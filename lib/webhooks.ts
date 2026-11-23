@@ -1438,6 +1438,8 @@ export async function recentMessagesOf(store: Store, type: WebhookEvent, ids: st
     } catch {
       throw new DeliveriesUnreadable();
     }
+    // A kept message is the object this code sent; JSON that is not one (null, a number, a list) does not read either.
+    if (!message || typeof message !== "object" || Array.isArray(message)) throw new DeliveriesUnreadable();
     messages.push(message);
     const paid = paidBuyerOf(delivery);
     const made = delivery.createdAt;

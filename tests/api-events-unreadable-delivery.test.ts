@@ -69,6 +69,10 @@ async function main(): Promise<void> {
       return JSON.stringify(value);
     }],
     ["its body is not JSON", (statsId: string, id: string) => record(id, statsId, { body: "{\"id\":\"evt_trunc" })],
+    // JSON that is not a message (Claude 5 ia5d's LEVE on #5187): unavailable too, never handed out as a sample.
+    ["its body is JSON null", (statsId: string, id: string) => record(id, statsId, { body: "null" })],
+    ["its body is a JSON number", (statsId: string, id: string) => record(id, statsId, { body: "5" })],
+    ["its body is a JSON list", (statsId: string, id: string) => record(id, statsId, { body: "[1]" })],
   ] as [string, (statsId: string, id: string) => string][]) {
     read = await world(raw);
     got = await read();

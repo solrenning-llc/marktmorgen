@@ -23,6 +23,7 @@
  * the real one does; the fake Stripe keeps its invoices and replays an
  * idempotency key's first answer. Synthetic data only.
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
@@ -279,9 +280,28 @@ async function main(): Promise<void> {
   part("A change by hand in flight holds its language: no request for it starts, nothing charged");
   reset();
   redis.run(["SET", `nl:stream:auto:${VIDEO}:own:es`, "held", "EX", 120]);
-  is("asked for English and Spanish: refused, nothing charged, the video free", [await ask(T), invoices.length, record()], ["unavailable", 0, null]);
+  // Told a change in that language is under way, not that the service could not take it (Claude 1's LOW 1 on #3427).
+  is("asked for English and Spanish: refused as a change under way, nothing charged, the video free", [await ask(T), invoices.length, record()], ["changing", 0, null]);
+  {
+    const editor = readFileSync("components/course-editor.tsx", "utf8");
+    const stream = readFileSync("lib/stream.ts", "utf8");
+    is("the editor has its own words for a request refused by a change under way", /\bauto_changing: "/.test(editor), true);
+    // Claude 4's LEVE on #3427 (6898294411): the upload's own "writing" refusal is no longer reachable (withOwnCaptions
+    // answers auto_writing), so its reason and its editor words are gone, never shown for a case that cannot happen.
+    is("no dead 'writing' refusal on the upload, nor its editor words", [/\| "writing" \}/.test(stream), /\bcaption_writing:/.test(editor)], [false, false]);
+  }
   redis.run(["DEL", `nl:stream:auto:${VIDEO}:own:es`]);
   is("the hold gone: asked, charged once", [await ask(T + 1_000), invoices.length], ["asked", 1]);
+
+  part("A hold that does not read is not a change under way: the service's answer is unknown, nothing charged");
+  reset();
+  {
+    const plain = redis.pipeline.bind(redis);
+    redis.pipeline = ((commands: (string | number)[][]) => (commands[0]?.[0] === "GET" && String(commands[0]?.[1]).startsWith(`nl:stream:auto:${VIDEO}:own:`) ? Promise.resolve([{ unexpected: true }]) : plain(commands))) as typeof redis.pipeline;
+    const unread = await ask(T);
+    redis.pipeline = plain;
+    is("refused as unavailable, nothing charged, the video free", [unread, invoices.length, record()], ["unavailable", 0, null]);
+  }
 
   part("Spanish landed by hand between the request's first read and its order: never charged");
   reset();
@@ -305,7 +325,7 @@ async function main(): Promise<void> {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => (/\/captions\/es$/.test(new URL(String(input)).pathname) ? new Response("", { status: 503 }) : realFetch(input, init))) as typeof fetch;
   is("unavailable, and Spanish is still held", [await added("es"), holds().length], ["unavailable", 1]);
   globalThis.fetch = realFetch;
-  is("a request for Spanish meanwhile: refused, nothing charged", [await ask(T), invoices.length], ["unavailable", 0]);
+  is("a request for Spanish meanwhile: refused as a change under way, nothing charged", [await ask(T), invoices.length], ["changing", 0]);
   advance(121_000);
   is("the hold run out: asked", [holds().length, await ask(T + 121_000)], [0, "asked"]);
   is("a change by hand with a known answer lets go of its hold", [await added("fr"), holds().length], ["added", 0]);

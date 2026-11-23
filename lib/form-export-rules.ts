@@ -5,8 +5,11 @@
  * can stand in for the form store without these.
  */
 
-/** Its commands past the request: the size, then the responses and their count in one pipeline. */
-export const FORM_EXPORT_COMMANDS = 3;
+/**
+ * Its commands past the request: the size (its EVAL and the LRANGE inside it, billed one by one as Upstash bills a
+ * script's inner commands; Claude 6 UoHAG's LOW on #5268), then the responses and their count in one pipeline.
+ */
+export const FORM_EXPORT_COMMANDS = 4;
 /** The most bytes of the database's answer for each byte kept: a character escaped as \u0000 is six. */
 export const FORM_EXPORT_WIDEST = 6;
 /** Around each response in the answer (its quotes and comma) and around the answer itself and its count. */

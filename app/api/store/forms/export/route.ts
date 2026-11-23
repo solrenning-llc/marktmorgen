@@ -63,10 +63,12 @@ export async function GET(request: NextRequest) {
     }
   };
 
-  const read = await readResponses(store.statsId, id).catch(() => null);
+  // Measured empty, nothing is read: the file is its header alone, as the size found it (Claude 6 UoHAG's NIT on #5268:
+  // an answer kept between the size and a read would otherwise be read with nothing held to count it against).
+  const read = size.count === 0 ? { responses: [], total: 0, bytes: 0 } : await readResponses(store.statsId, id).catch(() => null);
   if (read === null) {
     // A read that failed is counted at its most, since it is never measured.
-    await settle(holding > 0 ? exportUnitsPast(FORM_EXPORT_COMMANDS, readMost) : 0);
+    await settle(exportUnitsPast(FORM_EXPORT_COMMANDS, readMost));
     return plain(503, "unavailable");
   }
   const { responses } = read;
@@ -75,13 +77,6 @@ export async function GET(request: NextRequest) {
   const body = `﻿${responsesCsv(form, responses)}`;
   const sent = Buffer.byteLength(body, "utf8");
   const used = responses.length === 0 ? 0 : exportUnitsPast(FORM_EXPORT_COMMANDS, read.bytes + sent);
-  if (used > holding && holds.length === 0) {
-    // Measured empty, read with answers (kept meanwhile): nothing was held to count them past, so they are held now.
-    const late = await holdStudio(store, used);
-    if (!late.ok) return plain(late.reason === "unknown" ? 503 : 429, late.reason === "unknown" ? "unavailable" : late.reason === "used" ? shortWords(store, used, late) : late.message);
-    holds.push({ units: used, give: late.give, force: late.force });
-    holding = used;
-  }
   // A file longer than what was held is counted past the figure, never refused: its answers were read and paid for
   // already (Claude 5 icEJ's LOW on #5268, as the coordinator's audit of #5256 asked, 7bab 7).
   await settle(used);

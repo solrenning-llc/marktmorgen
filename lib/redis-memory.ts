@@ -758,6 +758,8 @@ export class MemoryRedis {
           const held = this.data.get(list);
           if (held !== undefined && !Array.isArray(held)) throw new Error("WRONGTYPE");
           const items = ((held ?? []) as string[]).slice(0, Number(most));
+          // Its one inner call, the LRANGE, billed as Upstash bills a script's inner commands (Claude 6 UoHAG's LOW on #5268).
+          this.scriptCalls += 1;
           return [items.length, items.reduce((sum, item) => sum + Buffer.byteLength(item, "utf8"), 0)];
         }
         // lib/flow-versions.ts FLOW_HISTORY_SIZE: the workflows' length and the kept versions' total and longest, nothing read out.

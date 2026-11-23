@@ -3149,8 +3149,8 @@ export const COST_LINES: CostLine[] = [
       // A form's answers as a file (#5010 row 145) measures them in Redis first (FORM_RESPONSES_SIZE, nothing read out) and takes the studio units of
       // reading them at their widest before any is read, holds the file before it is sent and gives back what it did not use, at a download's unit
       // (lib/export-unit-rules.ts); held in tests/forms-export-held.test.ts, a form at the Store plan's whole data room among them.
-      { file: "app/api/store/forms/export/route.ts", names: ["responsesSize(store.statsId, id)", "holdStudio(store, holding)", "holdStudio(store, used)", "await settle(used)", "exportUnitsPast(FORM_EXPORT_COMMANDS, readMost)", "read.bytes + sent", "shortWords("] },
-      { file: "lib/form-export-rules.ts", names: ["FORM_EXPORT_COMMANDS = 3", "FORM_EXPORT_WIDEST = 6", "formExportReadMost"] },
+      { file: "app/api/store/forms/export/route.ts", names: ["responsesSize(store.statsId, id)", "holdStudio(store, holding)", "size.count === 0 ? { responses: [], total: 0, bytes: 0 }", "await settle(used)", "exportUnitsPast(FORM_EXPORT_COMMANDS, readMost)", "read.bytes + sent", "shortWords("] },
+      { file: "lib/form-export-rules.ts", names: ["FORM_EXPORT_COMMANDS = 4", "FORM_EXPORT_WIDEST = 6", "formExportReadMost"] },
       { file: "lib/form-store.ts", names: ["FORM_RESPONSES_SIZE", "responsesSize", "bytes: jsonBytes([raw, total])"] },
       { file: "lib/export-unit-rules.ts", names: ["EXPORT_COMMANDS_PER_UNIT = 16", "EXPORT_BYTES_PER_UNIT = 1_000_000", "exportUnitsPast"] },
       // The studio's one search box (766 [STN13]): STUDIO_SEARCH_UNITS studio requests taken before its one exact read of every product's card (readCardsExact, never filled in from the products' records), with the store's minute and day counters (two commands each) inside them, counted first so a search they refuse takes none; tests/stn13-studio-search.test.ts holds the dearest search, MAX_PRODUCTS cards, under them.

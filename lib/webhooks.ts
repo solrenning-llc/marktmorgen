@@ -2064,6 +2064,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     const membership = object.mode === "subscription" && meta.kind !== "plan";
     const kind = meta.kind === "call" ? "call" : meta.kind === "plan" ? "payment_plan" : membership ? "membership" : "one_time";
     const totals = (object.total_details ?? {}) as { amount_discount?: unknown };
+    // Sent once and for good, so read exactly: a missing or unreadable discount waits, never sent as 0 (Codex G-20261119-0600).
+    const discount = paidCents(totals.amount_discount, "a checkout's discount");
     // A bundle names every product it handed over, from the list on the order.
     const inside = async (slot: BundleSlot) => {
       const ids = bundleFromMeta(meta, slot);
@@ -2083,7 +2085,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
         return { order_bump: ticked[0] ?? null, order_bumps: ticked };
       })()),
       amount_cents: amount,
-      discount_cents: num(totals.amount_discount),
+      discount_cents: discount,
       currency,
       buyer,
       paid_at: iso(event.created),

@@ -101,7 +101,7 @@ const isDelivery = (c: Command) => String(c[1]).startsWith("nl:hooks:d:");
 const nx = (c: Command) => c.includes("NX");
 const evt = (id: string, session: string) => ({
   id, type: "checkout.session.completed", created: 1_790_000_000, data: { object: {
-    id: session, object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd",
+    id: session, object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", total_details: { amount_discount: 0 },
     metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null },
   } },
 });

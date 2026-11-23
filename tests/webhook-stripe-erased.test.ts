@@ -169,7 +169,7 @@ async function main() {
   await erase("offer-gone@example.com", PAID + 50);
   await erase("member-gone@example.com", PAID + 50);
   const session = (id: string, email: string, mode = "payment", extra: Record<string, unknown> = {}) => ({
-    id, object: "checkout.session", created: PAID, status: "complete", payment_status: "paid", mode, amount_total: 4900, currency: "usd",
+    id, object: "checkout.session", created: PAID, status: "complete", payment_status: "paid", mode, amount_total: 4900, currency: "usd", total_details: { amount_discount: 0 },
     metadata: { store: HANDLE, product: "p_course" }, customer_details: { email, name: `Name of ${email}` }, ...extra,
   });
   const offer = (id: string, email: string) => ({ id, object: "payment_intent", created: PAID, amount: 1900, currency: "usd", receipt_email: email, metadata: { store: HANDLE, kind: "upsell", product: "p_offer" } });

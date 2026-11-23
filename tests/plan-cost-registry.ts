@@ -105,6 +105,7 @@ import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { HOST_LOCK_OWNER_COMMANDS, HOST_READING_FENCE_BYTES, HOST_READING_FENCE_COMMANDS, SYNC_SECONDS } from "@/lib/host-calendar";
 import { MAX_TEAM, MEMBER_STORES_READ, TEAM_LOG_FENCE_COMMANDS } from "@/lib/team";
+import { REVIEW_MAIL_CHECK_COMMANDS } from "@/lib/assignment-notify";
 import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
@@ -1385,6 +1386,17 @@ export function teamLogFenceUsd(tier: Tier): number {
   return (STORE_ALLOWANCES[tier].studio + ESSENTIAL_PER_DAY * DAY_WINDOWS) * TEAM_LOG_LINES_PER_STUDIO_REQUEST * TEAM_LOG_FENCE_COMMANDS * COMMAND;
 }
 
+/**
+ * The check before a review's email to the student (lib/assignment-notify.ts studentStillThere, #5010 row 98): the
+ * store read again by its handle and the student's deletion print, REVIEW_MAIL_CHECK_COMMANDS commands and at the most
+ * one store record (MAX_STORE_BYTES) and the handle's value read. It runs before the email is taken from the store's
+ * figure, once a review, and each review is one studio request (app/api/store/course/route.ts, guardStoreWrite), so it
+ * is priced on every studio request of the month, not on the emails.
+ */
+export function reviewMailCheckUsd(tier: Tier): number {
+  return STORE_ALLOWANCES[tier].studio * (REVIEW_MAIL_CHECK_COMMANDS * COMMAND + (MAX_STORE_BYTES + 4_096) * DB_BYTE);
+}
+
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database, and lockedUntil's
@@ -2579,10 +2591,12 @@ export const COST_LINES: CostLine[] = [
   {
     id: "store-email",
     feature: "The store's own emails outside the monthly ones: inbox notices and replies, a purchase sent again, contact-form and inbound-mail notices, checkout reminders, come-back, welcome and yearly offers, payment and pause notices to members, community events, affiliates, team invites (17 October 2026)",
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "email"),
+    // And the check before a review's email to the student, on every studio request (reviewMailCheckUsd).
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "email") + reviewMailCheckUsd(tier),
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "email"] },
       { file: "lib/email.ts", names: ["EmailMeter", "metered"] },
+      { file: "lib/assignment-notify.ts", names: ["REVIEW_MAIL_CHECK_COMMANDS", "studentStillThere", "storeForHandleExact(store.handle)", "isSuppressed(now.listId, to)"] },
       { file: "lib/store-contact.ts", names: ["MAX_PER_DAY"] },
       { file: "lib/ses.ts", names: ["markMaybe", "unmarkMaybe", "notMaybeTaken"] },
       { file: "lib/checkout-ask.ts", names: ["ASKS_PER_STORE_DAY"] },

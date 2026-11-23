@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_pwyw_erasure_only_a_stand_in";
   await claimHandle(OWNER, "pwywerase", "Pwyw Erase", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestPwywErase01", true);
+  await setStripeAccount(OWNER, "acct_PwywErase01", true);
   await setSubscription(OWNER, { customerId: "cus_PwywErase01", subscriptionId: "sub_PwywErase01", active: true, period: paidPeriod() });
   const added = await addProduct(OWNER, "Field Notes", "A guide.", "10", null, "15");
   if (!added.ok) throw new Error(`no product: ${JSON.stringify(added)}`);

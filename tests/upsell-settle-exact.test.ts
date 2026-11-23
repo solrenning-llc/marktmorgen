@@ -78,6 +78,28 @@ async function main(): Promise<void> {
   answerStatus = "requires_payment_method";
   await settleUpsells(store, SESSION);
   is("the offer is failed", (await readUpsell(SESSION, SLOT))?.state, "failed");
+
+  // Claude 2 lpgvy's MEDIUM on #5343: a settle that lost the race to a write that left the offer pending took it off
+  // the job's watch anyway, so a paid (or failed) offer stayed pending and was never looked at again.
+  for (const status of ["succeeded", "requires_payment_method"]) {
+    part(`4. ${status}, but the other settle wrote "pending, processing" meanwhile: still watched`);
+    seed({ state: "pending", product: "prod000001", pi: PI, at: Date.now() - 5 * 60_000 });
+    redis.run(["ZADD", "nl:upsell:pending", Date.now() - 5 * 60_000, member]);
+    answerStatus = status;
+    whileAsked = () => {
+      whileAsked = () => {};
+      redis.run(["SET", key, JSON.stringify({ state: "pending", product: "prod000001", pi: PI, at: Date.now() - 5 * 60_000, waiting: "processing" }), "EX", 30 * 86_400]);
+    };
+    await settleUpsells(store, SESSION);
+    is("the lost write left it pending, as the other settle wrote it", (await readUpsell(SESSION, SLOT))?.state, "pending");
+    is("RED: and it is still on the job's watch, to be settled at the next look", redis.run(["ZSCORE", "nl:upsell:pending", member]) !== null, true);
+
+    part(`4. ${status}, with nothing in between: written and off the watch`);
+    seed({ state: "pending", product: "prod000001", pi: PI, at: Date.now() - 5 * 60_000 });
+    await settleUpsells(store, SESSION);
+    is("written", (await readUpsell(SESSION, SLOT))?.state, status === "succeeded" ? "paid" : "failed");
+    is("and off the watch", redis.run(["ZSCORE", "nl:upsell:pending", member]), null);
+  }
   done();
 }
 

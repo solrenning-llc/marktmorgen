@@ -855,18 +855,19 @@ async function settleOne(
     // the job keeps watching the offer.
     if (typeof pi.status !== "string") return UNREAD;
     const id = typeof pi.id === "string" ? pi.id : record.pi;
-    if (pi.status === "succeeded" || pi.status === "requires_payment_method" || pi.status === "canceled") {
-      await unwatchPending(store, session, slot);
-    }
+    // The offer leaves the job's watch only once its write landed (Claude 2 lpgvy's MEDIUM on #5343): a settle that
+    // lost the race to a write that left it pending (the job's "processing") keeps it watched, so the next look settles
+    // it; one that lost to a "paid" or "failed" leaves the unwatching to the settle that wrote it.
     if (pi.status === "succeeded") {
       // Another settle that wrote first also hands the purchase over: this one stops here.
       if (!(await rewriteUpsell(session, slot, record, { ...record, pi: id, state: "paid" }))) return pi.status;
+      await unwatchPending(store, session, slot);
       const target = await readListing(store, record.product);
       const email = typeof pi.receipt_email === "string" ? pi.receipt_email : "";
       if (target) await afterPaid(store, session, slot, target, pi, email);
       else await creditCharge(store, session, slot, pi);
     } else if (pi.status === "requires_payment_method" || pi.status === "canceled") {
-      await rewriteUpsell(session, slot, record, { ...record, pi: id, state: "failed" });
+      if (await rewriteUpsell(session, slot, record, { ...record, pi: id, state: "failed" })) await unwatchPending(store, session, slot);
     } else {
       // Still pending: told as checking while Stripe says processing, as not confirmed while it waits on the buyer.
       const waiting = pi.status === "processing" ? "processing" : pi.status === "requires_action" ? undefined : record.waiting;

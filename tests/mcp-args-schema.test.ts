@@ -74,6 +74,15 @@ async function main(): Promise<void> {
     is(`${name} with no product: Invalid params`, answer.error?.code, -32602);
     is(`${name} with no product: no command sent`, sent, 0);
   }
+  // An empty id is no id (Claude 3 yLYhi's LEVE on #5413, confirmed by Claude 3 wtXk): "" is a string, present, so
+  // `required` alone let it through to the store's allowance and the route's own tool error.
+  for (const name of ["get_product_description", "get_sales_page", "get_course_outline", "get_lesson", "get_page_test", "get_page_reading", "get_page_versions"]) {
+    const { answer, commands: sent } = await call(reader.key, name, name === "get_lesson" ? { product: "", lesson: "lessonid01" } : { product: "" });
+    is(`${name} with an empty product: Invalid params`, answer.error?.code, -32602);
+    is(`${name} with an empty product: no command sent`, sent, 0);
+  }
+  const emptyLesson = await call(reader.key, "get_lesson", { product: product.product.id, lesson: "" });
+  is("get_lesson with an empty lesson: Invalid params, no command sent", [emptyLesson.answer.error?.code, emptyLesson.commands], [-32602, 0]);
   const noLesson = await call(reader.key, "get_lesson", { product: product.product.id });
   is("get_lesson with no lesson: Invalid params", noLesson.answer.error?.code, -32602);
   is("get_lesson with no lesson: no command sent", noLesson.commands, 0);

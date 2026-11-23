@@ -1,7 +1,12 @@
 /**
- * Disconnecting a Discord server never leaves a buyer's address linked to a Discord id with nobody to forget it, even
- * when a join already under way writes its person between the people's deletes and the server's (Board #5285, row
- * #3017: the LOW Claude 4 disclosed at 5b7a26d4 and Claude 1 carried at 5cea23413b, retained by Codex P).
+ * A join already under way that writes its person between a Disconnect's people's deletes and its server's delete
+ * never leaves the buyer's address linked to a Discord id with nobody to forget it (Board #5285, row #3017: the LOW
+ * Claude 4 disclosed at 5b7a26d4 and Claude 1 carried at 5cea23413b, retained by Codex P).
+ *
+ * Not covered here: a join whose write lands after the whole Disconnect is over (it read the server before, and waited
+ * on Discord through it). keepMember is not fenced on the server yet, so that person and their link are written
+ * into a room with no server (Claude 3 yUZf's LEVE on #5380); it is its own row of the main board (#5010), to fence
+ * keepMember on the server and the store.
  *
  * lib/discord-store.ts forgetServer deleted the people it read (FORGET_PEOPLE, which answers the people left), then, in
  * a second command, DEL of the server, its products' roles and the people's list. A keepMember landing between the

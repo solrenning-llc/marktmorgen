@@ -182,7 +182,9 @@ export async function forgetServer(room: string, sid: string): Promise<number> {
   });
   // Only the people read, with their address links and due entries, are deleted; then the list must be empty. Anybody
   // left (a reading that missed somebody, a person who joined meanwhile) keeps the server for the next try, which
-  // forgets them with their address: no buyer's address is ever left linked to a Discord id with nobody to forget it.
+  // forgets them with their address: no buyer's address is left linked to a Discord id with nobody to forget it by a
+  // person read or written before the server goes. A join whose write lands after the whole Disconnect is not fenced
+  // here: keepMember does not yet check the server (Claude 3 yUZf's LEVE on #5380; its own row of the #5010 board).
   // Each person goes only while their row is still the one read, in one step (FORGET_PEOPLE; Codex G on #3017): a join
   // that rewrote them with another address meanwhile keeps its row, its new link and its due entry for the next try.
   if (people.length) {

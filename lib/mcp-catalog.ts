@@ -46,6 +46,8 @@ const TITLES: Readonly<Record<string, string>> = {
   list_bundle_choices: "Products for a bundle",
   get_imports: "Imports",
   propose_product_description: "Propose a product description",
+  propose_product_title: "Propose a product title",
+  propose_product_summary: "Propose a product summary",
   get_store: "Which store",
 };
 
@@ -202,6 +204,36 @@ const DRAFTS: readonly ToolDraft[] = [
     annotations: { readOnlyHint: false },
   },
   {
+    name: "propose_product_title",
+    description:
+      "Prepares a new title for one product, for the creator to read beside the current one and confirm in their studio (What the AI proposes). Its price and everything else stay as they are. Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one. It counts as a few of the store's API requests, more as more proposals wait or are kept.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        product: { type: "string", description: "The product's id, from list_products." },
+        title: { type: "string", description: "The whole new title, on one line." },
+      },
+      required: ["product", "title"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false },
+  },
+  {
+    name: "propose_product_summary",
+    description:
+      "Prepares a new short summary for one product (the line under its title), for the creator to read beside the current one and confirm in their studio (What the AI proposes). Its price and everything else stay as they are. Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one. It counts as a few of the store's API requests, more as more proposals wait or are kept.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        product: { type: "string", description: "The product's id, from list_products." },
+        summary: { type: "string", description: "The whole new summary, on one line; empty takes it off." },
+      },
+      required: ["product", "summary"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false },
+  },
+  {
     name: "get_store",
     description: "Which store this key reads: its handle, name and currency.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -214,3 +246,34 @@ export const MCP_TOOLS: readonly McpTool[] = DRAFTS.map((tool) => {
   const title = TITLES[tool.name] ?? "";
   return { ...tool, title, annotations: { ...tool.annotations, title } };
 });
+
+/** A property of a tool's inputSchema, in the subset this catalog writes: a type, and for a number maybe an enum. */
+type PropertySchema = { type?: unknown; enum?: unknown };
+
+/**
+ * Why a tools/call's `arguments` do not match the named tool's own inputSchema, or null when they do (#4346): the
+ * arguments an object (or left out, as no arguments), no property the schema does not list (additionalProperties
+ * false), each one of its type ("string", or a finite "number"), within its enum, and every required one there. Null
+ * also for a name that is no tool: the route answers that on its own. Checked before the key or any read, so a call
+ * the contract forbids is never answered as a different reading.
+ */
+export function argumentsProblem(name: string, args: unknown): string | null {
+  const tool = MCP_TOOLS.find((one) => one.name === name);
+  if (!tool) return null;
+  if (args === undefined) args = {};
+  if (!args || typeof args !== "object" || Array.isArray(args)) return "arguments must be an object";
+  const given = args as Record<string, unknown>;
+  const properties = tool.inputSchema.properties as Record<string, PropertySchema>;
+  for (const [key, value] of Object.entries(given)) {
+    const schema = Object.hasOwn(properties, key) ? properties[key] : undefined;
+    if (!schema) {
+      if (tool.inputSchema.additionalProperties === false) return `${key} is not an argument of ${name}`;
+      continue;
+    }
+    if (schema.type === "string" && typeof value !== "string") return `${key} must be a string`;
+    if (schema.type === "number" && !(typeof value === "number" && Number.isFinite(value))) return `${key} must be a number`;
+    if (Array.isArray(schema.enum) && !schema.enum.includes(value)) return `${key} must be one of ${schema.enum.join(", ")}`;
+  }
+  for (const key of tool.inputSchema.required ?? []) if (!Object.hasOwn(given, key)) return `${key} is required`;
+  return null;
+}

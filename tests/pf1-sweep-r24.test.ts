@@ -188,6 +188,9 @@ test("F4: a list of checkouts of another shape is unknown, never 'not paid'", as
     [{ object: "list", data: "none", has_more: false }, "data as text"],
     [{ object: "list", data: {}, has_more: false }, "data as an object"],
     [{ object: "list", data: [], has_more: true }, "a page cut short"],
+    // #4425: only a boolean has_more: false says the list ended; absent or as text is not known to be whole.
+    [{ object: "list", data: [] }, "has_more absent"],
+    [{ object: "list", data: [], has_more: "false" }, "has_more as text"],
     [{ object: "list", data: [null], has_more: false }, "a null row"],
     [{ object: "list", data: ["cs_test_x"], has_more: false }, "a row as text"],
   ];
@@ -345,7 +348,8 @@ test("an answer not known (a 500) keeps the claim, and the next pass does not se
     refuseMailTo = "";
     refuseWith = 422;
   }
-  assert.equal(await markOf(id), "sending", "the \"sending\" mark is kept on an answer not known");
+  // Changed (rule 23, Codex N1 on #3929): the claim holds "sending:" and this pass's own value (RECOVERY_ADMIT).
+  assert.match(String(await markOf(id)), /^sending:/, "the \"sending\" mark is kept on an answer not known");
   const before = sent.length;
   assert.equal(await remindAbandoned(store, left(id, email)), "skip");
   assert.deepEqual(sent.slice(before), []);

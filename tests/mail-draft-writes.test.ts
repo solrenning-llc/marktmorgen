@@ -4,11 +4,12 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 const listId = "draft-write-tests";
 const key = "nl:mail:drafts:" + listId;
-const store = { listId, catalog: { items: [] } } as unknown as Store;
+const store = { listId, email: "drafts-owner@example.test", sid: "dd".repeat(16), extra: false, catalog: { items: [] } } as unknown as Store;
 const first = { id: "1111111111111111", subject: "First", body: "Original", productId: null, by: "owner@example.com", savedAt: "2026-10-15T00:00:00.000Z" };
 const second = { ...first, id: "2222222222222222", subject: "Second" };
 async function main() {
   part("Draft write acknowledgement");
+  redis.run(["SET", "nl:store:id:" + "dd".repeat(16), "drafts-owner@example.test"]); // a live store with an id (#5010 row 111)
   const original = redis.pipeline;
   const normal = Symbol("normal");
   let reply: unknown = normal;
@@ -17,18 +18,22 @@ async function main() {
   let writes = 0;
   let deleteReply: unknown = normal;
   let applyDelete = false;
+  // A draft's save and delete: a plain HSET (a new draft) or, under the lease since #3343's follow-up, one script naming the hash.
+  const held = (command: (string | number)[], kind: "set" | "del") => command[0] === "EVAL" && String(command[1]).startsWith((kind === "set" ? "-- marktmorgen:draft-set-live:" : "-- marktmorgen:draft-del-held:")) && command.includes(key);
+  const sets = (command: (string | number)[]) => (command[0] === "HSET" && command[1] === key) || held(command, "set");
+  const deletes = (command: (string | number)[]) => (command[0] === "HDEL" && command[1] === key) || held(command, "del");
   redis.pipeline = async commands => {
-    if (commands.some(command => command[0] === "HDEL" && command[1] === key) && deleteReply !== normal) {
+    if (commands.some(deletes) && deleteReply !== normal) {
       if (applyDelete) await original.call(redis, commands);
       if (deleteReply instanceof Error) throw deleteReply;
       return deleteReply as unknown[];
     }
-    writes += commands.filter(command => command[0] === "HSET" && command[1] === key).length;
+    writes += commands.filter(sets).length;
     if (commands.some(command => (command[0] === "HLEN" || command[0] === "HEXISTS") && command[1] === key) && readReply !== normal) {
       if (readReply instanceof Error) throw readReply;
       return readReply as unknown[];
     }
-    if (commands.some(command => command[0] === "HSET" && command[1] === key) && reply !== normal) {
+    if (commands.some(sets) && reply !== normal) {
       if (applyWrite) await original.call(redis, commands);
       if (reply instanceof Error) throw reply;
       return reply as unknown[];
@@ -66,6 +71,11 @@ async function main() {
     for (const uncertain of [[], [null], [true], ["1"], [-1], [2], [1, 0], null, {}, new Error("write unavailable")]) {
       reply = uncertain;
       for (const id of [undefined, first.id]) {
+        // An edit's script answers -1 only when its lease ran out and nothing was written: refused as busy, never saved.
+        if (id && JSON.stringify(uncertain) === "[-1]") {
+          is("an edit whose lease ran out is refused, never saved", await saveDraft(store, "owner@example.com", { ...input, id }), { ok: false, reason: "draft_busy" });
+          continue;
+        }
         let rejected = false;
         try { await saveDraft(store, "owner@example.com", { ...input, id }); } catch (error) { rejected = error instanceof DraftWriteUnconfirmed; }
         is("unconfirmed " + (id ? "edit" : "creation") + " " + String(uncertain), rejected, true);

@@ -120,6 +120,8 @@ const en = {
   exactFirst: "You see the exact amount before anything is charged.",
   cannotList:
     "Stripe could not list your memberships just now. The button below opens them all on Stripe's own page, where you can cancel.",
+  mayBeMore:
+    "This list may not show every membership of this address: it has more purchases than one link can hold. If one you have is missing, write to the store and they will help you cancel or change it.",
   changeCard: "Change card or see receipts",
   openMembership: "Open my membership",
   pause: {
@@ -239,15 +241,23 @@ const en = {
 
   // ---- A membership that has ended ----------------------------------------------------------
   offerNotices: {
+    /** A membership of this product that has not ended was found: the come-back checkout is not opened (lib/winback-send.ts). */
+    member: "You already have a membership to this that is still running, so the offer was not used. Nothing was charged.",
     price: "The store no longer offers the price this offer was for, so it cannot be used. Nothing was charged.",
     expired: "This offer has ended. You can still come back at the usual price below.",
     unavailable: "This offer cannot be used for this membership any more. You can still come back at the usual price below, if it is offered.",
     refused: "The offer could not be applied just now. You can come back at the usual price below, or reply to the email it came in.",
     limited: "Too many tries for now. Wait a few minutes and press the button again.",
+    /** Another press of the same link is opening its checkout right now (lib/winback-send.ts): wait, then press again. */
+    opening: "This offer is already opening in another window. Wait a moment, then press the button again. Nothing was charged.",
     /** The link could not be checked just now (CX-123 rule 24): never said as an offer that ended. */
     unknown: "We could not check this offer right now. Nothing was charged. Please try again in a moment.",
   } as Record<string, string>,
   membershipLabel: "Membership",
+  /** The heading when a come-back link was refused because the membership has not ended. */
+  runningTitle: "Your membership is still running",
+  /** A link of its own, to the page where a member manages or cancels (app/[handle]/manage). */
+  manageLink: "Manage your membership",
   endedBody: (title: string) =>
     `Your membership for ${title} is no longer running, so what it gave you access to is closed now. Renew it and everything opens again right away.`,
   /** The same without the promise that renewing opens it again: said when the price the offer named is gone. */
@@ -393,6 +403,7 @@ const en = {
     canceled: { title: "Nothing was changed", body: "You left Stripe's page before saving a card. Press the button to try again." },
     expired: { title: "This link has expired", body: "Ask for a link to your membership on its page; from there you can change your card." },
     error: { title: "Something went wrong on our side", body: "Nothing was changed. Try again in a moment." },
+    unsure: { title: "We couldn't confirm your new card", body: "We couldn't confirm that your membership now uses your new card, so nothing was paid with it. Press the button to try again in a moment." },
   } as Record<string, Notice>,
 };
 
@@ -498,6 +509,8 @@ const es: MembershipWords = {
   exactFirst: "Ves el importe exacto antes de que se cobre nada.",
   cannotList:
     "Stripe no pudo mostrar tus membresías en este momento. El botón de abajo las abre todas en la propia página de Stripe, donde puedes cancelar.",
+  mayBeMore:
+    "Es posible que esta lista no muestre todas las membresías de esta dirección: tiene más compras de las que caben en un enlace. Si falta alguna tuya, escribe a la tienda y te ayudarán a cancelarla o cambiarla.",
   changeCard: "Cambiar tarjeta o ver recibos",
   openMembership: "Abrir mi membresía",
   pause: {
@@ -614,14 +627,18 @@ const es: MembershipWords = {
   backToMembership: "Volver a tu membresía",
 
   offerNotices: {
+    member: "Ya tienes una membresía de esto que sigue activa, así que la oferta no se usó. No se cobró nada.",
     price: "La tienda ya no ofrece el precio para el que era esta oferta, así que no se puede usar. No se cobró nada.",
     expired: "Esta oferta ha terminado. Todavía puedes volver al precio habitual, abajo.",
     unavailable: "Esta oferta ya no se puede usar para esta membresía. Todavía puedes volver al precio habitual, abajo, si se ofrece.",
     refused: "No se pudo aplicar la oferta en este momento. Puedes volver al precio habitual, abajo, o responder al email en el que llegó.",
     limited: "Demasiados intentos por ahora. Espera unos minutos y vuelve a pulsar el botón.",
+    opening: "Esta oferta ya se está abriendo en otra ventana. Espera un momento y vuelve a pulsar el botón. No se cobró nada.",
     unknown: "No pudimos comprobar esta oferta en este momento. No se cobró nada. Vuelve a intentarlo en un momento.",
   },
   membershipLabel: "Membresía",
+  runningTitle: "Tu membresía sigue activa",
+  manageLink: "Gestiona tu membresía",
   endedBody: (title) =>
     `Tu membresía de ${title} ya no está activa, así que aquello a lo que te daba acceso está cerrado ahora. Renuévala y todo se vuelve a abrir al instante.`,
   endedClosed: (title) =>
@@ -755,6 +772,7 @@ const es: MembershipWords = {
     canceled: { title: "No se ha cambiado nada", body: "Saliste de la página de Stripe antes de guardar una tarjeta. Pulsa el botón para intentarlo de nuevo." },
     expired: { title: "Este enlace ha caducado", body: "Pide un enlace a tu membresía en su página; desde allí puedes cambiar tu tarjeta." },
     error: { title: "Algo salió mal por nuestra parte", body: "No se ha cambiado nada. Inténtalo de nuevo en un momento." },
+    unsure: { title: "No pudimos confirmar tu nueva tarjeta", body: "No pudimos confirmar que tu membresía ya use tu nueva tarjeta, así que no se pagó nada con ella. Pulsa el botón para intentarlo de nuevo en un momento." },
   },
 };
 
@@ -863,6 +881,8 @@ const fr: MembershipWords = {
   exactFirst: "Vous voyez le montant exact avant tout débit.",
   cannotList:
     "Stripe n'a pas pu afficher vos abonnements pour le moment. Le bouton ci-dessous les ouvre tous sur la page de Stripe, où vous pouvez annuler.",
+  mayBeMore:
+    "Cette liste peut ne pas montrer tous les abonnements de cette adresse : elle compte plus d'achats qu'un lien ne peut en contenir. S'il vous en manque un, écrivez à la boutique, qui vous aidera à l'annuler ou à le modifier.",
   changeCard: "Changer de carte ou voir les reçus",
   openMembership: "Ouvrir mon abonnement",
   pause: {
@@ -982,14 +1002,18 @@ const fr: MembershipWords = {
   backToMembership: "Retour à votre abonnement",
 
   offerNotices: {
+    member: "Vous avez déjà un abonnement à ceci qui est toujours en cours, donc l'offre n'a pas été utilisée. Rien n'a été débité.",
     price: "La boutique ne propose plus le prix auquel cette offre correspondait, elle ne peut donc pas être utilisée. Rien n'a été débité.",
     expired: "Cette offre est terminée. Vous pouvez toujours revenir au prix habituel ci-dessous.",
     unavailable: "Cette offre ne peut plus être utilisée pour cet abonnement. Vous pouvez toujours revenir au prix habituel ci-dessous, s'il est proposé.",
     refused: "L'offre n'a pas pu être appliquée pour le moment. Vous pouvez revenir au prix habituel ci-dessous, ou répondre à l'e-mail dans lequel elle est arrivée.",
     limited: "Trop de tentatives pour le moment. Attendez quelques minutes et appuyez à nouveau sur le bouton.",
+    opening: "Cette offre est déjà en cours d'ouverture dans une autre fenêtre. Patientez un instant, puis appuyez à nouveau sur le bouton. Rien n'a été débité.",
     unknown: "Nous n'avons pas pu vérifier cette offre pour le moment. Rien n'a été débité. Réessayez dans un instant.",
   },
   membershipLabel: "Abonnement",
+  runningTitle: "Votre abonnement est toujours en cours",
+  manageLink: "Gérez votre abonnement",
   endedBody: (title) =>
     `Votre abonnement à ${title} n'est plus actif, donc ce à quoi il vous donnait accès est désormais fermé. Renouvelez-le et tout se rouvre immédiatement.`,
   endedClosed: (title) =>
@@ -1125,6 +1149,7 @@ const fr: MembershipWords = {
     canceled: { title: "Rien n'a été modifié", body: "Vous avez quitté la page de Stripe avant d'enregistrer une carte. Appuyez sur le bouton pour réessayer." },
     expired: { title: "Ce lien a expiré", body: `Demandez un lien vers votre abonnement sur sa page${S}; de là, vous pouvez changer de carte.` },
     error: { title: "Un problème est survenu de notre côté", body: "Rien n'a été modifié. Réessayez dans un instant." },
+    unsure: { title: "Nous n'avons pas pu confirmer votre nouvelle carte", body: "Nous n'avons pas pu confirmer que votre abonnement utilise désormais votre nouvelle carte, donc aucun paiement n'a été effectué avec celle-ci. Appuyez sur le bouton pour réessayer dans un instant." },
   },
 };
 
@@ -1229,6 +1254,8 @@ const de: MembershipWords = {
   exactFirst: "Sie sehen den genauen Betrag, bevor etwas berechnet wird.",
   cannotList:
     "Stripe konnte Ihre Mitgliedschaften gerade nicht auflisten. Die Schaltfläche unten öffnet sie alle auf der Seite von Stripe, wo Sie kündigen können.",
+  mayBeMore:
+    "Diese Liste zeigt möglicherweise nicht alle Mitgliedschaften dieser Adresse: Sie hat mehr Käufe, als ein Link fassen kann. Fehlt eine Ihrer Mitgliedschaften, schreiben Sie dem Shop, der Ihnen beim Kündigen oder Ändern hilft.",
   changeCard: "Karte ändern oder Quittungen ansehen",
   openMembership: "Meine Mitgliedschaft öffnen",
   pause: {
@@ -1355,6 +1382,7 @@ const de: MembershipWords = {
   backToMembership: "Zurück zu Ihrer Mitgliedschaft",
 
   offerNotices: {
+    member: "Sie haben hierfür bereits eine Mitgliedschaft, die noch läuft, deshalb wurde das Angebot nicht genutzt. Es wurde nichts berechnet.",
     price: "Der Shop bietet den Preis, für den dieses Angebot galt, nicht mehr an, deshalb kann es nicht genutzt werden. Es wurde nichts berechnet.",
     expired: "Dieses Angebot ist abgelaufen. Sie können unten weiterhin zum normalen Preis zurückkehren.",
     unavailable:
@@ -1362,9 +1390,12 @@ const de: MembershipWords = {
     refused:
       "Das Angebot konnte gerade nicht angewendet werden. Sie können unten zum normalen Preis zurückkehren oder auf die E-Mail antworten, mit der es kam.",
     limited: "Vorerst zu viele Versuche. Warten Sie ein paar Minuten und drücken Sie die Schaltfläche erneut.",
+    opening: "Dieses Angebot wird bereits in einem anderen Fenster geöffnet. Warten Sie einen Moment und drücken Sie dann die Schaltfläche erneut. Es wurde nichts berechnet.",
     unknown: "Wir konnten dieses Angebot gerade nicht prüfen. Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal.",
   },
   membershipLabel: "Mitgliedschaft",
+  runningTitle: "Ihre Mitgliedschaft läuft noch",
+  manageLink: "Verwalten Sie Ihre Mitgliedschaft",
   endedBody: (title) =>
     `Ihre Mitgliedschaft für ${title} läuft nicht mehr, daher ist das, wozu sie Ihnen Zugang gab, jetzt geschlossen. Erneuern Sie sie, und alles öffnet sich sofort wieder.`,
   endedClosed: (title) =>
@@ -1501,6 +1532,7 @@ const de: MembershipWords = {
     canceled: { title: "Es wurde nichts geändert", body: "Sie haben die Seite von Stripe verlassen, bevor eine Karte gespeichert war. Drücken Sie den Knopf, um es erneut zu versuchen." },
     expired: { title: "Dieser Link ist abgelaufen", body: "Fordern Sie auf der Seite Ihrer Mitgliedschaft einen Link an; von dort können Sie Ihre Karte ändern." },
     error: { title: "Bei uns ist etwas schiefgegangen", body: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal." },
+    unsure: { title: "Wir konnten Ihre neue Karte nicht bestätigen", body: "Wir konnten nicht bestätigen, dass Ihre Mitgliedschaft jetzt Ihre neue Karte nutzt, daher wurde nichts damit bezahlt. Drücken Sie gleich noch einmal auf den Knopf." },
   },
 };
 
@@ -1610,6 +1642,8 @@ const it: MembershipWords = {
   exactFirst: "Vedi l'importo esatto prima di qualsiasi addebito.",
   cannotList:
     "Stripe non è riuscito a elencare i tuoi abbonamenti in questo momento. Il pulsante qui sotto li apre tutti sulla pagina di Stripe, dove puoi annullarli.",
+  mayBeMore:
+    "Questo elenco potrebbe non mostrare tutti gli abbonamenti di questo indirizzo: ha più acquisti di quanti ne possa contenere un link. Se ne manca uno tuo, scrivi al negozio, che ti aiuterà ad annullarlo o modificarlo.",
   changeCard: "Cambia carta o vedi le ricevute",
   openMembership: "Apri il mio abbonamento",
   pause: {
@@ -1729,14 +1763,18 @@ const it: MembershipWords = {
   backToMembership: "Torna al tuo abbonamento",
 
   offerNotices: {
+    member: "Hai già un abbonamento a questo ancora attivo, quindi l'offerta non è stata usata. Non è stato addebitato nulla.",
     price: "Il negozio non offre più il prezzo a cui si riferiva questa offerta, quindi non può essere usata. Non è stato addebitato nulla.",
     expired: "Questa offerta è terminata. Puoi comunque tornare al prezzo normale qui sotto.",
     unavailable: "Questa offerta non può più essere usata per questo abbonamento. Puoi comunque tornare al prezzo normale qui sotto, se è offerto.",
     refused: "Non è stato possibile applicare l'offerta in questo momento. Puoi tornare al prezzo normale qui sotto, o rispondere all'email con cui è arrivata.",
     limited: "Troppi tentativi per ora. Aspetta qualche minuto e premi di nuovo il pulsante.",
+    opening: "Questa offerta si sta già aprendo in un'altra finestra. Aspetta un momento, poi premi di nuovo il pulsante. Non è stato addebitato nulla.",
     unknown: "Non è stato possibile verificare questa offerta in questo momento. Non è stato addebitato nulla. Riprova tra un momento.",
   },
   membershipLabel: "Abbonamento",
+  runningTitle: "Il tuo abbonamento è ancora attivo",
+  manageLink: "Gestisci il tuo abbonamento",
   endedBody: (title) =>
     `Il tuo abbonamento a ${title} non è più attivo, quindi ciò a cui ti dava accesso ora è chiuso. Rinnovalo e tutto si riapre subito.`,
   endedClosed: (title) =>
@@ -1872,6 +1910,7 @@ const it: MembershipWords = {
     canceled: { title: "Non è cambiato nulla", body: "Hai lasciato la pagina di Stripe prima di salvare una carta. Premi il pulsante per riprovare." },
     expired: { title: "Questo link è scaduto", body: "Chiedi un link al tuo abbonamento dalla sua pagina; da lì puoi cambiare la carta." },
     error: { title: "Qualcosa è andato storto da parte nostra", body: "Non è cambiato nulla. Riprova tra un momento." },
+    unsure: { title: "Non siamo riusciti a confermare la tua nuova carta", body: "Non siamo riusciti a confermare che il tuo abbonamento usi ora la tua nuova carta, quindi non è stato effettuato alcun pagamento. Premi di nuovo il pulsante tra un momento." },
   },
 };
 
@@ -1975,6 +2014,8 @@ const nl: MembershipWords = {
   exactFirst: "Je ziet het precieze bedrag voordat er iets wordt afgeschreven.",
   cannotList:
     "Stripe kon je lidmaatschappen nu niet tonen. De knop hieronder opent ze allemaal op de pagina van Stripe zelf, waar je kunt opzeggen.",
+  mayBeMore:
+    "Deze lijst toont misschien niet alle lidmaatschappen van dit adres: er zijn meer aankopen dan één link kan bevatten. Mist er een van jou, schrijf dan de winkel, die je helpt om het op te zeggen of te wijzigen.",
   changeCard: "Kaart wijzigen of ontvangstbewijzen bekijken",
   openMembership: "Mijn lidmaatschap openen",
   pause: {
@@ -2094,14 +2135,18 @@ const nl: MembershipWords = {
   backToMembership: "Terug naar je lidmaatschap",
 
   offerNotices: {
+    member: "Je hebt hier al een lidmaatschap voor dat nog loopt, dus het aanbod is niet gebruikt. Er is niets afgeschreven.",
     price: "De winkel biedt de prijs waarvoor dit aanbod gold niet meer aan, dus het kan niet worden gebruikt. Er is niets afgeschreven.",
     expired: "Dit aanbod is afgelopen. Je kunt hieronder nog steeds terugkomen tegen de gewone prijs.",
     unavailable: "Dit aanbod kan niet meer voor dit lidmaatschap worden gebruikt. Je kunt hieronder nog steeds terugkomen tegen de gewone prijs, als die wordt aangeboden.",
     refused: "Het aanbod kon nu niet worden toegepast. Je kunt hieronder terugkomen tegen de gewone prijs, of de e-mail beantwoorden waarin het kwam.",
     limited: "Even te veel pogingen. Wacht een paar minuten en druk dan opnieuw op de knop.",
+    opening: "Dit aanbod wordt al in een ander venster geopend. Wacht even en druk dan opnieuw op de knop. Er is niets afgeschreven.",
     unknown: "We konden dit aanbod nu niet controleren. Er is niets afgeschreven. Probeer het zo meteen opnieuw.",
   },
   membershipLabel: "Lidmaatschap",
+  runningTitle: "Je lidmaatschap loopt nog",
+  manageLink: "Beheer je lidmaatschap",
   endedBody: (title) =>
     `Je lidmaatschap voor ${title} loopt niet meer, dus waar het je toegang toe gaf, is nu gesloten. Verleng het en alles gaat meteen weer open.`,
   endedClosed: (title) =>
@@ -2235,6 +2280,7 @@ const nl: MembershipWords = {
     canceled: { title: "Er is niets gewijzigd", body: "Je hebt de pagina van Stripe verlaten voordat er een kaart was opgeslagen. Druk op de knop om het opnieuw te proberen." },
     expired: { title: "Deze link is verlopen", body: "Vraag op de pagina van je lidmaatschap een link aan; van daaruit kun je je kaart wijzigen." },
     error: { title: "Er ging aan onze kant iets mis", body: "Er is niets gewijzigd. Probeer het zo opnieuw." },
+    unsure: { title: "We konden je nieuwe kaart niet bevestigen", body: "We konden niet bevestigen dat je lidmaatschap nu je nieuwe kaart gebruikt, dus er is niets mee betaald. Druk zo nog een keer op de knop." },
   },
 };
 
@@ -2338,6 +2384,8 @@ const pt: MembershipWords = {
   exactFirst: "Vê o valor exato antes de qualquer cobrança.",
   cannotList:
     "A Stripe não conseguiu listar as suas subscrições neste momento. O botão abaixo abre-as todas na própria página da Stripe, onde pode cancelar.",
+  mayBeMore:
+    "Esta lista pode não mostrar todas as subscrições deste endereço: tem mais compras do que uma ligação consegue conter. Se faltar uma das suas, escreva à loja, que o ajudará a cancelá-la ou alterá-la.",
   changeCard: "Alterar cartão ou ver recibos",
   openMembership: "Abrir a minha subscrição",
   pause: {
@@ -2457,14 +2505,18 @@ const pt: MembershipWords = {
   backToMembership: "Voltar à sua subscrição",
 
   offerNotices: {
+    member: "Já tem uma subscrição disto que ainda está ativa, por isso a oferta não foi usada. Não foi cobrado nada.",
     price: "A loja já não oferece o preço a que esta oferta se referia, por isso não pode ser usada. Não foi cobrado nada.",
     expired: "Esta oferta terminou. Ainda pode voltar ao preço habitual, abaixo.",
     unavailable: "Esta oferta já não pode ser usada nesta subscrição. Ainda pode voltar ao preço habitual, abaixo, se estiver disponível.",
     refused: "Não foi possível aplicar a oferta neste momento. Pode voltar ao preço habitual, abaixo, ou responder ao email em que ela chegou.",
     limited: "Demasiadas tentativas por agora. Aguarde alguns minutos e carregue novamente no botão.",
+    opening: "Esta oferta já está a abrir noutra janela. Aguarde um momento e carregue novamente no botão. Não foi cobrado nada.",
     unknown: "Não foi possível verificar esta oferta neste momento. Não foi cobrado nada. Tente novamente daqui a pouco.",
   },
   membershipLabel: "Subscrição",
+  runningTitle: "A sua subscrição ainda está ativa",
+  manageLink: "Gira a sua subscrição",
   endedBody: (title) =>
     `A sua subscrição de ${title} já não está ativa, por isso aquilo a que lhe dava acesso está agora fechado. Renove-a e tudo volta a abrir de imediato.`,
   endedClosed: (title) =>
@@ -2598,6 +2650,7 @@ const pt: MembershipWords = {
     canceled: { title: "Nada foi alterado", body: "Saiu da página da Stripe antes de guardar um cartão. Prima o botão para tentar de novo." },
     expired: { title: "Este link expirou", body: "Peça um link para a sua subscrição na página dela; a partir daí pode alterar o seu cartão." },
     error: { title: "Algo correu mal do nosso lado", body: "Nada foi alterado. Tente de novo dentro de momentos." },
+    unsure: { title: "Não conseguimos confirmar o seu novo cartão", body: "Não conseguimos confirmar que a sua subscrição já usa o seu novo cartão, por isso nada foi pago com ele. Prima o botão para tentar de novo dentro de momentos." },
   },
 };
 

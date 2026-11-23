@@ -115,7 +115,8 @@ async function main(): Promise<void> {
   const noDetails = paid(shipMeta, { subtotal: 7800, total: 10800, shipping: 3000 }) as Record<string, unknown>;
   delete noDetails.total_details;
   const noDetailsOutcome = await noteSession(store, noDetails as never, new Map(), partners).then(() => "resolved", (error: Error) => error.name);
-  is("no total details at all: the order is left for the sweep's next run", noDetailsOutcome, "UnknownReplyError");
+  // With no total details Stripe gave no tax either, so the order is refused at its tax (paidOrder) before its shipping.
+  is("no total details at all: the order is left for the sweep's next run", noDetailsOutcome, "UnknownStripeAmount");
   is("no total details at all: nothing for the Workbook partner", await baseOf(noDetails.id as string, onWorkbook.id), null);
 
   part("Controls");

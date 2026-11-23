@@ -41,7 +41,8 @@ import {
 import { type ClaimHost, CLAIM_MARGIN_MS, claimHosts, confirmClaim, hostId, readClaims, releaseClaim } from "@/lib/host-claims";
 import { type HostPrefetch, type HostSync, hostSync, prefetchHosts } from "@/lib/host-calendar";
 import { readTeam } from "@/lib/team";
-import type { Listing, Store } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Listing, type Store } from "@/lib/store";
+import { repliesFor } from "@/lib/redis-reply";
 
 const teamKey = (callsId: string) => `nl:callteam:${callsId}`;
 const rrKey = (callsId: string, product: string) => `nl:callteam:rr:${callsId}:${product}`;
@@ -76,9 +77,45 @@ export async function readTeams(store: Pick<Store, "callsId">): Promise<Map<stri
   return out;
 }
 
-export async function writeTeam(store: Pick<Store, "callsId">, productId: string, team: TeamSetup | null): Promise<void> {
-  if (!store.callsId) return;
-  await redisPipeline([team ? ["HSET", teamKey(store.callsId), productId, JSON.stringify(team)] : ["HDEL", teamKey(store.callsId), productId]]);
+/** One EVAL plus GET, HEXISTS and HSET; deletion remains one HDEL. */
+export const TEAM_WRITE_MAX_COMMANDS = 4;
+const WRITE_TEAM_IF_LIVE = `-- marktmorgen:team-setup-live:v1
+local raw = redis.call("GET", KEYS[1])
+if not raw then return 0 end
+if ARGV[5] ~= "" then
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" or record.callsId ~= ARGV[5] then return 0 end
+elseif string.lower(raw) ~= ARGV[4] then
+  return 0
+end
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return 0 end
+redis.call("HSET", KEYS[3], ARGV[2], ARGV[3])
+return 1`;
+
+export class TeamWriteUnavailableError extends Error {
+  constructor() { super("The call's team could not be saved."); }
+}
+
+/** Hosts' addresses and hours are saved only while their store is live, in the same Redis step. */
+export async function writeTeam(store: Pick<Store, "callsId" | "email" | "sid" | "extra">, productId: string, team: TeamSetup | null): Promise<void> {
+  if (!store.callsId) {
+    if (team) throw new TeamWriteUnavailableError();
+    return;
+  }
+  // Removing a team never creates data and must still work for an erased store's cleanup.
+  if (!team) {
+    await redisPipeline([["HDEL", teamKey(store.callsId), productId]]);
+    return;
+  }
+  if (!isRedisConfigured()) throw new TeamWriteUnavailableError();
+  const ref = storeRef(store);
+  const hasId = STORE_ID_PATTERN.test(store.sid);
+  const live = hasId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  const reply = repliesFor(await redisPipeline([["EVAL", WRITE_TEAM_IF_LIVE, 3,
+    live, ERASING_KEY, teamKey(store.callsId), await erasingField(ref), productId, JSON.stringify(team), ref.toLowerCase(), hasId ? "" : store.callsId,
+  ]]), 1);
+  // Unknown includes an applied write whose response was lost: no retry or ordinary HSET fallback.
+  if (reply?.[0] !== 1) throw new TeamWriteUnavailableError();
 }
 
 /** The order team event types are kept on in when a plan allows fewer: oldest first, then by product. */

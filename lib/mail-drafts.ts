@@ -21,6 +21,7 @@ import { repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { MAX_MAIL_BODY, MAX_SUBJECT } from "@/lib/mail";
 import type { Store } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { hasProduct } from "@/lib/catalog";
 
 /** A write may have happened even when its acknowledgement is lost. */
@@ -139,14 +140,50 @@ export type DraftResult =
   | { ok: false; reason: "subject" | "body" | "product" | "full" | "unknown" | "list" | "audience" | "draft_test" | "draft_conflict" | "draft_busy" };
 
 /**
+ * A draft deleted only while its lease still holds this delete's own value, checked in the same step as the delete: a
+ * delete whose 90 seconds ran out never lands over what another tab saved since (Claude 2 on #3343). -1 when the lease
+ * is not ours, with nothing deleted; otherwise HDEL's own reply. The first line names it for the local stand-in
+ * (lib/redis-memory.ts). A save goes through DRAFT_SET_LIVE below, which checks the same lease.
+ */
+const DRAFT_DEL_HELD = '-- marktmorgen:draft-del-held:v1\nif redis.call("GET", KEYS[2]) ~= ARGV[1] then return -1 end\nreturn redis.call("HDEL", KEYS[1], ARGV[2])';
+/**
+ * A draft written only while its store is live, read in the same step as the write (Codex X4-20261119-2140, row 111
+ * of #5010): a save that raced the store's erasure never recreates the erased draft (subject, body, the address it was
+ * meant for). The fence is the rule of lib/live-fence.ts (store-cache-live:v3): the store's erasing field absent, and
+ * its id key holding its own ref, or, for a store kept from before ids, its owner's record still carrying its statsId.
+ * An edit is also written only while its lease still holds this save's value (ARGV[1]; "" for a new draft, which has no
+ * lease). "gone": the store is gone, moved or erasing, nothing written; -3: the owner's record does not parse, nothing
+ * written; -1: the lease is not ours, nothing written; otherwise HSET's own reply. "gone" is a word, not a number, so
+ * that no reply in another shape can be taken for it.
+ */
+const DRAFT_SET_LIVE = `-- marktmorgen:draft-set-live:v1
+if redis.call("HGET", KEYS[4], ARGV[4]) then return "gone" end
+if ARGV[5] == "" then
+  if redis.call("GET", KEYS[3]) ~= ARGV[6] then return "gone" end
+else
+  local raw = redis.call("GET", KEYS[3])
+  if not raw then return "gone" end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -3 end
+  if record["statsId"] ~= ARGV[5] then return "gone" end
+end
+if ARGV[1] ~= "" and redis.call("GET", KEYS[2]) ~= ARGV[1] then return -1 end
+return redis.call("HSET", KEYS[1], ARGV[2], ARGV[3])`;
+/** The billed commands of one draft write at its worst: the EVAL, the erasing field, the live key, the lease and the HSET. */
+export const DRAFT_SET_LIVE_COMMANDS = 5;
+type Lease = { key: string; value: string };
+
+/**
  * Saves a draft: a new one without `id`, or over the one with it. The text is
  * trimmed to what an email may hold, and the product it is meant for has to
- * be one this store has.
+ * be one this store has. An existing draft is written only while `lease` is
+ * still ours; a lease that ran out is refused as busy, never saved.
  */
 async function saveDraftUnlocked(
   store: Store,
   who: string,
   input: { id?: string; subject: string; body: string; productId: string; audience?: unknown; subjectTest?: unknown; expectedSavedAt?: unknown },
+  lease?: Lease,
 ): Promise<DraftResult> {
   if (!store.listId) return { ok: false, reason: "list" };
   const subject = input.subject.replace(/\s+/g, " ").trim().slice(0, MAX_SUBJECT);
@@ -187,13 +224,24 @@ async function saveDraftUnlocked(
     id = randomBytes(8).toString("hex");
   }
   const draft: Draft = { ...(subjectTest !== undefined ? { subjectTest } : {}), ...(audience ? { audience } : {}), id, subject, body, productId, by: who.toLowerCase(), savedAt };
-  let acknowledgement: unknown;
+  const fence = await storeLiveFence(store);
+  // A store kept from before ids with no statsId cannot be told from its owner's next one: nothing is written.
+  if (fence.statsId === null) throw new DraftWriteUnconfirmed();
+  let acknowledgement: unknown[] | null;
   try {
-    acknowledgement = await redisPipeline([["HSET", key, id, JSON.stringify(draft)]]);
+    acknowledgement = repliesFor(await redisPipeline([[
+      "EVAL", DRAFT_SET_LIVE, 4, key, lease?.key ?? key, fence.live, fence.erasing,
+      lease?.value ?? "", id, JSON.stringify(draft), fence.field, fence.statsId, fence.ref,
+    ]]), 1);
   } catch {
     throw new DraftWriteUnconfirmed();
   }
-  if (!Array.isArray(acknowledgement) || acknowledgement.length !== 1 || (acknowledgement[0] !== 0 && acknowledgement[0] !== 1)) throw new DraftWriteUnconfirmed();
+  const answer = acknowledgement?.[0];
+  // The store is gone or being erased: nothing was written, and its list is no longer there to keep a draft in.
+  if (answer === "gone") return { ok: false, reason: "list" };
+  // Our lease ran out before the write: nothing was written, so it is refused as busy and the text stays in the editor.
+  if (lease && answer === -1) return { ok: false, reason: "draft_busy" };
+  if (answer !== 0 && answer !== 1) throw new DraftWriteUnconfirmed();
   return { ok: true, draft };
 }
 
@@ -213,9 +261,11 @@ export async function removeDraft(store: Store, id: string, expectedSavedAt?: un
       if (!current || current.id !== id || !Number.isFinite(Date.parse(current.savedAt))) throw new DraftRemovalUnconfirmed();
       if (current.savedAt !== expectedSavedAt) throw new DraftRemovalConflict();
     }
-    const response = await redisPipeline([["HDEL", draftsKey(store.listId), id]]);
-    if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 0 && response[0] !== 1)) throw new DraftRemovalUnconfirmed();
-    return response[0] === 1;
+    // Deleted only while the lease is still ours; -1 (it ran out, nothing deleted) is refused like a busy lease.
+    const response = repliesFor(await redisPipeline([["EVAL", DRAFT_DEL_HELD, 2, draftsKey(store.listId), draftLockKey(store.listId, id), acquired, id]]), 1);
+    const answer = response?.[0];
+    if (answer !== 0 && answer !== 1) throw new DraftRemovalUnconfirmed();
+    return answer === 1;
   } catch (error) {
     if (error instanceof DraftRemovalConflict) throw error;
     throw new DraftRemovalUnconfirmed();
@@ -245,7 +295,7 @@ async function claimDraftLock(listId: string, id: string): Promise<string | null
 async function releaseDraftLock(listId: string, id: string, value: string): Promise<void> {
   await releaseMark(draftLockKey(listId, id), value);
 }
-/** Existing drafts are read, version-checked and written under the same lease as deletion. */
+/** Existing drafts are read, version-checked and written under the same lease as deletion, and written only while it holds. */
 export async function saveDraft(store: Store, who: string, input: { id?: string; subject: string; body: string; productId: string; audience?: unknown; subjectTest?: unknown; expectedSavedAt?: unknown }): Promise<DraftResult> {
   if (!store.listId) return { ok: false, reason: "list" };
   if (!input.id) return saveDraftUnlocked(store, who, input);
@@ -253,6 +303,6 @@ export async function saveDraft(store: Store, who: string, input: { id?: string;
   let acquired: string | null;
   try { acquired = await claimDraftLock(store.listId, input.id); } catch { throw new DraftReadUnavailable(); }
   if (!acquired) return { ok: false, reason: "draft_busy" };
-  try { return await saveDraftUnlocked(store, who, input); }
+  try { return await saveDraftUnlocked(store, who, input, { key: draftLockKey(store.listId, input.id), value: acquired }); }
   finally { await releaseDraftLock(store.listId, input.id, acquired); }
 }

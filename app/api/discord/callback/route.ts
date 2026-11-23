@@ -8,7 +8,7 @@ import { forgetServer, readServerOrThrow, saveServer, takeTrip } from "@/lib/dis
 import { storeKey } from "@/lib/learn";
 import { logTeam } from "@/lib/team";
 import { PERMISSION_WORDS } from "@/lib/team-roles";
-import { clientAddress, withinLimit } from "@/lib/request-guard";
+import { clientAddress, withinLimit, unknownLimit, limitUnknownResponse } from "@/lib/request-guard";
 import { originFrom } from "@/lib/request-origin";
 import { storeForId } from "@/lib/store";
 import { away, resolveAccess, studioPath } from "@/lib/studio-route";
@@ -25,7 +25,9 @@ const CODE = /^[A-Za-z0-9._~-]{1,512}$/;
 export async function GET(request: NextRequest) {
   if (!isDiscordConfigured()) return new Response("Not found.", { status: 404 });
   const origin = originFrom(request);
-  if (!(await withinLimit("discord-return", clientAddress(request), 30, 600))) return away(origin, "/");
+  const counted = await withinLimit("discord-return", clientAddress(request), 30, 600).catch(unknownLimit);
+  if (counted === "unknown") return limitUnknownResponse();
+  if (!counted) return away(origin, "/");
   const params = request.nextUrl.searchParams;
   const trip = await takeTrip(params.get("state") ?? "");
   if (!trip) return away(origin, "/?discord=expired");
@@ -95,12 +97,21 @@ export async function GET(request: NextRequest) {
     }
     await leaveServer(before.id).catch(() => false);
   }
-  await saveServer(room, {
-    id: granted.serverId,
-    name: granted.serverName || before?.name || "",
-    at: before?.id === granted.serverId ? before.at : Math.floor(Date.now() / 1000),
-    kick: before?.id === granted.serverId ? before.kick : false,
-  });
+  // Written only while the store is still live (lib/discord-store.ts, saveServer): its erasure may have begun or ended
+  // while the code was exchanged (Codex L-20261120-0732). Not confirmed: the code is spent, so the creator is told the
+  // outcome is unknown ("unsaved"), never "connected", and no notice or team log is made.
+  try {
+    await saveServer(store, {
+      id: granted.serverId,
+      name: granted.serverName || before?.name || "",
+      at: before?.id === granted.serverId ? before.at : Math.floor(Date.now() / 1000),
+      kick: before?.id === granted.serverId ? before.kick : false,
+    });
+  } catch (error) {
+    console.error("keeping the connected Discord server was not confirmed", error);
+    // Its own notice (Claude 6 on #5097): what is unknown here is whether the NEW server was kept, not the old one.
+    return back("discord=unsaved");
+  }
   after(() => noticeCreator(store, { kind: "discord-connected", server: granted.serverName || "you chose" }));
   if (role !== "owner") await logTeam(store.sid, { who: email, role, what: `${PERMISSION_WORDS.settings}: connected Discord` });
   return back("discord=connected");

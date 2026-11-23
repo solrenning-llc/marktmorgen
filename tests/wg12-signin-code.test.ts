@@ -20,6 +20,7 @@
  *   - the field is labeled, takes the phone's one-time code, and says what
  *     went wrong in a live region.
  */
+import { inspect } from "node:util";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
@@ -154,18 +155,20 @@ async function main(): Promise<void> {
 
   part("An unknown count of tries refuses and opens nothing");
   const gus = await ask("gus@wg12.example");
-  // The pipeline that counts a try: the hour's and the day's counts for the address, the request's, the record's time, the newest code.
+  // The pipeline that counts a try: the hour's and the day's counts for the address, each with its EXPIRE NX
+  // (lib/window-count.ts), the request's, the record's time, the newest code.
   for (const [label, reply] of [
-    ["the hour's count null", ["OK", null, "OK", 1, 1, 900, null]],
-    ["the hour's count text", ["OK", "1", "OK", 1, 1, 900, null]],
-    ["the day's count null", ["OK", 1, "OK", null, 1, 900, null]],
-    ["the day's count negative", ["OK", 1, "OK", -1, 1, 900, null]],
-    ["the request's count negative", ["OK", 1, "OK", 1, -1, 900, null]],
-    ["the record's time text", ["OK", 1, "OK", 1, 1, "900", null]],
-    ["a short reply", ["OK", 1]],
+    ["the hour's count null", [null, 1, 1, 1, 1, 900, null]],
+    ["the hour's count text", ["1", 1, 1, 1, 1, 900, null]],
+    ["the hour's EXPIRE answered false", [1, false, 1, 1, 1, 900, null]],
+    ["the day's count null", [1, 1, null, 1, 1, 900, null]],
+    ["the day's count negative", [1, 1, -1, 1, 1, 900, null]],
+    ["the request's count negative", [1, 1, 1, 1, -1, 900, null]],
+    ["the record's time text", [1, 1, 1, 1, 1, "900", null]],
+    ["a short reply", [1, 1]],
     ["not a list", { result: 1 }],
   ] as [string, unknown][]) {
-    rule = { when: (c) => c.length === 7 && c[1]?.[0] === "INCR" && c[4]?.[0] === "HINCRBY", reply };
+    rule = { when: (c) => c.length === 7 && c[0]?.[0] === "INCR" && c[4]?.[0] === "HINCRBY", reply };
     const refused = await send(gus.request, gus.code);
     rule = null;
     is(`the tries answered as ${label}: server_error, no session`, [refused.status, refused.error, refused.session], [503, "server_error", ""]);
@@ -261,6 +264,27 @@ async function main(): Promise<void> {
   is("what went wrong is said in a live region", /role="alert"/.test(html), true);
   is("the hint says where the code is", html.includes("It is in the same email as the link."), true);
   is("and that it works on this page without reloading it", html.includes("without reloading"), true);
+
+
+  part("A failed sign-in request does not put the address or token in server logs");
+  const originalError = console.error;
+  const logCalls: unknown[][] = [];
+  const originalPipeline = redis.pipeline;
+  console.error = (...args: unknown[]) => { logCalls.push(args); };
+  redis.pipeline = (async () => { throw new Error("private@wg12.example token=synthetic-secret-token"); }) as typeof redis.pipeline;
+  let failedRequest: Response;
+  try {
+    failedRequest = await requestRoute(json("/api/auth/request", { email: "private@wg12.example" }));
+  } finally {
+    redis.pipeline = originalPipeline;
+    console.error = originalError;
+  }
+  const failedBody = (await failedRequest.json()) as { error?: string };
+  is("the public error stays generic", [failedRequest.status, failedBody.error], [500, "server_error"]);
+  // inspect, not JSON.stringify: an Error serializes to {} in JSON, which would hide exactly what is checked here.
+  const logged = logCalls.map((args) => inspect(args, { depth: 5 })).join("\n");
+  is("something was logged, so the check below reads a real line", logCalls.length > 0, true);
+  is("the server log contains neither address nor error details", logged.includes("private@wg12.example") || logged.includes("synthetic-secret-token"), false);
 
   mail.restore();
   done();

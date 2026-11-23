@@ -2,10 +2,17 @@ import {planPaymentDisputeFixture, zeroExposureFixture } from './margin-test-fix
 import {CURRENT_UPLOAD_BUDGET_POLICY as testUploadFunding} from "./upload-budget-approved-policy";
 import {fundedCustomerScenario,fundedCustomerWithAi} from './margin-test-fixtures';
 import { assessCustomerWorstCase, CUSTOMER_COST_CATEGORIES, MINIMUM_NET_MARGIN_BPS, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from "@/lib/net-margin-rules";
-import { commercialMarginReady, commercialPlansMayOpen, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS, type CommercialMarginReview } from "@/lib/commercial-margin";
+import { commercialMarginReady, commercialPlansMayOpen, CURRENT_TERMS_DIGEST, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS, type CommercialMarginReview } from "@/lib/commercial-margin";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { done, is } from "./check";
 import {txCustomerFixture} from './customer-tax-review-fixture';
+import { withinOneUtcDay } from "./one-utc-day";
+
+// The upload budget fixture's month is fixed once the check below sets it back (and the exposure names its month
+// once), while commercialMarginReady reads the month at each call; a real month end between them failed the TX
+// baseline checks (RED when started 1 s before a month's last midnight). The clock stays inside one UTC day
+// (tests/one-utc-day.ts).
+withinOneUtcDay();
 const zeroCosts=()=>Object.fromEntries(CUSTOMER_COST_CATEGORIES.map(key=>[key,0])) as Record<typeof CUSTOMER_COST_CATEGORIES[number],number>;
 const scenario=(changes:Partial<CustomerWorstCase>={}):CustomerWorstCase=>({...fundedCustomerScenario(),...changes});
 is("owner percentage floor is retired",MINIMUM_NET_MARGIN_BPS,0);
@@ -44,7 +51,7 @@ for(const gross of [1,3,10,101,1000,10001,1000000]){
   is("exact boundary not display rounding",result.approved,gross-cost-tax>0);
  }
 }
-const review=():CommercialMarginReview=>({companyBase:{monthlyFixedCostsCeilingCents:0,monthlyFixedTaxesCeilingCents:0,allFixedCostsBounded:true,allFixedTaxesReviewed:true,fixedCostsEvidence:"TEST ONLY: zero fixed costs",fixedTaxEvidence:"TEST ONLY: zero fixed taxes",reviewedPayingCustomers:1},planPaymentDisputes:planPaymentDisputeFixture(),priceAndRightsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,taxEvidence:"TEST ONLY: hypothetical ceilings",costAndLimitEvidence:"TEST ONLY: hypothetical enforced limits",allocatedFixedCostsVerified:true, fundedExposure:zeroExposureFixture(),prepaidUsageEnforced:true,scenarios:Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map(key=>{const gross=BASE_PLAN_REVENUE_CEILINGS[key]??10000;return [key,fundedCustomerWithAi(gross,Math.floor(gross*.65),12,key)];}))});
+const review=():CommercialMarginReview=>({companyBase:{monthlyFixedCostsCeilingCents:0,monthlyFixedTaxesCeilingCents:0,allFixedCostsBounded:true,allFixedTaxesReviewed:true,fixedCostsEvidence:"TEST ONLY: zero fixed costs",fixedTaxEvidence:"TEST ONLY: zero fixed taxes",reviewedPayingCustomers:1},planPaymentDisputes:planPaymentDisputeFixture(),priceAndRightsDigest:CURRENT_TERMS_DIGEST!,taxEvidence:"TEST ONLY: hypothetical ceilings",costAndLimitEvidence:"TEST ONLY: hypothetical enforced limits",allocatedFixedCostsVerified:true, fundedExposure:zeroExposureFixture(),prepaidUsageEnforced:true,scenarios:Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map(key=>{const gross=BASE_PLAN_REVENUE_CEILINGS[key]??10000;return [key,fundedCustomerWithAi(gross,Math.floor(gross*.65),12,key)];}))});
 is("hypothetical complete passing review passes calculation",commercialMarginReady(review()),true);
 is("absent real review stays closed",commercialMarginReady(),false);
 is("requesting launch cannot bypass missing review",commercialPlansMayOpen(true),false);
@@ -56,7 +63,7 @@ for(const key of REQUIRED_MARGIN_SCENARIOS){
  const bad=review();bad.scenarios[key]={...bad.scenarios[key]!,costCeilings:{...zeroCosts(),other:Math.ceil(bad.scenarios[key]!.collectedRevenueCents!*0.9)}};
  is("one unprofitable "+key+" is not cross-subsidized",commercialMarginReady(bad),false);
 }
-is("price change invalidates old review",commercialMarginReady({...review(),priceAndRightsSnapshot:"old prices"}),false);
+is("price change invalidates old review",commercialMarginReady({...review(),priceAndRightsDigest:"old prices"}),false);
 is("tax evidence required",commercialMarginReady({...review(),taxEvidence:" "}),false);
 is("cost and limit evidence required",commercialMarginReady({...review(),costAndLimitEvidence:""}),false);
 is("allocated fixed costs must be reviewed",commercialMarginReady({...review(),allocatedFixedCostsVerified:false}),false);
@@ -80,7 +87,7 @@ is('own financial data with null prototype remains assessable',commercialMarginR
 is('frozen reviewed data remains assessable',commercialMarginReady(Object.freeze(review())),true);
 is('no request cannot activate a synthetic review',commercialPlansMayOpen(false,review()),false);
 is('absent real review remains closed',commercialPlansMayOpen(true),false);
-for(const field of ['priceAndRightsSnapshot','taxEvidence','costAndLimitEvidence','companyBase','fundedExposure','scenarios','allocatedFixedCostsVerified','prepaidUsageEnforced'] as const){
+for(const field of ['priceAndRightsDigest','taxEvidence','costAndLimitEvidence','companyBase','fundedExposure','scenarios','allocatedFixedCostsVerified','prepaidUsageEnforced'] as const){
  const input=review();const value=input[field];let calls=0;
  Object.defineProperty(input,field,{enumerable:true,get(){calls++;return value;}});
  is('calculator rejects executable review assertion '+field,commercialMarginReady(input),false);
@@ -121,7 +128,7 @@ is('symbol financial assertions fail closed',commercialMarginReady(symbolic),fal
 const oversized=review();oversized.taxEvidence='x'.repeat(1024*1024+1);
 is('review beyond existing contract snapshot ceiling fails closed',commercialMarginReady(oversized),false);
 is('oversized release review fails closed',commercialPlansMayOpen(true,oversized),false);
-const stale=review();stale.priceAndRightsSnapshot='old terms';
+const stale=review();stale.priceAndRightsDigest='old terms';
 is('detachment never makes stale terms current',commercialMarginReady(stale),false);
 const unknown=review();unknown.scenarios.creator_month_full!.taxesCeilingCents=null;
 is('detachment never treats unknown taxes as zero',commercialMarginReady(unknown),false);
@@ -156,8 +163,8 @@ for(const key of Object.keys(BASE_PLAN_REVENUE_CEILINGS) as (keyof typeof BASE_P
  selected.costCeilings.other!--;
  is('one cent beyond full TX room passes the actual commercial check',commercialMarginReady(r),true);
  is('adding the full room never shrinks the reviewed TX tax ceiling',selected.taxesCeilingCents,taxHeld);
- const current=r.priceAndRightsSnapshot;r.priceAndRightsSnapshot='schema26 historical review';
- is('an older commercial snapshot cannot approve TX data',commercialMarginReady(r),false);r.priceAndRightsSnapshot=current;
+ const current=r.priceAndRightsDigest;r.priceAndRightsDigest='schema26 historical review';
+ is('an older commercial snapshot cannot approve TX data',commercialMarginReady(r),false);r.priceAndRightsDigest=current;
  r.scenarios.creator_month_full!.taxContext!.scenario='scale_month_full';
  is('the commercial map binds each TX scenario to its actual key',commercialMarginReady(r),false);
  is('TX synthetic data never fills the actual commercial review',commercialMarginReady(),false);

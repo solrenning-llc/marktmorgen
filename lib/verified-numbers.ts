@@ -145,6 +145,11 @@ export function usesVerified(store: Store, nowSeconds = Math.floor(Date.now() / 
   return kit || (store.numbersLinks ?? []).some((l) => l.expires > nowSeconds);
 }
 
+/** A Redis SCAN cursor: an unsigned 64-bit decimal, kept as a string, with no leading zero. */
+function scanCursor(value: string): boolean {
+  return /^(0|[1-9]\d{0,19})$/.test(value) && (value.length < 20 || value <= "18446744073709551615");
+}
+
 /** The daily pass: every store that shows them, from where the last pass stopped. */
 export async function sendVerified(deadline: number): Promise<{ stores: number }> {
   const counts = { stores: 0 };
@@ -154,9 +159,19 @@ export async function sendVerified(deadline: number): Promise<{ stores: number }
   const read = repliesFor(await redisPipeline([["GET", CURSOR_KEY]]), 1);
   const saved = read?.[0];
   if (!read || (saved !== null && typeof saved !== "string")) throw new UnknownReplyError("where the shared numbers' last pass stopped");
-  const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
-  let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
-  let skip = Number(savedDone) || 0;
+  let cursor = "0";
+  let skip = 0;
+  if (saved !== null) {
+    // Only the writer's complete cursor|offset format is a saved position.
+    // Redis SCAN cursors are unsigned 64-bit decimals; keep them as strings.
+    const position = /^(0|[1-9]\d{0,19})\|(0|[1-9]\d{0,15})$/.exec(saved);
+    if (!position || position[0] !== saved || !scanCursor(position[1]) ||
+      !Number.isSafeInteger(Number(position[2]))) {
+      throw new UnknownReplyError("the shared numbers' saved position");
+    }
+    cursor = position[1];
+    skip = Number(position[2]);
+  }
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
     let done = 0;
@@ -181,6 +196,9 @@ export async function sendVerified(deadline: number): Promise<{ stores: number }
       return counts;
     }
     skip = 0;
+    // storesAfter hands back the SCAN reply's cursor unchecked: an unreadable one is unknown, and saving it
+    // would leave a position the reader above refuses on every later run. Stop without writing instead.
+    if (!scanCursor(next)) throw new UnknownReplyError("where the shared numbers' store scan goes next");
     cursor = next;
     if (next === "0") break;
   }

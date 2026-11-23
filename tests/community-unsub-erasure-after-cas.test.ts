@@ -1,3 +1,4 @@
+// Rule 23: complete the synthetic Member fixture with the new empty profile-links field; assertions unchanged.
 /** G independent proof. Six race assertions preserved verbatim from ed40258d; isolated atomic CAS fixture. */
 import { NextRequest } from "next/server";
 import { POST as unsubscribePost } from "@/app/api/mail/unsubscribe/route";
@@ -13,7 +14,7 @@ let afterAtomic: null | (()=>Promise<void>) = null;
 const gate: null = null;
 const pipeline=redis.pipeline.bind(redis);
 redis.pipeline=(async(commands:Command[])=>{
-  if(commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).startsWith('local cur = redis.call("HGET"')){
+  if(commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).includes('local cur = redis.call("HGET", KEYS[1], ARGV[1])')){
     const[,,,members,dir,field,expected,next,listed,at]=commands[0];
     // Atomic region: no await between HGET, comparison, HSET and directory update.
     if(redis.run(["HGET",members,field])!==expected)return[0];
@@ -52,7 +53,7 @@ async function main(): Promise<void> {
     const email = `member${n}@patchmember.example`;
     const key = memberKey(email);
     const token = n.toString(16).padStart(40, "a");
-    const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: token, q: [], qa: 0, qq: [] };
+    const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: token, q: [], qa: 0, qq: [], s: [] };
     await redis.pipeline([["HSET", members, key, JSON.stringify(record)], ["SET", `nl:cm:unsub:${token}`, `${cid}|${key}|${club.handle}`]]);
     return { key, token, email };
   }

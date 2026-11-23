@@ -159,7 +159,7 @@ async function main() {
   part("LOW 1 (rv49): counterReply keeps its own doc comment");
   {
     const guard = readFileSync("lib/request-guard.ts", "utf8");
-    is("the comment on the SET NX + INCR reply sits right above counterReply", /The count of a SET NX \+ INCR pipeline[^/]*\*\/\r?\nfunction counterReply\(/.test(guard), true);
+    is("the comment on the windowCount reply sits right above counterReply", /The count of a windowCount pipeline[^/]*\*\/\r?\nfunction counterReply\(/.test(guard), true);
     is("and limitKey has its own, right above it", /\*\/\r?\nasync function limitKey\(/.test(guard) && !/as withinEssentialLimit does, so a getter cannot answer for them\.\r?\n \*\/\r?\n\/\*\*/.test(guard), true);
   }
   done();

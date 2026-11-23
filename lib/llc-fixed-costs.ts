@@ -16,7 +16,7 @@ export const LLC_COMPLIANCE_COST_IDS = [
  "us-form-5472", "us-pro-forma-1120", "br-irpf", "br-cbe", "vat-oss-and-local-compliance",
  "itin-and-acceptance-agent", "us-resident-representative", "us-business-address",
 ] as const;
-export const LLC_FIXED_COST_IDS = ["delaware", "california-tax", "california-fee", "registered-agent", "llc-formation", "owner-inss", "domains", "tools", "deployment-artifact-retention", "backup", "us-mailbox", "eu-gdpr-representative", "eu-dsa-representative", "uk-gdpr-representative", ...LLC_COMPLIANCE_COST_IDS] as const;
+export const LLC_FIXED_COST_IDS = ["delaware", "california-tax", "california-fee", "registered-agent", "llc-formation", "owner-inss", "domains", "tools", "deployment-artifact-retention", "backup", "account-moves", "support-forward", "us-mailbox", "eu-gdpr-representative", "eu-dsa-representative", "uk-gdpr-representative", ...LLC_COMPLIANCE_COST_IDS] as const;
 export type FixedCostId = typeof LLC_FIXED_COST_IDS[number];
 export type FixedCostCeiling = { id: FixedCostId; fullMonthlyUsdCents: number | null; fullAnnualUsdCents: number | null; evidence: string; reserveReviewed: boolean };
 /** Public observations checked22 October2026; discounts/free periods never reduce worst-case cost. */
@@ -25,10 +25,33 @@ export const FIXED_COST_SOURCE_OBSERVATIONS = {
  deploymentArtifacts: { currency: "USD", perGbMonthMinorEach: 10, products: ["Deployment Storage", "Functions Storage"], checked: "2026-10-30", published: "2026-10-09", source: "https://vercel.com/changelog/deployment-storage-pricing-expands-to-existing-teams", approvedCeiling: false },
  /** 273 [BK1]: the daily backup of the whole database (a company cost), its worst month from a review's caps by
   * lib/backup-cost.ts (backupWorstMonth): 64 runs (a run and a new try on 32 UTC days), R2 at the review's ceiling
-  * (retention + 2 sets; one run at a time writes only below it) with a GB-month and a million of each class of rounding,
-  * a Class A for each object's deletion and two listings a run, Upstash at every command and byte the caps allow (200
-  * SCAN pages a run at the most), no free quota. Not a reviewed ceiling: BACKUP_COST_UNKNOWNS are open and the owner has not approved a monthly cost. */
- backup: { currency: "USD", model: "lib/backup-cost.ts", review: "lib/backup-run.ts BACKUP_COST_REVIEW", checked: "2026-11-04", source: "docs/backup-cost-2026-11-04.md", approvedCeiling: false },
+  * (retention + 2 + 3 sets, backupPeakSets in lib/backup-run.ts: 35 for a 30-day retention, the 3 newest months' copies
+  * included; one run at a time writes only below it) with a GB-month and a million of each class of rounding,
+  * a Class A for each object's deletion (a month's mark included) and two listings a run, Upstash at every command and
+  * byte the caps allow (200 SCAN pages a run at the most), Vercel at its dearest region (gru1), one more billing block
+  * of each Upstash and Vercel unit, the batch of DUMPs read past the byte cap at Upstash's record cap, and every byte
+  * the function moves at Vercel's dearest transfer rate (the four lines of docs/backup-costs-2026-11-08.md, section 3,
+  * in the code since 9 November 2026), no free quota. No copy is kept past 120 days
+  * (BACKUP_MAX_COPY_DAYS, the bucket's lifecycle rule: backupLifecycleDays). It prices the database copy only: the files
+  * and videos copy's Cloudflare Worker (the Workers Paid $5 monthly minimum an account and its CPU,
+  * docs/backup-costs-2026-11-08.md on #3271) is not in it yet and must be before any review. Not a reviewed ceiling:
+  * BACKUP_COST_UNKNOWNS are open and the owner has not approved a monthly cost. */
+ backup: { currency: "USD", model: "lib/backup-cost.ts", review: "lib/backup-run.ts BACKUP_COST_REVIEW", checked: "2026-11-04", source: "docs/backup-cost-2026-11-04.md", covers: "the database copy only; the files and videos Worker is not priced yet", approvedCeiling: false },
+ /** #2271 (Codex G's MEDIUM): moves of the sign-in address, a company cost admitted at most MOVES_PER_MONTH times a
+  * calendar month before any of their work (lib/auth.ts takeMoveRoom), their worst month priced from the registry's
+  * rates and measured on the real route (tests/move-cost.test.ts).
+  * boundedPartApproval: the owner approved US$17 a month (11 November 2026, 11:32 Fortaleza, his choice "Aprovar
+  * US$ 17/mês") for the bounded part only, MOVES_MONTH_COST; tests/move-cost.test.ts fails when that priced month,
+  * rounded up to the cent, passes it. approvedCeiling stays false: it is the whole line's, and MOVE_COST_UNKNOWNS
+  * are open (sessions, memberships, phone device lists, broken moves kept from earlier months, undo, repairs and asks
+  * before the room). The approval prices none of them, neither at zero nor inside what is left under US$17, so the
+  * line's reviewed ceiling in CURRENT_LLC_FIXED_COST_CEILINGS stays unknown, and with it the company total. */
+ accountMoves: { currency: "USD", model: "tests/plan-cost-registry.ts MOVES_MONTH_COST", unknowns: "tests/plan-cost-registry.ts MOVE_COST_UNKNOWNS", checked: "2026-11-11", source: "tests/move-cost.test.ts", approvedCeiling: false,
+  boundedPartApproval: { monthlyUsdCents: 1700, covers: "tests/plan-cost-registry.ts MOVES_MONTH_COST", excludes: "tests/plan-cost-registry.ts MOVE_COST_UNKNOWNS", approvedBy: "owner", decided: "2026-11-11T11:32:00-03:00", decision: "Aprovar US$ 17/mês" } },
+ /** Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the 9 November 2026 email audit), a company
+  * cost: its month at the code's ceilings from tests/plan-cost-registry.ts (supportForwardMonthlyUsd) and docs/funded-exposure-review.md.
+  * Not a reviewed ceiling: announcements past the day's, transfer out of the function and Resend's receiving quota stay unknown. */
+ supportForward: { currency: "USD", model: "tests/plan-cost-registry.ts supportForwardMonthlyUsd", review: "docs/funded-exposure-review.md", checked: "2026-11-09", source: "lib/inbound-mail.ts", approvedCeiling: false },
  delaware: { currency: "USD", annualMinor: 40000, source: "https://corp.delaware.gov/alt-entitytaxinstructions/" },
  californiaTax: { currency: "USD", annualMinor: 80000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },
  californiaFee: { currency: "USD", maximumAnnualMinor: 1179000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },
@@ -82,7 +105,7 @@ export function allocateEntireLlcFixedCosts(lines: readonly FixedCostCeiling[]) 
 }
 
 /** Generated-report section: unknown complete ceilings block a finite minimum.
- * Per-unit most-tax failures also cannot be repaired by a larger customer count.
+ * Per-unit failures under the TX reading also cannot be repaired by a larger customer count.
  */
 export function renderLlcFixedCostStatus(): string {
  const costs=allocateEntireLlcFixedCosts(CURRENT_LLC_FIXED_COST_CEILINGS);

@@ -55,6 +55,8 @@ const MESSAGES: Record<string, string> = {
   unknown: "That product is not a call any more. Reload the page.",
   signed_out: "Your session ended. Log in again.",
   role: "Your role cannot change products.",
+  // The route answers 503 "unavailable" when the save could not be confirmed (it may have landed), never "nothing saved".
+  unavailable: "We could not confirm the save. Reload the page to see what is saved, then try again.",
   server_error: "Something went wrong on our side. Nothing was saved; try again in a moment.",
 };
 
@@ -211,18 +213,18 @@ export function TeamEventEditor({ product }: { product: Product }) {
         )}
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm font-bold">
           {team || roomForNew ? (
-            <button type="button" onClick={edit} disabled={limits.eventTypes === 0} className="inline-flex min-h-11 -my-2.5 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep">
+            <button type="button" onClick={edit} disabled={limits.eventTypes === 0} className="inline-flex min-h-11 min-w-11 -my-2.5 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep">
               {team ? "Change the team" : "Make it a team event"}
             </button>
           ) : (
             <span className="text-ink-soft">{`Your plan allows ${limits.eventTypes} team event ${limits.eventTypes === 1 ? "type" : "types"}, and they are in use.`}</span>
           )}
           {team ? (
-            <button type="button" disabled={busy} onClick={() => save(null, "It is an ordinary call again.")} className="inline-flex min-h-11 -my-2.5 items-center text-ink-soft underline underline-offset-4 transition hover:text-danger">
+            <button type="button" disabled={busy} onClick={() => save(null, "It is an ordinary call again.")} className="inline-flex min-h-11 min-w-11 -my-2.5 items-center text-ink-soft underline underline-offset-4 transition hover:text-danger">
               Stop being a team event
             </button>
           ) : null}
-          <a href={href("/studio/calendar")} className="inline-flex min-h-11 -my-2.5 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep">
+          <a href={href("/studio/calendar")} className="inline-flex min-h-11 min-w-11 -my-2.5 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep">
             Your own calendar
           </a>
         </div>
@@ -373,7 +375,7 @@ export function TeamEventEditor({ product }: { product: Product }) {
                             weekly[day] = weekly[day].slice(0, 1);
                             change(host.email, { weekly });
                           }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-lg leading-none text-ink-mute transition hover:bg-white hover:text-danger"
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-full text-lg leading-none text-ink-mute transition hover:bg-white hover:text-danger"
                         >
                           &times;
                         </button>
@@ -389,7 +391,7 @@ export function TeamEventEditor({ product }: { product: Product }) {
                         weekly[day].push([Math.min(end + 60, 1380), Math.min(end + 180, 1440)]);
                         change(host.email, { weekly });
                       }}
-                      className="text-sm font-semibold text-violet-deep underline underline-offset-4"
+                      className="inline-flex min-h-11 min-w-11 items-center text-sm font-semibold text-violet-deep underline underline-offset-4"
                     >
                       Add a second stretch
                     </button>

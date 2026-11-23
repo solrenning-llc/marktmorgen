@@ -42,9 +42,11 @@ import {
   type PitchStatus,
   type Sender,
   cleanSender,
+  PAGE_READ_CHARS,
   contactPages,
   countryRule,
   isOwnAddress,
+  openingTags,
   pageText,
   parsePitch,
   pitchFooter,
@@ -61,7 +63,7 @@ import { textCountOf } from "@/lib/redis-count";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { SafeFetchError, checkUrl, safeFetch } from "@/lib/safe-fetch";
 import { SITE_URL } from "@/lib/site-url";
-import type { Store } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 
 /** Who is reading, said to every site read. */
@@ -70,12 +72,24 @@ export const READER = `${READER_NAME}/1.0 (+${SITE_URL}/help#outreach)`;
 const PAGE_BYTES = 3_000_000;
 const PAGE_MS = 8_000;
 
-/** One page of somebody's site, or null when it could not or should not be read. For tests to stand in for. */
-export type PageReader = (url: string) => Promise<{ url: string; html: string } | null>;
+/**
+ * The whole of one read of a business's site, its robots.txt and every page, ends inside this. A read is one unit of
+ * the store's integrations, priced as ten seconds held while the other service answers (tests/plan-cost-registry.ts,
+ * line integrations); without it a read could take a robots.txt, a front page, a moved origin's robots.txt and the
+ * contact pages at PAGE_MS each, about 32 seconds (coordinator cb12 on #5231). The second left is for the route's own
+ * checks around it.
+ */
+export const READ_SITE_MS = 9_000;
 
-const readPage: PageReader = async (url) => {
+/**
+ * One page of somebody's site, or null when it could not or should not be read. For tests to stand in for. `timeoutMs`
+ * is how long is left of the read: a reader gives up by then.
+ */
+export type PageReader = (url: string, timeoutMs?: number) => Promise<{ url: string; html: string } | null>;
+
+const readPage: PageReader = async (url, timeoutMs = PAGE_MS) => {
   try {
-    const answer = await safeFetch(url, { maxBytes: PAGE_BYTES, timeoutMs: PAGE_MS, maxRedirects: 3, headers: { "User-Agent": READER, Accept: "text/html,text/plain;q=0.8" } });
+    const answer = await safeFetch(url, { maxBytes: PAGE_BYTES, timeoutMs: Math.max(1, Math.min(PAGE_MS, timeoutMs)), maxRedirects: 3, headers: { "User-Agent": READER, Accept: "text/html,text/plain;q=0.8" } });
     if (answer.status !== 200) return null;
     const type = (answer.headers["content-type"] ?? "").toLowerCase();
     if (type && !/text\/|html|xml/.test(type)) return null;
@@ -86,7 +100,8 @@ const readPage: PageReader = async (url) => {
   }
 };
 
-export type SiteProblem = "address" | "unreadable";
+/** "timeout": the site did not answer inside READ_SITE_MS, said to the creator as such, never as an empty result. */
+export type SiteProblem = "address" | "unreadable" | "timeout";
 
 export type SiteRead = {
   /** The business's own domain, as its addresses carry it. */
@@ -101,7 +116,16 @@ export type SiteRead = {
 };
 
 const meta = (html: string, name: string): string => {
-  const tag = new RegExp(`<meta\\b[^>]*(?:name|property)\\s*=\\s*["']${name}["'][^>]*>`, "i").exec(html)?.[0] ?? "";
+  // Each whole tag read once and its name looked for inside it, so a page of "<meta " with no ">", or of one "<meta"
+  // holding many name=, is read in linear time (#4592; Claude 6 on #4619).
+  const named = new RegExp(`(?:name|property)\\s*=\\s*["']${name}["']`, "i");
+  let tag = "";
+  for (const found of openingTags(html.slice(0, PAGE_READ_CHARS), "meta")) {
+    if (named.test(found.tag)) {
+      tag = found.tag;
+      break;
+    }
+  }
   const content = /content\s*=\s*"([^"]*)"|content\s*=\s*'([^']*)'/i.exec(tag);
   return pageText(content?.[1] ?? content?.[2] ?? "").slice(0, 400);
 };
@@ -124,6 +148,36 @@ async function siteRules(origin: string, reader: PageReader): Promise<string[]> 
 }
 
 /**
+ * A reader whose pages are all asked for inside one deadline: each is told what is left and is not waited for past it,
+ * so a slow site ends the read on time. `late()` says whether a page was cut off by the deadline (a "timeout"), not
+ * merely unread.
+ */
+function deadlineReader(reader: PageReader, budgetMs: number): { within: PageReader; late: () => boolean } {
+  const ends = Date.now() + budgetMs;
+  let cut = false;
+  const within: PageReader = async (url) => {
+    const left = ends - Date.now();
+    if (left <= 0) {
+      cut = true;
+      return null;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ran = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        cut = true;
+        resolve(null);
+      }, left);
+    });
+    try {
+      return await Promise.race([reader(url, left), ran]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  return { within, late: () => cut };
+}
+
+/**
  * Reads what a creator typed as the address of a business's website, and
  * returns what that business says of itself and where it asks to be written.
  */
@@ -133,7 +187,10 @@ export async function readStoreSite(store: Store, raw: string, reader: PageReade
   return readSite(raw, reader);
 }
 
-export async function readSite(raw: string, reader: PageReader = readPage): Promise<{ ok: true; site: SiteRead } | { ok: false; reason: SiteProblem }> {
+export async function readSite(raw: string, reader: PageReader = readPage, budgetMs: number = READ_SITE_MS): Promise<{ ok: true; site: SiteRead } | { ok: false; reason: SiteProblem }> {
+  // Every page of this read is asked for inside one deadline (coordinator cb12 on #5231).
+  const { within, late } = deadlineReader(reader, budgetMs);
+  const missed = (): { ok: false; reason: SiteProblem } => ({ ok: false, reason: late() ? "timeout" : "unreadable" });
   let start: URL;
   try {
     const typed = raw.trim();
@@ -141,17 +198,25 @@ export async function readSite(raw: string, reader: PageReader = readPage): Prom
   } catch {
     return { ok: false, reason: "address" };
   }
-  const front = await reader(`${start.origin}/`);
-  if (!front) return { ok: false, reason: "unreadable" };
+  // robots.txt first (#4482): a site that closes its front page to this reader is never read, not read and then let go.
+  // A robots.txt that did not answer in time is not read as one that asks nothing: the read ends there.
+  const first = await siteRules(start.origin, within);
+  if (late()) return missed();
+  if (!robotsAllows(first, "/")) return { ok: false, reason: "unreadable" };
+  const front = await within(`${start.origin}/`);
+  if (!front) return missed();
   const home = new URL(front.url);
-  const disallows = await siteRules(home.origin, reader);
+  // A front page that moved to another origin is asked about by that origin's own robots.txt, as before.
+  const disallows = home.origin === start.origin ? first : await siteRules(home.origin, within);
+  if (late()) return missed();
   if (!robotsAllows(disallows, home.pathname || "/")) return { ok: false, reason: "unreadable" };
 
   // The few pages its own menu points to, asked for together: each once, and none that robots.txt closes.
   const wanted = contactPages(front.html, front.url)
     .filter((url) => robotsAllows(disallows, new URL(url).pathname))
     .slice(0, MAX_PAGES_READ - 1);
-  const others = await Promise.all(wanted.map((url) => reader(url)));
+  // A contact page that did not answer in time is left out, as one that did not answer at all: the front page was read.
+  const others = await Promise.all(wanted.map((url) => within(url)));
   const pages = [front, ...others.filter((page): page is { url: string; html: string } => page !== null && siteDomain(new URL(page.url).hostname) === siteDomain(home.hostname))];
 
   const found = new Map<string, FoundAddress & { refuses: boolean }>();
@@ -163,7 +228,8 @@ export async function readSite(raw: string, reader: PageReader = readPage): Prom
       if (!found.has(address.email)) found.set(address.email, { ...address, refuses: refusesProposals(around(text, address.email)) });
     }
   }
-  const title = pageText(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(front.html)?.[1] ?? "");
+  // A title is short: bounded, so a page of "<title>" with no end is read in linear time (#4592).
+  const title = pageText(/<title\b[^<>]*>([\s\S]{0,2000}?)<\/title>/i.exec(front.html.slice(0, PAGE_READ_CHARS))?.[1] ?? "");
   const company = (meta(front.html, "og:site_name") || title.split(/\s[|–—·-]\s/)[0] || siteDomain(home.hostname)).slice(0, 120);
   const about = meta(front.html, "description") || meta(front.html, "og:description");
   return { ok: true, site: { domain: siteDomain(home.hostname), home: `${home.origin}/`, company, about, found: [...found.values()].slice(0, 12) } };
@@ -209,10 +275,22 @@ export async function saveSender(store: Store, raw: { name?: unknown; address?: 
   if (!store.statsId || !isRedisConfigured()) return null;
   const sender = cleanSender(raw);
   if (!sender.name || !sender.address) return null;
-  // Said saved only on the exact receipt (Claude 1 on #2870, LOW): an unknown answer throws, the route answers 503.
-  wroteSet(await redisPipeline([["SET", key(store.statsId, "me"), JSON.stringify(sender)]]), [["SET"]], "the sender");
+  // A store from before ids has no identity key: its own record, under its owner's address, is what erasure removes,
+  // so it is the fence (as on #4928, Claude 3's LOW), and such a store still saves its sender while it lives.
+  const identity = STORE_ID_PATTERN.test(store.sid) ? storeIdCommand(store.sid)[1] : await ownerKey(storeRef(store));
+  // The identity and erasure checks share the write: an admitted save cannot put personal data back after erasure.
+  // Said saved only on the exact receipt (Claude 1 on #2870, LOW): an unknown or refused answer gives the route 503.
+  wroteSet(await redisPipeline([[
+    "EVAL", SAVE_SENDER_IF_LIVE, 3, identity, ERASING_KEY, key(store.statsId, "me"),
+    await erasingField(storeRef(store)), JSON.stringify(sender),
+  ]]), [["SET"]], "the sender");
   return sender;
 }
+
+/** The sender is kept only while its store's identity exists and its erasure has not begun. */
+export const SAVE_SENDER_IF_LIVE = `-- marktmorgen:outreach-sender-save:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return "gone" end
+return redis.call("SET", KEYS[3], ARGV[2])`;
 
 /**
  * Every pitch a store keeps, the newest first. Read exactly (CX-123 rule 24):
@@ -266,7 +344,7 @@ export type StartResult =
 export async function startPitch(
   store: Store,
   input: { goal: OutreachGoal; country: string; isCompany: boolean; page: string; email: string; company: string; about: string; notes: string },
-  options: { reader?: PageReader; now?: number } = {},
+  options: { reader?: PageReader; now?: number; readMs?: number } = {},
 ): Promise<StartResult> {
   if (!store.statsId || !isRedisConfigured()) return { ok: false, reason: "off" };
   const now = options.now ?? Math.floor(Date.now() / 1000);
@@ -311,10 +389,15 @@ export async function startPitch(
 
   // New draft work must be funded before even verifying its external page.
   if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return { ok: false, reason: "unavailable" };
-  const reader = options.reader ?? readPage;
-  if (!robotsAllows(await siteRules(page.origin, reader), `${page.pathname || "/"}${page.search}`)) return { ok: false, reason: "unreadable" };
-  const read = await reader(page.toString());
-  if (!read) return { ok: false, reason: "unreadable" };
+  // The page's robots.txt and the page itself inside the same deadline as a find (READ_SITE_MS), so the reads before
+  // the model call cannot hold the draft 16 s (coordinator 5252 on the readSite deadline). A robots.txt that did not
+  // answer in time is never read as one that asks nothing.
+  const { within, late } = deadlineReader(options.reader ?? readPage, options.readMs ?? READ_SITE_MS);
+  const rules = await siteRules(page.origin, within);
+  if (late()) return { ok: false, reason: "timeout" };
+  if (!robotsAllows(rules, `${page.pathname || "/"}${page.search}`)) return { ok: false, reason: "unreadable" };
+  const read = await within(page.toString());
+  if (!read) return { ok: false, reason: late() ? "timeout" : "unreadable" };
   const address = publishedAddresses(read.html, read.url, new URL(read.url).hostname).find((a) => a.email === email);
   if (!address) return { ok: false, reason: "unpublished" };
   const domain = siteDomain(new URL(read.url).hostname);
@@ -410,6 +493,7 @@ export async function startPitch(
     status: "draft",
     createdAt: now,
     sentAt: 0,
+    stoppedAt: 0,
   };
   const pushedOut = pitches.length - replaced.length >= MAX_PITCHES && spare.some((p) => !replaced.includes(p)) ? spare.find((p) => !replaced.includes(p))! : null;
   const commands: (string | number)[][] = [
@@ -477,19 +561,35 @@ function wroteSet(replies: unknown, commands: (string | number)[][], what: strin
  */
 export async function setPitchStatus(store: Store, id: string, status: PitchStatus, now = Math.floor(Date.now() / 1000)): Promise<Pitch | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const pitch = parsePitch(await keptPitch(store.statsId, id));
+  let raw = await keptPitch(store.statsId, id);
+  const pitch = parsePitch(raw);
   if (!pitch) return null;
   // Once they asked to stop, it stays stopped.
   if (pitch.status === "stopped") return pitch;
-  const next: Pitch = { ...pitch, status, sentAt: status === "draft" ? 0 : pitch.sentAt || now };
   // Said done only on the exact receipt (Claude 6 on #2870): "stopped" is a business's opt-out and "sent" starts the
   // wait before the same business is written to again, so neither is answered done on a write not known to land.
-  const commands: (string | number)[][] = [
-    ["HSET", key(store.statsId, "pitches"), id, JSON.stringify(next)],
-    ...(status === "stopped" ? [["SADD", key(store.statsId, "stop"), pitch.domain]] : []),
-  ];
-  wrote(await redisPipeline(commands), commands.length, "a pitch's status");
-  return next;
+  if (status === "stopped") {
+    const next: Pitch = { ...pitch, status, sentAt: pitch.sentAt || now };
+    const commands: (string | number)[][] = [
+      ["HSET", key(store.statsId, "pitches"), id, JSON.stringify(next)],
+      ["SADD", key(store.statsId, "stop"), pitch.domain],
+    ];
+    wrote(await redisPipeline(commands), commands.length, "a pitch's status");
+    return next;
+  }
+  // Any other mark is written only over the exact record read (Codex L and U on #4123), as stopFromLink writes its
+  // stop: a business's stop that landed after the read is read again and kept, its stoppedAt beside the creator's
+  // answer. After PITCH_STOP_TRIES changes in a row the mark is not said done.
+  for (let tries = 0; tries < PITCH_STOP_TRIES && typeof raw === "string"; tries += 1) {
+    const current = parsePitch(raw);
+    if (!current) return null;
+    if (current.status === "stopped" && (!(status === "replied" || status === "deal") || !current.stoppedAt)) return current;
+    const next: Pitch = { ...current, status, sentAt: status === "draft" ? 0 : current.sentAt || now };
+    const [swapped] = wrote(await redisPipeline([["EVAL", PITCH_IF_READ, 1, key(store.statsId, "pitches"), id, raw, JSON.stringify(next)]]), 1, "a pitch's status");
+    if (swapped === 1) return next;
+    raw = await keptPitch(store.statsId, id);
+  }
+  throw new UnknownReplyError("a pitch's status");
 }
 
 /** Takes a draft away. Only a draft: what was sent stays, so the same business is not written to twice. */
@@ -559,18 +659,42 @@ export async function readStopLink(token: string): Promise<{ domain: string; sto
 export async function stopFromLink(token: string, everyone: boolean, now = Math.floor(Date.now() / 1000)): Promise<boolean> {
   const link = await readLink(token);
   if (!link) return false;
-  // Read and written exactly (CX-123 rule 24; J and Codex Q on #2870): the pitch is nil or a string, and the write
+  // Read and written exactly (CX-123 rule 24; J and Codex Q on #2870): the pitch is nil or a string, and each write
   // answers one count for each command. Anything else throws, so the stop is never said done on a write whose answer
   // is not known (the route then answers done=0, and pressing again only adds what may already be there).
-  const raw = repliesFor(await redisPipeline([["HGET", key(link.s, "pitches"), link.id]]), 1)?.[0];
-  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("the pitch a stop link names");
-  const pitch = parsePitch(raw);
-  const writes: (string | number)[][] = [
-    ["SADD", key(link.s, "stop"), link.d],
-    ...(everyone ? [["SADD", STOP_ALL, link.d]] : []),
-    ...(pitch && pitch.status !== "stopped" ? [["HSET", key(link.s, "pitches"), link.id, JSON.stringify({ ...pitch, status: "stopped", sentAt: pitch.sentAt || now } satisfies Pitch)]] : []),
-  ];
-  const receipt = repliesFor(await redisPipeline(writes), writes.length);
-  if (!receipt || !receipt.every((reply) => countOf(reply) !== null)) throw new UnknownReplyError("a business's stop");
+  let raw = await keptPitch(link.s, link.id);
+  // The stop sets are what close the business, so they go first and on their own.
+  const sets: (string | number)[][] = [["SADD", key(link.s, "stop"), link.d], ...(everyone ? [["SADD", STOP_ALL, link.d]] : [])];
+  wrote(await redisPipeline(sets), sets.length, "a business's stop");
+  // Then the pitch, only over the exact record read (Codex V on #4123): a mark the creator wrote meanwhile is read
+  // again and kept, with the stop beside it. After PITCH_STOP_TRIES changes in a row the business stays closed by
+  // the sets all the same.
+  for (let tries = 0; tries < PITCH_STOP_TRIES && typeof raw === "string"; tries += 1) {
+    const next = stoppedPitch(parsePitch(raw), now);
+    if (!next) break;
+    const [swapped] = wrote(await redisPipeline([["EVAL", PITCH_IF_READ, 1, key(link.s, "pitches"), link.id, raw, JSON.stringify(next)]]), 1, "a business's stop");
+    if (swapped === 1) break;
+    raw = await keptPitch(link.s, link.id);
+  }
   return true;
+}
+
+/** How many times a stop link reads its pitch again when it changed in between; a company cost (the outreach-stop guard). */
+export const PITCH_STOP_TRIES = 3;
+
+/** Writes a pitch only while it still holds the exact record read (stopFromLink). Billed 1 + 2; lib/redis-memory.ts runs it. */
+const PITCH_IF_READ = `-- marktmorgen:outreach-pitch-if-read:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])
+return 1`;
+
+/**
+ * What a business's stop makes of its pitch, or null when nothing changes. A pitch with no answer becomes "stopped";
+ * an answer the creator marked (replied, deal) stays, with when the stop came beside it, so "What your pitches did"
+ * counts both (Claude 1 cloud and Codex X7 on #4123).
+ */
+function stoppedPitch(pitch: Pitch | null, now: number): Pitch | null {
+  if (!pitch || pitch.status === "stopped") return null;
+  if (pitch.status === "draft" || pitch.status === "sent") return { ...pitch, status: "stopped", sentAt: pitch.sentAt || now, stoppedAt: pitch.stoppedAt || now };
+  return pitch.stoppedAt ? null : { ...pitch, stoppedAt: now };
 }

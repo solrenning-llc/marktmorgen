@@ -38,6 +38,8 @@ function notice() {
 }
 /** The Zoom user's stores, read once each time a notice is acted on (lib/meet-connect.ts forgetUser). */
 const forgotten = () => count("SMEMBERS", "nl:meet:user:zoom:");
+/** forgetUser's read of the user's stores: its pipeline opens with the deletion's mark (lib/meet-connect.ts goneKey). */
+const forgetRead = (c: (string | number)[]) => c[0] === "SET" && String(c[1] ?? "").startsWith("nl:meet:gone:zoom:");
 
 async function main(): Promise<void> {
   redis.clear();
@@ -78,11 +80,13 @@ async function main(): Promise<void> {
   part("A notice that failed lets go of its own mark, never another's");
   clearAnswers();
   const failed = notice();
-  answer((c) => c[0] === "SMEMBERS", THROWS);
+  // forgetUser's read now opens with the deletion's mark, then SMEMBERS, in one pipeline (lib/meet-connect.ts, Claude 5
+  // zoom-forget-race): the rule matches that pipeline by its first command, and the failure and the outcome are unchanged.
+  answer(forgetRead, THROWS);
   is("forgetting failed: 500, its mark let go so the retry is heard", [await failed.send(), redis.run(["EXISTS", failed.key])], [500, 0]);
   clearAnswers();
   const outlasted = notice();
-  answer((c) => c[0] === "SMEMBERS", THROWS, { before: () => void redis.run(["SET", outlasted.key, "another-request", "EX", 600]) });
+  answer(forgetRead, THROWS, { before: () => void redis.run(["SET", outlasted.key, "another-request", "EX", 600]) });
   is("its mark ran out and was taken by another request: that one is left alone", [await outlasted.send(), redis.run(["GET", outlasted.key])], [500, "another-request"]);
   clearAnswers();
   done();

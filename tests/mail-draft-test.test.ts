@@ -7,7 +7,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 async function main() {
   redis.clear();
-  const store = { listId: "draft-subject-test", catalog: { items: [] } } as unknown as Store;
+  redis.run(["SET", "nl:store:id:" + "dd".repeat(16), "drafts-owner@example.test"]); // a live store with an id (#5010 row 111)
+  const store = { listId: "draft-subject-test", email: "drafts-owner@example.test", sid: "dd".repeat(16), extra: false, catalog: { items: [] } } as unknown as Store;
   const key = "nl:mail:drafts:" + store.listId;
   const content = { subject: "First subject", body: "Content", productId: "" };
   let id = "", version: string | undefined;
@@ -52,7 +53,7 @@ async function main() {
   is("reordered fields are equivalent",sameDraftSubjectTest(valid,{by:"visits",hours:4,share:20,subjectB:"Second subject"}),true);
   is("disabled and absent are not equivalent",sameDraftSubjectTest(null,undefined),false);
   const original=redis.pipeline;let writes=0;
-  redis.pipeline=async commands=>{writes+=commands.filter(c=>c[0]==="HSET").length;if(commands.some(c=>c[0]==="HGET"))return [];return original.call(redis,commands);};
+  redis.pipeline=async commands=>{writes+=commands.filter(c=>c[0]==="HSET"||(c[0]==="EVAL"&&String(c[1]).startsWith("-- marktmorgen:draft-set-live:"))).length;if(commands.some(c=>c[0]==="HGET"))return [];return original.call(redis,commands);};
   try{let failed=false;try{await saveDraft(store,"owner@example.com",{...content,id});}catch(e){failed=e instanceof DraftReadUnavailable;}
     is("unreadable legacy record cannot discard the experiment",failed,true);is("no write after unavailable previous record",writes,0);
   }finally{redis.pipeline=original;}

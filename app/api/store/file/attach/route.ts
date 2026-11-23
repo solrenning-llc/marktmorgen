@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
-import { deleteFile as del, headFile as head } from "@/lib/file-store";
+import { lockRead } from "@/lib/two-step-unknown";
+import { headFile as head } from "@/lib/file-store";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { setProductFile, storeForEmail, storeFolder } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
@@ -9,6 +11,7 @@ import { audioPlayedBy } from "@/lib/podcast";
 import { takesLastDelivery } from "@/lib/product-option";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { forgetFreshUpload, retireFreshUpload } from "@/lib/vault";
 
 /**
  * Puts the file that was just uploaded onto the product, or takes it off.
@@ -46,7 +49,18 @@ export async function POST(request: NextRequest) {
     // own, so the file is read where the id points (readDelivery), not on a product only.
     // Read once, only for a new file (the lock and the episodes need it); a detach reads it after its write instead.
     const delivery = detach ? null : await readDelivery(store, id);
-    if (!detach && (await lockedFor(request, "products", "replace")) && deliveredFile(delivery)) return refusedJson("locked");
+    // The lock read exactly (main): an unknown read answers its own error, never "not locked".
+    const lock = detach ? false : await lockRead(lockedFor(request, "products", "replace"));
+    if (lock instanceof Response) return lock;
+    if (lock && deliveredFile(delivery)) {
+      // An upload this session finished after another one attached a file first (the "open" check passed while there
+      // was none) is deleted, not left held against the store and billed (Codex V on #4022). Only a finished upload
+      // never attached, in this item's own folder and not its file (retireFreshUpload): never a path on the client's word.
+      if (pathname && pathname !== deliveredFile(delivery)?.pathname && ownsPath(pathname, await storeFolder(ref), id)) {
+        await retireFreshUpload(pathname).catch((error: unknown) => console.error("a refused upload could not be deleted", error));
+      }
+      return refusedJson("locked");
+    }
 
     // The last thing a product on the store hands over is not taken off: it is replaced, or the product unpublished
     // first (754 [STN1]; Claude 6 on #3432). A read that fails throws, so nothing is taken off (rule 24).
@@ -84,6 +98,9 @@ export async function POST(request: NextRequest) {
       };
     }
 
+    // Attached from here on: no longer a finished upload a refused attach may delete, and forgotten before the write so
+    // it never is one while it is the item's file. A note that is not forgotten refuses the attach (nothing written).
+    if (file) await forgetFreshUpload(file.pathname);
     const result = await setProductFile(ref, id, file);
     if (!result.ok) {
       return Response.json(
@@ -104,9 +121,7 @@ export async function POST(request: NextRequest) {
       ? new Set<string>()
       : await (delivery ? Promise.resolve(delivery) : readDelivery(result.store, id)).then((found) => audioPlayedBy(found?.product)).catch(() => null);
     if (removed && removed.pathname !== file?.pathname && stillPlayed && !stillPlayed.has(removed.pathname)) {
-      await del(removed.pathname).catch((error: unknown) => {
-        console.error("could not delete the replaced file", error);
-      });
+      await deleteOrSweep(removed.pathname, "the replaced file");
       // Buyers' stamped copies of it go with it.
       await dropStamped(removed);
     }

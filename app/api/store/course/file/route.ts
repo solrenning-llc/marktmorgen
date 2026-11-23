@@ -7,10 +7,11 @@ import { heldBack, passedForGate } from "@/lib/quiz";
 import { plain, serveFile } from "@/lib/serve-file";
 import { readCourseListing } from "@/lib/catalog";
 import { coursesWords } from "@/lib/buyer-words/courses";
-import { takePublicRequest } from "@/lib/traffic";
+import { takePublicRequestExact } from "@/lib/traffic";
 import { speech } from "@/lib/buyer-words";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /**
  * A lesson's download: a worksheet, the slides. Handed over only to someone
@@ -34,10 +35,15 @@ export async function GET(request: NextRequest) {
   const file = found && Number.isInteger(index) ? found.lesson.files[index] : undefined;
   if (!found || !file) return plain(404, "Not found.");
 
+  // Not even a free preview's download while the store is switched off after a report (lib/takedown.ts), except to its
+  // students, as the lesson page (app/[handle]/course/[product]/[lesson]/page.tsx): they keep what they could open.
+  if (found.lesson.preview && store.suspended && (await courseAccess(store, product, await cookies(), course)).state !== "open") return plain(404, "Not found.");
   if (!found.lesson.preview) {
     // Said to the student in the store's language (lib/buyer-words/courses.ts).
     const w = coursesWords(store.language);
-    const access = await courseAccess(store, product, await cookies());
+    const access = await courseAccess(store, product, await cookies(), course);
+    // Whether the course's end date applies could not be read: said as a check not made (rule 24, 24 [E7]).
+    if (access.state === "unchecked") return plain(503, w.accessUncheckedBody);
     if (!course || access.state !== "open" || !isOpen(course, found.unit, access.start)) {
       return plain(403, w.notOpenForYou);
     }
@@ -51,6 +57,12 @@ export async function GET(request: NextRequest) {
     }
   }
   // One of the store's public requests: on the buyers' side, or the public's for a lesson anyone may preview (lib/buyer-actions.ts).
-  if (!(await takePublicRequest(store, found.lesson.preview ? "public" : "buyer"))) return plain(503, speech(store).w.restingTitle);
-  return serveFile(file);
+  const taken = await takePublicRequestExact(store, found.lesson.preview ? "public" : "buyer").catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return plain(503, speech(store).w.restingTitle);
+  // A preview lesson's file goes to anyone, signed in or not: a free copy, paused with the store's other free
+  // downloads (lib/serve-file.ts), unless whoever asks holds the course (or owns the store), whose copy is a paid one.
+  const paid = !found.lesson.preview || (await courseAccess(store, product, await cookies(), course)).state === "open";
+  return serveFile(file, { paid });
 }

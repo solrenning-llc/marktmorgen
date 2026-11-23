@@ -27,7 +27,9 @@
  *
  * Nothing here needs Node's own modules, so the proxy can use it as it is.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 type HeaderSource = { headers: Headers };
 
@@ -125,8 +127,11 @@ async function sha256Hex(value: string): Promise<string> {
  * address is kept in the clear. When Redis cannot be asked (it throws) the
  * answer is yes: these limits keep abuse down, and a buyer must never be
  * kept from paying because a counter was out of reach. A reply that did come
- * back in another shape is an unknown count and the answer is no (SG2 17,
- * Claude 1's decision of 05/11/2026). Work that spends money uses
+ * back in another shape is an unknown count (SG2 17, Claude 1's decision of
+ * 05/11/2026): never room and never past the limit, so withinLimit throws
+ * UnknownReplyError and its caller says it could not check just now, never
+ * "too many" (rule 24; follow-up of #2971). A caller that answers it in its
+ * own words reads it with `.catch(unknownLimit)`. Work that spends money uses
  * withinEssentialLimit, which says no on both.
  */
 /** Essential authenticated actions need a confirmed finite allowance before
@@ -154,10 +159,7 @@ export async function essentialLimitState(scope: string, who: string, limit: num
   let reply: unknown;
   try {
     const key = await limitKey(scope, who);
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", windowSeconds, "NX"],
-      ["INCR", key],
-    ]);
+    reply = await redisPipeline(windowCount(key, windowSeconds));
   } catch {
     return "unknown";
   }
@@ -171,25 +173,95 @@ export async function essentialLimitState(scope: string, who: string, limit: num
   return count <= limit ? "within" : "exceeded";
 }
 
+/**
+ * How many seconds are left before the counter of essentialLimitState for `scope` and `who` starts again, so a
+ * person turned away can be told when to come back (491 [PP2] complement, unit 2). One TTL read, nothing written.
+ * null when it cannot be known: Redis not configured or not answering, no counter, a counter without an expiry,
+ * or a reply in any other shape. A wait that cannot be read is never said as "now".
+ */
+export async function limitResetSeconds(scope: string, who: string): Promise<number | null> {
+  if (!isRedisConfigured()) return null;
+  let reply: unknown;
+  try {
+    reply = await redisPipeline([["TTL", await limitKey(scope, who)]]);
+  } catch {
+    return null;
+  }
+  try {
+    if (!Array.isArray(reply) || reply.length !== 1) return null;
+    const seconds: unknown = reply[0];
+    return typeof seconds === "number" && Number.isSafeInteger(seconds) && seconds > 0 ? seconds : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Gives back one count taken by essentialLimitState when the work it admitted did not happen (lib/stock.ts
+ * giveBackHold). Best effort: a failed give-back leaves the count as taken, the safe way to be wrong. A window that
+ * ended in between starts again at -1 with its own expiry, never a key that outlives it.
+ */
+export async function giveBackLimit(scope: string, who: string, windowSeconds: number): Promise<void> {
+  if (!isRedisConfigured() || !Number.isSafeInteger(windowSeconds) || windowSeconds <= 0) return;
+  try {
+    const key = await limitKey(scope, who);
+    await redisPipeline([
+      ["SET", key, "0", "EX", windowSeconds, "NX"],
+      ["DECR", key],
+    ]);
+  } catch {
+    // Kept as taken.
+  }
+}
+
 export async function withinLimit(scope: string, who: string, limit: number, windowSeconds: number): Promise<boolean> {
   if (!isRedisConfigured()) return true;
   let reply: unknown;
   try {
-    const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", windowSeconds, "NX"],
-      ["INCR", key],
-    ]);
-  } catch {
+    const key = await limitKey(scope, who);
+    reply = await redisPipeline(windowCount(key, windowSeconds));
+  } catch (error) {
+    // Redis answered in another shape (lib/redis.ts, UnknownReplyError): an unknown count, never room (SG2 17).
+    if (error instanceof UnknownReplyError) return false;
     // Redis could not be asked: open, so a buyer is never kept from paying by a counter out of reach.
     return true;
   }
   // A reply that came back in another shape, or that cannot even be looked at, is an unknown count, never room
-  // (SG2 17, Claude 1, 05/11/2026; Codex Q on #2670: reading it is outside the catch above).
-  return countWithin(reply, limit);
+  // and never past the limit (SG2 17, Claude 1, 05/11/2026; Codex Q on #2670: reading it is outside the catch above).
+  let count: number | null;
+  try {
+    count = counterReply(reply);
+  } catch {
+    count = null;
+  }
+  if (count === null) throw new UnknownReplyError(`the ${scope} limit's count`);
+  return count <= limit;
 }
 
-/** Whether a returned SET NX + INCR reply holds a count within `limit`; no for any other shape or a reply that throws when read. */
+/**
+ * withinLimit's (or withinStore's) answer with an unknown count said as
+ * "unknown", for a caller that answers it in its own words: a 503, or its
+ * form's "try again" notice, never its "too many" one. Anything else thrown
+ * is thrown on.
+ */
+export function unknownLimit(error: unknown): "unknown" {
+  if (error instanceof UnknownReplyError) return "unknown";
+  throw error;
+}
+
+/**
+ * The answer of a form or a provider's call whose limit's count could not be
+ * read, where the page it came from has no notice of its own for it: 503,
+ * said plainly and never as "too many", so a person or a sender tries again.
+ */
+export function limitUnknownResponse(): Response {
+  return new Response("This could not be checked just now. Nothing was changed. Try again in a moment.", {
+    status: 503,
+    headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "60", "Cache-Control": "no-store" },
+  });
+}
+
+/** Whether a returned windowCount reply holds a count within `limit`; no for any other shape or a reply that throws when read. */
 function countWithin(reply: unknown, limit: number): boolean {
   try {
     const count = counterReply(reply);
@@ -199,9 +271,46 @@ function countWithin(reply: unknown, limit: number): boolean {
   }
 }
 
-/** The counter's key for a scope and whoever it counts, hashed: one place, so every reader of a counter reads the same one. */
+/**
+ * An IPv6 address as the connection it belongs to (#4628): its first four groups, a /64, the least one customer is
+ * handed, as visitorAddress in lib/traffic-rules.ts counts it. Not a /48: a mobile carrier hands thousands of
+ * unrelated subscribers a /64 each out of one /48, so a /48 would let one of them use up a site-wide limit (sign-in,
+ * erasure requests) for all the others (Claude 7 on #4637). An IPv4 address written the new way ("::ffff:203.0.113.9")
+ * is that IPv4 address. Anything that is not a whole IPv6 address is answered as it is.
+ */
+export function limitAddress(part: string): string {
+  // "[2001:db8::1]:443" and "fe80::1%eth0" are the address they hold: brackets, a port and a zone are not part of it.
+  const address = part.trim().toLowerCase().replace(/^\[([^\]]+)\](?::\d+)?$/, "$1").replace(/%[\w.-]+$/, "");
+  if (!address.includes(":")) return part;
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(address);
+  if (mapped) return mapped[1];
+  // The same IPv4 address in hexadecimal ("::ffff:cb00:7109" is 203.0.113.9), never one bucket for every such address.
+  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(address);
+  if (hex) {
+    const [high, low] = [parseInt(hex[1], 16), parseInt(hex[2], 16)];
+    return [high >> 8, high & 255, low >> 8, low & 255].join(".");
+  }
+  if ((address.match(/::/g) ?? []).length > 1) return part;
+  const [head, tail = ""] = address.split("::");
+  const front = head ? head.split(":") : [];
+  const back = tail ? tail.split(":") : [];
+  const missing = 8 - front.length - back.length;
+  const groups = address.includes("::") ? (missing > 0 ? [...front, ...Array<string>(missing).fill("0"), ...back] : []) : front;
+  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return part;
+  return `${groups.slice(0, 4).map((group) => group.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
+/**
+ * The counter of a limit. Every part of `who` (an address and a store, usually, joined by "|") that is an IPv6
+ * address is counted as its /64 (#4628): one IPv6 customer holds at least a /64, so counting the exact address let
+ * every request of theirs come from a new address and find a new allowance. An IPv4 address counts by itself. A
+ * caller keeps the address in a part of its own ("|"): joined to something else with ":", it would be read whole
+ * (tests/limit-groups-ipv6.test.ts holds every caller to that). Hashed, and one place, so every reader of a counter
+ * (withinLimit, essentialLimitState and the rest) reads the same one.
+ */
 async function limitKey(scope: string, who: string): Promise<string> {
-  return `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
+  const counted = who.split("|").map(limitAddress).join("|");
+  return `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${counted}`)).slice(0, 32)}`;
 }
 
 /**
@@ -242,20 +351,12 @@ export async function essentialTakeBelow(scope: string, who: string, below: numb
 }
 
 /**
- * The count of a SET NX + INCR pipeline, only in its exact shape: two
- * replies, the SET's "OK" or null, and the INCR's own whole number of at
- * least 1; null for anything else. Read by the replies' own data fields,
- * as withinEssentialLimit does, so a getter cannot answer for them.
+ * The count of a windowCount pipeline (the window-count module), only in its exact shape: two replies, the INCR's own
+ * whole number of at least 1 and the EXPIRE's 0 or 1; null for anything else. Read by the replies' own data fields,
+ * so a getter cannot answer for them.
  */
 function counterReply(reply: unknown): number | null {
-  if (!Array.isArray(reply)) return null;
-  const length = Object.getOwnPropertyDescriptor(reply, "length");
-  if (!length || !Object.hasOwn(length, "value") || length.value !== 2) return null;
-  const set = Object.getOwnPropertyDescriptor(reply, "0");
-  const count = Object.getOwnPropertyDescriptor(reply, "1");
-  if (!set || !Object.hasOwn(set, "value") || (set.value !== null && set.value !== "OK")) return null;
-  if (!count || !Object.hasOwn(count, "value") || !Number.isSafeInteger(count.value) || count.value < 1) return null;
-  return count.value as number;
+  return windowCountOf(reply);
 }
 
 /**
@@ -266,24 +367,31 @@ function counterReply(reply: unknown): number | null {
  * exactly one of these. `window` is the store's window by its name
  * (lib/allowance-window.ts, windowId): its billing month when it pays us,
  * the calendar month otherwise, so one payment buys one month of each. No
- * window known, nothing let through. Kept 32 days, longer than any window.
+ * window known, nothing let through. Kept `keepSeconds`, which every caller takes from the
+ * store's window (lib/allowance-window.ts, windowKeySeconds(store, 32 * 86_400)): at least 32
+ * days, and never less than the window, so a window stretched to its period's end never outlives
+ * its count (Claude 6's second MEDIUM on #4561, rule 30). A keep under MONTH_KEEP_SECONDS lets
+ * nothing through.
  * Fails open like withinLimit when Redis cannot be asked: the work it guards
  * cannot run either.
  */
-export async function withinMonth(scope: string, who: string, limit: number, window: string | null): Promise<boolean> {
+/** The least a month counter may be kept (withinMonth). */
+const MONTH_KEEP_SECONDS = 32 * 86_400;
+
+export async function withinMonth(scope: string, who: string, limit: number, window: string | null, keepSeconds: number): Promise<boolean> {
   if (!window || !/^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/.test(window)) return false;
   if (!isRedisConfigured()) return true;
   if (!Number.isSafeInteger(limit) || limit <= 0) return false;
+  // Never kept less than a month: a keep that is not one would let the window's count lapse inside it.
+  if (!Number.isSafeInteger(keepSeconds) || keepSeconds < MONTH_KEEP_SECONDS) return false;
   let reply: unknown;
   try {
     const month = window;
     const key = `nl:rlm:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}:${month}`;
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", 32 * 86_400, "NX"],
-      ["INCR", key],
-    ]);
-  } catch {
-    return true;
+    reply = await redisPipeline(windowCount(key, keepSeconds));
+  } catch (error) {
+    // An answer out of shape is an unknown count, never room; only Redis out of reach opens, as withinLimit.
+    return !(error instanceof UnknownReplyError);
   }
   return countWithin(reply, limit);
 }

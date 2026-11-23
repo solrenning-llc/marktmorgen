@@ -1,3 +1,4 @@
+// Rule 23: complete the synthetic Member fixture with the new empty profile-links field; assertions unchanged.
 /**
  * Codex G on #3123 (review 5815399154): a member's stop link is made once and
  * kept. Two jobs that read the same member before the first token was written
@@ -23,7 +24,7 @@ let casReply: null | (() => unknown) = null;
 const pipeline = redis.pipeline.bind(redis);
 // The member CAS as Redis runs it: no await between HGET, the comparison, HSET and the directory.
 redis.pipeline = (async (commands: Command[]) => {
-  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith('local cur = redis.call("HGET"')) {
+  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes('local cur = redis.call("HGET", KEYS[1], ARGV[1])')) {
     if (gate) await gate();
     if (casReply) return casReply();
     const [, , , members, dir, field, expected, next, listed, at] = commands[0];
@@ -64,7 +65,7 @@ async function main(): Promise<void> {
     n += 1;
     const email = `member${n}@tokenrace.example`;
     const key = memberKey(email);
-    const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+    const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] };
     await pipeline([["HSET", members, key, JSON.stringify(record)]]);
     return { key, email };
   }
@@ -136,7 +137,7 @@ async function main(): Promise<void> {
 
   part("A member with no record gets no stop link");
   {
-    const ghost: Member = { k: memberKey("ghost@tokenrace.example"), e: "ghost@tokenrace.example", n: "", h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+    const ghost: Member = { k: memberKey("ghost@tokenrace.example"), e: "ghost@tokenrace.example", n: "", h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] };
     const before = await unsubKeys();
     const thrown = await tokenFor(club, cid, ghost).then(() => "returned", () => "threw");
     is("tokenFor refuses a member Redis says is not there", thrown, "threw");

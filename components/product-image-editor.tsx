@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { uploadPresigned } from "@vercel/blob/client";
+import { uploadMessage, uploadThroughDoor } from "@/lib/upload-refusal";
 import { toast } from "@/components/toast";
 import type { Product } from "@/lib/store";
 import {
@@ -12,6 +12,8 @@ import {
   MAX_ALT_LENGTH,
   MAX_SOURCE_BYTES,
   SMALL_LONG_SIDE,
+  THUMB_LONG_SIDE,
+  MAX_THUMB_BYTES,
   imagePath,
   imageUrl,
 } from "@/lib/product-image";
@@ -137,9 +139,10 @@ export function ProductImageEditor({
         return;
       }
       const path = imagePath(folder, freshId(), shrunk.blob.type);
-      await uploadPresigned(path, shrunk.blob, {
+      // Through the door that reads its own answer, so a refusal says why (lib/upload-refusal.ts).
+      await uploadThroughDoor(path, shrunk.blob, {
         access: "private",
-        handleUploadUrl: "/api/store/image/upload",
+        door: "/api/store/image/upload",
         clientPayload: JSON.stringify({ productId: product.id }),
         contentType: shrunk.blob.type,
         onUploadProgress: (progress) => setPercent(progress.percentage),
@@ -153,9 +156,9 @@ export function ProductImageEditor({
         try {
           const copy = await shrink(file, SMALL_LONG_SIDE);
           const smallPath = imagePath(folder, freshId(), copy.blob.type);
-          await uploadPresigned(smallPath, copy.blob, {
+          await uploadThroughDoor(smallPath, copy.blob, {
             access: "private",
-            handleUploadUrl: "/api/store/image/upload",
+            door: "/api/store/image/upload",
             clientPayload: JSON.stringify({ productId: product.id }),
             contentType: copy.blob.type,
           });
@@ -164,9 +167,28 @@ export function ProductImageEditor({
           small = null;
         }
       }
+      // A third copy for small pictures in lists (Encanto 5b-2, THUMB_LONG_SIDE), made and sent like the smaller
+      // copy; one that cannot be made or sent is simply left out.
+      let thumb: { path: string; width: number } | null = null;
+      if (Math.max(shrunk.width, shrunk.height) > THUMB_LONG_SIDE) {
+        try {
+          const copy = await shrink(file, THUMB_LONG_SIDE, MAX_THUMB_BYTES);
+          const thumbPath = imagePath(folder, freshId(), copy.blob.type);
+          // Through the one door protocol, as the picture and its smaller copy (lib/upload-through-door.ts, #3171).
+          await uploadThroughDoor(thumbPath, copy.blob, {
+            access: "private",
+            door: "/api/store/image/upload",
+            clientPayload: JSON.stringify({ productId: product.id }),
+            contentType: copy.blob.type,
+          });
+          thumb = { path: thumbPath, width: copy.width };
+        } catch {
+          thumb = null;
+        }
+      }
       const described = describe ?? alt;
       // The picture's color, painted under it while it loads (Encanto 5b); none for one with transparency.
-      const problem = await post({ action: "attach", path, width: shrunk.width, height: shrunk.height, alt: described, ...(small ? { small } : {}), ...(shrunk.tone ? { tone: shrunk.tone } : {}) });
+      const problem = await post({ action: "attach", path, width: shrunk.width, height: shrunk.height, alt: described, ...(small ? { small } : {}), ...(thumb ? { thumb } : {}), ...(shrunk.tone ? { tone: shrunk.tone } : {}) });
       if (problem) {
         setError(problem);
         return;
@@ -177,8 +199,9 @@ export function ProductImageEditor({
       }
       toast(describe !== null ? "Cover added." : image ? "Picture replaced." : "Picture added.");
       router.refresh();
-    } catch {
-      setError(MESSAGES.server_error);
+    } catch (thrown) {
+      // The door's own reason (a spent studio window, a second step, a paused plan...), or that it did not finish.
+      setError(uploadMessage(thrown, MESSAGES));
     } finally {
       setBusy(null);
       setPercent(0);

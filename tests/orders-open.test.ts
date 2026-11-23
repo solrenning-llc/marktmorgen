@@ -51,6 +51,7 @@ import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { requestsIn } from "@/lib/traffic";
 import { allowanceWindow } from "@/lib/allowance-window";
 import type { CallSetup } from "@/lib/call-setup";
+import { roomReads } from "@/lib/call-rooms";
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setProductLink, setStripeAccount, setSubscription, storeFolder, storeForEmail, type Store } from "@/lib/store";
 
 const OWNER = "olive@example.com";
@@ -204,9 +205,11 @@ test("an opening with forty bookings takes the most moves first, and pays their 
   const calls = await callsFor(store, BUYER, opened.meter);
   assert.equal(calls.length, MAX_LISTED);
   assert.ok(calls.every((call) => call.room), "each booking was given its room");
-  // Each booking's move, the product's listing, and each room: four reads, and a video room made and read back.
-  const rooms = sent.filter((command) => command.includes("nl:call:room:") || command.includes("nl:meet:r:")).length;
-  assert.ok(rooms > 4 * MAX_LISTED && rooms <= ORDERS_ROOM_COMMANDS * MAX_LISTED, String(rooms));
+  // Each booking's move, the product's listing, and each room: its four keys read in shared MGETs (lib/call-rooms.ts,
+  // roomReads; calendar-feed room, 10 November 2026), and a video room made and read back.
+  const roomCommands = sent.filter((command) => command.includes("nl:call:room:") || command.includes("nl:meet:r:"));
+  const roomMgets = roomCommands.filter((command) => command.startsWith("MGET ")).length;
+  assert.ok(roomMgets === roomReads(MAX_LISTED) && roomCommands.length <= roomReads(MAX_LISTED) + 2 * MAX_LISTED && roomCommands.length <= ORDERS_ROOM_COMMANDS * MAX_LISTED, String(roomCommands.length));
   // The forty moves were one MGET (C3-82), not forty GETs.
   assert.deepEqual(sent.filter((command) => command.includes("nl:call:moved:")).map((command) => command.split(" ")[0]), ["MGET"]);
   // ORDERS_CALL_MOVES taken before any booking is read; what the one MGET left pays the listing, then the rooms take more.
@@ -284,10 +287,10 @@ test("a meter the store has no room for reads none of the bookings, not even the
   assert.deepEqual(sent.filter(bookingReads), []);
   // Read without a meter (the other readers of bookings), the same store reads them all.
   assert.equal((await callsFor(store, BUYER)).length, MAX_LISTED);
-  // Their forty moves in one MGET (C3-82), and four reads of each room.
+  // Their forty moves in one MGET (C3-82), and each room's four keys in shared MGETs (roomReads).
   const moves = sent.filter((command) => command.includes("nl:call:moved:"));
   assert.deepEqual([moves.length, moves[0]?.split(" ")[0], moves[0]?.split(" ").length], [1, "MGET", 1 + MAX_LISTED]);
-  assert.ok(sent.filter(bookingReads).length >= 1 + MAX_LISTED * 4, String(sent.filter(bookingReads).length));
+  assert.ok(sent.filter(bookingReads).length >= 1 + roomReads(MAX_LISTED), String(sent.filter(bookingReads).length));
 });
 
 test("the moves taken before a store's bookings are read cover every booking its pages can hold", () => {
@@ -435,7 +438,7 @@ test("a link request the store has no room for asks Stripe nothing, and the per-
   assert.deepEqual([asked, (await requestsIn(folder, window)) - before], [0, 0]);
   // The route answers a refusal as it answers a store with no room at all.
   const route = readFileSync("app/api/store/orders/route.ts", "utf8");
-  assert.ok(route.includes('if (result === "busy") return tooMany();') && route.includes("if (!(await takePublicRequest(store, \"buyer\"))) return tooMany();"));
+  assert.ok(route.includes('if (result === "busy") return tooMany();') && route.includes('const taken = await takePublicRequestExact(store, "buyer").catch(unknownLimit);\n  if (!taken) return tooMany();'));
 });
 
 /** A store selling links, with one paid checkout of BUYER per product, and its link to the list. */
@@ -620,6 +623,31 @@ test("a download of what was brought over reads its ids and that one entry, each
   assert.equal((await requestsIn(folder, window)) - before, DOWNLOAD_LOOKUP_UNITS + Math.ceil((3 + ORDERS_LISTING_COMMANDS) / ORDERS_UNIT_COMMANDS));
 });
 
+test("a brought-over entry removed after HKEYS is absent, not an unknown reply", async () => {
+  const { store, ids, token } = await linkStore(["Guide", "Archive"]);
+  const shop = { ...store, pastBuyers: true };
+  sessions = [];
+  const key = importedKey(shop.statsId!, BUYER);
+  await redis.pipeline([["HSET", key, ids[0], JSON.stringify({ at: 1, job: "api:1", items: null })]]);
+  const reference = importedReference(shop.statsId!, BUYER, ids[0]);
+  const beforeRace = redis.pipeline;
+  let removed = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const answers = await beforeRace(commands);
+    if (!removed && commands.some((command) => command[0] === "HKEYS" && command[1] === key)) {
+      removed = true;
+      await beforeRace([["HDEL", key, ids[0]]]);
+    }
+    return answers;
+  }) as typeof redis.pipeline;
+  try {
+    assert.equal(await findPurchase(shop, token, reference), null);
+    assert.equal(removed, true, "the field was removed between HKEYS and HGET");
+  } finally {
+    redis.pipeline = beforeRace;
+  }
+});
+
 test("a download the store has no room for reads nothing; a token or a reference not shaped like one takes nothing", async () => {
   const { store, refs, token, folder, window } = await linkStore();
   asked = 0;
@@ -707,7 +735,11 @@ test("a link request says sent whatever happens past its units: the email not se
   const answer = await ordersRoute(new NextRequest(`${ORIGIN}/api/store/orders`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "198.51.100.4" }, body: body.toString() }));
   assert.deepEqual([answer.status, answer.headers.get("location")], [303, `${ORIGIN}/@moss/orders?status=sent`]);
   const route = readFileSync("app/api/store/orders/route.ts", "utf8");
-  assert.ok(!route.includes("status=error"));
+  // Whatever happens once the address is asked about, the page is "sent". The one "error" is the store's own count
+  // that could not be read (rule 24), before anything of the address is read, so it is the same for every address.
+  assert.ok(/\} catch \(error\) \{\n[^}]*return away\(`\$\{page\}\?status=sent`\);/.test(route));
+  assert.equal(route.split("status=error").length, 2);
+  assert.ok(route.indexOf("status=error") < route.indexOf("requestOrdersLink({"));
 });
 
 test("a link request answers sent before it reads anything for the address, writes a grant or emails, whether or not it bought; the link still goes after", async () => {

@@ -1,0 +1,216 @@
+/**
+ * Codex L on main (L-20261120-0141, MEDIUM, privacy): a vault upload's provider reply after the store's erasure. The
+ * open reserved storage, then waited on the provider's POST that makes the multipart session; an erasure that ran in
+ * that wait deleted the store's live key, its pending storage and its upload records. When the provider answered,
+ * openVaultUpload wrote the upload record back with a plain SET (its pathname, its size, its session id), and the
+ * reservation's own writes (the bind, then the release in its catch) wrote the storage row back too, a day of data of
+ * an erased store, and a session with nothing left to retire it if its DELETE was refused.
+ *
+ * Every write of the open now goes through the store's fence (its live key there and its erasing mark absent): a reply
+ * that comes after the erasure writes nothing, retires the session it opened, and forgets nothing it did not write.
+ * Synthetic store, the repository's in-memory Redis, a stand-in for R2, no real request.
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { store as redis } from "./redis-stub";
+import { openReservedVault } from "@/lib/vault-storage";
+import { ERASING_KEY, erasingField } from "@/lib/store";
+import type { StorageUse } from "@/lib/storage-quota";
+
+process.env.R2_ACCOUNT_ID = "0123456789abcdef0123456789abcdef";
+process.env.R2_ACCESS_KEY_ID = "1234567890123456";
+process.env.R2_SECRET_ACCESS_KEY = "x".repeat(32);
+process.env.R2_BUCKET = "test-files";
+
+const sessions = new Set<string>();
+const asked: string[] = [];
+let made = 0;
+/** While set, the provider's POST that makes a session waits for it. */
+let hold: Promise<void> | null = null;
+let started: () => void = () => undefined;
+let refuseDelete = false;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  if (!url.hostname.endsWith(".r2.cloudflarestorage.com")) throw new Error("unexpected request " + url.href);
+  const method = init?.method ?? "GET";
+  const uploadId = url.searchParams.get("uploadId");
+  asked.push(`${method}${uploadId ? " session" : ""}`);
+  if (method === "POST" && url.searchParams.has("uploads")) {
+    started();
+    if (hold) await hold;
+    const id = `session-${++made}`;
+    sessions.add(id);
+    return new Response(`<InitiateMultipartUploadResult><UploadId>${id}</UploadId></InitiateMultipartUploadResult>`);
+  }
+  if (method === "DELETE" && uploadId) {
+    if (refuseDelete) return new Response("<Error><Code>InternalError</Code></Error>", { status: 500 });
+    sessions.delete(uploadId);
+    return new Response(null, { status: 204 });
+  }
+  // The listing the storage measure would read: an empty folder.
+  if (method === "GET") return new Response("<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>");
+  throw new Error("unexpected request " + method + " " + url.href);
+}) as typeof fetch;
+
+const SID = "a".repeat(32);
+const REF = "owner-vault@example.com";
+const LIVE = `nl:store:id:${SID}`;
+const folder = (n: number) => n.toString(16).padStart(32, "0");
+const measure = async (): Promise<StorageUse> => ({ bytes: 0, brake: 10, left: 10, full: false, available: true });
+const keys = async (pattern: string) => ((await redis.pipeline([["SCAN", "0", "MATCH", pattern, "COUNT", 1000]]))[0] as [string, string[]])[1];
+
+async function openDuringErasure(n: number) {
+  const field = await erasingField(REF);
+  const fence = { live: LIVE, erasing: ERASING_KEY, field, statsId: "", ref: REF };
+  await redis.pipeline([["SET", LIVE, REF]]);
+  let release: () => void = () => undefined;
+  hold = new Promise<void>((done) => { release = done; });
+  const asking = new Promise<void>((done) => { started = done; });
+  const opening = openReservedVault({ folder: folder(n), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure, async () => true)
+    .then((r) => r, (e: unknown) => e);
+  await asking;
+  // The store's erasure runs while the provider has not answered: its mark, its live key, and the families walked.
+  await redis.pipeline([["HSET", ERASING_KEY, field, String(Date.now())], ["DEL", LIVE]]);
+  for (const key of [...(await keys("nl:storage:pending:*")), ...(await keys("nl:vault:up:*"))]) await redis.pipeline([["DEL", key]]);
+  hold = null;
+  release();
+  return opening;
+}
+
+test("a provider reply after the store's erasure writes back no upload record and no storage row", async () => {
+  redis.clear();
+  asked.length = 0;
+  const outcome = await openDuringErasure(1);
+  assert.equal((outcome as { ok?: boolean }).ok === true, false, `the erased store is handed out no upload: ${JSON.stringify(outcome)}`);
+  assert.deepEqual(await keys("nl:vault:up:*"), [], "no upload record of the erased store is written back");
+  assert.deepEqual(await keys("nl:storage:pending:*"), [], "no storage row of the erased store is written back");
+  assert.equal(sessions.size, 0, "the session made for it is retired at the provider");
+  assert.ok(asked.includes("DELETE session"), `the provider was asked to retire it: ${asked.join(", ")}`);
+});
+
+test("when the provider refuses that retirement, still nothing of the erased store is written", async () => {
+  redis.clear();
+  sessions.clear();
+  refuseDelete = true;
+  const outcome = await openDuringErasure(2).finally(() => { refuseDelete = false; });
+  assert.equal((outcome as { ok?: boolean }).ok === true, false);
+  assert.deepEqual([await keys("nl:vault:up:*"), await keys("nl:storage:pending:*")], [[], []]);
+});
+
+test("an erasure between the record's write and the bind: the session is retired and its record forgotten", async () => {
+  redis.clear();
+  sessions.clear();
+  asked.length = 0;
+  await redis.pipeline([["SET", LIVE, REF]]);
+  const field = await erasingField(REF);
+  const fence = { live: LIVE, erasing: ERASING_KEY, field, statsId: "", ref: REF };
+  const pipeline = redis.pipeline.bind(redis);
+  let erased = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const reply = await pipeline(commands);
+    if (!erased && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-cache-live:"))) {
+      erased = true;
+      await pipeline([["HSET", ERASING_KEY, field, String(Date.now())], ["DEL", LIVE]]);
+      for (const key of await keys("nl:storage:pending:*")) await pipeline([["DEL", key]]);
+    }
+    return reply;
+  }) as typeof redis.pipeline;
+  const outcome = await openReservedVault({ folder: folder(4), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure, async () => true)
+    .then((r) => r, (e: unknown) => e)
+    .finally(() => { redis.pipeline = pipeline; });
+  assert.equal(erased, true, "the erasure ran after the record was written");
+  assert.match(String(outcome), /storage_(store_gone|reservation_missing)/, "the bind is refused for the erased store");
+  assert.ok(asked.includes("DELETE session") && sessions.size === 0, "the session is retired at the provider");
+  assert.deepEqual([await keys("nl:vault:up:*"), await keys("nl:storage:pending:*")], [[], []], "its record is forgotten and no row is written back");
+});
+
+// Claude 4 on #4937 @59a37b3486 (LOW, a test gap): the store's erasure begins after the record's fenced write, while
+// its walk has not yet reached the storage rows. The bind's own write is then the fence's -1 (storage_store_gone):
+// without that refusal the bind would answer bound with nothing written, and the browser would be handed signatures.
+test("an erasure begun before the bind, its storage row still there: the bind is refused as gone and nothing is handed out", async () => {
+  redis.clear();
+  sessions.clear();
+  asked.length = 0;
+  await redis.pipeline([["SET", LIVE, REF]]);
+  const field = await erasingField(REF);
+  const fence = { live: LIVE, erasing: ERASING_KEY, field, statsId: "", ref: REF };
+  const pipeline = redis.pipeline.bind(redis);
+  let erased = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const reply = await pipeline(commands);
+    if (!erased && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-cache-live:"))) {
+      erased = true;
+      // Only the mark and the live key: the walk has not reached the storage family yet.
+      await pipeline([["HSET", ERASING_KEY, field, String(Date.now())], ["DEL", LIVE]]);
+    }
+    return reply;
+  }) as typeof redis.pipeline;
+  const outcome = await openReservedVault({ folder: folder(5), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure, async () => true)
+    .then((r) => r, (e: unknown) => e)
+    .finally(() => { redis.pipeline = pipeline; });
+  assert.equal(erased, true, "the erasure began after the record was written");
+  assert.match(String(outcome), /storage_store_gone/, "the bind's write is refused by the store's fence");
+  assert.ok(asked.includes("DELETE session") && sessions.size === 0, "the session is retired at the provider");
+  assert.deepEqual(await keys("nl:vault:up:*"), [], "its record is forgotten");
+  const rows = await redis.pipeline([["GET", `nl:storage:pending:${folder(5)}`]]);
+  assert.deepEqual(JSON.parse(String(rows[0])).map((r: { pathname?: string }) => r.pathname ?? null), [null], "the row is never bound to the upload");
+});
+
+test("control: a live store's upload opens, with its record and its storage row", async () => {
+  redis.clear();
+  sessions.clear();
+  await redis.pipeline([["SET", LIVE, REF]]);
+  const fence = { live: LIVE, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "", ref: REF };
+  const opened = await openReservedVault({ folder: folder(3), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure, async () => true);
+  assert.equal(opened.ok, true);
+  assert.equal((await keys("nl:vault:up:*")).length, 1);
+  assert.equal((await keys("nl:storage:pending:*")).length, 1);
+  assert.equal(sessions.size, 1);
+});
+
+test("the fence's commands on an open stay within what each upload start is priced with", async () => {
+  const { UPLOAD_OPEN_FENCE_EXTRA_COMMANDS } = await import("@/lib/spend-cost-table");
+  const count = async (n: number, fenced: boolean) => {
+    redis.clear();
+    await redis.pipeline([["SET", LIVE, REF]]);
+    const fence = { live: LIVE, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "", ref: REF };
+    const run = redis.run.bind(redis);
+    let commands = 0;
+    redis.run = ((command: (string | number)[]) => { commands += 1; return run(command); }) as typeof redis.run;
+    try {
+      const opened = await openReservedVault({ folder: folder(n), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, ...(fenced ? { fence } : {}) } as never, 10, measure, async () => true);
+      assert.equal(opened.ok, true);
+    } finally {
+      redis.run = run;
+    }
+    return commands;
+  };
+  const { SET_IF_STORE_LIVE } = await import("@/lib/live-fence");
+  // Measured: the storage writes of the cleanup, the reservation and the bind, each read the store's key and its mark.
+  // The record's EVAL stands in for its SET one for one here (the stand-in runs that script's own commands apart), so
+  // its own extra is read from the script: its EVAL and its calls, in place of one SET.
+  const storage = (await count(6, true)) - (await count(7, false));
+  assert.equal(storage, 3 * 2, `the three storage writes add ${storage} commands`);
+  // Its calls at the worst path: the script's two GETs (the id key of a store with an id, the owner's record of one
+  // from before ids) are the two branches of one check, so one of them runs, never both.
+  const calls = (SET_IF_STORE_LIVE.match(/redis\.call\(/g)?.length ?? 0) - 1;
+  const record = 1 + calls - 1;
+  assert.equal(record, 3);
+  // The worst path adds a release's write (2) and the record's DEL (1).
+  const worst = storage + record + 2 + 1;
+  assert.equal(worst, UPLOAD_OPEN_FENCE_EXTRA_COMMANDS, `${worst} at the worst against the ${UPLOAD_OPEN_FENCE_EXTRA_COMMANDS} priced`);
+});
+
+test("the vault route opens every upload with its store's fence", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const route = readFileSync(join(process.cwd(), "app/api/store/vault/route.ts"), "utf8");
+  assert.match(route, /const fence = await storeLiveFence\(store\);\s*\n\s*const opened = await openReservedVault\(\{[^}]*\bfence \}/);
+});
+
+test("the buyer's submission route opens every upload with its store's fence (Codex G-20261121-0801)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const route = readFileSync(join(process.cwd(), "app/api/store/course/submission/route.ts"), "utf8");
+  assert.match(route, /const fence = await storeLiveFence\(store\);\s*\n\s*const opened = await openSubmissionDoor\(\{[^}]*\bfence \}/);
+});

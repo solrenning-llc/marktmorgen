@@ -65,7 +65,9 @@ async function main(): Promise<void> {
 
   part("The studio's email page reads its history this way");
   const page = readFileSync("app/studio/email/page.tsx", "utf8");
-  is("listBroadcastsStrict with expired: skip", page.includes('listBroadcastsStrict(store.listId, 30, { expired: "skip" })'), true);
+  // Rule 23 (merge of #3034 with main): the page now reads its emails without their bodies, paid first
+  // (readBroadcastHeads, #3034), which takes the same option; the check follows the reader, not the old name.
+  is("readBroadcastHeads with expired: skip", page.includes('readBroadcastHeads(store.listId, payStudio, 30, { expired: "skip" })'), true);
 
   done();
 }

@@ -1,13 +1,14 @@
 import type { NextRequest } from "next/server";
 import { DataRoomError } from "@/lib/store-data";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, storeKey } from "@/lib/learn";
 import { heldBack, passedForGate } from "@/lib/quiz";
-import { limited, withinLimit } from "@/lib/request-guard";
+import { limited, withinLimit, unknownLimit, limitUnknownResponse } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { addComment, commentsOn, deleteComment, readComment, setHidden } from "@/lib/lesson-comments";
 import { COMMENTS_PER_DAY, COMMENTS_PER_MINUTE, COMMENT_ID_PATTERN, CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
 
   const course = await readCourse(product.course.id);
   const found = course ? findLesson(course, lessonId) : null;
-  const access = await courseAccess(store, product, request.cookies);
+  const access = await courseAccess(store, product, request.cookies, course);
   if (!course || !found || access.state !== "open" || !isOpen(course, found.unit, access.start)) {
     return new Response(null, { status: 303, headers: { Location: base } });
   }
@@ -61,7 +62,9 @@ export async function POST(request: NextRequest) {
   }
   if (!(await commentsOn(course.id))) return back("off");
   // The creator deleting a comment, from a session let in without its second step, waits (lib/two-step.ts).
-  if (owner && action === "delete" && (await lockedFor(request, "products", "cm-delete"))) return back("locked");
+  const lock = owner && action === "delete" ? await lockRead(lockedFor(request, "products", "cm-delete"), { back: `${base}/${lessonId}#comments`, to: "the lesson" }) : false;
+  if (lock instanceof Response) return lock;
+  if (lock) return back("locked");
 
   // Each act here is one of the store's buyer actions, or the creator's
   // studio requests (lib/buyer-actions.ts); a student deleting their own
@@ -85,9 +88,11 @@ export async function POST(request: NextRequest) {
   const who = `${storeKey(store)}:${by}`;
   if (!owner) {
     const [minute, day] = await Promise.all([
-      withinLimit("lesson-comment", who, COMMENTS_PER_MINUTE, 60),
-      withinLimit("lesson-comment-day", who, COMMENTS_PER_DAY, 86_400),
+      withinLimit("lesson-comment", who, COMMENTS_PER_MINUTE, 60).catch(unknownLimit),
+      withinLimit("lesson-comment-day", who, COMMENTS_PER_DAY, 86_400).catch(unknownLimit),
     ]);
+    // A count that could not be read is never "a lot of comments" (rule 24): nothing was posted.
+    if (minute === "unknown" || day === "unknown") return limitUnknownResponse();
     if (!minute || !day) return back("slow");
   }
   const parent = field("parent", 20);

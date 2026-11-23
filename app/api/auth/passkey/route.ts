@@ -2,11 +2,12 @@ import type { NextRequest } from "next/server";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { SESSION_COOKIE, emailForSession, isFreshSession } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
-import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { RemovalBusyError, RemovalUnsentError, addPasskey, cancelRemoval, listPasskeys, registrationOptions, removePasskey, scheduleRemovalSaid } from "@/lib/passkeys";
 import { LockBusyError } from "@/lib/redis-lock";
 import { liveSecondStep, mayAddNow, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
 import { lockedUntil, twoStepOn } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 
 const MAX_BODY_BYTES = 16_000;
 /** Changes one account may make to its passkeys in an hour: each one emails the account. */
@@ -16,14 +17,17 @@ const LOCKED_REMOVALS_PER_HOUR = 5;
 
 const ANSWERS: Record<string, number> = { expired: 400, invalid: 400, full: 409, taken: 409, unknown: 404, reauth: 403, second_step: 403 };
 
-/** What went wrong, in JSON: another change to the same passkeys holding them (lib/passkeys.ts) is "busy", to try again. */
-function failed(error: unknown, doing: string): Response {
+/**
+ * What went wrong, in JSON: another change to the same passkeys holding them (lib/passkeys.ts) is "busy", to try again.
+ * Any other error is logged by `logFailure`, one fixed string written by the caller (tests/auth-log-redaction.test.ts).
+ */
+function failed(error: unknown, logFailure: () => void): Response {
   if (error instanceof LockBusyError) return Response.json({ ok: false, error: "busy" }, { status: 503 });
   // Another request's notice of a removal is still going out: nothing was set, try again (lib/passkeys.ts scheduleRemoval).
   if (error instanceof RemovalBusyError) return Response.json({ ok: false, error: "busy" }, { status: 503 });
   // The email that tells the account could not be sent, so nothing was set (lib/passkeys.ts scheduleRemoval).
   if (error instanceof RemovalUnsentError) return Response.json({ ok: false, error: "unsent" }, { status: 503 });
-  console.error(doing, error);
+  logFailure();
   return Response.json({ ok: false, error: "server_error" }, { status: 500 });
 }
 
@@ -73,22 +77,29 @@ export async function POST(request: NextRequest) {
   // owner's own changes (31 requests of any kind would otherwise keep the owner out for the hour). The one
   // exception: it may ask for a removal that waits, on a count of its own (below), so somebody who lost the
   // app and the passkey waits once, not twice.
-  const locked = (await lockedUntil(session)) > 0;
+  const until = await lockRead(lockedUntil(session));
+  if (until instanceof Response) return until;
+  const locked = until > 0;
   if (locked && body.action !== "remove") {
     return Response.json({ ok: false, error: "locked" }, { status: 403 });
   }
   if (body.action === "remove" && locked) {
-    if (!(await withinLimit("passkey-remove-locked", email, LOCKED_REMOVALS_PER_HOUR, 60 * 60))) {
+    const room = await withinLimit("passkey-remove-locked", email, LOCKED_REMOVALS_PER_HOUR, 60 * 60).catch(unknownLimit);
+    if (room === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+    if (!room) {
       return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
     try {
       const set = await scheduleRemovalSaid(email, typeof body.id === "string" ? body.id.slice(0, 1_400) : "", session, await twoStepOn(email));
       return set === null ? Response.json({ ok: false, error: "unknown" }, { status: 404 }) : Response.json({ ok: true, removeOn: set.at, loggedOut: set.loggedOut });
     } catch (error) {
-      return failed(error, "asking for a passkey removal failed");
+      return failed(error, () => console.error("asking for a passkey removal failed"));
     }
   }
-  if (!(await withinLimit("passkey-change", email, CHANGES_PER_HOUR, 60 * 60))) {
+  const room = await withinLimit("passkey-change", email, CHANGES_PER_HOUR, 60 * 60).catch(unknownLimit);
+  // A count that could not be read is never "too many changes" (rule 24).
+  if (room === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   }
 
@@ -137,6 +148,6 @@ export async function POST(request: NextRequest) {
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {
-    return failed(error, "a passkey change failed");
+    return failed(error, () => console.error("a passkey change failed"));
   }
 }

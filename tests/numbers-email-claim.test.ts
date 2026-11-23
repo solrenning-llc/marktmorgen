@@ -1,3 +1,5 @@
+import { seedNumbersStore } from "./numbers-email-claim-world";
+import { summaryClaimKey } from "./summary-claim-command";
 import { NextRequest } from "next/server";
 import { GET as weekly } from "@/app/api/cron/weekly/route";
 import { GET as monthly } from "@/app/api/cron/monthly/route";
@@ -17,7 +19,7 @@ let failChatRead = false;
 const request = (path: string) => new NextRequest(`https://example.test${path}`);
 
 function reset(): void {
-  redis.clear();
+  redis.clear(); seedNumbersStore();
   commands.length = 0;
   control.sent.length = 0;
   control.numbers = "visitors-0";
@@ -26,9 +28,9 @@ function reset(): void {
 
 /** The claim key this run tried to take (SET … NX on the sent key), and whether it is held now. */
 function claim(prefix: string): { tried: boolean; held: boolean } {
-  const set = commands.find((c) => c[0] === "SET" && String(c[1]).startsWith(prefix) && c.includes("NX"));
+  const set = commands.find((c) => summaryClaimKey(c).startsWith(prefix));
   if (!set) return { tried: false, held: false };
-  return { tried: true, held: redis.run(["GET", String(set[1])]) !== null };
+  return { tried: true, held: redis.run(["GET", summaryClaimKey(set)]) !== null };
 }
 
 async function main(): Promise<void> {

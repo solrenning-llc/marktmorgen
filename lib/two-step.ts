@@ -357,9 +357,9 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  *     ("lesson-remove", "module-remove", "media-remove"), an assignment taken
  *     off with the work handed in ("task-remove"), a quiz taken off
  *     ("quiz-remove"), a student's certificate withdrawn ("withdraw") and a
- *     lesson comment deleted ("cm-delete"); and "launch" (app/api/store/
- *     waitlist: the product goes on sale with one email, in the creator's
- *     own words, to everyone on its waitlist);
+ *     lesson comment deleted ("cm-delete"). A waitlist's "launch" (one email,
+ *     in the creator's own words, to everyone on it) needs "send" since the
+ *     audit of 11 November 2026, so it is held by LOCKED_NEEDS above;
  *   - page: "remove" (a form with its answers, a site page, a saved block, a
  *     link, a short link, the store photo), "delete" (a blog post), "clear"
  *     (the questions the answers and the assistant missed) and "replace";
@@ -389,7 +389,7 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  * tests/locked-deletes.test.ts holds every route that deletes to one of them.
  */
 export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = {
-  products: ["remove", "clear", "detach", "replace", "launch", "lesson-remove", "module-remove", "media-remove", "task-remove", "quiz-remove", "withdraw", "cm-delete"],
+  products: ["remove", "clear", "detach", "replace", "lesson-remove", "module-remove", "media-remove", "task-remove", "quiz-remove", "withdraw", "cm-delete"],
   page: ["remove", "delete", "clear", "replace"],
   events: ["cancel", "delete", "move"],
   community: ["report-delete", "held-remove", "email", "delete", "delete-comment", "unsay", "clear"],
@@ -570,7 +570,7 @@ async function takeBackReset(email: string, until: number): Promise<void> {
     });
     if (!undone) console.error("taking back the reset day of a login without two-step that never opened failed");
   } catch (error) {
-    console.error("taking back the reset day of a login without two-step that never opened failed", error);
+    console.error("taking back the reset day of a login without two-step that never opened failed");
   }
 }
 
@@ -638,29 +638,49 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
   const [members] = await redisPipeline([["SMEMBERS", lockedSetKey(email)]]);
   const sessions = stringList(members);
   if (!sessions) {
-    console.error("logging out the sessions let in without a second step failed", new UnknownReplyError("the locked sessions"));
-    // Not read, only kept: the set outlives every session in it, so a lock that lapses on its day (one written
-    // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
-    const [, listed] = await redisPipeline([
-      ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
-      // Listed by a one-way tag of the account, never its address: once, at most KEPT_ANY_MAX (KEEP_ANY).
-      ["EVAL", KEEP_ANY, 1, KEPT_ANY_KEY, accountTag(email), KEPT_ANY_MAX, SESSION_TTL_SECONDS + 86_400],
-      ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
-    ]);
-    // The list past its ceiling ("*", or an answer of another shape): every session with no lock of its own now
-    // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
-    // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept.
-    if (listed !== 1) {
-      console.error(`more than ${KEPT_ANY_MAX} accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until ${SESSION_TTL_SECONDS / 86_400 + 1} days after the last`);
-      const month = new Date(now).toISOString().slice(0, 7);
-      await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]);
-    }
+    console.error("logging out the sessions let in without a second step failed");
+    await keepLocked(email, now);
     return false;
   }
-  for (const session of sessions) await endSession(session);
+  // Each logout read as endSession answers it (CX-123 rule 24): only one confirmed loses its lock and its place in
+  // the list. One not confirmed (a delete answering in another shape, or a failure) may still be open: its lock and
+  // its place stay, and the account is kept locked as when the list cannot be read, so it stays locked past its day
+  // and the owner is never told it was logged out.
+  const open: string[] = [];
+  for (const session of sessions) if ((await endSession(session)) !== true) open.push(session);
+  if (open.length) {
+    const ended = sessions.filter((session) => !open.includes(session));
+    if (ended.length) await redisPipeline([["DEL", ...ended.map((session) => lockedKey(session))], ["SREM", lockedSetKey(email), ...ended]]);
+    await keepLocked(email, now);
+    return false;
+  }
   await redisPipeline([["DEL", lockedSetKey(email), ...sessions.map((session) => lockedKey(session))]]);
   // A passkey removal one of them asked for stays: only "Keep it" calls one off (lib/passkeys.ts).
   return true;
+}
+
+/**
+ * Keeps an account's locked sessions locked when they could not all be logged out (endLocked): the list is kept
+ * and the account is marked with the moment, so that every locked session opened before it stays locked until it
+ * ends, past its day too (lockedUntil, keptListed).
+ */
+async function keepLocked(email: string, now: number): Promise<void> {
+  // Not read, only kept: the set outlives every session in it, so a lock that lapses on its day (one written
+  // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
+  const [, listed] = await redisPipeline([
+    ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
+    // Listed by a one-way tag of the account, never its address: once, at most KEPT_ANY_MAX (KEEP_ANY).
+    ["EVAL", KEEP_ANY, 1, KEPT_ANY_KEY, accountTag(email), KEPT_ANY_MAX, SESSION_TTL_SECONDS + 86_400],
+    ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
+  ]);
+  // The list past its ceiling ("*", or an answer of another shape): every session with no lock of its own now
+  // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
+  // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept.
+  if (listed !== 1) {
+    console.error("too many accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until the sessions' last day");
+    const month = new Date(now).toISOString().slice(0, 7);
+    await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]);
+  }
 }
 
 /**
@@ -709,7 +729,7 @@ export async function resetIfDue(email: string, now = Date.now()): Promise<boole
     // answers, so the turn-off is never told only to the sign-in inbox (MM-SA-19; VR2 audit).
     const kept = await backupOf(email, record).catch((error: unknown) => {
       if (!(error instanceof UnknownReplyError)) throw error;
-      console.error("reading the recovery address before turning two-step login off failed", error);
+      console.error("reading the recovery address before turning two-step login off failed");
       return null;
     });
     if (kept === null) return null;
@@ -735,7 +755,7 @@ async function dropAppSessions(email: string): Promise<void> {
     await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery");
   } catch (error) {
     if (!(error instanceof SessionsUnknownError)) throw error;
-    console.error("logging out what the app opened failed", error);
+    console.error("logging out what the app opened failed");
   }
 }
 
@@ -826,7 +846,7 @@ export async function finishSetup(
       await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery", session);
     } catch (error) {
       if (!(error instanceof SessionsUnknownError)) throw error;
-      console.error("logging out what an earlier app opened failed", error);
+      console.error("logging out what an earlier app opened failed");
       return "sessions" as const;
     }
     return (await writeHeld(held, email, { s: pending.s as string, since: now, codes: codes.map((c) => codeHash(c)), last: step, reset: 0, backup: "" }, { absent: true })) ? ("made" as const) : ("already" as const);

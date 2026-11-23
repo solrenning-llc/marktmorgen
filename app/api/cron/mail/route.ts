@@ -1,5 +1,7 @@
 import { runLaunches } from "@/lib/waitlist";
 import { runPreorderReleases } from "@/lib/preorders";
+import { runRestocks } from "@/lib/stock-alert-send";
+import { lowStockJobDeps, runLowStockChecks } from "@/lib/low-stock-alert";
 import { preorderDeps } from "@/lib/purchase-email";
 import { readListing } from "@/lib/catalog";
 import type { NextRequest } from "next/server";
@@ -10,6 +12,7 @@ import { isSenderConfigured, sendQueuedShipmentMail } from "@/lib/email";
 import { runShipmentMail } from "@/lib/shipment-mail-outbox";
 import { runOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
 import { storeForHandle } from "@/lib/store";
+import { storeForScheduledWork } from "@/lib/store-exact";
 import { advanceAll } from "@/lib/broadcasts";
 import { advanceAnnouncements } from "@/lib/community-mail";
 import { advanceUpdates } from "@/lib/product-updates";
@@ -21,6 +24,7 @@ import { sweepCheckouts } from "@/lib/checkout-sweep";
 import { sendAsked } from "@/lib/checkout-ask";
 import { sendAssistReminders } from "@/lib/assistant-reminder";
 import { deliverDue, watchStripe } from "@/lib/webhooks";
+import { replayKept } from "@/lib/webhook-outbox";
 import { settlePendingOffers } from "@/lib/upsell";
 import { sendReviewRequests } from "@/lib/review-requests";
 import { syncDue } from "@/lib/email-sync";
@@ -166,14 +170,16 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     const deadline = started + 30_000;
     // Each kept apart: one failing never skips the others for this run.
     let broadcasts = 0;
+    // Broadcasts, sequence steps and product updates read their store exactly: one read out of shape leaves the send
+    // in line for a later run instead of ending it as if the store were gone (lib/store-exact.ts).
     try {
-      broadcasts = await advanceAll(storeForHandle, deadline);
+      broadcasts = await advanceAll(storeForScheduledWork, deadline);
     } catch (error) {
       console.error("sending broadcasts failed", error);
     }
     let steps = { sent: 0, dropped: 0, later: 0 };
     try {
-      steps = await sendDueSteps(storeForHandle, deadline);
+      steps = await sendDueSteps(storeForScheduledWork, deadline);
     } catch (error) {
       console.error("sending sequence steps failed", error);
     }
@@ -186,7 +192,7 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     // A product's buyers told it was updated (lib/product-updates.ts).
     let updates = 0;
     try {
-      updates = await advanceUpdates(storeForHandle, deadline);
+      updates = await advanceUpdates(storeForScheduledWork, deadline);
     } catch (error) {
       console.error("sending product updates failed", error);
     }
@@ -204,6 +210,20 @@ async function run(request: NextRequest, started: number): Promise<Response> {
       preorders = await runPreorderReleases(storeForHandle, readListing, preorderDeps, deadline);
     } catch (error) {
       console.error("handing over pre-orders failed", error);
+    }
+    // The one email to a back-in-stock list when its product is back (lib/stock-alert-send.ts, 623 [SZ7]).
+    let restocks = 0;
+    try {
+      restocks = await runRestocks(deadline);
+    } catch (error) {
+      console.error("sending back-in-stock emails failed", error);
+    }
+    // The creators' low-stock numbers (623 [SZ7]): checked here, one run at a time, never in the checkout.
+    try {
+      // The units left as read where something is decided: never a guess (lowStockJobDeps).
+      await runLowStockChecks(deadline, lowStockJobDeps);
+    } catch (error) {
+      console.error("checking low-stock numbers failed", error);
     }
     // Reminders are kept apart from the creators' own emails: one failing
     // never stops the other, and the next run picks up whatever was left.
@@ -234,7 +254,7 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     // Nothing started after fifty: a webhook try can take eight more, and the
     // whole run has sixty.
     const webhooks = await runWebhooks(webhooksBy, meetingsCutoff);
-    return Response.json({ ok: true, checkouts, offers, broadcasts, announcements, updates, launches, preorders, ...steps, calls, events, reviews, webhooks }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ ok: true, checkouts, offers, broadcasts, announcements, updates, launches, preorders, restocks, ...steps, calls, events, reviews, webhooks }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("the email job failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
@@ -258,6 +278,8 @@ async function runWebhooks(deadline: number, cutoff: number) {
   } catch (error) {
     console.error("reading Stripe for webhooks failed", error);
   }
+  // Events noticed once that could not be queued then (lib/webhook-outbox.ts): queued now, before the deliveries.
+  await replayKept(deadline - 3_000).catch((error) => console.error("trying kept webhook events again failed", error));
   try {
     deliveries = await deliverDue(deadline);
   } catch (error) {

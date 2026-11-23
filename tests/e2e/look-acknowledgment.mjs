@@ -1,3 +1,5 @@
+import {waitForReactHydrated} from "./react-hydration.mjs";
+
 /** Every appearance POST is synthetic; photo uploads and writes are blocked. */
 export async function checkLookAcknowledgment({browser,LOCAL,fixture,is}){
  const cases=[
@@ -29,7 +31,15 @@ export async function checkLookAcknowledgment({browser,LOCAL,fixture,is}){
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const section=page.locator("[data-look-editor]");await section.waitFor();
    const theme=section.locator('input[name="theme"][value="night"]');
-   await theme.check({force:true});
+   // The theme is a controlled radio. Chosen before React has committed the page's hydration, the press makes React
+   // finish hydrating at once, and that commit puts the server's theme back, so the radio reads unchecked again
+   // ("Clicking the checkbox did not change its state" in WebKit, the slowest engine, on 22 November 2026: the
+   // merge-queue runs of #5073 and #4164 and seven PR runs; the same race as PAIRS_INITIAL_SELECTION, see
+   // react-hydration.mjs). So the check first waits for the hydration to be committed, then chooses the theme the way
+   // a creator does, by its visible label (the radio is .sr-only, 1 px, clipped), and reads the radio's state after.
+   await waitForReactHydrated(page,theme);
+   await section.locator('label:has(input[name="theme"][value="night"])').click();
+   is("look theme chosen by its label "+width,await theme.isChecked(),true);
    const before=await section.locator('input[name="font"]:checked,input[name="backdrop"]:checked').evaluateAll(nodes=>nodes.map(n=>({name:n.name,value:n.value})));
    for(const scenario of cases){
     let release;const held=new Promise(resolve=>{release=resolve;});pending={scenario,release:held};

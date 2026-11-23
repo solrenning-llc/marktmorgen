@@ -88,6 +88,8 @@ const unknownCounts: [string, unknown[]][] = [
   ["a fraction", [0.5]],
   ["a count as text", ["1"]],
   ["an extra reply", [1, 1]],
+  // One key deleted can answer only 0 or 1 (Claude 5, a sibling of Codex V-20261116-1249).
+  ["a count above one key", [2]],
 ];
 
 for (const [label, reply] of unknownCounts) {

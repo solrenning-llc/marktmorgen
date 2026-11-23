@@ -32,7 +32,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_LOW_STOCK, crossedLow, readLowStock } from "@/lib/stock-alert-rules";
 import { MAX_STOCK } from "@/lib/product-extras";
-import { type DataStore, TAKE_DATA, dataKey, dataTakenOf, monthOf } from "@/lib/store-data";
+import { type DataStore, TAKE_DATA, dataKey, dataTakenOf, monthOf, takeDataCommands } from "@/lib/store-data";
 import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 
 export type LowStock = { low: number; seen: number | null };
@@ -146,6 +146,20 @@ if #KEYS ~= 2 or #ARGV ~= 3 then return {-1, -1} end
 local removed = redis.call('HDEL', KEYS[2], ARGV[3])
 local given = lowStockRoom('0', '2', ARGV[1], ARGV[2], '0')
 return {removed, given[1]}`;
+
+/**
+ * What LOW_STOCK_SAVE bills at the most, as Upstash bills a script (its EVAL and every redis.call inside it): TAKE_DATA
+ * for one slot at its worst (takeDataCommands(1), whose EVAL is this script's) and the HSET. The same as the takeData
+ * and the HSET it replaced (Claude 5 ibuF on #5409); priced in tests/plan-cost-registry.ts (LOW_STOCK_RUN).
+ */
+export const LOW_STOCK_SAVE_COMMANDS = takeDataCommands(1) + 1;
+
+/**
+ * What LOW_STOCK_OFF bills at the most: its EVAL, the HDEL and TAKE_DATA's give-back for one slot at its worst
+ * (takeDataCommands(1), whose EVAL is this script's), so takeDataCommands(1) more than the plain HDEL it replaced
+ * (Claude 5 ibuF on #5409); priced in tests/plan-cost-registry.ts (LOW_STOCK_RUN).
+ */
+export const LOW_STOCK_OFF_COMMANDS = takeDataCommands(1) + 1;
 
 /**
  * Sets a product's low-stock number (0 or empty turns it off), kept with the

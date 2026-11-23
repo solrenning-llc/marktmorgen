@@ -81,6 +81,12 @@ async function main(): Promise<void> {
     is(`${name} with an empty product: Invalid params`, answer.error?.code, -32602);
     is(`${name} with an empty product: no command sent`, sent, 0);
   }
+  // The three that prepare a change take the same never-empty product (Claude 3 wtXk's NIT on the patch for #5413).
+  for (const [name, field] of [["propose_product_description", "description"], ["propose_product_title", "title"], ["propose_product_summary", "summary"]] as const) {
+    const { answer, commands: sent } = await call(drafter.key, name, { product: "", [field]: "Words for the product." });
+    is(`${name} with an empty product: Invalid params`, answer.error?.code, -32602);
+    is(`${name} with an empty product: no command sent`, sent, 0);
+  }
   const emptyLesson = await call(reader.key, "get_lesson", { product: product.product.id, lesson: "" });
   is("get_lesson with an empty lesson: Invalid params, no command sent", [emptyLesson.answer.error?.code, emptyLesson.commands], [-32602, 0]);
   const noLesson = await call(reader.key, "get_lesson", { product: product.product.id });

@@ -280,6 +280,8 @@ export type StepState = {
   why: string;
   /** Studio-only opt-in; never serialized by the public navigation callers. */
   reviewProduct?: Listing;
+  /** With `markUnknown`: a product the store still lists whose listing could not be read, neither open nor deleted. */
+  unknown?: boolean;
 };
 
 /**
@@ -287,16 +289,16 @@ export type StepState = {
  * catalog for the products it names: what the studio shows, and what a page
  * needs to know where "next" is.
  */
-export async function stepStates(store: Store, funnel: Pick<PageFunnel, "steps">, options: { strictProducts?: boolean; includeReviewProduct?: boolean } = {}): Promise<StepState[]> {
+export async function stepStates(store: Store, funnel: Pick<PageFunnel, "steps">, options: { strictProducts?: boolean; includeReviewProduct?: boolean; markUnknown?: boolean } = {}): Promise<StepState[]> {
   const productIds = funnel.steps.filter((s) => s.kind === "product").map((s) => s.id);
   const listings: Listing[] = productIds.length
     ? options.strictProducts ? await readListings(store, productIds) : await readListings(store, productIds).catch(() => [])
     : [];
-  if (options.strictProducts) {
-    const existing = new Set(store.catalog.items.map(item => item.id));
-    const loaded = new Set(listings.map(product => product.id));
-    if (productIds.some(id => existing.has(id) && !loaded.has(id))) throw new Error("Funnel product availability could not be checked");
-  }
+  // A product the store still lists whose listing was not read is unknown, never "a deleted product".
+  const existing = new Set(store.catalog.items.map(item => item.id));
+  const loaded = new Set(listings.map(product => product.id));
+  const unread = new Set(productIds.filter(id => existing.has(id) && !loaded.has(id)));
+  if (options.strictProducts && unread.size) throw new Error("Funnel product availability could not be checked");
   const now = Math.floor(Date.now() / 1000);
   return funnel.steps.map((step) => {
     if (step.kind === "page") {
@@ -306,6 +308,7 @@ export async function stepStates(store: Store, funnel: Pick<PageFunnel, "steps">
       return { step, title: page.title, path: `/@${store.handle}/${page.slug}`, free: false, open: out, why: out ? "" : STEP_WHY["page-back"] };
     }
     const product = listings.find((p) => p.id === step.id) ?? null;
+    if (options.markUnknown && !product && unread.has(step.id)) return { step, title: "A product that could not be read", path: null, free: false, open: false, why: "", unknown: true };
     const problem = productStepProblem(product);
     return {
       step,
@@ -342,11 +345,12 @@ export async function funnelHere(
   if (!funnel || !funnel.on) return null;
   const index = funnel.steps.findIndex((step) => step.kind === kind && step.id === id);
   if (index < 0) return null;
-  // Only what comes after this step is looked at.
-  const states = await stepStates(store, { steps: funnel.steps.slice(index + 1) });
-  const offset = index + 1;
-  const at = nextOpen({ steps: funnel.steps.slice(offset) }, -1, (step) => states.find((s) => s.step === step)?.open ?? false);
-  const path = at >= 0 ? states[at]?.path : null;
+  // Only what comes after this step is looked at, in order: the first step that is open is where "next" leads, and
+  // a product step whose listing could not be read comes first, "next" is unknown and the page shows none, never
+  // moved past it to a later step (#5285 row #2879).
+  const states = await stepStates(store, { steps: funnel.steps.slice(index + 1) }, { markUnknown: true });
+  const at = states.findIndex((s) => s.open || s.unknown);
+  const path = at >= 0 && !states[at].unknown ? states[at].path : null;
   return { funnel, index, next: path ? withMark(path, funnel.id) : null };
 }
 

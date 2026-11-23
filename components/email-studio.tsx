@@ -30,6 +30,7 @@ import { WorkflowVersions } from "@/components/workflow-versions";
 import type { MailSettings } from "@/lib/store";
 import { StoreField } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { mailLeftWords } from "@/lib/mail-left";
 import { formatMoney } from "@/lib/money";
 import { MIN_TEST_REACH, TEST_HOURS, TEST_SHARES, type SubjectTest, type TestBy } from "@/lib/mail-test";
 import { type Currency, plainAmount } from "@/lib/money";
@@ -384,6 +385,8 @@ export function EmailStudio(props: {
   allowance: number;
   /** Whether the plan's month can be told (lib/allowance-window.ts windowId); without it no count before sending is shown. */
   monthKnown?: boolean;
+  /** When the month's count starts again, said as a date (UTC), or null when it is not known (357 [ES3], lib/mail-left.ts). */
+  renews?: string | null;
   trial: boolean;
   products: { id: string; title: string }[];
   broadcasts: BroadcastRow[];
@@ -569,6 +572,10 @@ export function EmailStudio(props: {
           {!props.trial && emailEquivalence(props.allowance) ? (
             <p className="mt-2 text-sm text-ink-soft" data-email-equivalence>{emailEquivalence(props.allowance)}</p>
           ) : null}
+          {/* From 80% used: how many are left and when the count starts again (357 [ES3], lib/mail-left.ts); nothing while the month's count could not be read. */}
+          {props.monthKnown && props.used !== null && mailLeftWords(props.used, props.allowance, props.renews ?? null, props.trial) ? (
+            <p className="mt-3 rounded-[var(--r-md)] bg-sand p-3 text-sm font-medium text-ink" data-mail-left="">{mailLeftWords(props.used, props.allowance, props.renews ?? null, props.trial)}</p>
+          ) : null}
           {props.moveUp ? (
             <details className="mt-4">
               <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
@@ -690,9 +697,14 @@ function ListCard({
             const a = await call({ action: "import", text, confirm });
             setBusy(false);
             if (a.ok) {
-              setDone(`${n(Number(a.added))} added. ${n(Number(a.already))} were already on your list or had left it, and stay as they were.${Number(a.skipped) ? ` ${n(Number(a.skipped))} did not look like email addresses.` : ""}`);
-              setText("");
-              setConfirm(false);
+              const remaining = a.notImported && typeof a.notImported === "object" ? Number((a.notImported as { left?: unknown }).left) : 0;
+              const uncertain = a.notConfirmed && typeof a.notConfirmed === "object" ? Number((a.notConfirmed as { left?: unknown }).left) : 0;
+              const incomplete = (Number.isSafeInteger(remaining) && remaining > 0) || (Number.isSafeInteger(uncertain) && uncertain > 0);
+              setDone(`${n(Number(a.added))} added. ${n(Number(a.already))} were already on your list or had left it, and stay as they were.${Number(a.skipped) ? ` ${n(Number(a.skipped))} did not look like email addresses.` : ""}${remaining > 0 ? ` ${n(remaining)} not imported. Try again; the addresses already imported will stay as they are.` : ""}${uncertain > 0 ? ` The outcome for ${n(uncertain)} contacts could not be confirmed. Try again; they may already have been imported.` : ""}`);
+              if (!incomplete) {
+                setText("");
+                setConfirm(false);
+              }
               router.refresh();
             } else setError(message(a));
           }}

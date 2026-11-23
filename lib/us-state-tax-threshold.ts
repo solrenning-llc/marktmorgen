@@ -185,9 +185,9 @@ function assessWith(candidate: UsStateIncomeFranchiseRule | null, value: unknown
     else if (data.nonSalesFactors === null) unknown.push("non-sales-factors-not-reviewed");
     if (rule.salesThresholdMinor === null) unknown.push("sales-threshold");
     else {
-      const limit = BigInt(rule.salesThresholdMinor);
-      if (inState > limit) met.push("sales-threshold-exceeded");
-      else if (inState * BPS >= limit * room) near.push("sales-threshold-within-margin");
+      const threshold = BigInt(rule.salesThresholdMinor);
+      if (inState > threshold) met.push("sales-threshold-exceeded");
+      else if (inState * BPS >= threshold * room) near.push("sales-threshold-within-margin");
     }
     if (rule.relativeShareBps === null) unknown.push("relative-share");
     else {

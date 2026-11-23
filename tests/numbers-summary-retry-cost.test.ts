@@ -1,5 +1,3 @@
-import { SUMMARY_LIVE } from "@/lib/summary-live";
-import { seedNumbersStore } from "./numbers-email-claim-world";
 /**
  * #3297, Claude 7's two MEDIUMs at 9c48904a3d.
  *
@@ -17,6 +15,8 @@ import { seedNumbersStore } from "./numbers-email-claim-world";
  *
  * Synthetic store, sender, channel and AI; no network.
  */
+import { SUMMARY_LIVE } from "@/lib/summary-live";
+import { seedNumbersStore } from "./numbers-email-claim-world";
 import { NextRequest } from "next/server";
 import { GET as weekly } from "@/app/api/cron/weekly/route";
 import { GET as monthly } from "@/app/api/cron/monthly/route";

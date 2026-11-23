@@ -1378,6 +1378,12 @@ console.log("ZA: what a READY's text may say (owner, 23/11/2026 12h29 Fortaleza:
     is(`ZA: ichw's '${t}' is refused`, !aceito(t), za(t).join("; "));
   for (const t of ["READY, 0 findings; the PR fixes a typo in the header", "READY, 0 findings; issue #3958 reproduced and fixed", "READY, no findings; no minor issues either", "READY, sem achados.\nObservação: não é defeito, o nome segue o padrão"])
     is(`ZA: ichw's control '${t.replace(/\n/g, " / ")}' is accepted`, aceito(t), za(t).join("; "));
+  // Claude 5 id8Ws's LEVE on #5404 (7116503145, c4b45d5671): ordinary review wording with no finding is accepted: a count
+  // before a hyphenated adjective, "um mínimo de", and "issue —" in running prose.
+  for (const t of ["READY, sem achados. Store refunded first year 64.89, under US$66; 3 high-traffic stores in the fixture.", "READY, sem achados. O PR garante um mínimo de 2 READY por head.", "READY, no findings. Fixes Codex issue — the token is read exactly.", "READY, 0 findings; 2 low-cost reads more", "READY, sem achados; uma mínima de 3 revisões"])
+    is(`ZA: id8Ws's '${t}' is accepted`, aceito(t), za(t).join("; "));
+  for (const t of ["READY, sem achados; 1 high: the cap", "READY, sem achados. Issue — the token is not read exactly.", "READY, sem achados; um mínimo: o nome"])
+    is(`ZA: id8Ws's control '${t}' is refused`, !aceito(t), za(t).join("; "));
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

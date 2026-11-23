@@ -21,6 +21,7 @@
 import { refreshVerified, sendVerified } from "@/lib/verified-numbers";
 import { makeLink } from "@/lib/numbers-links";
 import { addNumbersLink, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
+import { keptStats } from "@/lib/store-readings";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -65,6 +66,8 @@ async function main(): Promise<void> {
   await addNumbersLink("owner@example.com", made.link, now);
   const store = (await storeForEmail("owner@example.com"))!;
   recordKey = `nl:verified:${store.statsId}`;
+  // The daily pass builds the record from the studio's kept readings only (row 139 of #5010): the studio read them first.
+  await keptStats(store, now);
   const deadline = () => Date.now() + 60_000;
 
   part("Healthy controls: no position yet, and a kept position");

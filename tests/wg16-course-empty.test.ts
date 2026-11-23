@@ -52,7 +52,7 @@ is("no bare sentence left where nobody opened it", course.includes(">Nobody has 
 part("The course's completions: no certificate issued");
 is(
   "no certificate: the studio empty state, an h4 under the list's own h3, Completions",
-  course.includes(' certificates.list.length === 0 ? (\n            <StudioEmptyState\n              level={4}\n              compact\n              className="mt-3"\n              title={course.certificate ? "No certificates yet" : "Certificates are off"}'),
+  course.includes(' certificates.total === 0 ? (\n            <StudioEmptyState\n              level={4}\n              compact\n              className="mt-3"\n              title={course.certificate ? "No certificates yet" : "Certificates are off"}'),
   true,
 );
 is(

@@ -14,6 +14,7 @@ import { claimHandle, ensureListId, storeForEmail, storeRef } from "@/lib/store"
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
+import { dataUsed } from "@/lib/store-data";
 
 const original = redis.pipeline.bind(redis);
 const lesson = { id: "lesson000001", title: "One", preview: false, video: null, files: [], link: null, hasBody: false, quiz: null } as unknown as Course["modules"][number]["lessons"][number];
@@ -56,6 +57,8 @@ async function main(): Promise<void> {
   // erased meanwhile, so it is written whole, the print read, and all of it taken back.
   {
     redis.clear();
+    // Another student's certificate in the same course first, so a room given back twice would show (it never goes below 0).
+    await press("kept-student@example.com");
     const run = redis.run.bind(redis);
     let commands = 0;
     let erasedOnce = false;
@@ -64,10 +67,16 @@ async function main(): Promise<void> {
       if (!erasedOnce && c[0] === "SADD" && String(c[1]).includes(":certs:by:")) { erasedOnce = true; run(suppressCommand(LIST, "costed@example.com")); }
       return run(c);
     }) as typeof redis.run;
+    const roomBefore = (await dataUsed(ROOM))?.used ?? -1;
     const costed = await press("costed@example.com").catch(() => null);
     redis.run = run;
+    // All it took comes back, once: the record's room with the record, the by-time entry on its ZREM (Claude 5 iYnra's
+    // LEVE 2 on #5481), never both twice.
+    is("its room comes back exactly, the by-time entry included", ((await dataUsed(ROOM))?.used ?? -1) - roomBefore, 0);
     console.log(`  the dearest press: ${commands} commands`);
     is("taken back", costed?.ok, false);
+    // Off the course's by-time list too (#4304; Claude 5 iYnra's LEVE 6 on #5481), so no page lists the erased student.
+    is("and off the course's by-time list, as off its other lists (the other student's stays)", [redis.run(["ZCARD", `nl:course:${course.id}:certs:at`]), redis.run(["SCARD", `nl:course:${course.id}:certs:all`])], [1, 1]);
     is("at most 100 commands, inside one buyer action", commands <= 100, true);
   }
 

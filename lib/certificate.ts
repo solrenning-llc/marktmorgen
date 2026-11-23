@@ -27,7 +27,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
-import { type DataStore, DataRoomError, giveData, needData } from "@/lib/store-data";
+import { type DataStore, DataRoomError, giveData, needData, takeData } from "@/lib/store-data";
 import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
 import { type Course, lessonsInOrder } from "@/lib/course";
 import { requiredQuizLessons } from "@/lib/quiz";
@@ -402,11 +402,15 @@ export async function issueCertificate(input: {
     await listByTime(input.course.id, existing, input.room);
     return { ok: true, certificate: existing, fresh: false };
   }
-  await redisPipeline([
+  const written = await redisPipeline([
     ["SADD", allKey(input.course.id), id],
     ["SADD", byKey(input.course.id, input.who), id],
-    ["ZADD", atKey(input.course.id), certificate.issuedAt, id],
+    ["ZADD", atKey(input.course.id), "NX", certificate.issuedAt, id],
   ]);
+  // A studio draw between the SADD and the ZADD (Upstash runs a pipeline's commands one by one) may have added this
+  // id to the by-time list itself, taking its entry's room (Claude 5 iYnra's LEVE 3 on #5481): the ZADD then answers
+  // 0, and the entry this press reserved comes back. Any other answer keeps it, which only counts too much.
+  if (Array.isArray(written) && written[2] === 0) await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes: ENTRY_BYTES }]);
   // The student's deletion print read after every write (#4783): an erasure writes it before it deletes anything, so
   // one that completed while this press was past its checks found nothing yet, and what was just written would hold
   // their name and address with the erasure said done. Found, or unknown, it is all taken back and nothing is issued
@@ -453,7 +457,25 @@ async function listByTime(courseId: string, certificate: Certificate, room: Data
   const [added] = exactReplies(await redisPipeline([["ZADD", atKey(courseId), "NX", certificate.issuedAt, certificate.id]]), 1, what);
   const count = replyCount(added, what);
   if (count > 1) throw new UnknownReply(what);
-  if (count === 0) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: ENTRY_BYTES }]);
+  if (count === 0) return void (await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: ENTRY_BYTES }]));
+  await dropIfErased(courseId, [certificate.id], room);
+}
+
+/**
+ * Takes off the by-time list the ids just added whose record is gone meanwhile (Claude 5 iYnra's LEVE 3 on #5481): an
+ * erasure that removed the record and the id between this draw's read of the record and its ZADD would leave an id
+ * there that nothing deletes, with its entry's room taken for good. Each one taken off gives its entry back once, on
+ * the ZREM that removed it. A reply that does not read leaves the ids as they are, which only counts too much.
+ */
+async function dropIfErased(courseId: string, ids: string[], room: DataStore): Promise<void> {
+  if (!ids.length) return;
+  const exists = plainList(await redisPipeline(ids.map((id) => ["EXISTS", certKey(id)])).catch(() => null));
+  if (!exists || exists.length !== ids.length) return;
+  const gone = ids.filter((_, i) => exists[i] === 0);
+  if (!gone.length) return;
+  const removed = plainList(await redisPipeline(gone.map((id) => ["ZREM", atKey(courseId), id])).catch(() => null));
+  const freed = removed ? removed.filter((n) => n === 1).length : 0;
+  if (freed > 0) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: freed * ENTRY_BYTES }]);
 }
 
 /**
@@ -467,7 +489,10 @@ async function takeBackIssued(courseId: string, who: string, id: string, room: D
   // Keep every reference until the record's deletion is known: a partial pipeline must not orphan personal data.
   const [record] = exactReplies(await redisPipeline([["DEL", certKey(id)]]), 1, what);
   if (replyCount(record, what) > 1) throw new UnknownReply(what);
-  if (record === 1) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes }]);
+  // The record's room with it, the by-time entry's apart: that one comes back only on the ZREM that removes it, so a
+  // pipeline below that fails and an erasure that then removes the id never give it back twice (Claude 5 iYnra's LEVE 2
+  // on #5481).
+  if (record === 1) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: bytes - ENTRY_BYTES }]);
   const [all, mine, slot, at] = exactReplies(await redisPipeline([
     ["SREM", allKey(courseId), id],
     ["SREM", byKey(courseId, who), id],
@@ -475,6 +500,7 @@ async function takeBackIssued(courseId: string, who: string, id: string, room: D
     ["ZREM", atKey(courseId), id],
   ]), 4, what);
   for (const n of [all, mine, slot, at]) if (replyCount(n, what) > 1) throw new UnknownReply(what);
+  if (at === 1) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: ENTRY_BYTES }]);
 }
 
 /**
@@ -506,12 +532,17 @@ async function claimSlot(courseId: string, who: string, id: string): Promise<Cer
 export type CertificatePage = {
   /** This page of them, newest first, withdrawn ones included; at most MAX_LISTED_CERTS. */
   list: Certificate[];
-  /** Every certificate ever issued for the course, withdrawn ones too (the course's set). */
+  /** Every certificate id the course's set holds, withdrawn ones too. */
   total: number;
   /** How many stand now: one per student whose slot names one. */
   standing: number;
-  /** Issued before the by-time list was kept and not on it yet: listed once the studio's walk adds them. */
+  /**
+   * Issued before the by-time list was kept and not on it yet, while the studio's walk still adds them (0 once the walk
+   * is done: what is left is a record that is gone or does not read, which no page can show).
+   */
   unlisted: number;
+  /** The store's data room was full on this draw, so none of them could be added now. */
+  roomFull: boolean;
   /** Whether an older page follows this one. */
   more: boolean;
 };
@@ -526,25 +557,34 @@ export type CertificatePage = {
  *
  * One draw reads a bounded page (#4304): the counts, a page of the by-time list (atKey) and its records in one MGET,
  * whatever the course holds. A course whose set holds certificates issued before that list was kept gets at most
- * CERT_BACKFILL_PER_DRAW of them added on each draw that brings the store's room (`room`): their entries' room taken
- * first, given back for each one another draw added meanwhile, and nothing added when the room is full. `page` is
- * 0 for the newest.
+ * CERT_BACKFILL_PER_DRAW of them added on each draw that brings the store's room (`room`), by the walk (addOlder). A
+ * walk that does not read is left for the next draw and never hides the page (Claude 5 iYnra's NIT 8 on #5481).
+ * `page` is 0 for the newest.
  */
 export async function certificatesFor(courseId: string, options: { room?: DataStore; page?: number } = {}): Promise<CertificatePage | null> {
-  const empty: CertificatePage = { list: [], total: 0, standing: 0, unlisted: 0, more: false };
+  const empty: CertificatePage = { list: [], total: 0, standing: 0, unlisted: 0, roomFull: false, more: false };
   if (!isRedisConfigured()) return empty;
   const page = Number.isSafeInteger(options.page) && (options.page as number) > 0 ? (options.page as number) : 0;
-  const counted = plainList(await redisPipeline([["SCARD", allKey(courseId)], ["ZCARD", atKey(courseId)], ["HLEN", indexKey(courseId)]]));
-  if (!counted || counted.length !== 3 || !counted.every((n) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0)) return null;
-  const [total, , standing] = counted as number[];
-  let listed = counted[1] as number;
-  if (options.room && listed < total) {
-    const added = await addOlder(courseId, options.room);
-    if (added === null) return null;
-    listed += added;
-  }
-  const unlisted = Math.max(0, total - listed);
+  const counted = plainList(await redisPipeline([["SCARD", allKey(courseId)], ["ZCARD", atKey(courseId)], ["HLEN", indexKey(courseId)], ["GET", atCursorKey(courseId)]]));
+  if (!counted || counted.length !== 4 || !counted.slice(0, 3).every((n) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0)) return null;
+  const [total, listedBefore, standing] = counted as number[];
   if (total === 0) return empty;
+  const state = readWalk(counted[3]);
+  let listed = listedBefore;
+  let roomFull = false;
+  let done = state === "done" || listed >= total;
+  if (!done && options.room && state !== null && state !== "done") {
+    const walked = await addOlder(courseId, options.room, state).catch((error: unknown) => {
+      console.error("the studio's walk of a course's older certificates failed; the next draw tries again", courseId, error);
+      return null;
+    });
+    if (walked) {
+      listed += walked.added;
+      roomFull = walked.roomFull;
+      done = walked.done;
+    }
+  }
+  const unlisted = done ? 0 : Math.max(0, total - listed);
   const from = page * MAX_LISTED_CERTS;
   const read = plainList(await redisPipeline([["ZREVRANGE", atKey(courseId), from, from + MAX_LISTED_CERTS]]));
   if (!read || read.length !== 1) return null;
@@ -552,7 +592,7 @@ export async function certificatesFor(courseId: string, options: { room?: DataSt
   if (!ids || ids.some((id) => typeof id !== "string")) return null;
   const more = ids.length > MAX_LISTED_CERTS;
   const valid = (ids as string[]).slice(0, MAX_LISTED_CERTS).filter((id) => CERT_ID_PATTERN.test(id));
-  if (valid.length === 0) return { list: [], total, standing, unlisted, more };
+  if (valid.length === 0) return { list: [], total, standing, unlisted, roomFull, more };
   const fetched = plainList(await redisPipeline([["MGET", ...valid.map(certKey)]]));
   if (!fetched || fetched.length !== 1) return null;
   const rows = plainList(fetched[0]);
@@ -561,67 +601,117 @@ export async function certificatesFor(courseId: string, options: { room?: DataSt
     .map(parseCertificate)
     .filter((c): c is Certificate => c !== null && c.courseId === courseId)
     .sort((a, b) => b.issuedAt - a.issuedAt);
-  return { list, total, standing, unlisted, more };
+  return { list, total, standing, unlisted, roomFull, more };
+}
+
+/** How long the walk's place is kept: past it, the walk starts again at the start, which only reads again. */
+export const CERT_WALK_SECONDS = 60 * 86_400;
+/**
+ * Where the studio's walk of a course's set stands (#4304): the SSCAN cursor, how far into that cursor's page it has
+ * looked, and whether this cycle added any; or "done" once a whole cycle added none, so what is left can never be
+ * added (a record that is gone, does not read or is another course's) and the walk stops (Claude 5 iYnra's LEVE 4 on
+ * #5481). Null for a value that does not read: the walk is left alone, never started again on a guess.
+ */
+type Walk = { cursor: string; offset: number; added: boolean; fresh?: boolean };
+function readWalk(raw: unknown): Walk | "done" | null {
+  if (raw === null || raw === undefined) return { cursor: "0", offset: 0, added: false, fresh: true };
+  if (raw === "done") return "done";
+  if (typeof raw !== "string") return null;
+  const m = /^([0-9]{1,20}):([0-9]{1,6}):([01])$/.exec(raw);
+  return m ? { cursor: m[1], offset: Number(m[2]), added: m[3] === "1" } : null;
+}
+const walkValue = (walk: Walk | "done") => (walk === "done" ? "done" : `${walk.cursor}:${walk.offset}:${walk.added ? 1 : 0}`);
+/** The room the walk's place takes (dataBytes of its longest value, one entry), for CERT_WALK_SECONDS at a time. */
+const WALK_BYTES = dataBytes(["99999999999999999999:999999:1"], 1);
+
+/**
+ * One step of the studio's walk of a course's set (#4304): at most CERT_BACKFILL_PER_DRAW ids of the SSCAN page the
+ * walk stands on, from its place in that page (so a page larger than a step, as SSCAN may return on a small set, is
+ * walked a step at a time, never stalled), those not yet on the by-time list (ZMSCORE), their records read (MGET), and
+ * those of this course added at the time each was issued (ZADD NX). Each added entry's room is taken before the write
+ * and given back for each one another draw added meanwhile; an id whose record went meanwhile is taken off again
+ * (dropIfErased). A full room adds nothing and keeps the walk's place, so the same ids are tried on a later draw. At
+ * the end of the set, a cycle that added none marks the walk done. The walk's place is a key of its own, its room taken
+ * for CERT_WALK_SECONDS when it is first written, kept that long and then gone (Claude 5 iYnra's LEVE 5 on #5481).
+ * Throws when a reply does not read (rule 24); the caller then leaves the walk for the next draw.
+ */
+async function addOlder(courseId: string, room: DataStore, walk: Walk): Promise<{ added: number; roomFull: boolean; done: boolean }> {
+  const what = "the studio's walk of a course's older certificates";
+  const [scannedRaw] = exactReplies(await redisPipeline([["SSCAN", allKey(courseId), walk.cursor, "COUNT", CERT_BACKFILL_PER_DRAW]]), 1, what);
+  const reply = plainList(scannedRaw);
+  if (!reply || reply.length !== 2 || typeof reply[0] !== "string" || !/^[0-9]{1,20}$/.test(reply[0])) throw new UnknownReply(what);
+  const members = plainList(reply[1]);
+  if (!members || members.some((id) => typeof id !== "string")) throw new UnknownReply(what);
+  const page = (members as string[]).filter((id) => CERT_ID_PATTERN.test(id));
+  const step = page.slice(walk.offset, walk.offset + CERT_BACKFILL_PER_DRAW);
+  let missing: string[] = [];
+  if (step.length) {
+    const [scoredRaw] = exactReplies(await redisPipeline([["ZMSCORE", atKey(courseId), ...step]]), 1, what);
+    const scores = plainList(scoredRaw);
+    if (!scores || scores.length !== step.length || scores.some((x) => x !== null && typeof x !== "string" && typeof x !== "number")) throw new UnknownReply(what);
+    missing = step.filter((_, i) => scores[i] === null);
+  }
+  let added = 0;
+  if (missing.length) {
+    const [rowsRaw] = exactReplies(await redisPipeline([["MGET", ...missing.map(certKey)]]), 1, what);
+    const rows = plainList(rowsRaw);
+    if (!rows || rows.length !== missing.length || rows.some((row) => row !== null && typeof row !== "string")) throw new UnknownReply(what);
+    const pairs: (string | number)[] = [];
+    const adding: string[] = [];
+    rows.forEach((raw, i) => {
+      const record = parseCertificate(raw);
+      if (record && record.courseId === courseId) {
+        pairs.push(record.issuedAt, missing[i]);
+        adding.push(missing[i]);
+      }
+    });
+    if (adding.length) {
+      try {
+        await needData(room, [{ slot: CERTS_SLOT(courseId), bytes: adding.length * ENTRY_BYTES }]);
+      } catch (error) {
+        // Full: nothing is added now and the walk keeps its place, so these are tried again on a later draw.
+        if (error instanceof DataRoomError) return { added: 0, roomFull: true, done: false };
+        throw error;
+      }
+      const [countRaw] = exactReplies(await redisPipeline([["ZADD", atKey(courseId), "NX", ...pairs]]), 1, what);
+      const count = replyCount(countRaw, what);
+      // Unknown how many were added: the room taken stays taken (it only counts too much), and the walk is not moved.
+      if (count > adding.length) throw new UnknownReply(what);
+      if (count < adding.length) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: (adding.length - count) * ENTRY_BYTES }]);
+      added = count;
+      if (count > 0) await dropIfErased(courseId, adding, room);
+    }
+  }
+  const offset = walk.offset + CERT_BACKFILL_PER_DRAW;
+  const cycleAdded = walk.added || added > 0;
+  const next: Walk | "done" =
+    offset < page.length ? { cursor: walk.cursor, offset, added: cycleAdded }
+    : reply[0] !== "0" ? { cursor: reply[0], offset: 0, added: cycleAdded }
+    : cycleAdded ? { cursor: "0", offset: 0, added: false }
+    : "done";
+  await keepWalk(courseId, room, walk, next);
+  return { added, roomFull: false, done: next === "done" };
 }
 
 /**
- * One step of the studio's walk of a course's set (#4304): the next SSCAN page from where the walk stands, the ids on
- * it not yet on the by-time list (ZMSCORE), at most CERT_BACKFILL_PER_DRAW of them, their records read (MGET), and
- * those of this course added at the time each was issued (ZADD NX). Each added entry's room is taken before the write
- * and given back for each one another draw had added meanwhile; a full room adds nothing now. The walk moves on only
- * once its page is done, so a page larger than the step is finished on later draws; it starts again at the start
- * when it reaches the end, because a later repair may have left one off. The number added, or null when a reply
- * could not be read (rule 24).
+ * Writes the walk's place: the first write takes its room for CERT_WALK_SECONDS and sets that expiry (SET NX EX); later
+ * writes keep it (SET XX KEEPTTL), so the room taken is the key's for exactly as long as it lives. A first write with no
+ * room left writes nothing, and the walk starts again at the start on the next draw.
  */
-async function addOlder(courseId: string, room: DataStore): Promise<number | null> {
-  const [cursorRaw] = plainList(await redisPipeline([["GET", atCursorKey(courseId)]])) ?? [undefined];
-  if (cursorRaw !== null && (typeof cursorRaw !== "string" || !/^[0-9]{1,20}$/.test(cursorRaw))) return null;
-  const cursor = cursorRaw ?? "0";
-  const scanned = plainList(await redisPipeline([["SSCAN", allKey(courseId), cursor, "COUNT", CERT_BACKFILL_PER_DRAW]]));
-  const reply = scanned && scanned.length === 1 ? plainList(scanned[0]) : null;
-  if (!reply || reply.length !== 2 || typeof reply[0] !== "string" || !/^[0-9]{1,20}$/.test(reply[0])) return null;
-  const members = plainList(reply[1]);
-  if (!members || members.some((id) => typeof id !== "string")) return null;
-  const ids = (members as string[]).filter((id) => CERT_ID_PATTERN.test(id));
-  let missing: string[] = [];
-  if (ids.length) {
-    const scored = plainList(await redisPipeline([["ZMSCORE", atKey(courseId), ...ids]]));
-    const scores = scored && scored.length === 1 ? plainList(scored[0]) : null;
-    if (!scores || scores.length !== ids.length || scores.some((s) => s !== null && typeof s !== "string" && typeof s !== "number")) return null;
-    missing = ids.filter((_, i) => scores[i] === null);
+async function keepWalk(courseId: string, room: DataStore, before: Walk, next: Walk | "done"): Promise<void> {
+  const what = "the studio's walk of a course's older certificates";
+  // Only a walk whose place was not kept yet (no key) takes room; one that went round and starts again keeps its key.
+  if (before.fresh) {
+    const now = Date.now();
+    const taken = await takeData(room, [{ until: now + CERT_WALK_SECONDS * 1000, bytes: WALK_BYTES }], now).catch(() => null);
+    if (!taken?.ok) return;
+    const [set] = exactReplies(await redisPipeline([["SET", atCursorKey(courseId), walkValue(next), "NX", "EX", CERT_WALK_SECONDS]]), 1, what);
+    if (set !== "OK" && set !== null) throw new UnknownReply(what);
+    if (set === null) await redisPipeline([["SET", atCursorKey(courseId), walkValue(next), "XX", "KEEPTTL"]]);
+    return;
   }
-  const step = missing.slice(0, CERT_BACKFILL_PER_DRAW);
-  // The walk moves on only once every id of its page is on the list or gone.
-  const pageDone = missing.length <= CERT_BACKFILL_PER_DRAW;
-  let added = 0;
-  if (step.length) {
-    const fetched = plainList(await redisPipeline([["MGET", ...step.map(certKey)]]));
-    const rows = fetched && fetched.length === 1 ? plainList(fetched[0]) : null;
-    if (!rows || rows.length !== step.length || rows.some((row) => row !== null && typeof row !== "string")) return null;
-    const pairs: (string | number)[] = [];
-    rows.forEach((raw, i) => {
-      const record = parseCertificate(raw);
-      if (record && record.courseId === courseId) pairs.push(record.issuedAt, step[i]);
-    });
-    const adding = pairs.length / 2;
-    if (adding > 0) {
-      try {
-        await needData(room, [{ slot: CERTS_SLOT(courseId), bytes: adding * ENTRY_BYTES }]);
-      } catch (error) {
-        // Full: nothing is added now, and the page says some are not listed yet.
-        if (error instanceof DataRoomError) return 0;
-        throw error;
-      }
-      const written = plainList(await redisPipeline([["ZADD", atKey(courseId), "NX", ...pairs]]));
-      const count = written && written.length === 1 && typeof written[0] === "number" && Number.isSafeInteger(written[0]) ? written[0] : null;
-      // Unknown how many were added: the room taken stays taken, and the page says the counts could not be read.
-      if (count === null || count < 0 || count > adding) return null;
-      if (count < adding) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: (adding - count) * ENTRY_BYTES }]);
-      added = count;
-    }
-  }
-  if (pageDone) await redisPipeline([["SET", atCursorKey(courseId), reply[0]]]);
-  return added;
+  const [set] = exactReplies(await redisPipeline([["SET", atCursorKey(courseId), walkValue(next), "XX", "KEEPTTL"]]), 1, what);
+  if (set !== "OK" && set !== null) throw new UnknownReply(what);
 }
 
 /**

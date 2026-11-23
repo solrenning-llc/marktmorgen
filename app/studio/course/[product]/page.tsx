@@ -117,7 +117,16 @@ export default async function StudioCoursePage({
   const quizLessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz).map(({ lesson }) => lesson.id);
   const passed = quizLessons.length ? await passedFor(course.id, students.map((s) => emailKey(s.email))) : [];
   // One page of the course's certificates, newest first (#4304): a draw reads a bounded page whatever the course holds.
-  const certsPage = typeof query.certs === "string" && /^[0-9]{1,4}$/.test(query.certs) ? Number(query.certs) : 0;
+  const certsPage = typeof query.certs === "string" && /^[0-9]{1,6}$/.test(query.certs) ? Number(query.certs) : 0;
+  // A page of the certificates, keeping the page's other choices (lesson=, work=; Claude 5 iYnra's NIT 9 on #5481).
+  const certsHref = (to: number) => {
+    const kept = new URLSearchParams();
+    for (const [name, value] of Object.entries(query)) if (name !== "store" && name !== "certs" && typeof value === "string") kept.set(name, value);
+    if (to > 0) kept.set("certs", String(to));
+    return `${studioPath(store, kept.toString(), `course/${product.id}`)}#certificates`;
+  };
+  // The empty state only when none was ever issued (certificates.total === 0); a page that lists none of many says so
+  // (Claude 3 wSUb3's and Claude 5 iYnra's MEDIUM on #5481).
   const certificates = await certificatesFor(course.id, { room: store, page: certsPage }).catch(() => null);
   const standing = certificates ? certificates.standing : null;
   // The newest comments under the lessons, marked new since this page last showed them. Null when they could not be
@@ -337,7 +346,7 @@ export default async function StudioCoursePage({
             <p role="status" className="notice mt-3">
               The certificates could not be read just now. Reload this page in a moment; this does not mean none were issued.
             </p>
-          ) : certificates.list.length === 0 ? (
+          ) : certificates.total === 0 ? (
             <StudioEmptyState
               level={4}
               compact
@@ -346,6 +355,16 @@ export default async function StudioCoursePage({
               body={course.certificate ? "Nobody has finished yet. When a student does and asks for their certificate, it is listed here." : "Switch certificates on above and each student who finishes is listed here with theirs."}
             />
           ) : (
+            <>
+            {certificates.list.length === 0 ? (
+              <p className="mt-3 text-sm text-ink-soft" role="status">
+                {certsPage > 0
+                  ? "No certificates on this page. Go back to the newer ones."
+                  : certificates.unlisted > 0
+                    ? "The certificates of this course are not in this list yet."
+                    : "No certificate of this course can be shown here: their records are gone or cannot be read."}
+              </p>
+            ) : (
             <>
             {seesBuyers ? null : <p className="mt-3 text-sm text-ink-soft">{NO_BUYER_ADDRESSES}</p>}
             <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Certificates issued, one row each">
@@ -385,20 +404,26 @@ export default async function StudioCoursePage({
                 </tbody>
               </table>
             </div>
+            </>
+            )}
             {certificates.unlisted > 0 ? (
+              // Said as it is (Claude 5 iYnra's LEVE 4 on #5481): added while the room allows, a few each visit.
               <p className="mt-3 text-sm text-ink-soft" role="status">
-                {`${certificates.unlisted} older ${certificates.unlisted === 1 ? "certificate is" : "certificates are"} not in this list yet. They are added a few at a time each time this page opens.`}
+                {`${certificates.unlisted} older ${certificates.unlisted === 1 ? "certificate is" : "certificates are"} not in this list yet. `}
+                {certificates.roomFull
+                  ? "Your store's data room is full, so none could be added now. Free some room and open this page again."
+                  : "Up to 25 more are added each time this page opens."}
               </p>
             ) : null}
             {certsPage > 0 || certificates.more ? (
               <nav aria-label="Pages of certificates" className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
                 {certsPage > 0 ? (
-                  <Link href={`${studioPath(store, certsPage > 1 ? `certs=${certsPage - 1}` : "", `course/${product.id}`)}#certificates`} className="inline-flex min-h-11 items-center font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
+                  <Link href={certsHref(certsPage - 1)} className="inline-flex min-h-11 items-center font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
                     Newer certificates
                   </Link>
                 ) : null}
                 {certificates.more ? (
-                  <Link href={`${studioPath(store, `certs=${certsPage + 1}`, `course/${product.id}`)}#certificates`} className="inline-flex min-h-11 items-center font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
+                  <Link href={certsHref(certsPage + 1)} className="inline-flex min-h-11 items-center font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
                     Older certificates
                   </Link>
                 ) : null}

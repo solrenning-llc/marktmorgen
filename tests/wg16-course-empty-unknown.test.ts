@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   is("the student is listed, with one lesson done", (await studentsOf(course))?.students.map((s) => [s.email, s.done]), [[student, 1]]);
   is("a course nobody opened: an empty list", await studentsOf(emptyCourse), { total: 0, students: [] });
   is("the certificate is listed", (await certificatesFor(course.id))?.list.map((c) => c.id), [certId]);
-  is("a course with no certificate: an empty list", await certificatesFor(emptyCourse.id), { list: [], total: 0, standing: 0, unlisted: 0, more: false });
+  is("a course with no certificate: an empty list", await certificatesFor(emptyCourse.id), { list: [], total: 0, standing: 0, unlisted: 0, roomFull: false, more: false });
 
   part("Students: an unknown reply is unknown (null), never none");
   for (const [name, answer] of [
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
   );
   is(
     "certificates unread: a status note, not the empty state",
-    page.includes('{certificates === null ? (\n            <p role="status" className="notice mt-3">\n              The certificates could not be read just now. Reload this page in a moment; this does not mean none were issued.\n            </p>\n          ) : certificates.list.length === 0 ? ('),
+    page.includes('{certificates === null ? (\n            <p role="status" className="notice mt-3">\n              The certificates could not be read just now. Reload this page in a moment; this does not mean none were issued.\n            </p>\n          ) : certificates.total === 0 ? ('),
     true,
   );
   const learn = readFileSync("lib/learn.ts", "utf8");

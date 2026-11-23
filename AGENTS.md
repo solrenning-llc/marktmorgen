@@ -155,7 +155,7 @@ Pedido do dono, nas palavras dele: "quero regra e politica para nao ocorrer mais
 
 Na dúvida, vale o número maior. Quem classifica é o coordenador, pela lista de arquivos, nunca o autor (FQ, "Depende do dono").
 
-**Atualização RS (dono, 23/11/2026, por volta das 14h25 Fortaleza):** os números desta lista passam a ser os da seção RS: 3 em dinheiro, cobrança, imposto, custo, segurança, privacidade, apagamento de dados e workflow, com a 3ª revisão do Codex e uma de foco próprio; 2 nos demais. O texto acima fica como histórico onde divergir.
+**Atualização RS (dono, 23/11/2026, por volta das 14h25 e das 14h40 Fortaleza):** os números desta lista passam a ser os da seção RS: 3 revisões em todo PR, de qualquer tipo, também em cada head novo; nos PRs de risco (dinheiro, cobrança, imposto, custo, segurança, privacidade, apagamento de dados e workflow), uma delas do Codex e uma de foco próprio. O texto acima fica como histórico onde divergir.
 
 (b) **Quem não pode revisar, por motivo técnico.** A escala de (c) pula, para cada PR, quem estiver num destes casos:
 1. a mesma família do autor, ou uma família com commit no ramo, que adotou o PR ou que preparou a sua junção;
@@ -193,36 +193,32 @@ Revisão sem esses itens não conta. Os horários citados são lidos no relógio
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
-## RS — Revisões por risco: quantas e de quem, para a segurança máxima (dono, 23/11/2026, por volta das 14h25 Fortaleza)
+## RS — Revisões: 3 em todo PR, de quem e com que foco (dono, 23/11/2026, por volta das 14h25 e das 14h40 Fortaleza)
 
-Pedido do dono ao Claude 5 (sessão `012ST5iYrdX`), nas palavras dele: "diga a quantidade ideal de revisoes para maxima segurança por tipo de pr" e, sobre a resposta, "gera essa regra para todos os agentes". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. Motivo: os Claude 1 a 7 são o mesmo modelo e tendem a errar nos mesmos pontos; um revisor a mais igual aos outros quase não acrescenta segurança, enquanto um revisor de outro modelo (o Codex) ou com um foco próprio acha o que os outros não acham. Acima de 3 revisões, a segurança quase não sobe, e o PR espera mais, gasta mais cota, envelhece e acumula conflito (PV, AC). É ordem posterior a RV (a) e à regra C1-20261121-2002-TODOS-1 e prevalece sobre elas onde divergirem (Pedidos repetidos, passo 3 (b)); nenhum número diminui.
+Pedido do dono ao Claude 5 (sessão `012ST5iYrdX`), nas palavras dele: às 14h25, "diga a quantidade ideal de revisoes para maxima segurança por tipo de pr" e, sobre a resposta (3 em dinheiro, segurança e workflow; 2 nos demais), "gera essa regra para todos os agentes"; às 14h40, "altera a regra: agora são 3 revisões para qualquer tip de pr". A ordem das 14h40 é posterior e prevalece sobre a das 14h25 no número (Pedidos repetidos, passo 3 (b)); o resto da proposta das 14h25 continua. Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. Motivo: os Claude 1 a 7 são o mesmo modelo e tendem a errar nos mesmos pontos; um revisor de outro modelo (o Codex) ou com um foco próprio acha o que os outros não acham. É ordem posterior a RV (a) e à regra C1-20261121-2002-TODOS-1 e prevalece sobre elas onde divergirem; nenhum número diminui.
 
-(a) **Quantas revisões, por tipo de PR**, todas READY no head exato, de famílias diferentes da do autor e sem commit no ramo (CO (e)):
-- dinheiro, cobrança, imposto, custo e tetos (a lista de arquivos de FQ (3)): **3**;
-- segurança, privacidade e apagamento de dados: **3**;
-- workflow (`.github/workflows`): **3**, mais o SIM do dono para o head exato (FQ (1));
-- ferramenta do correio e demais ferramentas dos agentes: **2**;
-- código comum (telas, textos do site, testes): **2**;
-- só texto interno (AGENTS.md, documentos): **2**.
+Recebido novamente em 23/11/2026, por volta das 14h41 e das 14h43 (Fortaleza), com a grafia "qualquer tipo de pr"; repetição sem mudança; nada alterado.
 
-(b) **A 3ª revisão é de outro modelo.** Nos tipos de 3 revisões, uma delas é do Codex. Quando o Codex está sem cota, sem sinal há mais de 2 horas (CO (g)) ou sem transcritor com uso (RV (b), 5), ela é de uma 3ª família Claude, e quem enfileira escreve no PR e no correio que o PR espera a revisão do Codex quando ele voltar; essa espera não segura a fila, e um achado do Codex depois da entrada é corrigido como em ZA (g). Nos PRs de dinheiro, continua valendo a auditoria do Codex antes de qualquer venda da exceção OWNER-20261121-1437.
+(a) **3 revisões em todo PR**, de qualquer tipo (dinheiro, cobrança, imposto, custo, segurança, privacidade, apagamento de dados, workflow, ferramentas e o correio, código comum, testes, só texto interno), todas READY sem achados (ZA) no head exato, de três famílias diferentes da do autor e sem commit no ramo (CO (e)). No workflow, continua também o SIM do dono para o head exato (FQ (1)).
 
-(c) **Uma das revisões tem foco próprio.** Nos tipos de 3 revisões, uma delas declara na primeira linha do veredito o foco e confere, além do que RV (f) exige:
+(b) **Nos PRs de risco, a 3ª revisão é de outro modelo.** São de risco os de dinheiro, cobrança, imposto, custo e tetos (a lista de arquivos de FQ (3)), os de segurança, privacidade e apagamento de dados, e os de workflow. Neles, uma das 3 revisões é do Codex. Quando o Codex está sem cota, sem sinal há mais de 2 horas (CO (g)) ou sem transcritor com uso (RV (b), 5), ela é de uma 3ª família Claude, e quem enfileira escreve no PR e no correio que o PR espera a revisão do Codex quando ele voltar; essa espera não segura a fila, e um achado do Codex depois da entrada é corrigido como em ZA (g). Nos PRs de dinheiro, continua a auditoria do Codex antes de qualquer venda da exceção OWNER-20261121-1437. Nos demais PRs, a revisão do Codex conta como qualquer outra família.
+
+(c) **Nos PRs de risco, uma das revisões tem foco próprio**, declarado na primeira linha do veredito, e confere, além do que RV (f) exige:
 - dinheiro: o pior caso com 100% dos direitos, os tetos antes de cada gasto, arredondamentos, reembolso e contestação, e os testes de teto de AC (l) sobre a junção;
 - segurança e privacidade: autorização, injeção, segredos, vazamento de dados, prazos de guarda e o CodeQL verde no head;
 - workflow: as permissões, o risco de injeção, a leitura por um analisador de YAML e o que o gatilho custa aos outros workflows (RV (f)).
 
-(d) **Head novo.** Uma junção do main sem outra mudança precisa de 2 READY focais, de duas famílias de fora, em todo tipo de PR, e, num PR de 3 revisões, uma delas confere o foco de (c) na junção. Uma correção de achado, ou qualquer mudança no código de risco, precisa de novo do número do tipo do PR em (a), com (b) e (c).
+(d) **Head novo.** Todo head novo, inclusive uma junção do main sem outra mudança, precisa de novo de 3 READY focais, de três famílias de fora, sem achados; num PR de risco, com (b) e (c). Na dúvida, vale o número maior.
 
-(e) **Classificação.** Quem classifica é o coordenador, pela lista de arquivos, nunca o autor (FQ, "Depende do dono"). Um PR de vários tipos fica com o maior número. Na dúvida, vale o maior número.
+(e) **Classificação.** Quem diz se um PR é de risco é o coordenador, pela lista de arquivos, nunca o autor (FQ, "Depende do dono"). Um PR de vários tipos segue o de maior exigência.
 
-(f) **Continuam.** ZA (todos os revisores do head sem nenhum achado, quando entrar no main), o conteúdo da revisão de RV (f), as exclusões técnicas de RV (b), o SIM do dono em travas, preços, limites visíveis, comissão, impostos, art. 9a, revisão comercial, `.github/workflows`, contas e pagamentos, e toda exigência maior (as revisões que um HOLD pedir e o número que o dono pedir). Revisões além do número de (a) são bem-vindas e, pela ZA, um achado delas também segura o PR; elas não substituem a do Codex de (b) nem a de foco de (c).
+(f) **Continuam.** ZA (todos os revisores do head sem nenhum achado, quando entrar no main), o conteúdo da revisão de RV (f), as exclusões técnicas de RV (b), o SIM do dono em travas, preços, limites visíveis, comissão, impostos, art. 9a, revisão comercial, `.github/workflows`, contas e pagamentos, e toda exigência maior (as revisões que um HOLD pedir e o número que o dono pedir). Revisões além de 3 são bem-vindas e, pela ZA, um achado delas também segura o PR; elas não substituem a do Codex de (b) nem a de foco de (c).
 
-(g) **Transição.** Vale para todo PR ainda não enfileirado quando esta seção entrar no main, inclusive os que já têm 2 READY no head atual: quem enfileira confere (a) a (c) antes (CO (f)). O que já está na fila ou no main não sai por ela.
+(g) **Transição.** Vale para todo PR ainda não enfileirado quando esta seção entrar no main, inclusive os que já têm 2 READY no head atual: quem enfileira confere (a) a (d) antes (CO (f)). O que já está na fila ou no main não sai por ela. Se faltar revisor por cota (CO (g)), o PR espera a 3ª revisão; nunca entra com 2.
 
-(h) **RQ.** Todo texto ao dono e toda mensagem no correio sobre a revisão de um PR dizem o número exigido por esta seção, quantas já há e quantas faltam, e se falta a do Codex ou a de foco.
+(h) **RQ.** Todo texto ao dono e toda mensagem no correio sobre a revisão de um PR dizem que são 3, quantas já há e quantas faltam, e, num PR de risco, se falta a do Codex ou a de foco.
 
-**Estado (regra VR):** regra vigente desde a decisão do dono; a ferramenta do correio ainda não conta as revisões por tipo de PR nem confere o Codex e o foco: até isso entrar, num PR próprio de `tooling/agent-mail/` (CO (a)), quem enfileira faz essa conferência.
+**Estado (regra VR):** regra vigente desde a decisão do dono; a ferramenta do correio ainda não conta as 3 revisões nem confere o Codex e o foco: até isso entrar, num PR próprio de `tooling/agent-mail/` (CO (a)), quem enfileira faz essa conferência.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 

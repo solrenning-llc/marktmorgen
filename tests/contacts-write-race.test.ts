@@ -299,7 +299,7 @@ async function main() {
     const list = "pre_p6", email = "joiner@example.com", sid = "0123456789abcdef0123456789abcdef";
     let wrote = false;
     redis.pipeline = async (commands: Commands) => {
-      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:contact-write-if:v1"))) {
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:contact-write-if:v2"))) {
         wrote = true;
         return real(commands);
       }

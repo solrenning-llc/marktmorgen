@@ -25,6 +25,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
 import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import type { Store } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 
 /** How long a complete list is kept before Stripe is asked again. */
 export const TAX_REGISTRATIONS_SECONDS = 12 * 60 * 60;
@@ -136,7 +137,7 @@ function readKept(raw: unknown): TaxRegistration[] | null {
  * TAX_REGISTRATION_PAGES pages. The caller has already counted the page this
  * is shown on (lib/studio-route.ts, studioView).
  */
-export async function readTaxRegistrations(store: Pick<Store, "stripeAccountId">): Promise<TaxRegistrations> {
+export async function readTaxRegistrations(store: Pick<Store, "stripeAccountId" | "email" | "sid" | "extra" | "statsId">): Promise<TaxRegistrations> {
   const account = store.stripeAccountId;
   if (!account) return { state: "none" };
   const dashboard = taxLocationsPage();
@@ -158,8 +159,14 @@ export async function readTaxRegistrations(store: Pick<Store, "stripeAccountId">
       if (!read.more) {
         list.sort((a, b) => a.country.localeCompare(b.country) || (a.region ?? "").localeCompare(b.region ?? "") || a.activeFrom - b.activeFrom);
         const json = JSON.stringify(list);
+        // Kept only while the store is live, in one step with the store's fence (lib/store-live-cache.ts): a store
+        // erased while Stripe was read gets no tax registrations written back, and the late read is not shown
+        // (Codex L-20261119-1643). "unknown" is not a confirmed keep either, so it is not shown as the list. A list
+        // past TAX_REGISTRATIONS_MAX_BYTES is never kept, so it skips the fence: nothing is written for it, and it is
+        // shown as read, to the creator whose own Stripe account it came from (triple audit 7090325633, LEVE 2).
         if (cache && json.length <= TAX_REGISTRATIONS_MAX_BYTES) {
-          await redisPipeline([["SET", keptKey(account), json, "EX", TAX_REGISTRATIONS_SECONDS]]).catch(() => {});
+          const kept = await setWhileStoreLive(store, keptKey(account), json, TAX_REGISTRATIONS_SECONDS).catch(() => "unknown" as const);
+          if (kept !== "kept") return { state: "unknown", dashboard };
         }
         return { state: "ok", list, dashboard };
       }

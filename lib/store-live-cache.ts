@@ -16,7 +16,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { claimValue } from "@/lib/claim-mark";
-import { setIfStoreLive, type StoreLiveFence } from "@/lib/live-fence";
+import { pushIfStoreLive, setIfStoreLive, type StoreLiveFence } from "@/lib/live-fence";
 import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 
 /** The fence of this store (lib/live-fence.ts): its id key, or its record and statsId for a store kept from before ids. */
@@ -37,6 +37,15 @@ export async function setWhileStoreLive(store: Pick<Store, "email" | "sid" | "ex
   return setIfStoreLive(await storeLiveFence(store), key, value, seconds);
 }
 
+/**
+ * Pushes `value` onto the list under `key`, kept to its newest `most` lines for `seconds`, while `store` is live
+ * (lib/live-fence.ts pushIfStoreLive): "kept"; "gone" when its erasure has begun or its record is gone, and then nothing
+ * is written; "unknown" for any other answer.
+ */
+export async function pushWhileStoreLive(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, value: string, most: number, seconds: number): Promise<"kept" | "gone" | "unknown"> {
+  return pushIfStoreLive(await storeLiveFence(store), key, value, most, seconds);
+}
+
 // The same identity rule as SET_IF_STORE_LIVE, for a mark taken once (lib/claim-mark.ts claimMark's SET NX): a job that
 // read slowly on an old Store takes its mark only while that store is still its own and not erasing, in one step, so a
 // late run never recreates an erased store's family nor goes on to contact its old addresses (Codex L-20261120-1852 and
@@ -54,16 +63,19 @@ else
   if not ok or type(record) ~= "table" then return -2 end
   if record["statsId"] ~= ARGV[4] then return -1 end
 end
-if redis.call("SET", KEYS[3], ARGV[2], "NX", "EX", ARGV[3]) then return 1 end
+local taken
+if ARGV[3] == "" then taken = redis.call("SET", KEYS[3], ARGV[2], "NX") else taken = redis.call("SET", KEYS[3], ARGV[2], "NX", "EX", ARGV[3]) end
+if taken then return 1 end
 return 0`;
 
 /**
  * Takes `key` for `seconds` with a value of its own, as claimMark does, but only while `store` is live: "ours" when it
  * was taken now; "taken" when someone holds it already; "gone" when the store's erasure has begun or its record is gone
  * (nothing written); "unknown" for any other answer. A lost answer is read back by the value, as claimMark does, so a
- * mark this run did take is never sent twice and never taken for someone else's.
+ * mark this run did take is never sent twice and never taken for someone else's. `seconds` null keeps the mark for
+ * good, as claimMark(key, null) does (an empty ARGV[3]; Codex L-20261120-1745, lib/yearly-offer.ts).
  */
-export async function claimWhileStoreLive(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, seconds: number, value = claimValue()): Promise<"ours" | "taken" | "gone" | "unknown"> {
+export async function claimWhileStoreLive(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, seconds: number | null, value = claimValue()): Promise<"ours" | "taken" | "gone" | "unknown"> {
   if (!isRedisConfigured()) return "unknown";
   const ref = storeRef(store);
   const withId = STORE_ID_PATTERN.test(store.sid);
@@ -72,7 +84,7 @@ export async function claimWhileStoreLive(store: Pick<Store, "email" | "sid" | "
   const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
   try {
     const answer = repliesFor(await redisPipeline([
-      ["EVAL", CLAIM_IF_STORE_LIVE, 3, live, ERASING_KEY, key, await erasingField(ref), value, seconds, withId ? "" : statsId, ref],
+      ["EVAL", CLAIM_IF_STORE_LIVE, 3, live, ERASING_KEY, key, await erasingField(ref), value, seconds ?? "", withId ? "" : statsId, ref],
     ]), 1)?.[0];
     if (answer === 1) return "ours";
     if (answer === 0) return "taken";

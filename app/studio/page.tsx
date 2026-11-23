@@ -222,6 +222,7 @@ import { COMMISSION_LIVE, canUse, hasPro, PLAN_PRICES, PLAN_TITLES, PRO_MONTHLY_
 import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { unusedSummary } from "@/lib/closing-refunds";
+import { EXIT_NOTICE_DAYS } from "@/lib/exit-redirect-rules";
 import { holdCounts } from "@/lib/closing-holds";
 import { CLOSING_CHECKOUT_SECONDS, lastPlanMoment } from "@/lib/closing-plan-guard";
 import { type Permission, type Role, ROLE_NAMES, ROLE_SUMMARIES, can } from "@/lib/team-roles";
@@ -245,6 +246,8 @@ import { LOCKED_LIST } from "@/lib/locked-words";
 import { RecoveryAddressManager, RecoveryAddressUnread } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
 import { ResendPurchase } from "@/components/resend-purchase";
+import { SalesBulkActions } from "@/components/sales-bulk-actions";
+import { bulkRowOf } from "@/lib/sales-bulk-rules";
 import { LeaveTeam } from "@/components/team-manager";
 import { productSegment } from "@/lib/product-slug";
 import { SharePanel } from "@/components/share-panel";
@@ -394,6 +397,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
   removed: {
     title: "Nothing was connected",
     body: "While this was connecting, Meta told us to delete this Facebook login's data. So nothing was kept, and the permission was given back to Meta. Connect again if you still want your ads read.",
+  },
+  // The store's closing began while Meta answered (lib/meta-ads.ts finishMeta): nothing of the connection was kept.
+  closed: {
+    title: "Nothing was connected",
+    body: "This store is closing, so Meta was not connected to it. Nothing was kept.",
   },
   refused: {
     title: "Meta did not finish connecting",
@@ -2800,6 +2808,18 @@ export default async function StudioPage({
                     </p>
                   </div>
                 ) : null}
+                {closing.today ? null : (
+                  <div className="mt-4">
+                    <p className="text-ink">
+                      {`Moving your store somewhere else? Give its new address, and for ${EXIT_NOTICE_DAYS} days after it closes, anyone who opens its old address here sees a short notice with a link to it.`}
+                    </p>
+                    <p className="mt-3">
+                      <a href={studioPath(store!, "", "moved")} className="btn btn-secondary">
+                        {store!.exitNotice ? "Change your new address" : "Give your new address"}
+                      </a>
+                    </p>
+                  </div>
+                )}
                 <p className="mt-4 text-ink-soft">
                   {`We keep no copy of your sales: every sale, refund and payout is on your own Stripe account, and stays there. Your account and sign-in stay. Tell your students to download their course certificates before that day: they can until then, and not after. Starting a plan again before that day keeps your store: everything stays as it is, your members' payments go on as they were with nothing charged for the days in between, and nothing is refunded.`}
                 </p>
@@ -3637,6 +3657,8 @@ export default async function StudioPage({
                         </li>
                       ))}
                     </ul>
+                    {/* 767 [STN14] unit 4: the same orders, chosen in a table, with what may be done to many at once. */}
+                    <SalesBulkActions sales={sold.sales.map(bulkRowOf)} canLabel={may("send")} canExport={may("export")} />
                     <p className="mt-4 text-sm text-ink-soft">
                       Up to {ORDERS_PAGE_SIZE} matching recent orders. For the full
                       history, open your Stripe dashboard.

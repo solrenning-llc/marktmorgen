@@ -51,7 +51,7 @@ import {
  * whoever runs the assistant, and the people on a creator's list never agreed
  * to be read there. The API is where a creator's own tools read those.
  */
-import { MCP_INSTRUCTIONS, MCP_PROTOCOL as PROTOCOL, MCP_SERVER, MCP_TOOLS as TOOLS } from "@/lib/mcp-catalog";
+import { MCP_INSTRUCTIONS, MCP_PROTOCOL as PROTOCOL, MCP_SERVER, MCP_TOOLS as TOOLS, argumentsProblem } from "@/lib/mcp-catalog";
 
 type Rpc = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown };
 
@@ -94,6 +94,16 @@ export async function POST(request: Request) {
     });
   }
   if (method === "ping") return result(id, {});
+
+  // A tool's arguments are checked against its own published inputSchema first (#4346), before the key or any read: a
+  // call the contract forbids is Invalid params, never answered as a different reading, and nothing is counted.
+  if (method === "tools/call") {
+    const raw = message.params;
+    if (raw !== undefined && (!raw || typeof raw !== "object" || Array.isArray(raw))) return failure(id, -32602, "Invalid params: params must be an object");
+    const named = raw as { name?: unknown; arguments?: unknown } | undefined;
+    const problem = typeof named?.name === "string" ? argumentsProblem(named.name, named.arguments) : null;
+    if (problem) return failure(id, -32602, `Invalid params: ${problem}`);
+  }
 
   // A tool that prepares a change needs a key that may (631 [AA1] (c)); checked instead of the plain read, so the call is counted once.
   const asked = (message.params ?? {}) as { name?: unknown; arguments?: Record<string, unknown> };

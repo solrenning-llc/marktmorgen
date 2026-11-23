@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { CONTACT_COMMANDS_MOST, CONTACT_FENCED_WRITE_CALLS, CONTACT_FENCED_WRITE_IF, CONTACT_WRITE_CALLS, CONTACT_WRITE_IF, leadsKey, noteProduct, takeBackClicks, tokensFor, unsubscribe, upsertContact } from "@/lib/contacts";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
-import { COMMAND, ORDER_COMPUTE } from "./plan-cost-registry";
+import { COMMAND, ORDER_CONTACT_WRITE } from "./plan-cost-registry";
 import { COMMANDS } from "./traffic-cost";
 import { done, is, part } from "./check";
 
@@ -28,8 +28,8 @@ function billed(commands: Commands, scriptCalls: number): number {
     const head = String(c[1] ?? "");
     if (c[0] !== "EVAL") total += 1;
     else if (head.startsWith("-- marktmorgen:store-data:")) continue;
-    else if (head.startsWith("-- marktmorgen:contact-write-if:v1")) total += 1 + scriptCalls;
-    else if (head.startsWith("-- marktmorgen:contact-fenced-write-if:v3")) total += 1 + CONTACT_FENCED_WRITE_CALLS;
+    else if (head.startsWith("-- marktmorgen:contact-write-if:v2")) total += 1 + scriptCalls;
+    else if (head.startsWith("-- marktmorgen:contact-fenced-write-if:v4")) total += 1 + CONTACT_FENCED_WRITE_CALLS;
     else if (head.startsWith("-- marktmorgen:contact-cas-hset:v1")) total += 1 + 2 * ((c.length - 4) / 3);
     // lib/contacts.ts TOKEN_CAS_HSET: for each address (its keys after the list's and the prints'), its row, its print,
     // the record and the row written.
@@ -62,10 +62,13 @@ async function main() {
     const written = (CONTACT_WRITE_IF.match(/redis\.call\(/g) ?? []).length;
     // The counts line holds INCR and DECR as alternatives, of which one runs.
     is("CONTACT_WRITE_CALLS is the most redis.call a run of CONTACT_WRITE_IF makes (the INCR/DECR pair counted once)", CONTACT_WRITE_CALLS, written - 1);
-    is("and it is the eight it was reviewed at: two reads, the row, the lifted mark, both counts, the stores joined (2)", CONTACT_WRITE_CALLS, 8);
+    // Nine since #4026 (Claude 7, 15 November 2026): the companies' deletion mark is lifted in the same step as the
+    // suppression, one DEL more, raising every figure built on it; none is lowered.
+    is("and it is the nine it was reviewed at: two reads, the row, the lifted mark, the companies' lifted mark, both counts, the stores joined (2)", CONTACT_WRITE_CALLS, 9);
     const fenced = (CONTACT_FENCED_WRITE_IF.match(/redis\.call\(/g) ?? []).length;
     is("CONTACT_FENCED_WRITE_CALLS is the most redis.call a run of CONTACT_FENCED_WRITE_IF makes (the INCR/DECR pair counted once)", CONTACT_FENCED_WRITE_CALLS, fenced - 1);
-    is("and it is CONTACT_WRITE_CALLS with the fence's PTTL and TIME (#4268): ten", CONTACT_FENCED_WRITE_CALLS, 10);
+    // Merge of main into #4026 (16 November 2026): the fenced script lifts the companies' mark with the print too.
+    is("and it is CONTACT_WRITE_CALLS with the fence's PTTL and TIME (#4268): eleven, the companies' lifted mark included (#4026)", CONTACT_FENCED_WRITE_CALLS, 11);
   }
 
   part("the worst case of each path, scripts counted by what they run");
@@ -79,7 +82,7 @@ async function main() {
     is("a purchase noted: the row, the checked write (1 + 2) and, once, its read back", [t.noteProductRound, t.noteProduct], [4, t.tries * 4 + 1]);
     is("taking back the permission: the row, the checked write (1 + 2) and, once, its read back", [t.takeBackRound, t.takeBack], [4, t.tries * 4 + 1]);
     is("links for n addresses: per round both reads and one script with 4 calls each (row, print, record, row written)", [t.tokens(1), t.tokens(10)], [t.tries * (2 + 1 + 4), t.tries * (2 + 1 + 10 * 4)]);
-    is("an order's sign-up is inside the order's own compute", t.upsert * COMMAND <= ORDER_COMPUTE, true);
+    is("an order's sign-up is inside its own line, order-contact-write", t.upsert * COMMAND <= ORDER_CONTACT_WRITE, true);
   }
 
   part("one round of each really stays inside its figure");
@@ -124,7 +127,7 @@ async function main() {
       let sum = 0;
       redis.pipeline = async (commands: Commands) => {
         // Another writer changes the row just before each of the first two checked writes: theirs is not counted here.
-        if (losses > 0 && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:contact-write-if:v1"))) {
+        if (losses > 0 && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:contact-write-if:v2"))) {
           losses -= 1;
           const [row] = await real([["HGET", leadsKey(list), email]]);
           await real([["HSET", leadsKey(list), email, String(row).replace(/"lastAt":"[^"]*"/, `"lastAt":"2026-01-0${losses + 1}T00:00:00.000Z"`)]]);

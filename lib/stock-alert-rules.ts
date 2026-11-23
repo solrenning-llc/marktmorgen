@@ -80,7 +80,9 @@ export function readLowStock(raw: unknown): number | null {
 
 /** Whether this change of units left crosses the low-stock number going down: told once per crossing. */
 export function crossedLow(before: unknown, after: unknown, low: unknown): Answer {
-  if (!isLeft(before) || !isLeft(after) || !isCount(low)) return "unknown";
+  // A low-stock number past MAX_LOW_STOCK is not one readLowStock keeps, so it is unknown, never a crossing (Codex G
+  // on #3607; the caller lib/low-stock.ts already keeps only read numbers, so this guards the rule itself).
+  if (!isLeft(before) || !isLeft(after) || !isCount(low) || low > MAX_LOW_STOCK) return "unknown";
   if (low === 0 || before === null || after === null) return "no";
   return before > low && after <= low ? "yes" : "no";
 }

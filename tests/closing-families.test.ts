@@ -31,11 +31,15 @@ const KEPT_AS_COMPANY: Record<string, string> = {
 /** Families gone by themselves whose time is set in code and not by a part of the registry. */
 const TIMED_IN_CODE: Record<string, [string, string]> = {
   "nl:taxobs:v1:": ["lib/checkout-sweep.ts", "TAX_OBSERVATION_KEEP_SECONDS"],
+  // The month's count of email gap checks (374 [SU7], a capped part): set with its own forty-day expiry.
+  "nl:mgap:checks:": ["lib/mail-frequency.ts", "MAIL_GAP_CHECK_WINDOW_SECONDS"],
   // The pace of a store's PayPal batch reads from the studio (a capped part): one mark kept five minutes.
   "nl:pp:pace:": ["lib/paypal-payouts.ts", "SETTLE_PACE_SECONDS"],
   "nl:pp:press:": ["lib/paypal-payouts.ts", "PRESS_PACE_SECONDS"],
   // A store's search index (a capped part): one record kept ten minutes.
   "nl:search:": ["lib/store-search-index.ts", "SEARCH_INDEX_SECONDS"],
+  // A store's Blob folder listed once a day, its total and the hourly tally (a capped part): each key kept three days.
+  "nl:storage:blob:": ["lib/blob-tally.ts", "BLOB_TALLY_KEEP_SECONDS"],
   // The mark of a passed-over Stripe event (a capped part): set with the same expiry as every event mark.
   "nl:hooks:evt:": ["lib/webhooks.ts", "EVENT_SECONDS"],
   "nl:call:confirmed:": ["lib/calls.ts", "CONFIRMED_SECONDS"],

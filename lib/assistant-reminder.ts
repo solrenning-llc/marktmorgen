@@ -185,15 +185,15 @@ export async function forgetAssistReminderPerson(statsId: string | null, email: 
   return gone;
 }
 
-/**
- * The checkouts one address said yes on, for the person's copy (remindersOf), read exactly (rule 24): only a list of
- * strings is the note. A reply out of shape throws UnknownReplyError, never "none", so the copy never says there was
- * none. The erasure reads the note itself (forgetAssistReminderPerson, above), refusing a member that is not a session.
- */
+/** The checkouts one address said yes on, from their note, read exactly; anything else throws. */
 async function sessionsOf(who: string): Promise<string[]> {
-  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", who]]), 1)?.[0]);
-  if (!members) throw new UnknownReplyError("the note of a person's checkout reminders");
-  return members.filter((s) => SESSION.test(s));
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", who]]), 1);
+  const members = replies ? stringList(replies[0]) : null;
+  if (!members) throw new UnknownReplyError("the checkouts an address said yes to a reminder on");
+  // Only a checkout id is ever added to the note (keepAssistReminder), so a member of another shape is a reply that
+  // does not read: skipped, the note would be deleted and that consent kept with nothing to find it by (Codex X6).
+  if (!members.every((s) => SESSION.test(s))) throw new UnknownReplyError("a checkout an address said yes to a reminder on");
+  return members;
 }
 
 /**
@@ -205,18 +205,14 @@ export async function remindersOf(statsId: string | null, email: string): Promis
   if (!statsId || !email || !isRedisConfigured()) return [];
   const sessions = await sessionsOf(whoKey(statsId, email));
   if (!sessions.length) return [];
+  // Each consent its text or nothing (gone by itself with its three days): another shape is unknown, never "none".
   const raws = repliesFor(await redisPipeline(sessions.map((s) => ["GET", assistRemindKey(s)])), sessions.length);
-  if (!raws) throw new UnknownReplyError("a person's checkout reminders");
+  if (!raws) throw new UnknownReplyError("the consents of an address's checkout reminders");
   return raws.flatMap((raw) => {
-    // Gone by itself (Redis's null): not listed. Anything but a string is not known, never left out of the copy.
     if (raw === null) return [];
-    if (typeof raw !== "string") throw new UnknownReplyError("a person's checkout reminder");
-    try {
-      const v = JSON.parse(String(raw)) as Partial<Consent>;
-      return typeof v.e === "string" ? [{ address: v.e, sentence: String(v.t ?? ""), version: String(v.v ?? ""), at: Number(v.at) || 0 }] : [];
-    } catch {
-      return [];
-    }
+    const v = typeof raw === "string" ? parseConsent(raw) : null;
+    if (!v) throw new UnknownReplyError("a checkout reminder's consent");
+    return [{ address: v.e, sentence: v.t, version: v.v, at: v.at }];
   });
 }
 

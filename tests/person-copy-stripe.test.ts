@@ -24,6 +24,7 @@ const GIFT_BOUGHT = "gft_" + "a".repeat(24);
 const GIFT_GOT = "gft_" + "b".repeat(24);
 const GROUP = "grp_" + "c".repeat(24);
 const SESSION = "cs_test_" + "s".repeat(24);
+const PACKAGE_TOKENS = ["a".repeat(48), "b".repeat(48)];
 
 let more = false;
 let down = false;
@@ -46,6 +47,8 @@ async function main(): Promise<void> {
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
   sessions.push({ id: SESSION, status: "complete", payment_status: "paid", payment_intent: "pi_1", metadata: { store: store.handle, product: "prod000001", gift: GIFT_BOUGHT, group: GROUP } });
+  // Their call package is found through its own checkout (#5125 (1)), never through the store's set of packages.
+  sessions.push({ id: "cs_test_" + "p".repeat(24), status: "complete", payment_status: "paid", payment_intent: "pi_2", metadata: { store: store.handle, product: "call000001", kind: "package" } });
   sessions.push({ id: "cs_test_" + "o".repeat(24), status: "complete", payment_status: "paid", metadata: { store: "another-store", gift: "gft_" + "f".repeat(24) } });
   redis.run(["SET", `nl:gift:${GIFT_BOUGHT}`, JSON.stringify({ id: GIFT_BOUGHT, s: statsId, p: "prod000001", to: "friend@example.com", from: "Mia", message: "Enjoy", at: 1_790_000_000 })]);
   redis.run(["SET", `nl:gift:${GIFT_GOT}`, JSON.stringify({ id: GIFT_GOT, s: statsId, p: "prod000002", to: PERSON, from: "Sam", message: "For you", at: 1_790_000_000 })]);
@@ -53,8 +56,8 @@ async function main(): Promise<void> {
   redis.run(["SET", `nl:grp:${GROUP}`, JSON.stringify({ id: GROUP, s: statsId, p: "prod000001", people: 5, at: 1_790_000_000 })]);
   redis.run(["SET", `nl:ship:done:${SESSION}`, JSON.stringify({ at: 1_790_000_000, tracking: "https://track.example.com/1" })]);
   redis.run(["SADD", packagesKey(statsId), "cs_test_" + "p".repeat(24), "cs_test_" + "q".repeat(24)]);
-  redis.run(["SET", "nl:pkg:cs_test_" + "p".repeat(24), JSON.stringify({ s: statsId, h: store.handle, p: "call000001", e: PERSON, total: 4, at: 1_790_000_000, until: 0, token: "secret-token-1", holds: [] })]);
-  redis.run(["SET", "nl:pkg:cs_test_" + "q".repeat(24), JSON.stringify({ s: statsId, h: store.handle, p: "call000001", e: OTHER, total: 4, at: 1_790_000_000, until: 0, token: "secret-token-2", holds: [] })]);
+  redis.run(["SET", "nl:pkg:cs_test_" + "p".repeat(24), JSON.stringify({ s: statsId, h: store.handle, p: "call000001", e: PERSON, total: 4, at: 1_790_000_000, until: 0, token: PACKAGE_TOKENS[0], holds: [] })]);
+  redis.run(["SET", "nl:pkg:cs_test_" + "q".repeat(24), JSON.stringify({ s: statsId, h: store.handle, p: "call000001", e: OTHER, total: 4, at: 1_790_000_000, until: 0, token: PACKAGE_TOKENS[1], holds: [] })]);
   redis.run(["HSET", paidKey(await storeFolder(storeRef(store))), "sub_1", JSON.stringify({ inv: "in_1", amt: 900, cur: "usd", ps: 1, pe: 2, e: PERSON }), "sub_2", JSON.stringify({ inv: "in_2", amt: 900, cur: "usd", ps: 1, pe: 2, e: OTHER })]);
   const scope = (await erasureScope(store, PERSON))!;
 
@@ -68,11 +71,23 @@ async function main(): Promise<void> {
   is("their shipment", records("lib/shipments.ts").map((r) => (r as { tracking: string }).tracking), ["https://track.example.com/1"]);
   is("their membership's last payment kept while the store closes", records("lib/closing-holds.ts").map((r) => (r as { subscription: string }).subscription), ["sub_1"]);
   const text = JSON.stringify(copy);
-  is("no booking link's key, nor another store's gift, nor the other buyer", ["secret-token", "gft_" + "f".repeat(24), OTHER].map((w) => text.includes(w)), [false, false, false]);
+  is("no booking link's key, nor another store's gift, nor the other buyer", [...PACKAGE_TOKENS, "gft_" + "f".repeat(24), OTHER].map((w) => text.includes(w)), [false, false, false, false]);
 
   part("Never a copy with a part left out");
-  more = true;
+  const packageKey = "nl:pkg:cs_test_" + "p".repeat(24);
+  const packageRecord = redis.run(["GET", packageKey]);
+  if (typeof packageRecord !== "string") throw Error("Synthetic package fixture missing");
+  redis.run(["SET", packageKey, "{broken"]);
   let failed = false;
+  try {
+    await copyPerson(scope);
+  } catch {
+    failed = true;
+  }
+  is("one unreadable call package refuses the whole privacy copy", failed, true);
+  redis.run(["SET", packageKey, packageRecord]);
+  more = true;
+  failed = false;
   try {
     await copyPerson((await erasureScope(store, PERSON))!);
   } catch {

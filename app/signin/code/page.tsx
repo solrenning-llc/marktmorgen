@@ -42,7 +42,7 @@ export default async function CodePage({ searchParams }: { searchParams: Promise
   // A request to turn it off without a code, waiting its days (lib/two-step.ts askReset).
   // Unreadable just now (CX-123 rule 24): said so, and no day or address is made up for it.
   const read = await twoStepStatus(email).catch((error: unknown) => {
-    console.error("reading two-step login for the code page failed", error);
+    console.error("reading two-step login for the code page failed");
     return null;
   });
   const { reset, backup } = read ?? { reset: 0, backup: "" };

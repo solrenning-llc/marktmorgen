@@ -10,8 +10,10 @@ import { withCartStockHolds, withStockHold, stockLeft } from "@/lib/stock";
 import { parseProduct } from "@/lib/catalog";
 import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { keepLive, liveStockStore } from "./stock-live-store";
 
-const shop = { statsId: "d".repeat(32), handle: "prints", name: "Prints", email: "prints@example.com", language: "en", currency: "usd", stripeAccountId: "acct_test_lastunit1" } as unknown as Store;
+// Live, so its checkouts' holds are written (STOCK_BIND is fenced on the store being live since Codex L-20261120-0655).
+const shop = liveStockStore({ statsId: "d".repeat(32), handle: "prints", name: "Prints", email: "prints@example.com", language: "en", currency: "usd", stripeAccountId: "acct_test_lastunit1" } as unknown as Store, "d1".repeat(16), "prints@example.com");
 const product = parseProduct({ id: "print1", title: "Print", summary: "", priceCents: 2000, stock: 1, link: "https://example.com/print" }) as Listing;
 const other = parseProduct({ id: "guide1", title: "Guide", summary: "", priceCents: 900, link: "https://example.com/guide" }) as Listing;
 process.env.STRIPE_SECRET_KEY = "sk_test_only";
@@ -29,6 +31,7 @@ const open = async () => {
 
 test("five buyers at once for the last unit: one checkout opens, the others are told it is sold out or to press again", async () => {
   redis.clear();
+  keepLive(shop);
   opened = 0;
   const results = await Promise.all(Array.from({ length: 5 }, () => withStockHold(shop, product, open)));
   assert.equal(results.filter((r) => r.ok).length, 1, "one checkout holds the unit");
@@ -39,6 +42,7 @@ test("five buyers at once for the last unit: one checkout opens, the others are 
 
 test("five carts at once holding the last unit: one opens", async () => {
   redis.clear();
+  keepLive(shop);
   opened = 0;
   const results = await Promise.all(Array.from({ length: 5 }, () => withCartStockHolds(shop, [product, other], open)));
   assert.equal(results.filter((r) => r.ok).length, 1, "one cart holds the unit");

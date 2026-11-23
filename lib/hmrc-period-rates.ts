@@ -77,10 +77,12 @@ function realDay(value: unknown): value is string {
 }
 
 function httpsSource(value: unknown): boolean {
-  if (typeof value !== "string") return false;
+  // The page's own address as written: "https://" and then a domain, so "https:x" and "https:///x", which `new URL`
+  // reads as host "x", name no page (Claude 2's NIT on #5024, 7061724274).
+  if (typeof value !== "string" || !value.startsWith("https://")) return false;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && url.hostname.length > 0;
+    return url.protocol === "https:" && /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(url.hostname) && value.slice("https://".length).toLowerCase().startsWith(url.hostname);
   } catch {
     return false;
   }

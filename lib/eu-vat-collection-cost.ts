@@ -73,9 +73,12 @@ function reviewedDay(day: string): boolean {
 
 /** A source must name a parseable HTTPS location; a bare scheme has no page to review. */
 function httpsSource(source: string): boolean {
+  // The page's own address as written: "https://" and then a domain, so "https:x" and "https:///x", which `new URL`
+  // reads as host "x", name no page (Claude 2's NIT on #5024, 7061724274).
+  if (typeof source !== "string" || !source.startsWith("https://")) return false;
   try {
     const url = new URL(source);
-    return typeof source === "string" && url.protocol === "https:" && Boolean(url.hostname);
+    return url.protocol === "https:" && /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(url.hostname) && source.slice("https://".length).toLowerCase().startsWith(url.hostname);
   } catch {
     return false;
   }

@@ -113,7 +113,7 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
   const backHost = open.back ? new URL(open.back).hostname : "";
   const back =
     open.back && !framed ? (
-      <a href={open.back} target="_top" className="st-footer-link mt-6 inline-block text-sm font-semibold">
+      <a href={open.back} target="_top" className="st-footer-link mt-6 inline-flex min-h-11 items-center text-sm font-semibold">
         {said.w.backTo(backHost)}
       </a>
     ) : null;

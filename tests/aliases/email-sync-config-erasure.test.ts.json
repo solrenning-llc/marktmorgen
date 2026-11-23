@@ -1,0 +1,4 @@
+{
+  "@/lib/safe-fetch": "email-sync-config-erasure-world.ts",
+  "next/server": "next-server-after-world.ts"
+}

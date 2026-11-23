@@ -103,6 +103,27 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
   },
   // lib/store-live-cache.ts CLAIM_IF_STORE_LIVE: a mark taken once (SET NX) only while the store is its own and not
   // erasing, by the same identity rule; -1 gone or erasing, -2 an owner's record that does not parse, 1 ours, 0 taken.
+  // lib/store-live-cache.ts SET_PERSISTENT_IF_STORE_LIVE: a setting kept with no expiry, written only while the store is
+  // not erasing and its key is still its own, by the same identity rule (Codex L-20261121-0237).
+  "store-cache-persistent-live:v1": (run, [live, erasing, key], [field, value, statsId, ref]) => {
+    if (run(["HGET", erasing, field]) !== null) return 0;
+    if (statsId === "") {
+      if (run(["GET", live]) !== ref) return 0;
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return 0;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -1;
+      }
+      if (!record || typeof record !== "object") return -1;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+    }
+    run(["SET", key, value]);
+    return 1;
+  },
   "store-claim-live:v1": (run, [live, erasing, key], [field, value, seconds, statsId, ref]) => {
     if (run(["HGET", erasing, field]) !== null) return -1;
     if (statsId === "") {

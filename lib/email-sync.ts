@@ -72,6 +72,7 @@ import { type EmailSyncRef, type Store, setEmailSyncRef, storeRef } from "@/lib/
 import { productIds } from "@/lib/catalog";
 import { SITE_URL } from "@/lib/site-url";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
+import { setPersistentWhileStoreLive } from "@/lib/store-live-cache";
 
 /** Jobs a store's studio keeps. */
 export const LOG_SIZE = 50;
@@ -264,13 +265,50 @@ function refFor(config: Config | null): EmailSyncRef | null {
   return { buyers: config.buyers, products: config.buyers === "some" ? config.products : [] };
 }
 
-async function writeConfig(store: Store, config: Config | null): Promise<void> {
+/**
+ * Keeps the platform's settings and sealed key, or forgets them (null). A key is written after a slow provider call
+ * (connect, saveSettings), and the store's erasure can begin or end meanwhile (Codex L-20261121-0237): the store's
+ * reference is changed first, which answers null when the store is gone, and the key is then written only while the
+ * store is live, in one fenced step (setPersistentWhileStoreLive). "gone": nothing of the key was written; "unknown":
+ * the fenced write's answer did not read, and the save is not said to have worked. Forgetting only deletes, which can
+ * never put an erased store's key back.
+ */
+async function writeConfig(store: Store, config: Config | null): Promise<"saved" | "gone" | "unknown"> {
   const statsId = store.statsId as string;
-  if (config) await redisPipeline([["SET", cfgKey(statsId), JSON.stringify({ ...config, handle: store.handle })]]);
-  else await redisPipeline([["DEL", cfgKey(statsId), tagsKey(statsId), badKey(statsId)]]);
   // By the key the store is kept under: an account's other stores are not kept under the address.
-  await setEmailSyncRef(storeRef(store), refFor(config));
+  if (!config) {
+    await redisPipeline([["DEL", cfgKey(statsId), tagsKey(statsId), badKey(statsId)]]);
+    await setEmailSyncRef(storeRef(store), null);
+    return "saved";
+  }
+  const live = await setEmailSyncRef(storeRef(store), refFor(config));
+  if (!live) return "gone";
+  const value = JSON.stringify({ ...config, handle: store.handle });
+  const kept = await setPersistentWhileStoreLive(live, cfgKey(statsId), value);
+  if (kept === "kept") return "saved";
+  if (kept === "unknown") return settleUnknownConfig(store, value);
+  return kept;
 }
+
+/**
+ * After a fenced write whose answer did not read (Claude 1 E's LEVE on #5185): the store's reference was already
+ * changed to the new settings, and the key may or may not have been written. The key is read back. If it holds what was
+ * written, the save worked; otherwise the reference is put back to the settings that are kept, so the two never
+ * disagree, and the save is said as not done. A read-back that does not read leaves it unknown.
+ */
+async function settleUnknownConfig(store: Store, value: string): Promise<"saved" | "unknown"> {
+  const statsId = store.statsId as string;
+  const read = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1)?.[0];
+  if (read === value) return "saved";
+  if (read !== null && typeof read !== "string") return "unknown";
+  const held = read === null ? null : parseConfig(read);
+  if (read !== null && !held) return "unknown";
+  await setEmailSyncRef(storeRef(store), refFor(held));
+  return "unknown";
+}
+
+/** What the creator is told when the store changed, or was erased, while the provider answered: nothing was saved. */
+const NOT_SAVED = "The store changed while this was being saved, so nothing was saved. Open the studio and try again.";
 
 /** `legacy`: opened with the key from before NIMBUS_DATA_KEY (lib/secret-box.ts); sealed again on the next save. */
 type OpenKey = { ok: true; key: string; legacy: boolean } | { ok: false; message: string };
@@ -927,7 +965,7 @@ export async function connect(store: Store, rawProvider: unknown, rawKey: unknow
     connectedAt: now,
   };
   await redisPipeline([["DEL", tagsKey(store.statsId), badKey(store.statsId)]]);
-  await writeConfig(store, config);
+  if ((await writeConfig(store, config)) !== "saved") return { ok: false, message: NOT_SAVED };
   return { ok: true, view: await viewAfterWrite(store, config, null), targets };
 }
 
@@ -985,7 +1023,7 @@ export async function saveSettings(store: Store, input: Settings): Promise<{ ok:
     products: buyers === "some" ? products : [],
     tags,
   };
-  await writeConfig(store, next);
+  if ((await writeConfig(store, next)) !== "saved") return { ok: false, message: NOT_SAVED };
   return { ok: true, view: await viewAfterWrite(store, next) };
 }
 

@@ -67,6 +67,7 @@ import { CERTIFICATE_PASS_EVERY_SECONDS, CERTIFICATE_REFUND_CHECKS_PER_MONTH, CE
 import { LOST_DISPUTE_PAGES } from "@/lib/refunds";
 import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
+import { MAIL_CLICK_KEY_COMMANDS } from "@/lib/mail-clicks";
 import { MAIL_GAP_COMMANDS_PER_CHECK, MAIL_GAP_TRIAL_CHECKS, mailGapCheckLimit } from "@/lib/mail-frequency";
 /** A gap mark moved: its key (the gate's, the longest, is 92 characters with a 32-character store id: nl:mgap:gate:{32}:{32}:{13}) with a time or a claim value (23), rounded up (tests/store-data-registry.ts, MARK). */
 const MAIL_GAP_MARK_BYTES = 160;
@@ -2517,6 +2518,17 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/review-requests.ts", names: ["stretchLanded"] },
     ],
     basis: "Every monthly email sent, at the most an email costs. A review ask whose claim's stretch to SENT_MARK_SECONDS was not confirmed reads the claim again before letting it go (lib/review-requests.ts stretchLanded, 17 November 2026): a GET, a TTL and a GET in one pipeline, three commands for each such claim, about $0.000006 at Upstash's $2 a million, inside what an email is priced at. A plain batch's email that goes by Amazon (sendBatch: product updates, community announcements, review asks, imports; never a list batch) takes at most three commands more for its possibly-taken mark (lib/ses.ts, 13 November 2026): a SET NX before Amazon is asked, a GET when the batch is tried again, a DEL when Amazon says for certain it did not take it, kept two days at most; about $0.000006 at Upstash's $2 a million, inside what an email is priced at. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
+  },
+  {
+    id: "mail-click-keys",
+    feature: "The key a sequence email's links carry for a reader who allowed their link use to be seen (lib/mail-clicks.ts), written only while they still allow it (Codex G-20261121-0033)",
+    // Every monthly email of the plan as a sequence email to a reader who allowed it (the dearest way).
+    monthlyUsd: (tier) => monthlyEmails(tier) * MAIL_CLICK_KEY_COMMANDS * COMMAND,
+    sources: [
+      { file: "lib/mail-clicks.ts", names: ["MAIL_CLICK_KEY_COMMANDS", "MAIL_CLICK_KEY_LIVE", "rememberLinkKeys"] },
+      { file: "lib/mail.ts", names: ["rememberLinkKeys(store.listId as string"] },
+    ],
+    basis: "Before 23 November 2026 a reader's key was one plain SET a sequence email, priced nowhere of its own. It is now one script that writes the key only while the address is not deleted from the store and the reader's row still holds the token, the permission and a yes: the EVAL, two HGETs and the SET, MAIL_CLICK_KEY_COMMANDS as Upstash bills a script, held to what the real write sends by tests/mail-click-key-consent-race.test.ts. Only a sequence's emails carry a key, and only to readers who allowed it, so pricing every monthly email of the plan (monthlyEmails: none on Store) is the most it can cost. The key's 400 days of room are the nl:mail:mk: family (tests/store-data-registry.ts), unchanged.",
   },
   {
     id: "mail-gap",

@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     const token = (await tokensFor(listId, [email], store.handle)).get(email);
     if (!token) throw new Error("no unsubscribe token");
     tokens[email] = token;
-    const keys = await rememberLinkKeys([token]);
+    const keys = await rememberLinkKeys(listId, [{ email, token }]);
     await noteClick(keys.get(token) as string, CAMPAIGN);
   }
   const clickKeys = () => redis.keys().filter((key) => key.startsWith(`nl:mail:clk:${listId}:`)).length;

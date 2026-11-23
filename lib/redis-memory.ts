@@ -1712,6 +1712,20 @@ export class MemoryRedis {
           this.run(["EXPIRE", used, seconds]);
           return 1;
         }
+        // lib/mail-clicks.ts MAIL_CLICK_KEY_LIVE: a reader's link key, written only while they still allow it.
+        if (key.startsWith("-- marktmorgen:mail-click-key-live:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, prints, contacts, marker, print, email, token, seconds] = args;
+          if (this.run(["HGET", prints, print]) !== null) return 0;
+          const raw = this.run(["HGET", contacts, email]);
+          if (typeof raw !== "string") return 0;
+          let row: unknown;
+          try { row = JSON.parse(raw); } catch { return 0; }
+          if (!row || typeof row !== "object" || Array.isArray(row)) return 0;
+          const r = row as Record<string, unknown>;
+          if (r.t !== token || r.agreed !== true || r.unsub === true || typeof r.clicks !== "string" || r.clicks === "") return 0;
+          this.run(["SET", marker, token, "EX", seconds]);
+          return 1;
+        }
         // DR1: one provider receipt and its campaign counter, atomically.
         if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
           const [, daily, receipt, aggregate, count, expiry, limit] = args;

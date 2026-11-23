@@ -19,6 +19,7 @@ import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
+import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
 
 process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
@@ -148,6 +149,18 @@ async function main(): Promise<void> {
   for (let draw = 0; draw < 4; draw += 1) noPlace = await certificatesFor(NOPLACE, { room: small });
   is("after five draws: the one waiting said as waiting, the room said full, no place written", [noPlace?.unlisted, noPlace?.roomFull, redis.run(["GET", cursorKey(NOPLACE)])], [1, true, null]);
 
+  part("A walk whose place does not read is said as such, never as more being added (Claude 3 wSUb3's LEVE on #5481)");
+  const UNREAD = "4".repeat(12);
+  seedOlder(UNREAD, 50_000, 30);
+  redis.run(["SET", cursorKey(UNREAD), "not-a-walk"]);
+  const unread1 = await certificatesFor(UNREAD, { room: ROOM });
+  const unread2 = await certificatesFor(UNREAD, { room: ROOM });
+  is("two draws: all 30 said as waiting, none added, the walk said as unable to go on, never the room", [unread1?.unlisted, unread2?.unlisted, redis.run(["ZCARD", atKey(UNREAD)]), unread2?.walkUnread, unread2?.roomFull], [30, 30, 0, true, false]);
+  is("and the place is left as it was, never started again on a guess", redis.run(["GET", cursorKey(UNREAD)]), "not-a-walk");
+  is("a walk that reads is not said as unread", (await certificatesFor(OLD, { room: ROOM }))?.walkUnread, false);
+  const studioPage = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
+  is("the page says it before the room or the walk's progress", studioPage.indexOf("certificates.walkUnread") > 0 && studioPage.indexOf("certificates.walkUnread") < studioPage.indexOf("Up to 25 more are added"), true);
+
   part("A walk that does not read is left for the next draw and never hides the page (Claude 5 iYnra's NIT 8)");
   const ODD = "b".repeat(12);
   seedOlder(ODD, 40_000, 3);
@@ -165,7 +178,7 @@ async function main(): Promise<void> {
   redis.run(["DEL", cursorKey(ODD)]);
   before = (batch) => (batch.length === 1 && batch[0][0] === "ZMSCORE" ? ["not a list"] : null);
   const oddScores = await certificatesFor(ODD, { room: ROOM });
-  is("a ZMSCORE that does not read: no ZADD, the page still listed", [oddScores?.list.length, redis.run(["ZCARD", atKey(ODD)])], [1, 1]);
+  is("a ZMSCORE that does not read: no ZADD, the page still listed, and the walk said as unable to go on", [oddScores?.list.length, redis.run(["ZCARD", atKey(ODD)]), oddScores?.walkUnread], [1, 1, true]);
   const beforeOdd = await used(ROOM);
   before = (batch) => (batch.length === 1 && batch[0][0] === "ZADD" ? ["three"] : null);
   const oddCount = await certificatesFor(ODD, { room: ROOM });

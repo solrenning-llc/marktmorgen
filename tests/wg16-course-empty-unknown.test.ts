@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   is("the student is listed, with one lesson done", (await studentsOf(course))?.students.map((s) => [s.email, s.done]), [[student, 1]]);
   is("a course nobody opened: an empty list", await studentsOf(emptyCourse), { total: 0, students: [] });
   is("the certificate is listed", (await certificatesFor(course.id))?.list.map((c) => c.id), [certId]);
-  is("a course with no certificate: an empty list", await certificatesFor(emptyCourse.id), { list: [], total: 0, standing: 0, unlisted: 0, roomFull: false, more: false });
+  is("a course with no certificate: an empty list", await certificatesFor(emptyCourse.id), { list: [], total: 0, standing: 0, unlisted: 0, roomFull: false, walkUnread: false, more: false });
 
   part("Students: an unknown reply is unknown (null), never none");
   for (const [name, answer] of [

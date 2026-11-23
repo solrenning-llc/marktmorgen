@@ -543,6 +543,11 @@ export type CertificatePage = {
   unlisted: number;
   /** The store's data room was full on this draw, so none of them could be added now. */
   roomFull: boolean;
+  /**
+   * The walk could not go on this draw: its place does not read, or a reply on the way did not (rule 24). Said as such,
+   * never as more being added (Claude 3 wSUb3's LEVE on #5481).
+   */
+  walkUnread: boolean;
   /** Whether an older page follows this one. */
   more: boolean;
 };
@@ -562,7 +567,7 @@ export type CertificatePage = {
  * `page` is 0 for the newest.
  */
 export async function certificatesFor(courseId: string, options: { room?: DataStore; page?: number } = {}): Promise<CertificatePage | null> {
-  const empty: CertificatePage = { list: [], total: 0, standing: 0, unlisted: 0, roomFull: false, more: false };
+  const empty: CertificatePage = { list: [], total: 0, standing: 0, unlisted: 0, roomFull: false, walkUnread: false, more: false };
   if (!isRedisConfigured()) return empty;
   const page = Number.isSafeInteger(options.page) && (options.page as number) > 0 ? (options.page as number) : 0;
   const counted = plainList(await redisPipeline([["SCARD", allKey(courseId)], ["ZCARD", atKey(courseId)], ["HLEN", indexKey(courseId)], ["GET", atCursorKey(courseId)]]));
@@ -573,6 +578,8 @@ export async function certificatesFor(courseId: string, options: { room?: DataSt
   let listed = listedBefore;
   let roomFull = false;
   let done = state === "done" || listed >= total;
+  // A place that does not read is left alone, never started again on a guess, and the page says the walk cannot go on.
+  let walkUnread = !done && state === null;
   if (!done && options.room && state !== null && state !== "done") {
     const walked = await addOlder(courseId, options.room, state).catch((error: unknown) => {
       console.error("the studio's walk of a course's older certificates failed; the next draw tries again", courseId, error);
@@ -582,7 +589,7 @@ export async function certificatesFor(courseId: string, options: { room?: DataSt
       listed += walked.added;
       roomFull = walked.roomFull;
       done = walked.done;
-    }
+    } else walkUnread = true;
   }
   const unlisted = done ? 0 : Math.max(0, total - listed);
   const from = page * MAX_LISTED_CERTS;
@@ -592,7 +599,7 @@ export async function certificatesFor(courseId: string, options: { room?: DataSt
   if (!ids || ids.some((id) => typeof id !== "string")) return null;
   const more = ids.length > MAX_LISTED_CERTS;
   const valid = (ids as string[]).slice(0, MAX_LISTED_CERTS).filter((id) => CERT_ID_PATTERN.test(id));
-  if (valid.length === 0) return { list: [], total, standing, unlisted, roomFull, more };
+  if (valid.length === 0) return { list: [], total, standing, unlisted, roomFull, walkUnread, more };
   const fetched = plainList(await redisPipeline([["MGET", ...valid.map(certKey)]]));
   if (!fetched || fetched.length !== 1) return null;
   const rows = plainList(fetched[0]);
@@ -601,7 +608,7 @@ export async function certificatesFor(courseId: string, options: { room?: DataSt
     .map(parseCertificate)
     .filter((c): c is Certificate => c !== null && c.courseId === courseId)
     .sort((a, b) => b.issuedAt - a.issuedAt);
-  return { list, total, standing, unlisted, roomFull, more };
+  return { list, total, standing, unlisted, roomFull, walkUnread, more };
 }
 
 /** How long the walk's place is kept: past it, the walk starts again at the start, which only reads again. */

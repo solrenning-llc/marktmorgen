@@ -385,15 +385,19 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
 /** The most pages of a customer's balance history read; a history longer than that is not known whole. */
 const HISTORY_PAGES = 10;
 
+/** A credit found on a customer's balance: the transaction's id and, as Stripe gave them, its amount, currency and customer. */
+type FoundCredit = { txn: string; amount: unknown; currency: unknown; customer: unknown };
+
 /**
- * The credits already on a customer's balance, by the credit id each carries. Read exactly (Claude 5 on #2722): each
+ * The credits already on a customer's balance, by the credit id each carries, each with what its row says it moved
+ * (FoundCredit; read exactly at use, in putOnPlan). Read exactly (Claude 5 on #2722): each
  * page Stripe's list, `has_more` true or false, at most the hundred asked for, each row with a string id and its
  * metadata an object (or null) whose credit mark, when there, is text. Anything else, a page that says there is more
  * but has no rows, or a history still going on after the last page read, is not "not sent": it throws
  * UnknownReplyError before any credit is sent, the credit stays owed, and the next run reads again.
  */
-async function creditedAt(customer: string): Promise<Map<string, string>> {
-  const found = new Map<string, string>();
+async function creditedAt(customer: string): Promise<Map<string, FoundCredit>> {
+  const found = new Map<string, FoundCredit>();
   let after = "";
   for (let page = 0; page < HISTORY_PAGES; page += 1) {
     const query = new URLSearchParams({ limit: "100" });
@@ -406,12 +410,12 @@ async function creditedAt(customer: string): Promise<Map<string, string>> {
     let last = "";
     for (const row of rows) {
       if (!row || typeof row !== "object") throw new UnknownReplyError("invite credits: a balance history row");
-      const { id, metadata } = row as { id?: unknown; metadata?: unknown };
+      const { id, metadata, amount, currency, customer: owner } = row as { id?: unknown; metadata?: unknown; amount?: unknown; currency?: unknown; customer?: unknown };
       if (typeof id !== "string" || !id) throw new UnknownReplyError("invite credits: a balance history row");
       if (metadata !== null && (typeof metadata !== "object" || Array.isArray(metadata))) throw new UnknownReplyError("invite credits: a balance history row");
       const credit = metadata ? (metadata as Record<string, unknown>).nimbus_invite_credit : undefined;
       if (credit !== undefined && typeof credit !== "string") throw new UnknownReplyError("invite credits: a balance history row");
-      if (credit) found.set(credit, id);
+      if (credit) found.set(credit, { txn: id, amount, currency, customer: owner });
       last = id;
     }
     if (list.has_more === false) return found;
@@ -470,7 +474,7 @@ async function stillOwed(credit: Credit): Promise<number | "open"> {
 }
 
 /** Step 2 for one credit. True when it is now on the plan. */
-async function putOnPlan(id: string, history: Map<string, Map<string, string>>, nowSeconds: number): Promise<boolean> {
+async function putOnPlan(id: string, history: Map<string, Map<string, FoundCredit>>, nowSeconds: number): Promise<boolean> {
   // Read exactly (CX-123 rule 24, audit round 7): only a record confirmed absent (an exact null) or read back and no
   // longer owed leaves the owed list here. Anything else throws: the credit stays listed and the next run tries again.
   const read = repliesFor(await redisPipeline([["GET", creditKey(id)]]), 1);
@@ -499,9 +503,22 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
     known = await creditedAt(customer);
     history.set(customer, known);
   }
-  let txn = known.get(id) ?? "";
+  const landed = known.get(id);
+  let txn = landed?.txn ?? "";
   let sent = credit;
-  if (!txn) {
+  if (landed) {
+    // Already on the balance (a send whose answer was lost, found by its mark on a later run): written down at what
+    // that row moved, never at the amount first written, which a reduced send did not move (Claude 4's LOW on #4514,
+    // 7073362258: 840 recorded where 450 was credited). The row is held to this credit as a receipt is: a whole negative
+    // amount no larger than written, this credit's currency, and, when the row names one, this customer (the list is
+    // already this customer's own). Anything else throws: the credit stays owed and the next run reads again.
+    const moved = landed.amount;
+    if (typeof moved !== "number" || !Number.isSafeInteger(moved) || moved >= 0 || -moved > credit.cents ||
+        landed.currency !== credit.cur || (landed.customer !== undefined && landed.customer !== customer)) {
+      throw new UnknownReplyError(`invite credits: ${id} on the balance, not as a credit of it`);
+    }
+    sent = { ...credit, cents: -moved };
+  } else {
     // Read again before it is sent (Codex X5 on #4514, ALTO (a)): a payment taken back since the credit was written
     // makes it earn less, or nothing; a dispute not decided yet keeps it owed for a later run. A credit already at
     // Stripe is not touched here: what it becomes after a late dispute is the owner's decision (part (b)).
@@ -536,7 +553,7 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
       throw new UnknownReplyError(`invite credits: the receipt for ${id}`);
     }
     txn = made.id;
-    known.set(id, txn);
+    known.set(id, { txn, amount: made.amount, currency: made.currency, customer: made.customer });
   }
   await redisPipeline([
     ["SET", creditKey(id), JSON.stringify({ ...sent, state: "done", txn, doneAt: nowSeconds })],
@@ -653,7 +670,7 @@ async function settleWithin(deadline: number, now: number, counts: InviteCounts)
   // At most INVITE_OWED_READ of the owed credits, never the whole set (#4514); SRANDMEMBER picks another draw each run,
   // so every credit owed is reached in time.
   const ids = stringList(repliesFor(await redisPipeline([["SRANDMEMBER", OWED_KEY, INVITE_OWED_READ]]), 1)?.[0]);
-  const history = new Map<string, Map<string, string>>();
+  const history = new Map<string, Map<string, FoundCredit>>();
   let pushedAll = ids !== null;
   if (!ids) {
     counts.failed += 1;

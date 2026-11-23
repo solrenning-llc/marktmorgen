@@ -26,6 +26,9 @@ const link = /<a\b[^>]*>/.exec(trail)?.[0] ?? "";
 is("the trail draws its link", link.includes('href="/studio"'), true);
 is("44 px tall (min-h-11)", classesOf(link).includes("min-h-11"), true);
 is("and 44 px wide (min-w-11), so a short word such as Studio is a whole target", classesOf(link).includes("min-w-11"), true);
+// Claude 7's LEVE on #4630 (6893537836, #5285): the comment promises the words centered in that box; a word shorter
+// than 44 px sat at its left edge without justify-center.
+is("its words centered in the 44 px box, across (justify-center) as well as down (items-center)", ["justify-center", "items-center"].every((c) => classesOf(link).includes(c)), true);
 
 part("The studio header's logo link is 44 by 44 px");
 const header = readFileSync("components/studio-header.tsx", "utf8");

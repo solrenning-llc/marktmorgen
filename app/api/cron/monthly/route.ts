@@ -18,13 +18,15 @@ import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
  * or Discord channel where they chose one (lib/chat-summary.ts).
  *
  * Runs every hour on the 1st and the 2nd of the month, at most MAX_PER_RUN
- * stores a run, for the month just ended and the month before it, oldest
+ * stores a run, each claimed for the month before anything is read, so nobody
+ * gets two. It reads the month just ended and the month before it, oldest
  * first (issue #3995): a month whose whole two-day window was missed, or whose
- * stores the last runs did not reach, is sent in the next month's window,
- * never skipped; its claims (40 days) keep anything sent from going twice, each claimed for the month before anything is read, so nobody
- * gets two. Only stores with a plan running, paid or in its trial. "Stop" in
- * any numbers email stops this one too; the channel is the creator's own
- * choice and is posted to still.
+ * stores the last runs did not reach, is sent in the next month's window
+ * instead, one month back at most (a month missed in two windows in a row is
+ * not caught up). Its claims (40 days) outlive the month between the two
+ * windows, so nothing sent goes twice. Only stores with a plan running, paid
+ * or in its trial. "Stop" in any numbers email stops this one too; the channel
+ * is the creator's own choice and is posted to still.
  *
  * The post and the email are each marked once for the month (lib/stats-report.ts,
  * sendPart); one that did not go lets the month go, so a later run sends what is

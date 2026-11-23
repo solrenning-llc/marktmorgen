@@ -32,7 +32,7 @@ import { type BatchMessage, sendListBatch } from "@/lib/email";
 import { stopTags } from "@/lib/mail-health-rules";
 import { CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { SITE_URL } from "@/lib/site-url";
-import { leadsKey } from "@/lib/contact-rules";
+import { takenOffList } from "@/lib/list-taken-off";
 import type { Store } from "@/lib/store";
 import {
   type CommunityConfig,
@@ -346,34 +346,16 @@ async function recipientBatch(id: string, start: number, count: number): Promise
   } catch { return null; }
 }
 
-const GONE = new Set(["bounced", "complained", "refused"]);
-
 /**
- * The members whose address the store's list did not take off for a hard bounce, a spam complaint or a refusal (`gone`
- * with `unsub`, lib/contacts.ts stopWriting): such an address never gets an announcement either, so a member who
- * marked one as spam is not written to again and a dead address stops being tried (tests/community-mail-list-gone.test.ts).
- * A plain unsubscribe from the list is not read here: the community's own stop link decides its emails. A member not
- * on the list is kept. A row in no known shape is unknown (rule 24): it throws, and the batch waits.
+ * The members whose address the store's list did not take off for a hard bounce, a spam complaint or a refusal
+ * (lib/list-taken-off.ts takenOffList): such an address never gets an announcement either (tests/community-mail-list-gone.test.ts).
+ * A plain unsubscribe from the list is not read: the community's own stop link decides its emails. A member not on the
+ * list is kept. A row in no known shape is unknown (rule 24): it throws, and the batch waits.
  */
 async function keptOnList(listId: string, members: Member[]): Promise<Member[]> {
   if (!members.length) return members;
-  const rows = repliesFor(await redisPipeline([["HMGET", leadsKey(listId), ...members.map((m) => m.e)]]), 1)?.[0];
-  if (!Array.isArray(rows) || rows.length !== members.length) throw new UnknownReplyError("the store's list rows of an announcement batch");
-  return members.filter((_, i) => {
-    if (!Object.hasOwn(rows, i)) throw new UnknownReplyError("a store's list row");
-    const raw: unknown = rows[i];
-    if (raw === null) return true;
-    if (typeof raw !== "string") throw new UnknownReplyError("a store's list row");
-    let row: unknown;
-    try {
-      row = JSON.parse(raw);
-    } catch {
-      throw new UnknownReplyError("a store's list row");
-    }
-    if (!row || typeof row !== "object" || Array.isArray(row)) throw new UnknownReplyError("a store's list row");
-    const { unsub, gone } = row as { unsub?: unknown; gone?: unknown };
-    return !(unsub === true && typeof gone === "string" && GONE.has(gone));
-  });
+  const off = await takenOffList(listId, members.map((m) => m.e));
+  return members.filter((_, i) => !off[i]);
 }
 
 /**

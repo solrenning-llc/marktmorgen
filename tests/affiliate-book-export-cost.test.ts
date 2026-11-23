@@ -47,6 +47,8 @@ const real = redis.pipeline.bind(redis);
 let counting = false;
 let commands = 0;
 let bytes = 0;
+/** While counting: the book's records read whole (HGETALL of an nl:aff: key), which a refusal must not reach. */
+let bookReads = 0;
 /** While set, the book's records answer in a shape no reading accepts (a failed reading, #5256 audit). */
 let breakBook = false;
 redis.pipeline = (async (batch: Commands) => {
@@ -55,6 +57,7 @@ redis.pipeline = (async (batch: Commands) => {
   if (counting) {
     for (const c of batch) {
       commands += 1;
+      if (String(c[0]).toUpperCase() === "HGETALL" && String(c[1]).startsWith("nl:aff:")) bookReads += 1;
       if (String(c[0]).toUpperCase() === "EVAL") commands += (String(c[1]).match(/redis\.call\(/g) ?? []).length;
     }
     bytes += JSON.stringify(batch).length + JSON.stringify(replies).length;
@@ -135,32 +138,41 @@ async function main(): Promise<void> {
   is(`the file (${csv.length} bytes) is within what it may send (${work.sent})`, csv.length <= work.sent && work.sent >= BOOK_CSV_HEADER_BYTES, true);
   is(`the Stripe pages it asks (${stripePages}) are within those counted (${work.stripePages})`, stripePages <= work.stripePages, true);
 
-  part("A reading that fails keeps only what its reading took: two clicks on a book that does not read never empty the month (#5256 audit 7bab 1, 3c4a)");
+  part("A reading that fails keeps only what its reading took, and the book is not read again that month (#5256 audit 7bab 1, 3c4a; coordinator ea4f 2)");
   {
     const failedBefore = await allowanceUsed(store, "studio");
     breakBook = true;
     const one = await get(session);
+    const oneWords = await one.text();
+    counting = true;
+    bookReads = 0;
     const two = await get(session);
+    counting = false;
+    const twoWords = await two.text();
     breakBook = false;
-    is("both answered as failures, no file", [one.status, two.status], [500, 500]);
-    is(`each kept only its reading's units (${reading}), never the whole bound (${units})`, (await allowanceUsed(store, "studio")) - failedBefore, 2 * reading);
+    is("the first is a failure that says what it counted and that the book is not read again this month", [one.status, oneWords.includes("Reading the book was counted from your studio's requests."), oneWords.includes("It is not read again this month")], [500, true, true]);
+    is("the second is refused before anything is read or counted", [two.status, twoWords.includes("Nothing was read or counted now."), bookReads], [429, true, 0]);
+    is(`only the first kept its reading's units (${reading}), never the whole bound (${units})`, (await allowanceUsed(store, "studio")) - failedBefore, reading);
   }
+  // A new month opens its failed try again (the count is the month's own): the next parts start from it.
+  await redis.pipeline(redis.keys().filter((key) => key.includes(":book-failed:")).map((key) => ["DEL", key]));
 
   part("With the figure short of its reading, nothing of the book is read, and the answer says what it needs");
   const used = await allowanceUsed(store, "studio");
   if (!(await takeAllowance(store, "studio", STORE_ALLOWANCES.creator.studio - used - reading + 1)).ok) throw new Error("setup: the figure could not be filled");
   counting = true;
   commands = 0;
+  bookReads = 0;
   const short = await get(session);
   counting = false;
   const words = await short.text();
-  is("refused, saying how many it needs and how many are left", [short.status, words.startsWith(`This download needs ${reading.toLocaleString("en-US")} of your`), / left\./.test(words)], [429, true, true]);
-  is("no record of the book was read", commands < 20, true);
+  is("refused, saying how many it needs and how many are left", [short.status, words.startsWith(`This download needs at least ${reading.toLocaleString("en-US")} of your`), / left\./.test(words)], [429, true, true]);
+  is("no record of the book was read", bookReads, 0);
   // With exactly its reading's units left it goes through, though less than the whole bound is left (7bab 7).
   await giveAllowance(store, "studio", 1);
   is("with exactly its reading's units left, it goes through", (await get(session)).status, 200);
 
-  part("Once the plan has ended: the owner's own downloads, never the figure; failures and a teammate spend none");
+  part("Once the plan has ended: the owner's own downloads, never the figure; a teammate spends none, a failed reading one");
   const ENDED_OWNER = "book-export-ended@example.com";
   const { store: ended, session: endedSession } = await shop(ENDED_OWNER, "bookexportended");
   await seed(ended, 3, 1);
@@ -171,13 +183,14 @@ async function main(): Promise<void> {
   const endedBefore = await allowanceUsed(endedStore, "studio");
   const adminSession = await openSession(admin);
   is("a teammate with export is refused, before anything is counted", (await get(adminSession)).status, 403);
-  breakBook = true;
-  const failures = [(await get(endedSession)).status, (await get(endedSession)).status];
-  breakBook = false;
-  is("two failed readings in a row", failures, [500, 500]);
   const answers: number[] = [];
-  for (let i = 0; i <= ENDED_BOOK_EXPORTS; i += 1) answers.push((await get(endedSession)).status);
-  is(`still ${ENDED_BOOK_EXPORTS} downloads for the owner after them, then refused`, answers, [...Array.from({ length: ENDED_BOOK_EXPORTS }, () => 200), 429]);
+  for (let i = 0; i < ENDED_BOOK_EXPORTS - 1; i += 1) answers.push((await get(endedSession)).status);
+  breakBook = true;
+  const failed = await get(endedSession);
+  breakBook = false;
+  is(`${ENDED_BOOK_EXPORTS - 1} downloaded`, answers, Array.from({ length: ENDED_BOOK_EXPORTS - 1 }, () => 200));
+  is("a reading that failed is counted as one of them, and says so", [failed.status, (await failed.text()).includes(`one of the ${ENDED_BOOK_EXPORTS} downloads`)], [500, true]);
+  is("then refused, with nothing read", (await get(endedSession)).status, 429);
   is("nothing taken from the ended store's figure", (await allowanceUsed(endedStore, "studio")) - endedBefore, 0);
   is("the refusal says so", (await (await get(endedSession)).text()).includes("since your plan ended"), true);
 

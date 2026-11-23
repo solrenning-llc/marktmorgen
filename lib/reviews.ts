@@ -498,7 +498,15 @@ async function payMembers(statsId: string, pi: string): Promise<string[]> {
   const replies = repliesFor(await redisPipeline([["HGET", payKey(statsId), pi]]), 1);
   const raw = replies?.[0];
   if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("the reviews a payment paid for");
-  return raw ? raw.split(";").filter(Boolean) : [];
+  const members = raw ? raw.split(";").filter(Boolean) : [];
+  // Each member read exactly, as the review index reads its own (#5285, Codex X6's MEDIUM on #3862): one that is not
+  // a product id, a bar and a review id is unknown, never skipped, so a refund is not taken as seen with a paid
+  // review left unmarked.
+  for (const member of members) {
+    const [product, id, ...extra] = member.split("|");
+    if (extra.length || !PRODUCT_ID_PATTERN.test(product) || !REVIEW_ID_PATTERN.test(id ?? "")) throw new UnknownReplyError("the reviews a payment paid for");
+  }
+  return members;
 }
 
 /** The reviews a payment paid for, with one more added. */

@@ -49,7 +49,7 @@ async function main() {
   await real([["SET",pageKey,JSON.stringify(page)],["RPUSH",versionsKey,`1800000000000\n${JSON.stringify(page)}`]]);
   let id = 0;
   const call = async (name:string) => {
-    const r = await POST(new Request("https://marktmorgen.com/api/mcp",{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${key.key}`},body:JSON.stringify({jsonrpc:"2.0",id:++id,method:"tools/call",params:{name,arguments:{product:p}}})}));
+    const r = await POST(new Request("https://marktmorgen.com/api/mcp",{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${key.key}`},body:JSON.stringify({jsonrpc:"2.0",id:++id,method:"tools/call",params:{name,arguments:name==="list_saved_blocks"?{}:{product:p}}})}));
     const body = await r.json() as { result?:{isError:boolean;content:{text:string}[]};error?:unknown };
     const text = body.result?.content[0]?.text ?? "";
     return { rejected:Boolean(body.error || body.result?.isError), value:text ? JSON.parse(text) as Record<string,unknown> : {}, sent:Buffer.byteLength(text) };

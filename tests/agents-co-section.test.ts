@@ -33,6 +33,9 @@ is("the install command takes the tool from main and installs it only with the r
 is("the watcher, waking on mail and on review or queue requests", co.includes('node ~/.agent-mail/agent-mail.mjs watch --as "Claude N" --also review,enqueue'), true);
 is("the correio branch holds only data; the code is reviewed in tooling/agent-mail/", [/O ramo `correio` guarda só dados/.test(co), /`tooling\/agent-mail\/` do main deste repositório, revisado por PR/.test(co)], [true, true]);
 is("the Codex reads it at each hourly task", /Codex[^.]*hora em hora/.test(co), true);
+is("the Codex also reads it before each unit and at least every 15 minutes while working (owner, 22/11/2026)", /Codex[^.]*antes de cada unidade nova e pelo menos a cada 15 minutos/.test(co), true);
+is("a family without signal for more than 2 hours counts as without quota (OWNER-20261122-0121-MAIL-AVAILABILITY)", /sem sinal há mais de 2 horas é tratada como sem cota/.test(co), true);
+is("the percent of quota and the low-quota rule are taught", [co.includes("`set-quota --remaining 35 --renews <data>`"), /com 10% ou menos, o correio avisa as outras famílias/.test(co)], [true, true]);
 
 part("everything the owner asked it to cover");
 for (const command of ["send", "ack", "request-review", "claim-review", "complete-review", "request-enqueue", "claim-enqueue", "complete-enqueue",
@@ -65,7 +68,7 @@ is("(k) identity: the session from the environment, refusal of another family's 
 part("(l) switches and review records (owner, OWNER-20261121-1749)");
 is("(l) cites the owner's authorization", co.includes("OWNER-20261121-1749-QUEUE-IMPROVEMENTS-AUTH"), true);
 is("switches start off, only the named session turns one on (full session id, owner's order step 2), anyone turns one off", [/começa desligado/.test(co), /só a sessão nomeada, Claude 5 ibqho \(`session_012ST5ibqhoHCYrphJXU5az3`\), conferida pelo identificador completo/.test(co), /qualquer sessão o desliga/.test(co)], [true, true, true]);
-is("privileged actions: the backup's three cases, distance, the #4932 request and the stated limit (C1-20261121-2036-C6-1)", [/a reserva, Claude 1 A \(`session_01DKvYQaxPrZTrVdXNwosXYi`\), só em três casos/.test(co), /nunca age num PR que escreveu, revisou ou enfileirou/.test(co), /pedido do coordenador publicado na #4932 \(`--request`\)/.test(co), /isso não é autenticação/.test(co)], [true, true, true, true]);
+is("privileged actions: the backup's three cases, distance, the request on the channel in force and the stated limit (C1-20261121-2036-C6-1)", [/a reserva, Claude 1 A \(`session_01DKvYQaxPrZTrVdXNwosXYi`\), só em três casos/.test(co), /nunca age num PR que escreveu, revisou ou enfileirou/.test(co), /pedido do coordenador publicado no canal de coordenação em vigor \(`--request`\), a issue aberta com o rótulo `canal-ativo` \(AC \(y\)\) ou a parte que ela continua/.test(co), /isso não é autenticação/.test(co)], [true, true, true, true]);
 is("record-review needs the exact head and the PR comment link", /`record-review`, com o head exato e o link do comentário da revisão no PR, ambos obrigatórios/.test(co), true);
 is("the PR comment stays the only proof of a review (2.1)", /o comentário no PR continua sendo a única prova da revisão para FQ \(1\), RQ e CV/.test(co), true);
 is("a record counts only for its head (2.3)", /o registro vale só para o head registrado; um head novo o anula/.test(co), true);

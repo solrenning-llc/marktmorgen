@@ -115,6 +115,10 @@ const SAVE =
   'end\n' +
   'return 1';
 
+/** The commands SAVE runs to check that the store is live (its id key's EXISTS and its erasing mark's HEXISTS), priced
+ * in tests/plan-cost-registry.ts, line payment-request-erasure-fence. */
+export const PAYREQ_FENCE_COMMANDS = 2;
+
 /**
  * Writes a request's record under its write lock (SAVE): "saved"; "lost" when
  * the lock ran out and may be another hand's, so nothing was written; "gone"

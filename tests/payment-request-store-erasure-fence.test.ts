@@ -7,9 +7,9 @@
  * request already kept. Now the same script checks the store's id key and its erasing mark before any write.
  *
  * Its cost, measured on the real route's work (rule 964c): what the studio's POST does once it takes a request (the
- * request kept and its email sent; with plans not on sale the route answers 409 before either), then the worst a request
- * takes after (a dozen changes, each one SAVE), every command sent and every redis.call its scripts name counted, plus
- * every byte sent and read, held inside the request's own ORDER_COMPUTE, where tests/plan-cost-registry.ts prices it.
+ * request kept and its email sent; with plans not on sale the route answers 409 before either) and one change. The
+ * fence's own calls, the SAVEs a unit takes and the fence's bytes are held at what line payment-request-erasure-fence
+ * (tests/plan-cost-registry.ts) prices; the whole request's work against ORDER_COMPUTE is row 141 of #5010.
  * Synthetic only: the Redis stand-in and a fetch stub; no real email or payment.
  */
 import { sendRequestEmail } from "@/lib/payment-requests";
@@ -20,6 +20,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { COMMAND, DB_BYTE, ORDER_COMPUTE } from "./plan-cost-registry";
+import { PAYREQ_FENCE_COMMANDS } from "@/lib/payment-request-store";
 
 process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -113,14 +114,14 @@ async function main(): Promise<void> {
     const store = await freshStore();
     const made = await createRequest(store, draftOf(Date.now()));
     if (!made.ok) throw new Error("no request");
-    const before = await readRequest(store, made.request.id);
+    const before = await readRequest(made.request.id);
     await realPipeline([["HSET", ERASING_KEY, await erasingField(storeRef(store)), String(Date.now())]]);
     const canceled = await cancelRequest(store, made.request.id);
     is("the withdrawal answers that the request is gone", canceled, null);
-    is("the record is as it was, not written back as withdrawn", (await readRequest(store, made.request.id))?.state, before?.state);
+    is("the record is as it was, not written back as withdrawn", (await readRequest(made.request.id))?.state, before?.state);
   }
 
-  part("Its cost on the real route's work: a request made and emailed, then a dozen changes, fit the request's ORDER_COMPUTE");
+  part("Its cost on the real route's work: the fence stays inside what line payment-request-erasure-fence prices");
   {
     const store = await freshStore();
     const seen: Command[] = [];
@@ -168,12 +169,19 @@ async function main(): Promise<void> {
     }
     is("the change's SAVE checks the store's id key and its erasing mark", change.some((c) => c[0] === "EVAL" && String(c[1]).startsWith(SAVE_HEAD) && c[2] === 6), true);
     const oneChange = counted(change, Math.max(redis.scriptCalls - beforeChange, 0));
-    const CHANGES = 12;
-    const commands = making + CHANGES * oneChange;
-    const allBytes = makingBytes + CHANGES * changeBytes;
-    const usd = commands * COMMAND + allBytes * DB_BYTE;
-    console.log("PAYMENT_REQUEST_ROUTE", JSON.stringify({ making, makingBytes, oneChange, changeBytes, commands, bytes: allBytes, usd, orderCompute: ORDER_COMPUTE }));
-    is(`the making (${making} commands) and ${CHANGES} changes (${oneChange} each), ${allBytes} bytes ($${usd.toFixed(6)}), fit one request's ORDER_COMPUTE ($${ORDER_COMPUTE})`, usd <= ORDER_COMPUTE, true);
+    // What line payment-request-erasure-fence prices (tests/plan-cost-registry.ts, paymentRequestFenceCost): the fence's
+    // own calls in each SAVE, at most two SAVEs for a studio unit that makes and emails a request and one for a change,
+    // each with 512 wire bytes. The whole request's work against ORDER_COMPUTE is row 141 of #5010 (coordinator acd6).
+    const saves = (commands: Command[]) => commands.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith(SAVE_HEAD));
+    const fenceLine = String(saves(seen)[0]?.[1] ?? "").split("\n").find((line) => line.includes("KEYS[5]")) ?? "";
+    is("each SAVE runs exactly PAYREQ_FENCE_COMMANDS fence calls", (fenceLine.match(/redis\.call\(/g) ?? []).length, PAYREQ_FENCE_COMMANDS);
+    is("a request made and emailed takes at most the two SAVEs priced for its studio unit", saves(seen).length <= 2 && saves(seen).length >= 1, true);
+    is("a change takes the one SAVE priced for its unit", saves(change).length, 1);
+    const fenceBytes = (c: Command) => JSON.stringify([c[7], c[8], c[c.length - 1]]).length;
+    is("the fence's keys and field fit the 512 wire bytes priced a SAVE", [...saves(seen), ...saves(change)].every((c) => fenceBytes(c) <= 512), true);
+    console.log("PAYMENT_REQUEST_ROUTE", JSON.stringify({ making, makingBytes, oneChange, changeBytes, savesMaking: saves(seen).length, orderCompute: ORDER_COMPUTE, note: "row 141 measures the whole request against ORDER_COMPUTE" }));
+    void COMMAND;
+    void DB_BYTE;
   }
   done();
 }

@@ -176,6 +176,7 @@ import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-rea
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
 import { MAX_EMAIL_LENGTH, MAX_OPEN_BROKEN_MOVES, MOVES_PER_MONTH } from "@/lib/auth";
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
+import { PAYREQ_FENCE_COMMANDS } from "@/lib/payment-request-store";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
 import { MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, MAX_COMPANY_RECORD_BYTES, STUDIO_UNIT_SENT_BYTES } from "@/lib/crm-companies-rules";
@@ -1541,6 +1542,15 @@ export function figureCost(allowances: Record<AllowanceKind, number>, kind: Allo
 /** Every studio unit may be a campaign mutation: two fence commands on each of three attempts, with wire headroom. */
 export function campaignLandingFenceCost(allowances: Record<AllowanceKind, number>): number {
   return allowances.studio * (LANDINGS_FENCE_COMMANDS * COMMAND + 4_096 * DB_BYTE);
+}
+/**
+ * A payment request's write checks that its store is live (lib/payment-request-store.ts, SAVE: PAYREQ_FENCE_COMMANDS,
+ * row 93 of #5010). A studio unit may make a request and email it, two SAVEs; a buyer's, webhook's or email unit may
+ * change one, one SAVE. Each with wire headroom for the two keys and the erasing field.
+ */
+export function paymentRequestFenceCost(allowances: Record<AllowanceKind, number>): number {
+  const perSave = PAYREQ_FENCE_COMMANDS * COMMAND + 512 * DB_BYTE;
+  return allowances.studio * 2 * perSave + (allowances.buyer + allowances.webhook + allowances.email + allowances.transactional) * perSave;
 }
 /**
  * Commands each counted public request adds for a paying store: its count
@@ -3228,6 +3238,17 @@ export const COST_LINES: CostLine[] = [
     basis: "In addition to the existing studio request, every studio unit funds six internal commands (EXISTS and HEXISTS on each of three compare-and-swap attempts) and 4096 wire bytes. No extra round trip. The trial uses the same per-unit surcharge in nonPayingWorst; free-share carries its share. Prices and visible allowances do not change.",
   },
   {
+    id: "payment-request-erasure-fence",
+    feature: "A payment request is written only while its store is live: its id key there and no erasing mark (row 93 of #5010)",
+    monthlyUsd: (tier) => paymentRequestFenceCost(STORE_ALLOWANCES[tier]),
+    sources: [
+      { file: "lib/payment-request-store.ts", names: ["PAYREQ_FENCE_COMMANDS", "storeIdCommand", "erasingField"] },
+      { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "NON_PAYING_ALLOWANCES"] },
+      { file: "app/api/store/payment-requests/route.ts", names: ["guardStoreWrite"] },
+    ],
+    basis: "The SAVE script that writes a request's record checks its store's id key (EXISTS) and its erasing mark (HEXISTS) before writing: PAYREQ_FENCE_COMMANDS more a SAVE, inside the same EVAL, no extra round trip. Every studio unit may make a request and email it (two SAVEs); every buyer, webhook, email and transactional unit may change one (one SAVE); each SAVE with 512 wire bytes of headroom. Measured on the real work in tests/payment-request-store-erasure-fence.test.ts. The trial uses the same in nonPayingWorst. Prices and visible allowances do not change.",
+  },
+  {
     id: "rest-api",
     feature: "The REST API: every request with one of the store's keys, a contact added or a product given as API_WRITE_UNITS of them (17 October 2026)",
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "api"),
@@ -3778,6 +3799,7 @@ export function nonPayingWorst(): number {
     // Each integration unit may be a vault open refused for storage, priced on top of its call (VAULT_REFUSED_PASS).
     + allowances.integration * VAULT_REFUSED_PASS
     + campaignLandingFenceCost(allowances)
+    + paymentRequestFenceCost(allowances)
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS
     // Its studio picture doors, checks and page saves, at its own studio figure (line studio-blob; Claude 7 on #2852).

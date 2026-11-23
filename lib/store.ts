@@ -4269,7 +4269,6 @@ export async function editProduct(
         refusal = fields;
         return { ok: false, reason: fields };
       }
-      if (fields.priceCents === 0 && recurring) return { ok: false, reason: "free" };
       const typedPwyw = readSuggested(rawSuggested, store.currency);
       if (typedPwyw === "bad") {
         pwywWhy = "suggested";
@@ -4288,6 +4287,10 @@ export async function editProduct(
       const summary = known && typedSummary === known.summary ? (product.summary ?? "") : typedSummary;
       if (known && same(recurring, known.recurring)) recurring = product.recurring ?? null;
       const pwywCents = known && typedPwyw === known.pwyw ? (product.pwyw?.suggestedCents ?? null) : typedPwyw;
+      // A free product is never charged again and again. Checked on what will be written, after the swap above, so a
+      // stale tab that changed only the price (or only the schedule) cannot pair it with the other tab's (Claude 5
+      // icRk's MEDIUM on #5468).
+      if (fields.priceCents === 0 && recurring) return { ok: false, reason: "free" };
       freeNow = fields.priceCents === 0;
       // A product with several prices cannot become free: the buyer would be
       // shown prices for a thing the page says costs nothing. Take the options

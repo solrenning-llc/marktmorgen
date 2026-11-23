@@ -20,9 +20,9 @@ globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", da
 
 const OWNER = "tabs@example.com";
 
-type Fields = { title: string; summary: string; price: string; pwyw: string | null; about: string };
-/** The studio's payloadOf (components/product-editor.tsx) for a one-time product. */
-const payload = (f: Fields) => ({ title: f.title, summary: f.summary, price: f.price, every: "", everyCount: 1, trial: "", payments: "", intro: null, yearly: null, pwyw: f.pwyw, about: f.about });
+type Fields = { title: string; summary: string; price: string; pwyw: string | null; about: string; every?: "" | "month" };
+/** The studio's payloadOf (components/product-editor.tsx): a one-time product, or a monthly one with `every`. */
+const payload = (f: Fields) => ({ title: f.title, summary: f.summary, price: f.price, every: f.every ?? "", everyCount: 1, trial: "", payments: "", intro: null, yearly: null, pwyw: f.pwyw, about: f.about });
 
 async function main(): Promise<void> {
   redis.clear();
@@ -79,6 +79,21 @@ async function main(): Promise<void> {
   is("saved", (await save(payload({ ...openedE, title: "Old screen title", pwyw: null }))).ok, true);
   const old = await now();
   is("every field it sent is written", [old.title, old.pwyw], ["Old screen title", null]);
+
+  part("A free product is never left charged again and again by two tabs (Claude 5 icRk's MEDIUM on #5468)");
+  const openedF: Fields = { ...openedE, title: "Old screen title", summary: "Twelve lessons.", pwyw: null };
+  is("tab F makes it monthly", (await save({ ...payload({ ...openedF, every: "month" }), base: payload(openedF) })).ok, true);
+  const g = await save({ ...payload({ ...openedF, price: "0" }), base: payload(openedF) });
+  is("tab G, opened before, makes it free leaving billing as it opened it: refused as free", [g.ok, g.error], [false, "free"]);
+  const monthly = (await readProduct((await storeForEmail(OWNER))!, id))!;
+  is("the product is still paid and monthly", [monthly.priceCents > 0, monthly.recurring?.interval], [true, "month"]);
+  const openedH: Fields = { ...openedF, price: (monthly.priceCents / 100).toFixed(2), every: "month" };
+  is("tab H takes it back to one-time", (await save({ ...payload({ ...openedH, every: "" }), base: payload(openedH) })).ok, true);
+  is("tab I makes it free", (await save({ ...payload({ ...openedF, price: "0" }), base: payload(openedF) })).ok, true);
+  const j = await save({ ...payload({ ...openedF, every: "month" }), base: payload(openedF) });
+  is("tab J, opened before, makes it monthly leaving the price as it opened it: refused as free", [j.ok, j.error], [false, "free"]);
+  const free = (await readProduct((await storeForEmail(OWNER))!, id))!;
+  is("the product is still free and one-time", [free.priceCents, free.recurring], [0, null]);
 
   done();
 }

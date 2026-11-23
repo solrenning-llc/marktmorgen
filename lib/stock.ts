@@ -232,7 +232,12 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
     checks += 1;
     try {
       const found = await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}`, undefined, undefined, undefined, CHECK_MS);
-      if (isSettled(found)) {
+      if (found.id !== session) {
+        // An answer about another checkout proves nothing about this one (board #5285, row #4455; Claude 5's LEVE on
+        // #5363): neither paid nor expired, so the unit stays held and the count is unknown.
+        used += 1;
+        unknown += 1;
+      } else if (isSettled(found)) {
         paid.push(session);
         used += 1;
       } else if (found.status === "expired") {

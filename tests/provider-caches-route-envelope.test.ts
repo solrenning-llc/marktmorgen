@@ -29,7 +29,8 @@ import StudioEmailPage from "@/app/studio/email/page";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { emailsTool } from "@/lib/mcp-tools";
 import { holdMoreApi, takeMoreApi } from "@/lib/api-guard";
-import { apiReadUnits } from "@/lib/api-read-rules";
+import { apiReadUnits, mailRevenueColdWork } from "@/lib/api-read-rules";
+import { readMailRevenuePaid } from "@/lib/mail-revenue";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setMailSettings, setPayPalSeller, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
@@ -239,6 +240,19 @@ async function main(): Promise<void> {
     console.log("MCP_GET_EMAILS", JSON.stringify({ took, units, did, fences: m.fences, fenceInner: FENCE_INNER * m.fences, scriptCalls: m.scriptCalls, evals: m.evals, stripe: m.stripe }));
     is("get_emails: told, the cache missed and kept by its fenced write (worst case)", [!(m.result instanceof Response), kept], [true, 1]);
     is(`get_emails: what it did comes to no more API requests than it took (${units} of ${took})`, units <= took, true);
+  }
+
+  part("Row 112: the model of get_emails' cold read (mailRevenueColdWork) counts the fenced keep (coordinator a8f7)");
+  {
+    const store = await liveStore();
+    await oneSentEmail(store);
+    const m = await watched(() => readMailRevenuePaid(store, null));
+    // The kept copy's GET is the probe's (EMAILS_PROBE_WORK reads its size first); the rest is the cold read the model prices.
+    const cold = billed(m) - 1;
+    const modelled = mailRevenueColdWork(0).commands;
+    console.log("MAIL_REVENUE_COLD", JSON.stringify({ billed: billed(m), cold, modelled, fences: m.fences, evals: m.evals }));
+    is("the cold read ran the fenced keep", m.fences, 1);
+    is(`the cold read's billed commands (${cold}) are within what mailRevenueColdWork prices (${modelled})`, cold <= modelled, true);
   }
 
   done();

@@ -148,11 +148,13 @@ const countsLeft = (funnel: PageFunnel, now: number): DataChange => ({ until: no
  * id and address checks and the HSET. A save prepared before the store's erasure, and sent after the closing walk
  * passed this hash or while it is still running, would otherwise write the erased store's private funnel back, its
  * name, address and steps, with no expiry. The guard is the fence of lib/store-live-cache.ts (storeLiveFence): a
- * store with an id is fenced on its id key still holding this store's ref, ARGV[7] (v2, the rule of
+ * store with an id is fenced on its id key still holding this store's ref, ARGV[7] (since v2, the rule of
  * store-claim-live:v1, lib/live-fence.ts: moveAccount repoints the id key, and an erasure begun after a move marks
  * the new ref's field, so the key's mere existence let a save prepared under the old ref land); one from before ids,
- * on its owner's record, and only while that record is still this store's own (its statsId); -4 means the store is
- * gone, moved or being erased, and nothing was written. KEYS[1] and ARGV[1..4] are SAVE_PAGE_FUNNEL's own. Two more
+ * on its owner's record, and only while that record is still this store's own (its statsId). -4 means the store is
+ * gone or being erased (or, before ids, its record is another's); -5 means (v3) a store with an id moved and live
+ * under another ref, whose room keeps the new funnel's slot (saveFunnel gives it back). Nothing was written on
+ * either. KEYS[1] and ARGV[1..4] are SAVE_PAGE_FUNNEL's own. Two more
  * commands than it (the HGET and the GET).
  */
 export const SAVE_STORE_PAGE_FUNNEL = `-- marktmorgen:funnel-save-live:v3

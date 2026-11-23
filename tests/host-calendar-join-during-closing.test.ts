@@ -26,7 +26,7 @@ import { closeForErasure } from "./closed-for-erasure";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { SERVED_COMMANDS, SERVING_READ_COMMANDS, SERVING_RECHECK_COMMANDS } from "./plan-cost-registry";
-import { MEMBER_STORES_READ } from "@/lib/team";
+import { MEMBER_STORES_READ, TEAM_JOIN, TEAM_JOIN_CALLS } from "@/lib/team";
 import { createHash } from "node:crypto";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
@@ -199,6 +199,9 @@ async function main(): Promise<void> {
     for (let k = 0; k <= 3; k += 1) await walkAt(walkTime(at, k));
     is("the calendar stays and the store leaves the batch", [await joined(liveSid), calendarKept(HOST), batchLeft()], [true, [1, 1, 1, 1], 0]);
   }
+
+  part("Cost (rule 964c): a join's one step is billed as its EVAL and the calls inside it");
+  is("TEAM_JOIN makes exactly TEAM_JOIN_CALLS redis.call (its SADD and its SET)", (TEAM_JOIN.match(/redis\.call\(/g) ?? []).length, TEAM_JOIN_CALLS);
 
   part("Cost (rule 964c): one host's decision, at the most the registry prices it");
   {

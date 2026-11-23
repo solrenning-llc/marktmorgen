@@ -232,6 +232,25 @@ async function main(): Promise<void> {
   is("the upload serves the second buyer, and lets the first one's place go", [upload.served, (await give(slip, "cs_test_licmark000009")) !== null, (await real([["HLEN", slipWaiting]]))[0]], [1, true, 0]);
   is("the first one is given nothing", await give(slip, "cs_test_licmark000008"), null);
 
+  part("5b. An impossible HDEL count never says a refunded buyer's waiting place was removed (Codex G-20261119-2127)");
+  // The job's HDEL names one field, so only 0 or 1 can come back; 2 is an unknown shape (rule 24). Until the place is
+  // confirmed gone the refund stays unread, so a later restock cannot give the refunded buyer a key.
+  const waitingReference = "cs_test_licmark000011";
+  const waitingPayment = "pi_LicenceMark0011";
+  const waitingRefund = "re_LicenceMark0011";
+  is("the refunded buyer starts waiting", await give(slip, waitingReference, "third@example.com"), { state: "waiting" });
+  sessionsByPayment[waitingPayment] = [{ id: waitingReference, object: "checkout.session", metadata: { store: "licencemark", product: slip.id } }];
+  refunds = [refund(waitingRefund, waitingPayment)];
+  redis.pipeline = (async (commands: Command[]) => {
+    if (commands.length === 1 && commands[0][0] === "HDEL" && commands[0][1] === slipWaiting && commands[0][2] === waitingReference) return [2];
+    return real(commands);
+  }) as typeof redis.pipeline;
+  await run();
+  redis.pipeline = real;
+  is("the impossible count leaves the refund unread and the waiting place reachable", [await seenOf(waitingRefund), (await real([["HEXISTS", slipWaiting, waitingReference]]))[0]], [0, 1]);
+  await run();
+  is("a healthy retry removes the waiting place and only then marks the refund read", [await seenOf(waitingRefund), (await real([["HEXISTS", slipWaiting, waitingReference]]))[0]], [1, 0]);
+
   part("6. Cost: keyForSale stays inside ORDERS_KEY_COMMANDS on its dearest path, lost to the mark after five tries");
   let commands = 0;
   let refused = 0;

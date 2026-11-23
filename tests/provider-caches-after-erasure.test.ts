@@ -17,7 +17,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_provider_caches_after_erasure";
-const ACCOUNT = "acct_1TestCacheErase01";
+const ACCOUNT = "acct_1TestCacheEr";
 const OWNER = "provider-caches@example.test";
 
 // The erasure begins while Stripe is being read, when `eraseDuring` is set.

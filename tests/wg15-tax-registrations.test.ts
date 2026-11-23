@@ -140,7 +140,9 @@ async function main(): Promise<void> {
   is("the 'adds it' sentence is only for prices without tax", /store\.tax\.included \?/.test(page), true);
   is("never says tax is added whatever the setting", page.includes("Stripe adds tax at your\n            checkout only where you have one"), false);
   // Revisor 1 on #2735: a sale paid with PayPal (lib/paypal-sales.ts) adds no tax; the page says so whenever the store sells that way.
-  is("says PayPal sales carry no tax, when the store sells through PayPal", page.includes("Sales paid with PayPal have no tax added.") && /sellsThroughPayPal\(store\) \?/.test(page), true);
+  is("says PayPal sales carry no tax, when the store offers PayPal", page.includes("Sales paid with PayPal have no tax added.") && /paypalOffered\(store\)\s*\?/.test(page), true);
+  // #3971: with tax on top, PayPal is not offered at all, and the creator is told why.
+  is("says PayPal is not offered while tax is on top", page.includes("PayPal is not offered at checkout while tax is added on top of your prices") && /taxOnTop\(store\)/.test(page), true);
   is("no threshold, no coverage", /threshold|you are covered|fully covered|compliant/i.test(page), false);
   done();
 }

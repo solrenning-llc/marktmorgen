@@ -42,7 +42,8 @@ const paypalOnly = policyFacts(policyInputFrom({ name: "PayPal Only", pixels: {}
 is("PayPal only: the PayPal account, no Stripe account", paypalOnly[0].sentences[2], "Payments go into PayPal Only's own PayPal account.");
 is("neither: no account named", JSON.stringify(policyFacts(policyInputFrom(store, [ebook], { stripe: false, paypal: false }, true), "en")[0].sentences).match(/Stripe|PayPal/), null);
 const inputSource = readFileSync("lib/store-policy-input.ts", "utf8").replace(/\s+/g, " ");
-is("read from the same checks the store's pages use (canSell, sellsThroughPayPal)", inputSource.includes("{ stripe: canSell(store), paypal: sellsThroughPayPal(store) }"), true);
+// paypalOffered since #3971: PayPal is named only while it is offered (not while tax is added on top of the prices).
+is("read from the same checks the store's pages use (canSell, paypalOffered)", inputSource.includes("{ stripe: canSell(store), paypal: paypalOffered(store) }"), true);
 is("no position quietly takes Stripe for granted: the methods are named", /policyInputFrom\(store, products, (true|false)\b/.test(inputSource), false);
 is("no postal address: no contact section", policyFacts(policyInputFrom({ ...store, mail: null } as typeof store, [ebook], STRIPE, true), "en").some((s) => s.id === "contact"), false);
 

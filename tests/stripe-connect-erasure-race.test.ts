@@ -17,7 +17,7 @@
 import { NextRequest } from "next/server";
 import { POST as connectPOST } from "@/app/api/stripe/connect/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { ERASING_KEY, STRIPE_CONNECT_HOLD_SECONDS, STRIPE_CONNECT_REUSE_SECONDS, beginStripeConnect, claimHandle, clearStripeConnect, createStore, deleteStore as deleteWith, erasingField, storeForId, storeRef } from "@/lib/store";
+import { ERASING_KEY, STRIPE_CONNECT_HOLD_SECONDS, STRIPE_CONNECT_REUSE_SECONDS, beginStripeConnect, claimHandle, clearStripeConnect, createStore, deleteStore as deleteWith, erasingField, finishStripeConnect, storeForId, storeRef } from "@/lib/store";
 import { BATCH_KEY, StripeConnectingError, prepareStore, queueDeleted } from "@/lib/closed-store-data";
 import { FINAL_INDEX } from "@/lib/closing-holds";
 import { LOCKED_UNTIL_STAR_COMMANDS, STRIPE_CONNECT_PRESS_EXTRA_COMMANDS, TAKE_COMMANDS } from "./plan-cost-registry";
@@ -347,6 +347,32 @@ async function main(): Promise<void> {
     const younger = await extraStore("connect-younger@example.com", "connectyoungerfirst", "connectyoungerextra");
     await beginStripeConnect(storeRef(younger), younger.sid, { country: "us", email: "connect-younger@example.com", name: "Younger" }, Date.now() - 28 * 24 * 60 * 60 * 1000);
     is("one younger than 29 days is still kept, for a press again", Boolean((await storeForId(younger.sid))?.stripeConnecting), true);
+  }
+
+  part("An answer that comes back just past the 29th day still finds its attempt (Claude 4 3Rj's NIT on #5095)");
+  {
+    // The press began a moment before the attempt turned 29 days old and Stripe answered a moment after: the attempt is
+    // read as none for reuse and holding, but the answer is for it, so the account is written (and a refusal closes it),
+    // never left for a press again with a new key, which could open a second account.
+    reset();
+    const owner = "connect-edge@example.com";
+    const store = await extraStore(owner, "connectedgefirst", "connectedgeextra");
+    const edge = Date.now() - STRIPE_CONNECT_REUSE_SECONDS * 1000 + 150;
+    const attempt = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Edge" }, edge);
+    is("the press writes its attempt just inside the 29 days", Boolean(attempt && "id" in attempt), true);
+    await new Promise((done) => setTimeout(done, 300));
+    const finished = attempt && "id" in attempt ? await finishStripeConnect(storeRef(store), store.sid, attempt.id, "acct_EdgeAnswer01") : null;
+    is("the answer just past the 29th day writes the account", finished?.stripeAccountId ?? null, "acct_EdgeAnswer01");
+    is("and closes the attempt", (await storeForId(store.sid))?.stripeConnecting ?? null, null);
+    const refusedOwner = "connect-edge-refused@example.com";
+    const refused = await extraStore(refusedOwner, "connectedgerefusedfirst", "connectedgerefusedextra");
+    const second = await beginStripeConnect(storeRef(refused), refused.sid, { country: "us", email: refusedOwner, name: "Edge" }, Date.now() - STRIPE_CONNECT_REUSE_SECONDS * 1000 + 150);
+    await new Promise((done) => setTimeout(done, 300));
+    is("a refusal just past the 29th day closes its attempt", second && "id" in second ? await clearStripeConnect(storeRef(refused), refused.sid, second.id) : false, true);
+    const other = await extraStore("connect-edge-other@example.com", "connectedgeotherfirst", "connectedgeotherextra");
+    const stale = await beginStripeConnect(storeRef(other), other.sid, { country: "us", email: "connect-edge-other@example.com", name: "Edge" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60) * 1000);
+    is("an answer for another attempt id still writes nothing", stale && "id" in stale ? await finishStripeConnect(storeRef(other), other.sid, "0".repeat(32), "acct_EdgeAnswer02") : null, null);
+    is("a stale attempt's own late answer is written too", stale && "id" in stale ? (await finishStripeConnect(storeRef(other), other.sid, stale.id, "acct_EdgeAnswer03"))?.stripeAccountId ?? null : null, "acct_EdgeAnswer03");
   }
 
   part("A cross-border refusal closes the attempt even after an earlier send (coordinator's df44 on #5095, optional)");

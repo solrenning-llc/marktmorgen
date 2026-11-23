@@ -106,7 +106,7 @@ async function main(): Promise<void> {
   await claimHandle(OWNER, "gonehouse", "Gone House", "");
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestGoneHouse01", true);
+  await setStripeAccount(OWNER, "acct_1TestGoneHse", true);
   await setSubscription(OWNER, { customerId: "cus_Owner0Gone1", subscriptionId: "sub_Owner0Gone1", active: true, period: paidPeriod() });
   const added = await addProduct(OWNER, "Supper Club", "", "20", { interval: "month", trialDays: 0, payments: 0 });
   if (!added.ok) throw new Error("no product");

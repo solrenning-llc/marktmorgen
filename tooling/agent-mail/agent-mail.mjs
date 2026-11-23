@@ -1733,6 +1733,14 @@ export function motivosContraReady(texto) {
   // A capital severity's plural in either case, "NITs" and "LEVEs" as well as "NITS" (Claude 3 wSUb3's MÉDIO on #5404).
   const tamanho = new RegExp(`\\b(${SEV})(?:S|s)?\\b`).exec(resto)
     ?? new RegExp(`\\b(${SEV})S?\\b[ \\t]*(\\d+[ \\t]*)?(\\([^)]*\\)[ \\t]*)?[:—–]|\\b(achados?|findings?|defeitos?|defects?)[ \\t]+(${SEV})S?\\b|\\b(\\d+|one|two|three|um|uma|dois|duas|tr[êe]s)[ \\t]+(${SEV})S?\\b`, "iu").exec(resto);
+  // Claude 5 ichw's two LEVE on #5404 (7116035718): a severity or a small-size word in any case right before a finding
+  // noun ("a minor nit in ...", "um pequeno problema"), the common finding nouns before a colon or a dash ("Issue:",
+  // "Cosmetic:", "Suggestion:", "Observação:") and a clause that opens with "Typo" are findings too. A net, not a proof:
+  // the reviewer still writes "sem achados" only when there are none (README).
+  const RUIDO = "nits?|nitpicks?|issues?|problems?|problemas?|pontos?|findings?|achados?|defects?|defeitos?|typos?|bugs?";
+  const nome = tamanho ? null
+    : new RegExp(`\\b(${SEV}|small|tiny|slight|pequen[oa]s?)S?[ \\t]+(${RUIDO})\\b|\\b(issues?|problems?|problemas?|pontos?|bugs?|typos?|cosmetic|cosm[ée]tic[oa]s?|suggestions?|sugest[ãa]o|sugest[õo]es|observa[çc][ãa]o|observa[çc][õo]es)[ \\t]*[:—–]|(^|\\n)[ \\t]*typos?\\b`, "iu").exec(resto);
+  if (nome) motivos.push(`o texto aponta um achado (${nome[0].trim()}); um achado de head anterior só conta como resolvido no formato ${FORMATO_RESOLVIDO}`);
   if (tamanho) motivos.push(`o texto aponta um achado (${tamanho[0]}); um achado de head anterior só conta como resolvido no formato ${FORMATO_RESOLVIDO}`);
   const adiado = /n[ãa]o bloque(ia|ante)|non-?blocking|follow-?up(?!\s+(commit|push)s?\b)|fica para depois|fica pra depois/i.exec(resto);
   if (adiado) motivos.push(`o texto adia um achado ("${adiado[0]}")`);

@@ -231,7 +231,7 @@ function parsePending(raw: unknown): Pending | null {
 
 export type AutoAnswer =
   | { ok: true; writing: string[]; cents: number }
-  | { ok: false; reason: "off" | "unknown" | "not_ready" | "language" | "long" | "busy" | "held" | "checking" | "owed" | "refund_pending" | "refunded" | "credited" | "plan" | "card" | "declined" | "unavailable" };
+  | { ok: false; reason: "off" | "unknown" | "not_ready" | "language" | "long" | "busy" | "held" | "checking" | "owed" | "refund_pending" | "refunded" | "credited" | "plan" | "card" | "declined" | "unavailable" | "changing" };
 
 /** What captions for this video cost, by how many languages: its length as charged. Null when it cannot have them yet. */
 export async function autoQuote(pathname: string): Promise<{ minutes: number; seconds: number } | null> {
@@ -279,7 +279,8 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
   const free = await askedFree(record.id, pathname, asked.languages);
   if (free !== "free") {
     await releaseMark(key, value);
-    return { ok: false, reason: free === "language" ? "language" : "unavailable" };
+    // A change by hand under way in an asked language says so (Claude 1's LOW 1 on #3427), not "try again".
+    return { ok: false, reason: free === "unknown" ? "unavailable" : free };
   }
   // Queued before the charge, so the sweep finds this order if nothing after the charge runs.
   const queued = repliesFor(await redisPipeline([["ZADD", QUEUE, now + ORDER_SETTLE_MS, record.id]]), 1);
@@ -370,13 +371,15 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
  * read (its free GET /videos/<id>, read as the sweep reads it, deliveredIn), because a change by hand whose answer was
  * lost is not written down here and its hold runs out after OWN_HOLD_SECONDS, while the sweep counts every asked
  * language the service lists as the AI's (Claude 2's MEDIUM on #3427). A language it lists that is not written down
- * here is written down, so the studio lists what the player offers. Read exactly (rule 24): anything else, a 404
- * included, is "unknown", never free, and nothing is charged.
+ * here is written down, so the studio lists what the player offers. A hold read whole is a change by hand under way
+ * ("changing", Claude 1's LOW 1 on #3427). Read exactly (rule 24): anything else, a 404 included, is "unknown",
+ * never free, and nothing is charged.
  */
-async function askedFree(id: string, pathname: string, langs: string[]): Promise<"free" | "language" | "unknown"> {
+async function askedFree(id: string, pathname: string, langs: string[]): Promise<"free" | "language" | "changing" | "unknown"> {
   try {
     const holds = repliesFor(await redisPipeline(langs.map((lang) => ["GET", ownKey(id, lang)])), langs.length);
-    if (!holds || holds.some((hold) => hold !== null)) return "unknown";
+    if (!holds || holds.some((hold) => hold !== null && typeof hold !== "string")) return "unknown";
+    if (holds.some((hold) => hold !== null)) return "changing";
     const listed = ((await streamCaptions([pathname]))[pathname] ?? []).map((t) => t.lang);
     if (langs.some((lang) => listed.includes(lang))) return "language";
     const answer = await askStream("GET", `/videos/${id}`);

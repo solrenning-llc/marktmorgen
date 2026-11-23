@@ -787,7 +787,7 @@ export async function streamCaptions(pathnames: string[]): Promise<Record<string
 
 export type CaptionAnswer =
   | { ok: true; captions: CaptionTrack[] }
-  | { ok: false; reason: CaptionProblem | "off" | "unknown" | "language" | "many" | "not_ready" | "unavailable" | "writing" };
+  | { ok: false; reason: CaptionProblem | "off" | "unknown" | "language" | "many" | "not_ready" | "unavailable" };
 
 /**
  * Gives a lesson's video captions in one language, from a file the creator

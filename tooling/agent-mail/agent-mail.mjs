@@ -1727,9 +1727,11 @@ export function motivosContraReady(texto) {
     // next line (Claude 5 iaqyQ's MÉDIO on #5404).
     .replace(new RegExp(`\\b(0|zero|nenhum|sem|no)[ \\t]+(achados?[ \\t]+)?(${SEV})S?\\b`, "gi"), " ");
   // Severities as reviews write them, in capitals; in any case when they name a finding: "Leve:", "One nit:", "achado leve",
-  // "1 low" (Claude 2 upbeat's MÉDIO on #5404).
+  // "1 low" (Claude 2 upbeat's MÉDIO on #5404). Each pairing stays inside one clause, "[ \t]", not "\s": the clauses are
+  // joined with a line break, so "sem achados. Alto contraste ..." never reads as "achados Alto" (Claude 5 iZByNH's LEVE on
+  // #5404, 7114392176).
   const tamanho = new RegExp(`\\b(${SEV})S?\\b`).exec(resto)
-    ?? new RegExp(`\\b(${SEV})S?\\b\\s*(\\d+\\s*)?(\\([^)]*\\)\\s*)?[:—–]|\\b(achados?|findings?|defeitos?|defects?)\\s+(${SEV})S?\\b|\\b(\\d+|one|two|three|um|uma|dois|duas|tr[êe]s)\\s+(${SEV})S?\\b`, "iu").exec(resto);
+    ?? new RegExp(`\\b(${SEV})S?\\b[ \\t]*(\\d+[ \\t]*)?(\\([^)]*\\)[ \\t]*)?[:—–]|\\b(achados?|findings?|defeitos?|defects?)[ \\t]+(${SEV})S?\\b|\\b(\\d+|one|two|three|um|uma|dois|duas|tr[êe]s)[ \\t]+(${SEV})S?\\b`, "iu").exec(resto);
   if (tamanho) motivos.push(`o texto aponta um achado (${tamanho[0]}); um achado de head anterior só conta como resolvido no formato ${FORMATO_RESOLVIDO}`);
   const adiado = /n[ãa]o bloque(ia|ante)|non-?blocking|follow-?up(?!\s+(commit|push)s?\b)|fica para depois|fica pra depois/i.exec(resto);
   if (adiado) motivos.push(`o texto adia um achado ("${adiado[0]}")`);

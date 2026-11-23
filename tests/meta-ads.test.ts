@@ -39,6 +39,7 @@ import {
   takeMeta,
 } from "@/lib/meta-ads";
 import { addSpend, readSpends } from "@/lib/ad-spend";
+import { spendOwner } from "./spend-owner";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, storeForId } from "@/lib/store";
 import { sourceAlias } from "@/lib/source-rules";
 import { store as redis } from "./redis-stub";
@@ -185,7 +186,7 @@ async function main(): Promise<void> {
   is("read", await readMetaSpend(statsId, store.currency), "read");
   is("every call to Meta carries appsecret_proof", proofs.length > 0 && proofs.every(Boolean), true);
   is("Meta's next page is followed", asked.filter((a) => a === "GET /act_111/insights").length, 2);
-  await addSpend(statsId, { channel: "podcast", cents: 2000, from: today, to: today });
+  await addSpend(statsId, { channel: "podcast", cents: 2000, from: today, to: today }, Date.now(), spendOwner(statsId));
   const spends = await readSpends(statsId);
   is("Meta's lines come with the typed ones, marked as Meta's", spends.map((s) => [s.source ?? "typed", s.channel, s.campaign, s.cents]).sort(), [
     ["meta", "facebook", "leadmagnet", 500],

@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { addSpend, readSpendLines, removeSpend } from "@/lib/ad-spend";
+import { spendOwner } from "./spend-owner";
 import { linesKey } from "@/lib/meta-ads";
 import { store as redis } from "./redis-stub";
 
@@ -45,7 +46,7 @@ const kept = () => (redis.run(["HLEN", spendKey]) as number) ?? 0;
 
 test("an add while Meta cannot be read keeps the one line and says so, never told as failed", async () => {
   connected();
-  const added = await metaFailing(() => addSpend(statsId, line, NOW));
+  const added = await metaFailing(() => addSpend(statsId, line, NOW, spendOwner(statsId)));
   assert.notEqual(added, "failed", "a line that is kept is never told as failed");
   assert.ok(added !== "failed" && added.ok && added.metaUnread, "Meta's lines are said to be unread, not taken as none");
   assert.equal(kept(), 1, "the one line is kept, once");
@@ -54,7 +55,7 @@ test("an add while Meta cannot be read keeps the one line and says so, never tol
 
 test("a removal while Meta cannot be read is done and told as done", async () => {
   connected();
-  const added = await addSpend(statsId, line, NOW);
+  const added = await addSpend(statsId, line, NOW, spendOwner(statsId));
   assert.ok(added.ok);
   const id = added.ok ? added.spends.find((s) => s.cents === 1_000)?.id : undefined;
   assert.ok(id);

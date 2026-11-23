@@ -9,6 +9,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { addSpend } from "@/lib/ad-spend";
+import { isSpendWrite, spendOwner } from "./spend-owner";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 
@@ -29,7 +30,7 @@ async function rows(): Promise<number[]> {
 
 /** Runs `run` with the write's pipeline (the one holding HSET) answered by `answer` after, or instead of, applying it. */
 async function withWrite<T>(answer: (commands: Command[]) => Promise<unknown>, run: () => Promise<T>): Promise<T> {
-  redis.pipeline = (async (commands: Command[]) => (commands.some((c) => c[0] === "HSET") ? answer(commands) : real(commands))) as typeof redis.pipeline;
+  redis.pipeline = (async (commands: Command[]) => (isSpendWrite(commands) ? answer(commands) : real(commands))) as typeof redis.pipeline;
   try {
     return await run();
   } finally {
@@ -39,7 +40,7 @@ async function withWrite<T>(answer: (commands: Command[]) => Promise<unknown>, r
 
 test("control: a healthy add records one line, confirmed", async () => {
   redis.clear();
-  const result = await addSpend(SID, LINE);
+  const result = await addSpend(SID, LINE, Date.now(), spendOwner(SID));
   assert.equal(result.ok, true);
   assert.deepEqual(await rows(), [1200]);
 });
@@ -49,17 +50,17 @@ test("a receipt lost after the write was applied refuses the add with nothing sa
   const first = await withWrite(async (commands) => {
     await real(commands);
     throw new Error("synthetic: the write was applied and its receipt lost");
-  }, () => addSpend(SID, LINE));
+  }, () => addSpend(SID, LINE, Date.now(), spendOwner(SID)));
   assert.deepEqual(first, { ok: false, reason: "unavailable" }, "a lost receipt is never saved success");
   assert.deepEqual(await rows(), [], "a refusal means nothing was saved");
-  const retry = await addSpend(SID, LINE);
+  const retry = await addSpend(SID, LINE, Date.now(), spendOwner(SID));
   assert.equal(retry.ok, true);
   assert.deepEqual(await rows(), [1200], "one real expense stays one after the retry");
 });
 
 test("a write not applied, with an empty receipt, is never reported saved", async () => {
   redis.clear();
-  const result = await withWrite(async () => [], () => addSpend(SID, LINE));
+  const result = await withWrite(async () => [], () => addSpend(SID, LINE, Date.now(), spendOwner(SID)));
   assert.deepEqual(result, { ok: false, reason: "unavailable" });
   assert.deepEqual(await rows(), []);
 });
@@ -74,26 +75,26 @@ for (const [name, receipt] of [
 ] as [string, (r: unknown[]) => unknown][]) {
   test(`an applied write answered with ${name} is undone by its own id and refused, keeping the lines kept before`, async () => {
     redis.clear();
-    await addSpend(SID, KEPT);
-    const result = await withWrite(async (commands) => receipt((await real(commands)) as unknown[]), () => addSpend(SID, LINE));
+    await addSpend(SID, KEPT, Date.now(), spendOwner(SID));
+    const result = await withWrite(async (commands) => [receipt(((await real(commands)) as unknown[][])[0])], () => addSpend(SID, LINE, Date.now(), spendOwner(SID)));
     assert.deepEqual(result, { ok: false, reason: "unavailable" });
     assert.deepEqual(await rows(), [700], "the line kept before stays; the unconfirmed one is gone");
-    assert.equal((await addSpend(SID, LINE)).ok, true);
+    assert.equal((await addSpend(SID, LINE, Date.now(), spendOwner(SID))).ok, true);
     assert.deepEqual(await rows(), [700, 1200], "the retry adds it once");
   });
 }
 
 test("when the undoing deletion is unconfirmed too, the outcome is unknown: never saved success, never 'nothing saved'", async () => {
   redis.clear();
-  await addSpend(SID, KEPT);
+  await addSpend(SID, KEPT, Date.now(), spendOwner(SID));
   redis.pipeline = (async (commands: Command[]) => {
     const replies = await real(commands);
-    if (commands.some((c) => c[0] === "HSET")) throw new Error("synthetic: receipt lost");
+    if (isSpendWrite(commands)) throw new Error("synthetic: receipt lost");
     if (commands.length === 1 && commands[0][0] === "HDEL") return [];
     return replies;
   }) as typeof redis.pipeline;
   try {
-    await assert.rejects(addSpend(SID, LINE), (error: unknown) => error instanceof UnknownReplyError);
+    await assert.rejects(addSpend(SID, LINE, Date.now(), spendOwner(SID)), (error: unknown) => error instanceof UnknownReplyError);
   } finally {
     redis.pipeline = real;
   }

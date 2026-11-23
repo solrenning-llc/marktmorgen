@@ -24,6 +24,31 @@ const SCRIPTS: Record<string, Script> = {
     run(text === "" ? ["DEL", about] : ["SET", about, text]);
     return [1];
   },
+  // lib/ad-spend.ts SPEND_IF_STORE_LIVE: an ad spend line written only while its store is its own and not erasing, by
+  // the rule of store-cache-live:v3, answered as the write's two-number receipt; {-1} gone or erasing, {-2} an owner's
+  // record that does not parse (row 100 of #5010).
+  "ad-spend-live:v1": (run, [live, erasing, spend], [field, statsId, ref, mode, id, value, keep]) => {
+    if (run(["HGET", erasing, field]) !== null) return [-1];
+    if (statsId === "") {
+      if (run(["GET", live]) !== ref) return [-1];
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return [-1];
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return [-2];
+      }
+      if (!record || typeof record !== "object") return [-2];
+      if ((record as { statsId?: unknown }).statsId !== statsId) return [-1];
+    }
+    let written: unknown;
+    if (mode === "once") written = run(["HSETNX", spend, id, value]);
+    else if (mode === "fresh") written = run(["HSET", spend, id, value]);
+    else return [-2];
+    return [written, run(["EXPIRE", spend, keep])];
+  },
   // lib/card-update.ts KEEP_CARD_OPEN_IF_LIVE: a setup page kept only while its store (id key, or record before ids) is live.
   "card-open-live:v1": (run, [storeId, erasing, open], [erasingField, session, seconds]) => {
     if (run(["EXISTS", storeId]) !== 1 || run(["HEXISTS", erasing, erasingField]) === 1) return "gone";

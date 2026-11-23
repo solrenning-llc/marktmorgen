@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import * as adSpend from "@/lib/ad-spend";
+import { isSpendWrite, spendOwner } from "./spend-owner";
 import { disconnectMeta } from "@/lib/meta-ads";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -56,7 +57,7 @@ test("1. a kept entry in another shape refuses the add: three tries write nothin
   const statsId = await fresh();
   redis.run(["HSET", spendKey(statsId), "deadbeef", "{"]);
   for (let i = 0; i < 3; i += 1) {
-    const tried = await settle(() => addSpend(statsId, LINE));
+    const tried = await settle(() => addSpend(statsId, LINE, Date.now(), spendOwner(statsId)));
     assert.ok(tried.error || (tried.value && !tried.value.ok), "never answered as saved");
   }
   assert.equal(redis.run(["HLEN", spendKey(statsId)]), 1, "only the entry in another shape is there; nothing was written behind the refusals");
@@ -66,11 +67,11 @@ test("1. a read after the write that fails answers the lines known, never 'not s
   const statsId = await fresh();
   let wrote = false;
   redis.pipeline = (async (commands: Command[]) => {
-    if (commands.some((c) => c[0] === "HSET")) wrote = true;
+    if (isSpendWrite(commands)) wrote = true;
     if (wrote && commands.length === 1 && commands[0][0] === "HGETALL") return [];
     return real(commands);
   }) as typeof redis.pipeline;
-  const added = await settle(() => addSpend(statsId, LINE));
+  const added = await settle(() => addSpend(statsId, LINE, Date.now(), spendOwner(statsId)));
   redis.pipeline = real;
   assert.equal(redis.run(["HLEN", spendKey(statsId)]), 1, "the line is saved once");
   assert.equal(added.error, undefined, "so the add is not answered as failed");
@@ -80,7 +81,7 @@ test("1. a read after the write that fails answers the lines known, never 'not s
 
 test("1. control: a healthy add writes once and answers both kinds of line", async () => {
   const statsId = await fresh();
-  const added = await addSpend(statsId, LINE);
+  const added = await addSpend(statsId, LINE, Date.now(), spendOwner(statsId));
   assert.equal(added.ok, true);
   if (added.ok) assert.deepEqual([added.metaUnread, added.spends.map((s) => s.cents).sort()], [false, [1200, 500]]);
   assert.equal(redis.run(["HLEN", spendKey(statsId)]), 1);
@@ -89,7 +90,7 @@ test("1. control: a healthy add writes once and answers both kinds of line", asy
 test("2. the weekly email's spend: whole, or none at all", async () => {
   assert.equal(typeof spendsForReport, "function", "lib/ad-spend.ts gives the weekly email its spend");
   const statsId = await fresh();
-  await addSpend(statsId, LINE);
+  await addSpend(statsId, LINE, Date.now(), spendOwner(statsId));
   assert.deepEqual((await spendsForReport!(statsId)).map((s) => s.cents).sort(), [1200, 500], "control: both parts");
   redis.pipeline = (async (commands: Command[]) =>
     commands[0]?.[0] === "EXISTS" && String(commands[0][1]).startsWith("nl:metaads:conn:") ? [] : real(commands)) as typeof redis.pipeline;

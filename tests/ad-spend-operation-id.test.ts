@@ -11,6 +11,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { NextRequest } from "next/server";
 import { addSpend, readSpendLines, removeSpend } from "@/lib/ad-spend";
+import { isSpendWrite, spendOwner } from "./spend-owner";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -27,7 +28,8 @@ const OTHER_OP = "fedcba9876543210fedcba9876543210";
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
-const isWrite = (commands: Command[]) => commands.some((c) => c[0] === "HSET" || c[0] === "HSETNX");
+// The write is one fenced EVAL since row 100 of #5010 (tests/spend-owner.ts).
+const isWrite = isSpendWrite;
 
 async function rows(statsId = SID): Promise<number[]> {
   const [raw] = await real([["HGETALL", KEY(statsId)]]);
@@ -57,11 +59,11 @@ async function heldTry(run: () => Promise<unknown>) {
 
 test("Codex Z's scenario with the operation id: a late first write and a retry of the same add leave exactly one line", async () => {
   redis.clear();
-  const first = await heldTry(() => addSpend(SID, { ...LINE, op: OP }));
+  const first = await heldTry(() => addSpend(SID, { ...LINE, op: OP }, Date.now(), spendOwner(SID)));
   assert.equal(first.pending.length, 1, "the first write is held, on its way");
   assert.equal(first.outcome, "unknown", "an unconfirmed write is never answered as saved nor as nothing saved");
   assert.deepEqual(await rows(), []);
-  const retry = await addSpend(SID, { ...LINE, op: OP });
+  const retry = await addSpend(SID, { ...LINE, op: OP }, Date.now(), spendOwner(SID));
   assert.equal(retry.ok, true);
   for (const commands of first.pending) await real(commands);
   assert.deepEqual(await rows(), [1200], "one expense stays one line when the first write lands late");
@@ -73,14 +75,14 @@ test("the first write landed and its receipt was lost: the retry of the same add
   const first = await withWrite(async (commands) => {
     await real(commands);
     throw new Error("synthetic: the write was applied and its receipt lost");
-  }, () => addSpend(SID, { ...LINE, op: OP }).then((r) => r, (e: unknown) => (e instanceof UnknownReplyError ? "unknown" : e)));
+  }, () => addSpend(SID, { ...LINE, op: OP }, Date.now(), spendOwner(SID)).then((r) => r, (e: unknown) => (e instanceof UnknownReplyError ? "unknown" : e)));
   assert.equal(first, "unknown", "a lost receipt is never 'nothing saved' under an id a retry shares");
   assert.deepEqual(await rows(), [1200], "never undone: undoing under a shared id could take away a retry that saved");
   const writes: Command[][] = [];
   const retry = await withWrite(async (commands) => {
     writes.push(commands);
     return real(commands);
-  }, () => addSpend(SID, { ...LINE, op: OP }));
+  }, () => addSpend(SID, { ...LINE, op: OP }, Date.now(), spendOwner(SID)));
   assert.equal(retry.ok, true);
   assert.equal(writes.length, 0, "an add already kept is not written again");
   assert.deepEqual(retry.ok && retry.spends.map((s) => s.cents), [1200]);
@@ -89,10 +91,10 @@ test("the first write landed and its receipt was lost: the retry of the same add
 
 test("the same add sent twice (a double click, a replayed request) is one line", async () => {
   redis.clear();
-  const [a, b] = await Promise.all([addSpend(SID, { ...LINE, op: OP }), addSpend(SID, { ...LINE, op: OP })]);
+  const [a, b] = await Promise.all([addSpend(SID, { ...LINE, op: OP }, Date.now(), spendOwner(SID)), addSpend(SID, { ...LINE, op: OP }, Date.now(), spendOwner(SID))]);
   assert.equal(a.ok && b.ok, true);
   assert.deepEqual(await rows(), [1200]);
-  assert.equal((await addSpend(SID, { ...LINE, op: OP })).ok, true);
+  assert.equal((await addSpend(SID, { ...LINE, op: OP }, Date.now(), spendOwner(SID))).ok, true);
   assert.deepEqual(await rows(), [1200]);
 });
 
@@ -102,7 +104,7 @@ test("the write of an id already kept by a concurrent try answers [0, 1]: saved,
   const result = await withWrite(async (commands) => {
     await real([["HSET", KEY(SID), OP, JSON.stringify(LINE)]]);
     return real(commands);
-  }, () => addSpend(SID, { ...LINE, op: OP }));
+  }, () => addSpend(SID, { ...LINE, op: OP }, Date.now(), spendOwner(SID)));
   assert.equal(result.ok, true);
   assert.deepEqual(await rows(), [1200]);
 });
@@ -120,27 +122,28 @@ for (const [label, receipt] of GARBLED) {
     redis.clear();
     const outcome = await withWrite(async (commands) => {
       await real(commands);
-      return receipt;
-    }, () => addSpend(SID, { ...LINE, op: OP }).then((r) => r, (e: unknown) => (e instanceof UnknownReplyError ? "unknown" : e)));
+      // The fenced EVAL answers its two-number receipt as its one reply (row 100 of #5010): the garbled receipt goes there.
+      return [receipt];
+    }, () => addSpend(SID, { ...LINE, op: OP }, Date.now(), spendOwner(SID)).then((r) => r, (e: unknown) => (e instanceof UnknownReplyError ? "unknown" : e)));
     assert.equal(outcome, "unknown");
     assert.deepEqual(await rows(), [1200], "left as it is: a retry of the same add finds it");
-    assert.equal((await addSpend(SID, { ...LINE, op: OP })).ok, true);
+    assert.equal((await addSpend(SID, { ...LINE, op: OP }, Date.now(), spendOwner(SID))).ok, true);
     assert.deepEqual(await rows(), [1200]);
   });
 }
 
 test("control: two adds with two operation ids are two lines", async () => {
   redis.clear();
-  assert.equal((await addSpend(SID, { ...LINE, op: OP })).ok, true);
-  assert.equal((await addSpend(SID, { ...LINE, op: OTHER_OP })).ok, true);
+  assert.equal((await addSpend(SID, { ...LINE, op: OP }, Date.now(), spendOwner(SID))).ok, true);
+  assert.equal((await addSpend(SID, { ...LINE, op: OTHER_OP }, Date.now(), spendOwner(SID))).ok, true);
   assert.deepEqual(await rows(), [1200, 1200]);
 });
 
 for (const [label, op] of [["no id", undefined], ["an id in capitals", OP.toUpperCase()], ["a short id", "deadbeef"], ["a long id", `${OP}0`], ["a number", 42]] as [string, unknown][]) {
   test(`control: ${label} keeps the earlier behavior (a fresh id chosen on the server, never the one sent)`, async () => {
     redis.clear();
-    assert.equal((await addSpend(SID, { ...LINE, op })).ok, true);
-    assert.equal((await addSpend(SID, { ...LINE, op })).ok, true);
+    assert.equal((await addSpend(SID, { ...LINE, op }, Date.now(), spendOwner(SID))).ok, true);
+    assert.equal((await addSpend(SID, { ...LINE, op }, Date.now(), spendOwner(SID))).ok, true);
     assert.deepEqual(await rows(), [1200, 1200]);
     for (const field of await fields()) assert.match(field, /^[a-f0-9]{8}$/);
   });
@@ -148,7 +151,7 @@ for (const [label, op] of [["no id", undefined], ["an id in capitals", OP.toUppe
 
 test("a line kept under an operation id is read back and can be removed by it", async () => {
   redis.clear();
-  assert.equal((await addSpend(SID, { ...LINE, op: OP })).ok, true);
+  assert.equal((await addSpend(SID, { ...LINE, op: OP }, Date.now(), spendOwner(SID))).ok, true);
   const read = await readSpendLines(SID);
   assert.deepEqual(read.spends.map((s) => s.id), [OP]);
   const removed = await removeSpend(SID, OP);
@@ -158,19 +161,22 @@ test("a line kept under an operation id is read back and can be removed by it", 
 });
 
 const OWNER = "operation-id-owner@example.com";
-const fixture = (async () => {
+// Started by the route's own test, not when the file loads: the cases above clear the stand-in Redis, and a fixture
+// running alongside them lost its store to one of those clears (row 100 of #5010 made each add take a few more steps).
+let fixtureRun: Promise<{ statsId: string; cookie: string }> | undefined;
+const fixture = () => (fixtureRun ??= (async () => {
   redis.clear();
   await claimHandle(OWNER, "operation-id-shop", "Operation Id Shop", "");
   await ensureStatsId(OWNER);
   await setSubscription(OWNER, { customerId: "cus_OperationId01", subscriptionId: "sub_OperationId01", active: true, tier: "pro", period: paidPeriod() });
   const store = (await storeForEmail(OWNER))!;
   return { statsId: store.statsId!, cookie: `${SESSION_COOKIE}=${await openSession(OWNER)}` };
-})();
+})());
 const post = (cookie: string, body: unknown) =>
   spendRoute(new NextRequest("https://marktmorgen.com/api/store/spend", { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", cookie, "content-type": "application/json" }, body: JSON.stringify(body) }));
 
 test("the route passes the add's operation id: a late first write and the retry through the route are one line", async () => {
-  const { statsId, cookie } = await fixture;
+  const { statsId, cookie } = await fixture();
   await real([["DEL", KEY(statsId)]]);
   const pending: Command[][] = [];
   const first = await withWrite(async (commands) => {

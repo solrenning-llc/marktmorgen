@@ -32,6 +32,7 @@ import { cameFrom } from "@/lib/came-from";
 import { addNote, readNotes, removeNote, noteDay } from "@/lib/stats-notes";
 import { readSpend, spendBy, spendWithin } from "@/lib/ad-spend-rules";
 import { addSpend, readSpends } from "@/lib/ad-spend";
+import { spendOwner } from "./spend-owner";
 import { heardOff, recordHeard, setHeardOff } from "@/lib/heard";
 import { checkQuiet, isQuiet } from "@/lib/quiet-sales";
 import { setWeeklyOff, summaryOf, weeklyMessage } from "@/lib/stats-report";
@@ -257,7 +258,7 @@ async function main(): Promise<void> {
   ], [true, { ok: false, reason: "channel" }, { ok: false, reason: "amount" }, { ok: false, reason: "amount" }, { ok: false, reason: "days" }]);
   const line = { cents: 7000, from: "2026-10-01", to: "2026-10-07" };
   is("spread over the days it ran", [spendWithin(line, "2026-10-05", "2026-10-31"), spendWithin(line, "2026-09-01", "2026-09-30"), spendWithin(line, "2026-09-01", "2026-12-31")], [3000, 0, 7000]);
-  const added = await addSpend(notesStats, { channel: "Instagram", campaign: "October Reel", cents: 7000, from: "2026-10-01", to: "2026-10-07" }, NOW);
+  const added = await addSpend(notesStats, { channel: "Instagram", campaign: "October Reel", cents: 7000, from: "2026-10-01", to: "2026-10-07" }, NOW, spendOwner(notesStats));
   is("kept, the words as the numbers count them", added.ok ? added.spends.map((s) => [s.channel, s.campaign]) : null, [["instagram", "octoberreel"]]);
   const by = spendBy(await readSpends(notesStats), "2026-10-05", "2026-10-11");
   is("by channel and by post", [by.channels.get("instagram"), by.campaigns.get("octoberreel"), by.total], [3000, 3000, 3000]);

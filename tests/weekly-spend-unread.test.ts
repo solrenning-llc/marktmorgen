@@ -9,6 +9,7 @@ import { summaryClaimKey } from "./summary-claim-command";
 import { NextRequest } from "next/server";
 import { GET as weekly } from "@/app/api/cron/weekly/route";
 import { addSpend } from "@/lib/ad-spend";
+import { spendOwner } from "./spend-owner";
 import { control, texts } from "./weekly-spend-unread-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -37,7 +38,7 @@ async function main(): Promise<void> {
     texts.length = 0;
     control.numbers = "visitors-5";
     // A typed line of $12, so a Meta part unread could be mistaken for all of the spend.
-    await addSpend(STATS, { channel: "instagram", campaign: "", cents: 1200, from: today, to: today });
+    await addSpend(STATS, { channel: "instagram", campaign: "", cents: 1200, from: today, to: today }, Date.now(), spendOwner(STATS));
     metaUnread = unread;
     commands.length = 0;
   };

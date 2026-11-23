@@ -87,6 +87,18 @@ export function storeInfo(store: Store) {
  * anything else is answered 400 invalid_cursor before anything is read or taken, as /api/v1/sales does, never a
  * silent first page that a sync would loop on (tests/api-cursor-invalid.test.ts).
  */
+/**
+ * The one `cursor` a list request sent, read from its query: none, or exactly one value, which the list then checks
+ * (listCursor). Sent twice (a query builder repeating it, a checkpoint added to a URL that had one) is not one cursor
+ * the list gave: answered 400 invalid_cursor before anything is read or taken, as /api/v1/sales does (lib/api-sales.ts,
+ * cursorOf), never the first value taken in silence (#4363).
+ */
+export function sentCursor(params: URLSearchParams): { ok: true; cursor: string | null } | { ok: false; refused: Response } {
+  const sent = params.getAll("cursor");
+  if (sent.length <= 1) return { ok: true, cursor: sent[0] ?? null };
+  return { ok: false, refused: apiError(400, "invalid_cursor", "Send cursor once: the next value of the page before, or leave cursor out to start from the first page.") };
+}
+
 function listCursor(cursor: string | null, given: RegExp): { ok: true; cursor: string | null } | { ok: false; refused: Response } {
   if (cursor === null || cursor === "") return { ok: true, cursor: null };
   if (given.test(cursor)) return { ok: true, cursor };

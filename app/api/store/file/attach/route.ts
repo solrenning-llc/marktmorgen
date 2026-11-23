@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
     if (removed && removed.pathname !== file?.pathname && stillPlayed && !stillPlayed.has(removed.pathname)) {
       await deleteOrSweep(removed.pathname, "the replaced file");
       // Buyers' stamped copies of it go with it.
-      await dropStamped(removed);
+      await dropStamped(removed, result.store);
     }
 
     return Response.json({ ok: true });

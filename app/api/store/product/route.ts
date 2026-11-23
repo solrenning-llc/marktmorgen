@@ -567,7 +567,7 @@ export async function POST(request: NextRequest) {
             );
           });
         }
-        for (const file of filesOnProduct(going)) await dropStamped(file);
+        for (const file of filesOnProduct(going)) await dropStamped(file, removed.store);
       }
     } else if (action === "link") {
       // The link is checked before anything is written, so a product is never
@@ -590,7 +590,7 @@ export async function POST(request: NextRequest) {
       const linked = await setProductLink(ref, id, read.url);
       if (linked.ok && linked.removed) {
         await deleteOrSweep(linked.removed.pathname, "a file replaced by a link");
-        await dropStamped(linked.removed);
+        await dropStamped(linked.removed, guarded.store);
       }
       result = linked.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(linked.reason) };
     } else if (action === "visibility") {

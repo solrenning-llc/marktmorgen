@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
     // a fraction of a cent; an option pointing at nothing costs a sale.
     for (const file of result.removed) {
       await deleteOrSweep(file.pathname, "the file of a removed option");
-      await dropStamped(file);
+      await dropStamped(file, result.store);
     }
 
     return Response.json({ ok: true });

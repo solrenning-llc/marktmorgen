@@ -9,7 +9,9 @@
  *    vaultHeld), the video service's size of the store, the storage reservation taken and let go
  *    (lib/storage-reservations.ts), and the copy's own path asked about once (lib/file-store.ts headFile), so a copy
  *    already in place is written over without being reserved again as new storage. STORAGE_MEASURE_UNITS are taken before it lists; refused, nothing is listed and
- *    nothing is kept.
+ *    nothing is kept. A buyer's copy is also noted under the buyer before it is written, and the note read again after
+ *    (lib/pdf-stamp.ts noteCopy, stillNoted; board #5427, row #3312), its copy deleted again when the buyer's deletion
+ *    passed in between: inside the same units (tests/plan-cost-registry.ts COPY_NOTE_COMMANDS).
  * 2. A store found without room is noted for NO_ROOM_NOTE_SECONDS, for every file of the store: during that time
  *    no copy and no preview measures the store again.
  * 3. A copy stamped on the fly (lib/pdf-stamp.ts stampedDelivery), made for a buyer of a store without room and
@@ -23,7 +25,7 @@ import { MAX_STAMP_BYTES } from "@/lib/product-file";
 /** Pages each file store's listing reads at the most when a store's storage is measured. */
 export const MEASURE_LIST_PAGES = 20;
 /** Public requests one measurement of a store's storage is counted as, taken before it lists. */
-export const STORAGE_MEASURE_UNITS = 14;
+export const STORAGE_MEASURE_UNITS = 16;
 /** How long a store found without room for a new copy is taken to be still without it, in seconds. */
 export const NO_ROOM_NOTE_SECONDS = 60 * 60;
 
@@ -72,3 +74,26 @@ export type CopyMeter = {
   /** Gives back `units` taken and not needed. Best effort. */
   give(units: number): Promise<void>;
 };
+
+/**
+ * The stamped copies kept for one person in one store are noted under them (lib/pdf-stamp.ts stampedCopiesKey;
+ * board #5427, row #3312), so deleting the person finds and deletes each one: a copy carries their address on its
+ * pages. COPIES_PER_PERSON bounds the note: past it a copy is stamped on the fly for that download and not kept, as for
+ * a store without room. A copy whose path is longer than COPY_PATH_MOST bytes is not noted, and so not kept, either.
+ */
+export const COPIES_PER_PERSON = 50;
+export const COPY_PATH_MOST = 300;
+/**
+ * What one noted copy takes of the store's data room for as long as it is noted (a slot of its own, never expiring):
+ * its member in the buyer's note, the copy's record key (54 bytes), a space and a path of at most COPY_PATH_MOST
+ * bytes, and the same member again on its file's list (lib/pdf-stamp.ts stampedFileKey) after the buyer's one-way key
+ * (32 bytes) and a space, each with its set's own overhead, rounded up.
+ */
+export const COPY_NOTE_BYTES = 1_024;
+/**
+ * Removing a file takes its copies out of their buyers' notes (lib/pdf-stamp.ts dropStamped; Claude 5 iYwjc's MÉDIO on
+ * #5475): UNNOTE_PAGE notes at a time, at most UNNOTE_PAGES_PER_CALL pages a call, the rest left on a list for the
+ * next kept copy, which takes UNNOTE_PAGES_PER_CALL pages of it.
+ */
+export const UNNOTE_PAGE = 250;
+export const UNNOTE_PAGES_PER_CALL = 4;

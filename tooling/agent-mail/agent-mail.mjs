@@ -803,19 +803,23 @@ export function conflitosDoPr(pr, ramo = null) {
   }
 }
 
-/** As famílias que concluíram pelo correio uma revisão deste PR neste head: pela FQ (1), elas não o enfileiram. */
-export function revisoresDoHead(pr, sha, commit = buscar()) {
+/**
+ * As famílias que concluíram pelo correio uma revisão deste PR neste head: pela FQ (1), elas não o enfileiram. Com
+ * `soReady`, só as de READY: um CHANGES não tira a família de um novo pedido de revisão do mesmo head, porque o autor pode
+ * responder por escrito, sem mudar o código, e pedir que ela olhe de novo (LEVE do Claude 2 main no #5261).
+ */
+export function revisoresDoHead(pr, sha, commit = buscar(), { soReady = false } = {}) {
   const f = new Set();
   for (const c of arquivos(commit, "revisao/feitas")) {
     const texto = conteudo(commit, c);
     const head = campo(texto, "Head");
-    if (campo(texto, "PR") === String(pr) && head && sha && (head.startsWith(String(sha).slice(0, 10)) || String(sha).startsWith(head.slice(0, 10))) && /^(READY|CHANGES)$/.test(campo(texto, "Resultado"))) f.add(familia(campo(texto, "Por")));
+    if (campo(texto, "PR") === String(pr) && head && sha && (head.startsWith(String(sha).slice(0, 10)) || String(sha).startsWith(head.slice(0, 10))) && (soReady ? /^READY$/ : /^(READY|CHANGES)$/).test(campo(texto, "Resultado"))) f.add(familia(campo(texto, "Por")));
   }
   // Item 2: com o interruptor record-review ligado, quem registrou revisão deste head também fica de fora (R3: só registro
   // identificado ou confirmado pelo coordenador). Vale só o head registrado (2.3).
   if (sha && arquivos(commit, "revisao/registros").length) {
     for (const r of registros(pr, commit, null)) {
-      if (r.excluiDaFila && (r.sha.startsWith(String(sha).slice(0, 10)) || String(sha).startsWith(r.sha.slice(0, 10)))) f.add(familia(r.por));
+      if (r.excluiDaFila && (!soReady || r.resultado === "READY") && (r.sha.startsWith(String(sha).slice(0, 10)) || String(sha).startsWith(r.sha.slice(0, 10)))) f.add(familia(r.por));
     }
   }
   return f;
@@ -1119,8 +1123,14 @@ export function revisoraDoComentario(corpo, curto) {
  * comentário de quem trabalha no repositório, com a revisora lida por revisoraDoComentario. null = NÃO CONFERIDO (o GitHub não respondeu); quem chama não entrega nada nesse caso (passo 4).
  */
 const vereditosNoPr = new Map();
-// c944: o texto de cada veredito no PR, por família, para quem conclui saber se foi outra sessão da família que o escreveu.
+// c944: o texto e o resultado de cada veredito no PR, por família: para quem conclui saber se foi outra sessão da família
+// que o escreveu, e para o pedido de revisão deixar de fora só quem deu READY.
 const corposNoPr = new Map();
+/** READY ou CHANGES: o primeiro dos dois nas duas primeiras linhas, fora das contagens ("1 of 2 READY"). */
+function vereditoDoCorpo(corpo) {
+  const linhas = String(corpo ?? "").split(/\r?\n/).filter((l) => l.trim()).slice(0, 2).join("\n");
+  return /\b(READY|CHANGES)\b/.exec(linhas.replace(/\b\d+\s+(?:of|de)\s+\d+\s+(?:READY|CHANGES)\b/gi, ""))?.[1] ?? null;
+}
 export function revisoresNoPr(pr, sha) {
   if (testeLigado("CORREIO_SEM_GH")) return new Set();
   if (!/^\d+$/.test(String(pr ?? "")) || !sha) return null;
@@ -1135,7 +1145,7 @@ export function revisoresNoPr(pr, sha) {
         const [corpo, associacao] = JSON.parse(linha);
         if (!QUEM_TRABALHA.has(String(associacao))) continue;
         const quem = revisoraDoComentario(corpo, curto);
-        if (quem) { f.add(quem); corpos.set(quem, [...(corpos.get(quem) ?? []), String(corpo)]); }
+        if (quem) { f.add(quem); corpos.set(quem, [...(corpos.get(quem) ?? []), { corpo: String(corpo), veredito: vereditoDoCorpo(corpo) }]); }
       }
     }
   } catch {
@@ -1157,7 +1167,18 @@ export function vereditoDeIrmaNoPr(pr, sha, eu) {
   const sessao = /^\s*(?:claude|codex)(?:\s*\d+)?\s+(\S+)/i.exec(String(eu))?.[1];
   if (!sessao) return false;
   const proprio = new RegExp(`(?:^|[^A-Za-z0-9])${sessao.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`);
-  return (corposNoPr.get(`${pr}@${String(sha).slice(0, 10)}`)?.get(familia(eu)) ?? []).some((corpo) => !proprio.test(corpo));
+  return (corposNoPr.get(`${pr}@${String(sha).slice(0, 10)}`)?.get(familia(eu)) ?? []).some(({ corpo }) => !proprio.test(corpo));
+}
+
+/**
+ * As famílias com READY neste head no PR e nenhum CHANGES nele: só elas ficam de fora de um novo pedido de revisão do
+ * mesmo head (LEVE do Claude 2 main no #5261). null = NÃO CONFERIDO.
+ */
+export function aprovadoresNoPr(pr, sha) {
+  const f = revisoresNoPr(pr, sha);
+  if (f === null) return null;
+  const corpos = corposNoPr.get(`${pr}@${String(sha).slice(0, 10)}`) ?? new Map();
+  return new Set([...f].filter((fam) => { const vs = (corpos.get(fam) ?? []).map((c) => c.veredito); return vs.includes("READY") && !vs.includes("CHANGES"); }));
 }
 
 export function registrarRevisao({ eu, pr, sha, resultado, link, agora = new Date() }) {
@@ -1247,8 +1268,9 @@ export function pedir({ tipo, de, pr, sha, texto = "", para = "", exclui = "", c
       // Revisão: as famílias com commits no PR ficam de fora sozinhas, além das que o autor excluiu.
       const lidas = commits ?? null;
       // Fila: quem revisou este head pelo correio fica de fora sozinho (FQ (1)); revisões feitas fora do correio, o autor põe com --exclude.
-      // Revisão (c944, coordenador 999b): quem já deu veredito neste head, pelo correio ou no PR (`vereditos`), também fica de fora.
-      const revisores = new Set([...revisoresDoHead(pr, sha), ...(tipo === "revisao" ? vereditos ?? [] : [])]);
+      // Revisão (c944, coordenador 999b): quem já deu READY neste head, pelo correio ou no PR (`vereditos`), também fica de
+      // fora; um CHANGES não tira (LEVE do Claude 2 main no #5261).
+      const revisores = tipo === "revisao" ? new Set([...revisoresDoHead(pr, sha, undefined, { soReady: true }), ...(vereditos ?? [])]) : revisoresDoHead(pr, sha);
       // Commits no PR excluem só da revisão (CO (e)); na fila, a FQ (1) exclui só o autor e quem revisou o head
       // (coordenador, 21/11/2026, 19h41 UTC).
       const todas = new Set([...String(exclui).split(",").map((n) => n.trim()).filter(Boolean).map(familia), ...(tipo === "revisao" ? lidas?.familias ?? [] : []), ...revisores]);
@@ -2174,10 +2196,10 @@ async function main(argv) {
       const marca = estadoPr(o.pr);
       if (marca.ativo) console.log(`ATENÇÃO: #${o.pr} está com ${marca.acao} de ${marca.por}; enquanto ele valer, claim-enqueue não entrega o pedido. Se o trabalho acabou, rode release-pr --as "${marca.por}" --pr ${o.pr}.`);
     }
-    // c944: na revisão, as famílias que já deram veredito neste head só no PR também ficam de fora; sem ler o PR, o pedido
+    // c944: na revisão, as famílias que já deram READY neste head só no PR também ficam de fora; sem ler o PR, o pedido
     // é feito mesmo assim e diz que isso NÃO FOI CONFERIDO.
-    const vereditos = tipo === "revisao" ? revisoresNoPr(o.pr, o.sha) : undefined;
-    if (vereditos === null) console.log(`ATENÇÃO: os vereditos escritos no #${o.pr} NÃO FORAM CONFERIDOS agora (o GitHub não respondeu); quem já revisou este head só no PR não ficou de fora; diga com --exclude.`);
+    const vereditos = tipo === "revisao" ? aprovadoresNoPr(o.pr, o.sha) : undefined;
+    if (vereditos === null) console.log(`ATENÇÃO: os vereditos escritos no #${o.pr} NÃO FORAM CONFERIDOS agora (o GitHub não respondeu); quem já deu READY neste head só no PR não ficou de fora; diga com --exclude.`);
     console.log(`pedido registrado: ${pedir({ tipo, de: o.de, pr: o.pr, sha: o.sha, texto, para, exclui: o.exclui === true ? "" : o.exclui ?? "", commits, vereditos: vereditos ?? undefined })}`);
     {
       if (!commits) console.log("ATENÇÃO: não consegui ler os commits do PR; diga com --exclude as famílias que têm commits nele.");
@@ -2186,11 +2208,11 @@ async function main(argv) {
         // Na fila, as famílias com commit também ficam de fora (coordenador, 605b e 49de), salvo a exceção 4acb.
         const excluidas = String(o.exclui === true ? "" : o.exclui ?? "").split(",").map((n) => n.trim()).filter(Boolean).map(familia);
         const revisoresFila = tipo === "fila" ? [...revisoresDoHead(o.pr, o.sha)] : [];
-        // c944: na revisão, quem já deu veredito neste head (correio ou PR) não aparece entre os que podem revisar.
-        const jaRevisaram = tipo === "revisao" ? [...revisoresDoHead(o.pr, o.sha), ...(vereditos ?? [])] : [];
+        // c944: na revisão, quem já deu READY neste head (correio ou PR) não aparece entre os que podem revisar.
+        const jaRevisaram = tipo === "revisao" ? [...revisoresDoHead(o.pr, o.sha, undefined, { soReady: true }), ...(vereditos ?? [])] : [];
         const fora = new Set([...commits.familias, ...revisoresFila, ...jaRevisaram, familia(o.de), ...excluidas]);
         console.log(`famílias com commits no PR (ficam de fora${tipo === "fila" ? ", coordenador 605b e 49de" : ""}): ${[...commits.familias].sort().join(", ") || "nenhuma além do autor"}`);
-        if (jaRevisaram.length) console.log(`famílias com veredito neste head (ficam de fora, c944): ${[...new Set(jaRevisaram)].sort().join(", ")}`);
+        if (jaRevisaram.length) console.log(`famílias com READY neste head (ficam de fora, c944): ${[...new Set(jaRevisaram)].sort().join(", ")}`);
         const podem = [...FAMILIAS].filter((f) => !fora.has(f));
         console.log(`${tipo === "fila" ? "podem enfileirar (sem o autor, as famílias com commits, quem revisou este head pelo correio e os excluídos; confira revisões feitas fora do correio)" : "podem revisar"}: ${podem.join(", ") || "NENHUMA família; peça ao coordenador"}`);
         if (tipo === "fila" && !podem.length) {

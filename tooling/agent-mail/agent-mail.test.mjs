@@ -999,6 +999,21 @@ console.log("a family with a verdict on the head is left out of a new review req
   const outroDaFamilia = noPr + JSON.stringify([`Claude 6 Y review #944 @${H62.slice(0, 10)}: READY\n\nbody`, "COLLABORATOR"]) + "\n";
   r = run(["complete-review", "--as", "Claude 6 X", idB, "--result", "READY", "--text", "ok"], { ...m62, ...as("c6"), FAKE_COMMENTS: outroDaFamilia });
   is("c944: a verdict written on the PR by the same family during the take is warned about at completion, without refusing", r.ok && /concluído/.test(r.out) && /aviso: .*claude-6.*já tem veredito/.test(r.out), r.out);
+  // LOW of Claude 2 main on #5261: a CHANGES on this head is not a reason to leave that family out. The author may answer
+  // in writing with no code change and ask the same family to look again on the same head.
+  const comMudancas = noPr + JSON.stringify([`Claude 7 X review #944 @${H62.slice(0, 10)}: CHANGES (1 LOW)\n\nbody`, "COLLABORATOR"]) + "\n";
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "944", "--sha", H62, "--text", "changes"], { ...m62, ...as("c4"), FAKE_COMMENTS: comMudancas });
+  const idC = /pedido registrado: (\S+)/.exec(r.out)?.[1] ?? "";
+  is("c944: a family whose verdict on this head is CHANGES, on the PR, is not left out of a new review request", r.ok && !/^Exclui: .*claude-7/m.test(pedido(idC)) && /podem revisar: [^\n]*claude-7/.test(r.out), r.out + pedido(idC));
+  run(["claim-review", "--as", "Claude 7 X"], { ...m62, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", FAKE_COMMENTS: "" });
+  run(["complete-review", "--as", "Claude 7 X", idC, "--result", "CHANGES", "--text", "1 LOW"], { ...m62, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", FAKE_COMMENTS: "" });
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "944", "--sha", H62, "--text", "answered in writing"], { ...m62, ...as("c4"), FAKE_COMMENTS: "" });
+  const idD = /pedido registrado: (\S+)/.exec(r.out)?.[1] ?? "";
+  is("c944: nor a family whose CHANGES on this head is in the mail", r.ok && !/^Exclui: .*claude-7/m.test(pedido(idD)) && /podem revisar: [^\n]*claude-7/.test(r.out), r.out + pedido(idD));
+  r = run(["claim-review", "--as", "Claude 7 X"], { ...m62, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", FAKE_COMMENTS: "" });
+  is("c944: and that family can take it", /pegou:/.test(r.out), r.out);
+  run(["release-review", "--as", "Claude 7 X", idD], { ...m62, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
+  run(["cancel-review", "--as", "Claude 4 X", idD, "--reason", "test"], { ...m62, ...as("c4") });
   r = run(["request-review", "--from", "Claude 4 X", "--pr", "944", "--sha", H62, "--text", "down"], { ...m62, ...as("c4"), FAKE_COMMENTS_DOWN: "1" });
   is("c944: with the PR's comments unreadable, the request is still written and says so (NOT CHECKED)", r.ok && /pedido registrado/.test(r.out) && /NÃO FORAM CONFERIDOS/.test(r.out), r.out);
 }

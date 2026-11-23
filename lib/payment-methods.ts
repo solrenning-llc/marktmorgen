@@ -21,6 +21,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DELAYED_METHODS } from "@/lib/instant-pay";
 import { CURRENCIES, type Currency } from "@/lib/money";
 import type { Store } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { STRIPE_LIST_VERSION, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 /** How each method is named in the studio, and the one thing worth knowing about it. */
@@ -239,7 +240,12 @@ export async function chargeableCurrencies(store: Store): Promise<Currency[] | n
     if (listed.length === 0 || !listed.every((c): c is string => typeof c === "string")) return null;
     const supported = listed.map((c) => c.toLowerCase());
     const ours = CURRENCIES.map((c) => c.code).filter((code) => supported.includes(code));
-    if (cache) await redisPipeline([["SET", currenciesKey(account), ours.join(","), "EX", CURRENCIES_SECONDS]]).catch(() => {});
+    // Kept only while the store is live, in one step with its fence (Codex L-20261119-1735, #5010 row 120): a store
+    // erased while Stripe was read gets nothing written back, and the late list is not known (null), never shown.
+    if (cache) {
+      const kept = await setWhileStoreLive(store, currenciesKey(account), ours.join(","), CURRENCIES_SECONDS).catch(() => "unknown" as const);
+      if (kept !== "kept") return null;
+    }
     return ours;
   } catch (error) {
     console.error("reading the account's currencies failed", error);

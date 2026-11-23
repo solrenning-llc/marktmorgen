@@ -47,7 +47,7 @@
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { lockWait, timeLeft, withCutoff } from "@/lib/fetch-timeout";
-import type { MeetProvider } from "@/lib/call-setup";
+import { type MeetProvider, keepsMeetingLink } from "@/lib/call-setup";
 import { isHouseAddress } from "@/lib/house-store";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -538,10 +538,11 @@ export function isZoomLink(link: string): boolean {
 }
 
 function meetLinkOf(event: Record<string, unknown>): string {
-  if (typeof event.hangoutLink === "string" && MEET_LINK.test(event.hangoutLink)) return event.hangoutLink;
+  // A link a meeting record could not keep is no link (keepsMeetingLink, Codex X6's LOW on #2514).
+  if (typeof event.hangoutLink === "string" && MEET_LINK.test(event.hangoutLink) && keepsMeetingLink(event.hangoutLink)) return event.hangoutLink;
   const data = event.conferenceData as { entryPoints?: { entryPointType?: unknown; uri?: unknown }[] } | undefined;
   const video = data?.entryPoints?.find((p) => p.entryPointType === "video" && typeof p.uri === "string");
-  return video && MEET_LINK.test(video.uri as string) ? (video.uri as string) : "";
+  return video && MEET_LINK.test(video.uri as string) && keepsMeetingLink(video.uri as string) ? (video.uri as string) : "";
 }
 
 function conferenceState(event: Record<string, unknown>): string {
@@ -812,7 +813,7 @@ export async function zoomCreate(token: string, spec: MeetingSpec): Promise<Meet
   if (answer.status !== 201 && answer.status !== 200) throw problem(answer, "making the meeting");
   const id = typeof answer.json.id === "number" || typeof answer.json.id === "string" ? String(answer.json.id) : "";
   const link = typeof answer.json.join_url === "string" ? answer.json.join_url : "";
-  if (!/^\d{9,12}$/.test(id) || !ZOOM_LINK.test(link)) throw new ProviderError("bad", answer.status, "Zoom answered without a join link");
+  if (!/^\d{9,12}$/.test(id) || !ZOOM_LINK.test(link) || !keepsMeetingLink(link)) throw new ProviderError("bad", answer.status, "Zoom answered without a join link");
   return { id, link };
 }
 

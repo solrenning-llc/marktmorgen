@@ -17,6 +17,7 @@
  * The code is read without ever being made (existingInviteCode): a store page
  * must not write. Synthetic stores only, against the in-memory Redis.
  */
+import { SITE_URL } from "@/lib/site-url";
 import { readFileSync } from "node:fs";
 import { BADGE_HOME, INVITE_BADGE_LINK_ON, badgeHref, badgeInviteCode } from "@/lib/badge-link";
 import { existingInviteCode, inviteCode, myCodeKey } from "@/lib/creator-invites";
@@ -44,7 +45,9 @@ async function main(): Promise<void> {
   is("the switch is both locks together, and both are off today", INVITE_BADGE_LINK_ON, INVITE_PROGRAM_OPEN && PLANS_ON_SALE);
   is("off today", INVITE_BADGE_LINK_ON, false);
   is("off: the plain link even with a valid code", badgeHref("abcdefgh", false), BADGE_HOME);
-  is("the plain link is the home page", BADGE_HOME, "/");
+  // Absolute, so a store on its own domain still sends the visitor to Marktmorgen and not back to itself (Codex X6's
+  // LOW on #3429, #5285 row #3429): "/" on a creator's domain is that creator's own page.
+  is("the plain link is Marktmorgen's home page, absolute", BADGE_HOME, `${SITE_URL}/`);
   const code = await inviteCode(SID);
   is("a synthetic store has a code", typeof code === "string", true);
   const before = sent;
@@ -52,10 +55,11 @@ async function main(): Promise<void> {
   is("off: not one command sent", sent - before, 0);
 
   part("2. Both open and a valid code: the invite page with that code and nothing else");
-  is("on: the invite page with the code", badgeHref("abcdefgh", true), "/invite/abcdefgh");
+  is("on: the invite page with the code, absolute on Marktmorgen", badgeHref("abcdefgh", true), `${SITE_URL}/invite/abcdefgh`);
   is("on: the store's own code, read back", await badgeInviteCode(SID, true), code);
   const href = badgeHref(code, true);
-  is("only the code is in it: no query, no fragment", /^\/invite\/[a-hj-km-np-z2-9]{8}$/.test(href), true);
+  is("only the code is in it: no query, no fragment", new RegExp(`^${SITE_URL.replace(/[.]/g, "\\.")}/invite/[a-hj-km-np-z2-9]{8}$`).test(href), true);
+  is("both links leave a creator's own domain for Marktmorgen's", [BADGE_HOME, href].every((link) => new URL(link).origin === SITE_URL), true);
 
   part("3. A code that is not a valid one is never put in it");
   for (const bad of ["", "ABCDEFGH", "abcdefg", "abcdefghi", "abcdefg1", "a@b.co12", "../admin", "abcdefgi", null]) {

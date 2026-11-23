@@ -11,7 +11,8 @@
  *   - `ukProductRateBps` gives a rate only for a row written "0%", "5%" or "Standard-rated" (the standard rate is
  *     `UK_VAT_RATE` in lib/uk-vat.ts, read on gov.uk/vat-rates). Anything else is refused, never 0%: "Exempt", a rate
  *     with a condition ("0% or 5%", "Exempt if ..."), "Outside the scope of VAT" and "The same rate as the goods ...",
- *     whose condition this table does not hold; a row the table does not have; two rows that disagree; and any day
+ *     whose condition this table does not hold; a row whose own note says some of its items are at another rate
+ *     ("Some items are ...", "But ..."); a row the table does not have; two rows that disagree; and any day
  *     past `UK_VAT_PRODUCT_RATES_VALID_UNTIL`, before which the page is read again at the source, with the date.
  *
  * Pure. Nothing calls it yet: which row a store's product falls under is the next step, and collecting UK VAT stays off
@@ -47,7 +48,16 @@ const realDay = (value: unknown): value is string => {
   return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;
 };
 
-function basisPointsOf(rate: string): number | null {
+/**
+ * A note that says some of the row's own goods or services are at another rate ("Some items are standard-rated such as
+ * exercise books ...", "But holiday accommodation let in a moored houseboat is standard-rated"): which item is which is
+ * not in this table, so the row gives no rate. A note about other goods than the row's (industrial water, gliders) does
+ * not start this way and leaves the row's rate as the page writes it (Claude 6 hsz3 on #5045, 7094213497).
+ */
+const PART_AT_ANOTHER_RATE = /^(?:some items\b|but\b)/i;
+
+function basisPointsOf(rate: string, more: string): number | null {
+  if (typeof more !== "string" || PART_AT_ANOTHER_RATE.test(more.trim())) return null;
   if (rate === "0%") return 0;
   if (rate === "5%") return 500;
   if (rate === "Standard-rated") return UK_VAT_RATE.basisPoints;
@@ -63,7 +73,7 @@ export function ukProductRateBps(section: string, item: string, day: string, tab
   if (typeof section !== "string" || typeof item !== "string" || !Array.isArray(table)) return null;
   const rows = table.filter((row) => row && row.section === section && row.item === item);
   if (rows.length === 0) return null;
-  const rates = new Set(rows.map((row) => basisPointsOf(row.rate)));
+  const rates = new Set(rows.map((row) => basisPointsOf(row.rate, row.more)));
   if (rates.size !== 1) return null;
   const [rate] = rates;
   return rate ?? null;

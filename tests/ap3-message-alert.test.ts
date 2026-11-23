@@ -78,7 +78,7 @@ async function main() {
   part("A message from the contact form is told the same way");
   const contact = await fileContact({ store: (await storeForEmail(owner))!, email: "another.buyer@example.test", name: "Another", text: "A question about sizes." });
   is("filed and told", [contact, pushes.length], [true, 5]);
-  is("with nothing of that buyer", pushes[4].payload.includes("another.buyer") || pushes[2].payload.includes("sizes"), false);
+  is("with nothing of that buyer", pushes[4].payload.includes("another.buyer") || pushes[4].payload.includes("sizes"), false);
 
   part(`At most QUIET_PER_HOUR (${QUIET_PER_HOUR}) an hour, however many buyers write`);
   for (let i = 0; i < QUIET_PER_HOUR + 5; i++) {

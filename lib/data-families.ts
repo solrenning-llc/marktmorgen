@@ -70,7 +70,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:hostcal:good:", "nl:hostcal:lock:", "nl:house:seed", "nl:house:seed:lock", "nl:import:",
   "nl:imports:active", "nl:imports:busy:", "nl:imports:cf:", "nl:imports:cf:lock:", "nl:imports:list:",
   "nl:inbound:support:bytes:", "nl:inbound:support:counted:", "nl:inbound:support:held:",
-  "nl:imports:lock", "nl:imports:moved:", "nl:imports:rows:", "nl:inbound:counted:", "nl:inbound:seen:", "nl:indexnow:sent", "nl:join:t:",
+  "nl:imports:lock", "nl:imports:moved:", "nl:imports:rows:", "nl:inbound:counted:", "nl:inbound:seen:", "nl:indexnow:lock", "nl:indexnow:sent", "nl:join:t:",
   "nl:learn:link:", "nl:learn:paid:", "nl:learn:pass:", "nl:learn:passes:", "nl:learn:rate:addr:",
   "nl:learn:rate:ip:", "nl:leave:", "nl:letters:link:", "nl:letters:ok:", "nl:letters:rl:addr:", "nl:letters:rl:ip:", "nl:lib:joined:", "nl:lib:link:", "nl:list:try:", "nl:listed:", "nl:lock:plan-stop:", "nl:lostdispute:cursor:", "nl:mail-check:last",
   "nl:mail-check:lock", "nl:mail-check:runs", "nl:mail:clk:", "nl:mail:day:", "nl:mail:drafts:", "nl:mail:flowq:lease",
@@ -317,6 +317,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:inbound:support:bytes:": C, "nl:inbound:support:counted:": C, "nl:inbound:support:held:": C,
   "nl:inbox:": E, "nl:inbox:tok:": T("nl:inbox:"),
   "nl:intro:c:": E,
+  "nl:indexnow:lock": C,
   "nl:indexnow:sent": C,
   // The studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts): the company's day and its sessions, no store's; each session ends 21 hours after it opened.
   "nl:sdemo:": C, "nl:sdemo:{<session>}:<family>[:<part>]": C,

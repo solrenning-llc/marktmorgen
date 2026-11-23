@@ -3687,6 +3687,14 @@ export class MemoryRedis {
           const taken = this.storeData([room, limit, "1", month, "a", NOTES_TOTAL_FIELD, String(-(had + tally))]);
           return [n, Array.isArray(taken) ? taken[0] : -1];
         }
+        // lib/lesson-play.ts PLAYING_IF: a person's place let go or replaced only while it still holds the press's claim.
+        if (key.startsWith("-- marktmorgen:lesson-playing-if:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, place, claim, next, seconds] = args;
+          if (this.run(["GET", place]) !== claim) return 0;
+          if (next === "") return this.run(["DEL", place]);
+          this.run(["SET", place, next, "EX", seconds]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:lesson-note-clear:v1\n")) {
           if (args[0] !== "2" || args.length !== 9) return [-1, 0];
           const [, room, notes, limit, month, prefix, rawTally, rawEntry, rawStep] = args;

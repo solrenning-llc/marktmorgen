@@ -221,6 +221,9 @@ async function main() {
     Object.assign(invoice, { status: "paid", amount_paid: 6_900, amount_remaining: 0 });
     world.payments.set("in_openpart02", [paidPart("in_openpart02", "pi_openpart02", 2_000, S(day) + 120), paidPart("in_openpart02", "pi_openpart02late", 4_900, S(day) + 41 * 86_400)]);
     world.charges.set("pi_openpart02late", 4_900);
+    // Its next look comes a week after the last one (OPEN_RECHECK_DAYS): that week has passed.
+    const [kept] = await redisPipeline([["HGET", UNDO_KEY, "sub_openpart02"]]);
+    await redisPipeline([["HSET", UNDO_KEY, "sub_openpart02", JSON.stringify({ ...(JSON.parse(String(kept)) as Record<string, unknown>), next: Date.now() - 1 })]]);
     await retryPlanUndos(Date.now() + 60_000);
     is("the late payment is given back in full, once", [refundsOf("pi_openpart02late").length - before, refundsOf("pi_openpart02late")[0]], [1, 4_900]);
     await retryPlanUndos(Date.now() + 60_000);

@@ -202,14 +202,24 @@ export type Undo = {
   e?: 1;
   /**
    * One of its invoices is still open with an amount remaining (Stripe does not void an invoice with money on it): the
-   * settled entry is looked at again past DONE_KEEP_DAYS until none is, so a payment made on it later is given back
-   * (#5285 row #3274; Claude 7 xAF's LEVE on #5344).
+   * settled entry is looked at again past DONE_KEEP_DAYS while one is, so a payment made on it later is given back
+   * (#5285 row #3274; Claude 7 xAF's LEVE on #5344): once every OPEN_RECHECK_DAYS, until OPEN_KEEP_DAYS.
    */
   o?: 1;
+  /** Past DONE_KEEP_DAYS, when an entry kept for an open invoice (o) is next looked at (ms). */
+  next?: number;
 };
 
 /** Stripe: a refund can fail up to 30 days after it was asked for (docs.stripe.com/refunds, "Handle failed refunds", read 30/10/2026). A settled one is looked at again until then, and a little after. */
 export const DONE_KEEP_DAYS = 40;
+/**
+ * An entry kept for an invoice still open with money left (Undo.o) is looked at again past DONE_KEEP_DAYS once a week,
+ * not on every run, and taken out a year after it was settled (Claude 2 lpgvy's LEVE on #5344): the daily job walks
+ * every entry inside its 20 seconds, so such entries, which Stripe can keep open for good, must not grow its work
+ * without a bound, and the job walks them after every plan not settled yet, which never waits behind them.
+ */
+export const OPEN_RECHECK_DAYS = 7;
+export const OPEN_KEEP_DAYS = 365;
 
 const shutKey = (handle: string) => `${SHUT_PREFIX}${createHash("sha256").update(handle.toLowerCase()).digest("hex").slice(0, 32)}`;
 
@@ -457,6 +467,7 @@ function readUndo(raw: unknown): Undo | null {
       ...(value.t === 1 ? { t: 1 as const } : {}),
       ...(value.e === 1 ? { e: 1 as const } : {}),
       ...(value.o === 1 ? { o: 1 as const } : {}),
+      ...(typeof value.next === "number" && Number.isFinite(value.next) ? { next: value.next } : {}),
     };
   } catch {
     return null;
@@ -657,11 +668,14 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
     }
     if (!settled) return keep("a refund is not made in full yet");
     if (entry.done) {
-      // A recheck keeps the mark of an invoice still open in line with what Stripe says now.
-      if (Boolean(entry.o) !== openRest) {
-        const { o: _open, ...rest } = entry;
+      // A recheck keeps the mark of an invoice still open in line with what Stripe says now and, past DONE_KEEP_DAYS,
+      // sets the next look a week on (OPEN_RECHECK_DAYS).
+      const next = openRest && Date.now() - entry.done > DONE_KEEP_DAYS * 86_400_000 ? Date.now() + OPEN_RECHECK_DAYS * 86_400_000 : undefined;
+      if (Boolean(entry.o) !== openRest || next !== undefined || entry.next !== undefined) {
+        const { o: _open, next: _next, ...rest } = entry;
         void _open;
-        await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify({ ...rest, ...(openRest ? { o: 1 } : {}) })]]);
+        void _next;
+        await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify({ ...rest, ...(openRest ? { o: 1 } : {}), ...(next !== undefined ? { next } : {}) })]]);
       }
       return true;
     }
@@ -736,6 +750,9 @@ export async function retryPlanUndos(deadline: number): Promise<{ settled: numbe
   const ids = Array.isArray(fields) ? (fields as unknown[]).map(String) : [];
   let settled = 0;
   let left = 0;
+  // Plans not settled yet first: a payment still owed back never waits behind a recheck of a settled one (Claude 2
+  // lpgvy's LEVE on #5344).
+  const later: [string, Undo & { done: number }][] = [];
   for (const id of ids) {
     if (Date.now() > deadline) {
       left += 1;
@@ -743,15 +760,29 @@ export async function retryPlanUndos(deadline: number): Promise<{ settled: numbe
     }
     const [raw] = await redisPipeline([["HGET", UNDO_KEY, id]]);
     const entry = readUndo(raw);
+    if (entry?.done) {
+      later.push([id, entry as Undo & { done: number }]);
+      continue;
+    }
+    if (await settleOne(id)) settled += 1;
+    else left += 1;
+  }
+  for (const [id, entry] of later) {
+    if (Date.now() > deadline) {
+      left += 1;
+      continue;
+    }
+    const age = Date.now() - entry.done;
     // Settled long enough ago that no refund can still come back and no retry still come: taken out, unless one of its
-    // invoices is still open with an amount remaining, which can still be paid (o).
-    if (entry?.done && !entry.o && Date.now() - entry.done > DONE_KEEP_DAYS * 86_400_000) {
+    // invoices is still open with an amount remaining, which can still be paid (o): then until OPEN_KEEP_DAYS.
+    if (age > DONE_KEEP_DAYS * 86_400_000 && (!entry.o || age > OPEN_KEEP_DAYS * 86_400_000)) {
+      if (entry.o) console.error(`closing-plan-guard: ${id} is taken out ${OPEN_KEEP_DAYS} days after it was settled, an invoice still open`);
       await redisPipeline([["HDEL", UNDO_KEY, id]]);
       continue;
     }
-    if (await settleOne(id, Boolean(entry?.done))) {
-      if (!entry?.done) settled += 1;
-    } else left += 1;
+    // Past DONE_KEEP_DAYS, an entry kept for an open invoice is looked at once a week.
+    if (age > DONE_KEEP_DAYS * 86_400_000 && entry.next !== undefined && entry.next > Date.now()) continue;
+    if (!(await settleOne(id, true))) left += 1;
   }
   return { settled, left };
 }

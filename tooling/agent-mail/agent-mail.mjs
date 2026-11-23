@@ -418,7 +418,9 @@ export function naoLidas(eu, commit = buscar()) {
     .filter((c) => !lidas.has(idDe(c)) && !(c.startsWith("caixas/todos/") && remetenteDe(idDe(c)) === me));
   const familiares = me === fam
     ? arquivos(commit, "caixas").filter((c) => { const d = c.split("/")[1]; return d !== fam && d !== "todos" && familia(d) === fam && !daFamilia.has(idDe(c)); })
-    : arquivos(commit, `caixas/${fam}`).filter((c) => !daFamilia.has(idDe(c)));
+    // A mensagem que a própria sessão mandou à caixa da família não é não lida para ela (23/11/2026: o aviso de minuto
+    // de envio da Claude 6 UoHAG à família acordava a própria vigia); continua não lida para as irmãs.
+    : arquivos(commit, `caixas/${fam}`).filter((c) => !daFamilia.has(idDe(c)) && remetenteDe(idDe(c)) !== me);
   return [...proprias, ...familiares]
     .filter((c) => c.endsWith(".md"))
     .map((c) => ({ id: idDe(c), caminho: c, texto: conteudo(commit, c), pelaFamilia: me !== fam && c.startsWith(`caixas/${me}/`) && pelaFamilia.has(idDe(c)) }))

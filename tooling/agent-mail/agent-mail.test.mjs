@@ -930,6 +930,11 @@ console.log("a session's own box: an ack under the family name does not hide it 
   is("a message to two sessions of a family, acknowledged by one, still shows to the other (the 7f0a of 22/11/2026)",
     Boolean(idDuas) && run(["read", "--as", "Claude 6 z5v4"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_018ZjhHhz5v4kPZ3osC8Cr6g" }).out.includes(idDuas), r.out);
   is("a message to the family, acknowledged by the family, does not show to a session (unchanged)", !run(["read", "--as", "Claude 6 UoHAG"], as("c6")).out.includes(idF));
+  // 23/11/2026: Claude 6 UoHAG's own "push minute" note to its family woke its own watch and showed as unread to it.
+  r = run(["send", "--from", "Claude 6 UoHAG", "--to", "Claude 6", "--subject", "own note", "--text", "minuto"], as("c6"));
+  const idProprio = /enviada: (\S+)/.exec(r.out)?.[1];
+  is("a session's own message to its family box does not show to that session as unread", Boolean(idProprio) && !run(["read", "--as", "Claude 6 UoHAG"], as("c6")).out.includes(idProprio), r.out);
+  is("but it still shows to a sister session", Boolean(idProprio) && run(["read", "--as", "Claude 6 z5v4"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_018ZjhHhz5v4kPZ3osC8Cr6g" }).out.includes(idProprio));
 }
 
 console.log("a family with a verdict on the head written only on the PR does not take it (coordinator ce2d, #5118)");

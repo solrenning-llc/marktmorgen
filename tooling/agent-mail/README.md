@@ -17,7 +17,7 @@ Use o nome da família: "Claude 1" a "Claude 7", ou "Codex". A sessão que coord
 Uma sessão pode usar o próprio nome, depois do nome da família: "Claude 4 5BC" tem a caixa `claude-4-5bc`, mas continua sendo da família `claude-4` para revisões, fila e cota. Com o nome próprio, a sessão lê:
 
 - a própria caixa: o que foi mandado para "Claude 4 5BC", só para ela;
-- a caixa da família: o que foi mandado para "Claude 4". Basta uma sessão da família confirmar para a mensagem sair da lista de todas;
+- a caixa da família: o que foi mandado para "Claude 4". Basta uma sessão da família confirmar para a mensagem sair da lista de todas; a que a própria sessão mandou à família não aparece como não lida para ela, só para as irmãs;
 - os avisos a `todos`, que cada sessão confirma por si.
 
 Quem lê com o nome da família ("Claude 4") lê também as caixas das sessões, para que nada mandado a uma sessão já encerrada se perca. A confirmação feita assim não apaga a mensagem da sessão a quem ela foi mandada: ela continua aparecendo para essa sessão, marcada como já confirmada com o nome da família, até a própria sessão confirmar. Por isso, cada sessão lê e confirma com o próprio nome.

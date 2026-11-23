@@ -15,6 +15,8 @@ import { sesObservation } from "./mail-reservation-ses";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail } from "@/lib/store";
 import { upsertContact } from "@/lib/contacts";
 import { sendTo, usedThisMonth } from "@/lib/mail";
+import { healthId, startRamp } from "@/lib/mail-health";
+import { RAMP_TRIGGER } from "@/lib/mail-health-rules";
 import { windowId } from "@/lib/allowance-window";
 import { store as memory } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -68,6 +70,28 @@ async function main(): Promise<void> {
   is("sent, nothing left", [again.stopped, again.done, again.rest], [null, ["reader@example.com"], []]);
   is("one batch to the provider", dispatch.calls, 1);
   is("one email taken from the month", await usedThisMonth(store.listId, windowId(store)), before + 1);
+
+  // Claude 3 ykH's LEVE on #5458 @63393a9b04: with no addresses lately brought in, rampRoom takes no portion, so the
+  // give-back of the portion was never exercised. Here the list has had addresses brought in (startRamp, as an import
+  // does), so the try takes a portion of the ramp, and the failed key write must give it back whole.
+  part("A list with addresses lately brought in: the failed key write gives the ramp's portion back");
+  await upsertContact(store.listId!, "second@example.com", { agreed: true, explicit: true, source: "free", sid: store.sid, clicks: true, title: "The Guide" }, ROOM);
+  const ramp = `nl:mail:ramp:${healthId(store)}`;
+  await startRamp(healthId(store), RAMP_TRIGGER);
+  const rampBefore = memory.run(["GET", ramp]);
+  is("the ramp is running", typeof rampBefore, "string");
+  const monthBefore = await usedThisMonth(store.listId, windowId(store));
+  dispatch.calls = 0;
+  failKeys = true;
+  const portioned = await sendTo(store, ["second@example.com"], "Synthetic", "Test only", "link-keys-retry", SEQUENCE).then(
+    (r) => r,
+    (error: unknown) => ({ threw: String(error) }),
+  );
+  failKeys = false;
+  is("tried again later, never thrown", "stopped" in portioned ? portioned.stopped : "threw", "retry");
+  is("nothing reached the provider", dispatch.calls, 0);
+  is("the ramp's portion is given back: the ramp is as it was before the try", memory.run(["GET", ramp]), rampBefore);
+  is("and the month's reservation too", await usedThisMonth(store.listId, windowId(store)), monthBefore);
   clock.restore();
   done();
 }

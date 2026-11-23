@@ -168,16 +168,17 @@ async function main(): Promise<void> {
     is("the yes not rewritten, and no new queue member", [after.yes?.r, after.members], [undefined, 1]);
   }
 
-  part("The person erased while Stripe was read: the yes is not recreated");
+  part("The person erased while Stripe was read: the yes is not recreated, and no new queue member is added");
   {
     const store = await liveStore(now);
     const session = await openCheckout(store, now, later);
+    // Only the person's own erasure here, no store closing (Claude 5 ib47's LOW on #5372): it deletes the yes, and
+    // the queue member already there stays, holding no address; the job skips it, since the yes is gone.
     during.read = async () => {
       await forgetAssistReminderPerson(store.statsId!, "fay@example.com");
-      walkDeletes(session);
     };
     is("skip", await remindFromConsent(store, session, later), "skip");
-    is("no yes, no queue member", residue(session), { yes: null, members: 0 });
+    is("no yes, and only the member that was there (SET ... XX wrote nothing, so no ZADD)", residue(session), { yes: null, members: 1 });
   }
 
   part("A store from before ids: fenced on its owner's record still carrying its statsId");

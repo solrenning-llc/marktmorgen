@@ -86,6 +86,8 @@ test("the daily job retains the plan until full refund settlement is proven", as
  Date.now = () => realNow() + 2 * DAY * 1000;
  try {
    const recovered = await settlePlans();
-   assert.deepEqual([recovered.done, await inLine(), posts], [1, false, 0]);
+   // Settled; kept only to be read again a week on for a refund Stripe fails later (#3367, LOW 1 of 6938631896).
+   const [, due] = await redisPipeline([["SMEMBERS", "nl:plans:pending"], ["ZRANGEBYSCORE", "nl:plans:retry", "-inf", String(Math.floor(Date.now() / 1000) + 6 * DAY)]]);
+   assert.deepEqual([recovered.done, (due as unknown[]).some((x) => String(x).includes(session)), posts], [1, false, 0]);
  } finally { Date.now = realNow; }
 });

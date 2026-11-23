@@ -55,10 +55,11 @@ export { rememberPlan } from "@/lib/plan-remember";
 
 /**
  * Plans tried and not settled yet, scored by when they are next due (seconds), so the one due first comes first.
- * A member is `account|session|since[|store|product[|told[|owed|owedTold]]]` (Entry): `since` is when the checkout
+ * A member is `account|session|since[|store|product[|told[|owed|owedTold[|watch]]]]` (Entry): `since` is when the checkout
  * opened, or, for a plan watched for an earlier end or one whose last try failed for a reason not its account's, when
  * that was, the moment its days of refusals by the account count from; `owed` is when a payment after its end was
- * first found owed (seconds, empty when none is), and `owedTold` marks its creator told about it.
+ * first found owed (seconds, empty when none is), `owedTold` marks its creator told about it, and `watch` is when a
+ * plan settled with late payments given back began to be watched for a refund Stripe fails later.
  */
 const RETRY = "nl:plans:retry";
 /** Plans one run tries at the most (NOT_A_COST.PLANS_PER_RUN and PLAN_SETTLE_RUN in tests/plan-cost-registry.ts). */
@@ -75,6 +76,16 @@ export const PLAN_STUCK_RETRY_DAYS = 7;
  * no longer than that for anyone to act.
  */
 export const PLAN_OWED_TELL_DAYS = 3;
+/**
+ * Days a plan settled with late payments given back stays in the retry line, read again every
+ * LATE_REFUND_RECHECK_DAYS: Stripe can fail a refund after it read succeeded (a closed card), and one that failed no
+ * longer counts on its charge, so a try then makes it again (lib/plan-late-refunds.ts). Settled at once, the plan
+ * would never be read again, though its buyer was told the money went back (#3367, LOW 1 of 6938631896). Our bound,
+ * not a period Stripe states: a refund that fails later than this is not made again from here.
+ */
+export const LATE_REFUND_WATCH_DAYS = 30;
+/** Days between the reads of a plan watched for a late refund failed later. */
+export const LATE_REFUND_RECHECK_DAYS = 7;
 const DAY = 86_400;
 
 /**
@@ -100,7 +111,7 @@ export type PlanState = "done" | "open" | "gone" | "early" | "unread" | "owed" |
  * What one try found, and for a plan ending sooner, when it is read again (seconds); for a plan owed a refund, the
  * invoices its creator alone can put right (`short`).
  */
-type Outcome = { state: PlanState; again?: number; short?: string[] };
+type Outcome = { state: PlanState; again?: number; short?: string[]; watch?: boolean };
 
 /**
  * A Stripe reply decides only when it is the object asked for (rule 30): it
@@ -139,7 +150,8 @@ async function settleLate(account: string, subscription: string, end: number, ab
   const late = await refundLatePayments(account, subscription, end);
   const told = about ? await tellLateRefunds(about, end, late.given) : { told: 0, untold: 0 };
   if (late.state === "owed") return { state: "owed", short: late.short };
-  return { state: told.untold > 0 ? "untold" : "done" };
+  // Settled with payments given back: watched a while, for a refund Stripe fails later (LATE_REFUND_WATCH_DAYS).
+  return told.untold > 0 ? { state: "untold" } : { state: "done", watch: late.given.length > 0 };
 }
 
 async function tryPlan(account: string, session: string, about?: { sid: string; product: string }): Promise<Outcome> {
@@ -299,9 +311,22 @@ export async function settlePlans(
       console.error("settling a payment plan failed", error);
     }
     const state = outcome?.state;
+    // Settled with late payments given back: read again every LATE_REFUND_RECHECK_DAYS while it is watched, a refund
+    // Stripe failed since made again by that read; let go once LATE_REFUND_WATCH_DAYS have passed from the first.
+    if (state === "done" && outcome?.watch) {
+      const watch = entry.watch || now;
+      if (now - watch < LATE_REFUND_WATCH_DAYS * DAY) {
+        if (entry.watch) counts.watched += 1;
+        else counts.done += 1;
+        const at = now + LATE_REFUND_RECHECK_DAYS * DAY;
+        await moveTo(member, at, memberOf({ ...entry, since: at, owed: 0, owedTold: false, watch }));
+        continue;
+      }
+    }
     // An open checkout waits two days from when it was opened; one with no readable time does not wait.
     if (state === "done" || state === "gone" || (state === "open" && !(now - since < 2 * 86400))) {
-      if (state === "done") counts.done += 1;
+      // A watched plan was counted done when it first settled.
+      if (state === "done" && !entry.watch) counts.done += 1;
       else counts.dropped += 1;
       await leave(member);
       continue;

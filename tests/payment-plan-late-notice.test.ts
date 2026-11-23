@@ -144,6 +144,18 @@ const inALine = async (session: string) => {
   const [pending, retry] = await redis.pipeline([["SMEMBERS", "nl:plans:pending"], ["ZRANGEBYSCORE", "nl:plans:retry", "-inf", "+inf"]]);
   return [...(pending as string[]), ...(retry as string[])].some((m) => m.startsWith(`${ACCOUNT}|${session}|`));
 };
+/**
+ * Settled with its late payments given back: out of the new plans, and in the retry line only to be read again
+ * LATE_REFUND_RECHECK_DAYS from now for a refund Stripe fails later (#3367, LOW 1 of 6938631896), never sooner (as a
+ * plan kept for an email is, the next day).
+ */
+const settledWatched = async (session: string) => {
+  const now = Math.floor(Date.now() / 1000);
+  const [pending, retry] = await redis.pipeline([["SMEMBERS", "nl:plans:pending"], ["ZRANGEBYSCORE", "nl:plans:retry", "-inf", "+inf", "WITHSCORES"]]);
+  const rows = retry as string[];
+  const mine = rows.flatMap((m, i) => (i % 2 === 0 && m.startsWith(`${ACCOUNT}|${session}|`) ? [Number(rows[i + 1])] : []));
+  return !(pending as string[]).some((m) => m.startsWith(`${ACCOUNT}|${session}|`)) && mine.length === 1 && mine[0] >= now + plans.LATE_REFUND_RECHECK_DAYS * 86_400;
+};
 const to = (address: string) => emails.filter((e) => e.to === address);
 
 async function main(): Promise<void> {
@@ -175,7 +187,7 @@ async function main(): Promise<void> {
     /refunded in full/i.test(letter?.text ?? ""),
     /plan has ended/i.test(letter?.text ?? ""),
   ], [true, true, true, true, true, true]);
-  is("the plan is settled and out of its lines", await inALine(a.session), false);
+  is("the plan is settled, read again only a week on for a refund failed later", await settledWatched(a.session), true);
 
   part("A second pass never emails the buyer again");
   await finishPlan(ACCOUNT, a.session);
@@ -205,7 +217,7 @@ async function main(): Promise<void> {
   resendFails = false;
   tick(1);
   await settlePlans();
-  is("sent the next day, once, and the plan settled", [to(later).length, await inALine(c.session)], [1, false]);
+  is("sent the next day, once, and the plan settled (watched a week on)", [to(later).length, await settledWatched(c.session)], [1, true]);
   tick(1);
   await remember(ACCOUNT, c.session, about);
   await settlePlans();
@@ -219,7 +231,7 @@ async function main(): Promise<void> {
   resendPosts = 0;
   await settlePlans();
   resendUncertain = false;
-  is("the plan is settled at once, not kept to try an email that may have gone", await inALine(u.session), false);
+  is("the plan is settled at once, not kept to try an email that may have gone (only watched a week on)", await settledWatched(u.session), true);
   for (let day = 0; day < 9; day += 1) {
     tick(1);
     await settlePlans();
@@ -254,7 +266,7 @@ async function main(): Promise<void> {
   is("the buyer not emailed while nothing was given back, the plan kept", [to(owedBuyer).length, await inALine(d.session)], [0, true]);
   balance = 1_000_000;
   await settlePlans();
-  is("once the balance covers it: refunded, the buyer emailed once, the plan settled", [(refunds[d.invoices[2].charge.payment_intent] ?? []).length, to(owedBuyer).length, await inALine(d.session)], [1, 1, false]);
+  is("once the balance covers it: refunded, the buyer emailed once, the plan settled", [(refunds[d.invoices[2].charge.payment_intent] ?? []).length, to(owedBuyer).length, await settledWatched(d.session)], [1, 1, true]);
   is("and the creator was told only that once", to(OWNER).length, 1);
 
   part("A refund Stripe refuses for good: the creator is told once, the others still refunded (Claude 3, MEDIUM 1; Claude 6, N2)");
@@ -323,6 +335,9 @@ async function main(): Promise<void> {
     commands += sent.length;
     return real(sent);
   };
+  // Only this plan in the lines: the plans settled above are still watched for a refund failed later, and the clock
+  // moved past some of their weeks; they would be tried in this run too.
+  await redis.pipeline([["DEL", "nl:plans:retry"]]);
   stripeCalls = 0;
   const run = await settlePlans();
   (redis as unknown as { pipeline: Pipe }).pipeline = real;

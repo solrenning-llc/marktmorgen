@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   const store = (await storeForEmail(OWNER))!;
   const now = Math.floor(Date.now() / 1000);
   const member = (session: string, since: number) =>
-    memberOf({ account: ACCOUNT, session, since, sid: store.sid, product: "prod00000001", told: false, owed: 0, owedTold: false });
+    memberOf({ account: ACCOUNT, session, since, sid: store.sid, product: "prod00000001", told: false, owed: 0, owedTold: false, watch: 0 });
   const erasing = await erasingField(storeRef(store));
   const [, idKey] = storeIdCommand(store.sid);
   const idValue = String(redis.run(["GET", idKey]));

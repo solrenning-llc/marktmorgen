@@ -14,14 +14,15 @@ const STORE_ID = /^[0-9a-f]{32}$/;
 const PRODUCT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
- * One plan in a line: whose it is, since when its account has refused us, whether its creator was told, and since
- * when a payment after its end has been owed and whether its creator was told about that.
+ * One plan in a line: whose it is, since when its account has refused us, whether its creator was told, since
+ * when a payment after its end has been owed and whether its creator was told about that, and, for a plan settled
+ * with late payments given back, since when it is watched for a refund Stripe fails later (seconds, 0 when not).
  */
-export type Entry = { account: string; session: string; since: number; sid: string; product: string; told: boolean; owed: number; owedTold: boolean };
+export type Entry = { account: string; session: string; since: number; sid: string; product: string; told: boolean; owed: number; owedTold: boolean; watch: number };
 
 /** Reads a member; a store or product that is not one of ours is left out, and a member written before them reads. */
 export function entryOf(member: string): Entry {
-  const [account = "", session = "", since = "", sid = "", product = "", told = "", owed = "", owedTold = ""] = member.split("|");
+  const [account = "", session = "", since = "", sid = "", product = "", told = "", owed = "", owedTold = "", watch = ""] = member.split("|");
   return {
     account,
     session,
@@ -31,16 +32,18 @@ export function entryOf(member: string): Entry {
     told: told === "told",
     owed: /^[0-9]{1,12}$/.test(owed) ? Number(owed) : 0,
     owedTold: owedTold === "told",
+    watch: /^[0-9]{1,12}$/.test(watch) ? Number(watch) : 0,
   };
 }
 
 /** The member for an entry: one with nothing but its time is written as before, one never owed as before too. */
 export function memberOf(entry: Entry): string {
   const head = `${entry.account}|${entry.session}|${entry.since}`;
-  if (!entry.sid && !entry.product && !entry.told && !entry.owed && !entry.owedTold) return head;
+  if (!entry.sid && !entry.product && !entry.told && !entry.owed && !entry.owedTold && !entry.watch) return head;
   const base = `${head}|${entry.sid}|${entry.product}`;
-  if (!entry.owed && !entry.owedTold) return `${base}${entry.told ? "|told" : ""}`;
-  return `${base}|${entry.told ? "told" : ""}|${entry.owed || ""}|${entry.owedTold ? "told" : ""}`;
+  if (!entry.owed && !entry.owedTold && !entry.watch) return `${base}${entry.told ? "|told" : ""}`;
+  const owed = `${base}|${entry.told ? "told" : ""}|${entry.owed || ""}|${entry.owedTold ? "told" : ""}`;
+  return entry.watch ? `${owed}|${entry.watch}` : owed;
 }
 
 /**
@@ -56,7 +59,7 @@ export async function rememberPlan(account: string, session: string, about?: { s
   if (!ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) throw new Error("A plan's checkout cannot be written down: not a Stripe account and checkout session");
   const sid = about && STORE_ID.test(about.sid) ? about.sid : "";
   const product = about && PRODUCT_ID.test(about.product) ? about.product : "";
-  const line = memberOf({ account, session, since: Math.floor(Date.now() / 1000), sid, product, told: false, owed: 0, owedTold: false });
+  const line = memberOf({ account, session, since: Math.floor(Date.now() / 1000), sid, product, told: false, owed: 0, owedTold: false, watch: 0 });
   const replies = await redisPipeline([["SADD", PENDING, line]]);
   const added = Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined;
   if (added !== 0 && added !== 1) throw new Error("Redis did not confirm the plan's checkout was written down");

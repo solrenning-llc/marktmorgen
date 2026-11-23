@@ -8,6 +8,7 @@ import { isDemoCheckoutConfigured } from "@/lib/demo-store";
 import { type Check, verifyCartShipping, verifyPackages, verifyTaxDocuments, verifyTiers } from "@/lib/verify-stripe";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { SITE_URL } from "@/lib/site-url";
+import { failedNames } from "@/lib/health-check-status";
 import { STATUS_CHECKS, statusRunCommands } from "@/lib/status-page";
 
 // A run takes about half a minute, most of it Stripe charging and updating
@@ -75,7 +76,11 @@ export async function GET(request: NextRequest) {
     // Kept for the public status page (lib/status-page.ts), after the save and the notice and apart from them, so
     // its failure stops neither: its time and result only. Every check here is an answer from Stripe's test mode.
     await redisPipeline(statusRunCommands(STATUS_CHECKS[1].key, at, ok)).catch((error) => console.error("keeping the Stripe check's run for the status page failed", error));
-    return Response.json({ ok, checks }, { headers: { "Cache-Control": "no-store" } });
+    // A failed check is an error status (issue #4147), after every side effect above, so a monitor reading the
+    // status never takes it for a good run; the body still names each check, and which failed.
+    return ok
+      ? Response.json({ ok, checks }, { headers: { "Cache-Control": "no-store" } })
+      : Response.json({ ok, checks, failed: failedNames(checks) }, { status: 502, headers: { "Cache-Control": "no-store" } });
   } finally {
     await releaseMark("nl:stripe-check:lock", lock);
   }

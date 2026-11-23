@@ -193,8 +193,9 @@ async function main(): Promise<void> {
   for (const [name, lock, GET] of LOCK_ONLY.filter(([job]) => job === "stripe-check" || job === "mail-check")) {
     part(`cron/${name}: a slow run whose lock the next run took`);
     const overtaken = await run(name, lock, GET, { takeOver: "the-next-run" });
-    // Before: its finally deleted whoever held the lock, here the next run's.
-    is("its lock ran out and the next run took it: it ran, answered, and the next run's lock is kept", [overtaken.status, overtaken.ran > 0, overtaken.lockAfter], [200, true, "the-next-run"]);
+    // Before: its finally deleted whoever held the lock, here the next run's. Its checks fail on the stand-ins, so it
+    // answers the failed-check error status (issue #4147), not 200.
+    is("its lock ran out and the next run took it: it ran, answered, and the next run's lock is kept", [overtaken.status, overtaken.ran > 0, overtaken.lockAfter], [502, true, "the-next-run"]);
   }
 
   part("cron/shares: settles only while COMMISSION_LIVE (false today, not changed here), so its lock is read from the source");

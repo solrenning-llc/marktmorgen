@@ -7,6 +7,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Check, verifyAmazonAccount, verifyHostToken, verifyMailLoop, verifyProviderUsage } from "@/lib/verify-mail";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { timed, withCutoff } from "@/lib/fetch-timeout";
+import { failedNames } from "@/lib/health-check-status";
 import { STATUS_CHECKS, statusRunCommands, statusRunResult } from "@/lib/status-page";
 
 // The senders announce a bounce within seconds and a spam report within a
@@ -106,7 +107,11 @@ export async function GET(request: NextRequest) {
       // Kept for the public status page (lib/status-page.ts), after the save and the notice and apart from
       // them, so its failure stops neither: its time and whether a delivery loop ran and passed, nothing else.
       await redisPipeline(statusRunCommands(STATUS_CHECKS[0].key, at, statusRunResult(checks))).catch((error) => console.error("keeping the mail check's run for the status page failed", error));
-      return Response.json({ ok, checks, usage }, { headers: { "Cache-Control": "no-store" } });
+      // A failed check is an error status (issue #4147), after every side effect above, so a monitor reading the
+      // status never takes it for a good run; the body still names each check, and which failed.
+      return ok
+        ? Response.json({ ok, checks, usage }, { headers: { "Cache-Control": "no-store" } })
+        : Response.json({ ok, checks, usage, failed: failedNames(checks) }, { status: 502, headers: { "Cache-Control": "no-store" } });
     } finally {
       await releaseMark("nl:mail-check:lock", lock);
     }

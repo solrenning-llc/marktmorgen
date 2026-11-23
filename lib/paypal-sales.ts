@@ -1599,8 +1599,13 @@ export async function watchPayPal(
         (error: unknown) => console.error("putting a pending PayPal order back in line failed; it stays where it was", error),
       );
     const opened = await readOpened(order);
-    // Not read just now: kept, and asked about on a later run (rule 24), never dropped as expired.
-    if (opened === "unknown") continue;
+    // Not read just now: kept, and asked about on a later run (rule 24), never dropped as expired. At the back of the
+    // line, as every order kept here is (later): a batch of orders that do not read never keeps a newer, paid one out of
+    // every sweep (Claude 6's second money review of #3404, MEDIUM; row #3404 of #5285).
+    if (opened === "unknown") {
+      await later();
+      continue;
+    }
     let written: Paid | null;
     try {
       written = opened ? await readPaid(order) : null;
@@ -1608,6 +1613,7 @@ export async function watchPayPal(
       // Unknown is not "ended": the order stays pending and is read again on the next pass (CX-123 rule 24).
       if (!(error instanceof UnknownReplyError)) throw error;
       console.error("a pending PayPal order could not be read", order, error);
+      await later();
       continue;
     }
     // Thirty days without PayPal settling it: no longer asked about.
@@ -1624,8 +1630,11 @@ export async function watchPayPal(
       continue;
     }
     // Another order's record (completed, voided or anything else) says nothing about this one: kept and asked again
-    // (#4444, rule 30). A kept order is let go when its record ends (30 days).
-    if (!ownAnswer(done, order)) continue;
+    // (#4444, rule 30), at the back of the line (later). A kept order is let go when its record ends (30 days).
+    if (!ownAnswer(done, order)) {
+      await later();
+      continue;
+    }
     const { capture, payee, email } = captureIn(done);
     // Not confirmed PENDING_GIVE_UP_SECONDS after it was opened: canceled, and the buyer and the creator told, only on
     // PayPal's readable word that nothing was taken or that the payment is still pending; never on an answer that
@@ -1668,9 +1677,12 @@ export async function watchPayPal(
       try {
         settled = await settle(order, opened, capture.id, email);
       } catch (error) {
-        // Not known to be written down by this pass: nothing handed over, still pending, asked again (CX-123 rule 24).
+        // Not known to be written down by this pass: nothing handed over, still pending, asked again (CX-123 rule 24), at
+        // the back of the line (later). XX: a write whose answer was only lost took the order off pending, and it is never
+        // put back.
         if (!(error instanceof UnknownReplyError)) throw error;
         console.error("a PayPal payment could not be written down", order, error);
+        await later();
         continue;
       }
       const { paid, fresh } = settled;

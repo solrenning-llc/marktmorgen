@@ -3,7 +3,8 @@
  * request runs `during` first, which is how the test erases the store while the provider is answering.
  */
 import type { SafeResponse } from "../lib/safe-fetch";
-export { SafeFetchError } from "../lib/safe-fetch";
+// The rest of lib/safe-fetch as it is (the route imports checkUrl and problemWords); safeFetch below takes its place.
+export * from "../lib/safe-fetch";
 
 let replies: string[] = [];
 let during: (() => Promise<void>) | null = null;

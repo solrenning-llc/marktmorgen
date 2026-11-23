@@ -94,7 +94,8 @@ test("a fenced write whose answer does not read is never said to be saved", asyn
 });
 
 test("a connect and a settings save stay inside a call out's priced commands, the fence's included", async () => {
-  // Counted as Upstash bills: each command sent, and a script's inner calls (the fence's HGET, GET and SET) on top.
+  // Each command sent, and the fence's inner calls (HGET, GET and SET) on top. The lock scripts' inner calls are not
+  // counted here; the route test below counts every inner call against the units the route takes.
   const { PERSISTENT_FENCE_EXTRA_COMMANDS } = await import("@/lib/store-live-cache");
   type Batch = (string | number)[][];
   let billed = 0;
@@ -142,4 +143,62 @@ test("a fenced answer that does not read never leaves the store's reference on s
     redis.pipeline = plain;
   }
   assert.deepEqual((await storeForEmail(OWNER))!.emailSync ?? null, before, "the reference follows the settings that are kept");
+});
+
+test("the whole email-platform route, at its worst, stays inside the studio and integration units it takes", async () => {
+  // Claude 1 coord's rule (mail 964c) and Claude 1 E (0260) on #5185: the route, not only connect and saveSettings. A
+  // request here takes one studio unit (guardStoreWrite) and one integration unit (withinServiceWhy), so it is paid by
+  // both. Counted as Upstash bills: every command the store runs, a script's inner calls included.
+  const { NextRequest } = await import("next/server");
+  const { POST } = await import("@/app/api/store/email-sync/route");
+  const { openSession, SESSION_COOKIE } = await import("@/lib/auth");
+  const { setSubscription } = await import("@/lib/store");
+  const { paidPeriod } = await import("./billing-period-fixture");
+  const { afterTasks } = await import("./next-server-after-world");
+  const { LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS, UNIT_COST, request } = await import("./plan-cost-registry");
+  const { PERSISTENT_FENCE_EXTRA_COMMANDS } = await import("@/lib/store-live-cache");
+  // The commands UNIT_COST prices in its studio and integration units, tied to it so they cannot drift apart.
+  const studio = 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS;
+  const integration = 10 + TAKE_COMMANDS + PERSISTENT_FENCE_EXTRA_COMMANDS;
+  assert.equal(request("studio", studio, 50_000), UNIT_COST.studio);
+  assert.equal(request("wait", integration, 21_024), UNIT_COST.integration);
+  await liveStore();
+  await setSubscription(OWNER, { customerId: "cus_ConfigErasure01", subscriptionId: "sub_ConfigErasure01", active: true, tier: "creator", cycle: "month", period: paidPeriod() } as never);
+  const token = await openSession(OWNER);
+  const post = (body: object) => POST(new NextRequest("https://local.example/api/store/email-sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "https://local.example", Host: "local.example", Cookie: `${SESSION_COOKIE}=${token}` },
+    body: JSON.stringify(body),
+  }));
+  let billed = 0;
+  let unreadable = false;
+  const plainRun = redis.run.bind(redis);
+  const plainPipeline = redis.pipeline;
+  (redis as { run: typeof plainRun }).run = (command) => { billed += 1; return plainRun(command); };
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    // The worst save: the fenced answer does not read, so the key is read back and the reference put back (#5185).
+    if (unreadable && batch.length === 1 && batch[0]?.[0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:store-cache-persistent-live:v1")) {
+      billed += 1 + PERSISTENT_FENCE_EXTRA_COMMANDS;
+      return ["?"];
+    }
+    return plainPipeline(batch);
+  }) as typeof redis.pipeline;
+  try {
+    for (const [name, body, replies, status] of [
+      ["a connect", { action: "connect", provider: "kit", key: KEY }, [ACCOUNT, TWO_FORMS], 200],
+      ["a settings save", { action: "save", target: "chosen", free: true, buyers: "all", products: [], tags: {} }, [TWO_FORMS], 200],
+      ["a save whose fenced answer does not read", { action: "save", target: "other", free: true, buyers: "all", products: [], tags: {} }, [TWO_FORMS], 400],
+    ] as const) {
+      unreadable = status === 400;
+      afterTasks.length = 0;
+      answerWith([...replies]);
+      billed = 0;
+      assert.equal((await post(body)).status, status, name);
+      // The creator's notice after a new connection is an inbox message, priced by UNIT_COST.inbox, not here.
+      assert.ok(billed <= studio + integration, `${name} bills ${billed}, over the ${studio + integration} of its two units`);
+    }
+  } finally {
+    (redis as { run: typeof plainRun }).run = plainRun;
+    redis.pipeline = plainPipeline;
+  }
 });

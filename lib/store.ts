@@ -927,7 +927,7 @@ const CONNECT_ATTEMPT_ID = /^[0-9a-f]{32}$/;
  * is never reused, so the creator's address and name it was asked with go at the record's next save instead of staying
  * for good.
  */
-function readConnecting(raw: unknown, now = Date.now()): StripeConnecting | undefined {
+function readConnecting(raw: unknown, now = Date.now(), anyAge = false): StripeConnecting | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const v = raw as Record<string, unknown>;
   if (typeof v.id !== "string" || !CONNECT_ATTEMPT_ID.test(v.id) || typeof v.country !== "string" || !/^[a-z]{2}$/.test(v.country) ||
@@ -937,8 +937,24 @@ function readConnecting(raw: unknown, now = Date.now()): StripeConnecting | unde
   // that never left, which would let a refusal close an attempt Stripe may hold an account for.
   const pressedAt = typeof v.pressedAt === "string" && Number.isFinite(Date.parse(v.pressedAt)) ? v.pressedAt : v.at;
   const sends = typeof v.sends === "number" && Number.isSafeInteger(v.sends) && v.sends >= 1 ? v.sends : 1;
-  if (now - Date.parse(v.at) >= STRIPE_CONNECT_REUSE_SECONDS * 1000) return undefined;
+  if (!anyAge && now - Date.parse(v.at) >= STRIPE_CONNECT_REUSE_SECONDS * 1000) return undefined;
   return { id: v.id, country: v.country, email: v.email, name: v.name, at: v.at, pressedAt, sends };
+}
+/**
+ * The store with the attempt kept on its record whatever its age, for the answer to a press (finishStripeConnect,
+ * clearStripeConnect) only: a press begun a moment before the attempt turned STRIPE_CONNECT_REUSE_SECONDS old and
+ * answered a moment after is still that attempt's answer (Claude 4 3Rj's NIT on #5095), so the account is written or
+ * the refusal closes it, never left for a press again with a new key. Both drop the attempt in the save they make, so
+ * one past its age is never written back.
+ */
+function withAttemptOfAnyAge(store: Store, raw: string): Store {
+  let kept: StripeConnecting | undefined;
+  try {
+    kept = readConnecting((JSON.parse(raw) as { stripeConnecting?: unknown }).stripeConnecting, Date.now(), true);
+  } catch {
+    kept = undefined;
+  }
+  return kept ? { ...store, stripeConnecting: kept } : store;
 }
 function sinceOf(when: string | undefined, now: number): number {
   const at = when ? Date.parse(when) : NaN;
@@ -2223,7 +2239,11 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
  * to product records first if it has not been yet, and hands `work` the store
  * and the way to save it. Returns null when the address has no store.
  */
-async function withStore<T>(email: string, work: (store: Store, save: Save, held: Held) => Promise<T>): Promise<T | null> {
+async function withStore<T>(
+  email: string,
+  work: (store: Store, save: Save, held: Held) => Promise<T>,
+  options: { attemptOfAnyAge?: boolean } = {},
+): Promise<T | null> {
   if (!email || !isRedisConfigured()) return null;
   const owner = await ownerKey(email);
   let held: Held;
@@ -2238,6 +2258,7 @@ async function withStore<T>(email: string, work: (store: Store, save: Save, held
     let store = parseStore(raw);
     if (!store) return null;
     if (!store.catalog.id) store = await moveToRecords(owner, store, raw as string, held);
+    else if (options.attemptOfAnyAge && !store.stripeConnecting) store = withAttemptOfAnyAge(store, raw as string);
     let current = store;
     const save: Save = async (next, change = {}) => {
       current = await commit(owner, held, current, next, change);
@@ -2816,7 +2837,7 @@ export async function finishStripeConnect(email: string, sid: string, attemptId:
     const { stripeConnecting: _done, ...rest } = store;
     void _done;
     return save({ ...rest, stripeAccountId: accountId, stripeChargesEnabled: false, stripeCheckedAt: new Date().toISOString() });
-  });
+  }, { attemptOfAnyAge: true });
 }
 
 /**
@@ -2836,7 +2857,7 @@ export async function clearStripeConnect(email: string, sid: string, attemptId: 
     void _gone;
     await save(rest as Store);
     return true;
-  });
+  }, { attemptOfAnyAge: true });
   return done === true;
 }
 

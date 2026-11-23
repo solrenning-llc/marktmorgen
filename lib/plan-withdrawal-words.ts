@@ -32,6 +32,9 @@ export const PLAN_WITHDRAW_WORDS = {
     `You can withdraw from your contract for ${plan} within 14 days of paying for it. You do not need to give a reason. This tells Marktmorgen that you are withdrawing.`,
   until: (date: string) => `You can withdraw until ${date}.`,
   noEnd: "We could not check the date of your payment just now, so you can still send your withdrawal. We check it when it arrives.",
+  // The payment was not read on this visit because the page's daily reads were used up, not because Stripe failed:
+  // said as such, never as Stripe's answer (Claude 5's LEVE C on #2849).
+  notReadHere: "We did not check the date of your payment on this visit, so you can still send your withdrawal. We check it when it arrives and tell you if the 14 days have passed.",
   next: NEXT,
   nextChecked: NEXT_CHECKED,
   planLabel: "Your plan",

@@ -192,7 +192,7 @@ export default async function StudioRefundPage({ searchParams }: Params) {
                 ) : withdrawOpen ? (
                   <>
                     <p className="mt-3 text-ink">{W.lead(planName)}</p>
-                    <p className="mt-2 text-ink-soft">{withdrawOpen.until === null ? W.noEnd : W.until(momentOf(withdrawOpen.until * 1000))}</p>
+                    <p className="mt-2 text-ink-soft">{withdrawOpen.until === null ? (shown ? W.noEnd : W.notReadHere) : W.until(momentOf(withdrawOpen.until * 1000))}</p>
                     <p className="mt-2 text-ink-soft">{reading?.refund.kind === "guarantee" ? W.next : W.nextChecked}</p>
                     {withdrawForm}
                   </>

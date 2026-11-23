@@ -44,6 +44,7 @@ import { SessionsUnknownError, dropSecondStep, normaliseEmail, sessionMark } fro
 import { NIMBUS_FROM, headerText, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { takeOnce } from "@/lib/redis-take-once";
 import { type Claimed, releaseMark } from "@/lib/claim-mark";
 import { SITE_URL } from "@/lib/site-url";
 import { type Held, LockBusyError, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
@@ -133,15 +134,9 @@ async function claimCredential(id: string, address: string): Promise<Claimed> {
 
 /** Reads a key and deletes it in one step, so a challenge answers once. */
 async function spend(key: string): Promise<string | null> {
-  let raw: unknown;
-  try {
-    [raw] = await redisPipeline([["GETDEL", key]]);
-  } catch {
-    // Where GETDEL is missing, only the caller whose DEL removed the key wins.
-    const [read] = await redisPipeline([["GET", key]]);
-    const [removed] = await redisPipeline([["DEL", key]]);
-    raw = countOf(removed) === 1 ? read : null;
-  }
+  // Read in its exact shape, once (lib/redis-take-once.ts; #4060): a challenge from an answer of another shape, or one
+  // whose DEL did not remove exactly that key, is never handed to WebAuthn.
+  const raw = await takeOnce(key);
   return typeof raw === "string" && raw ? raw : null;
 }
 

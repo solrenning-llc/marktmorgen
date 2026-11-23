@@ -510,6 +510,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:@lib/chat-grant.ts": short("A member's leave from the live room's cooldown", "buyer", 1),
   "nl:chatsum:@lib/chat-summary.ts": { what: "Where a chat summary goes, sealed", parts: [capped(KB, "One a store.")] },
   "nl:recover:asks@lib/checkout-ask.ts": company("Checkout asks due", "One sorted set for every store, members gone when asked (a few hours): each a public request's."),
+  "nl:recover:asks:done@lib/checkout-ask.ts": company("Checkout asks taken off the queue and not yet finished", "One sorted set for every store: an ask's person index key and the ask, from its take until it is finished (a run's minutes); a finish whose reply was lost is done again by the next run after ASK_FLIGHT_SECONDS, and a person's erasure takes theirs out: each a public request's, as the queue's (#5285 row #4290)."),
   "nl:recover:asks:s:@lib/checkout-ask.ts": company("A person's checkout asks due at a store", "The same members and times as nl:recover:asks, one sorted set a person at a store, named by a hash with no address in it, taken out when the asks finish or are erased, retained while they remain queued or in flight even after a worker outage: each a public request's, as the queue's."),
   "nl:none@lib/checkout-recovery.ts": company("A key that is never written", "Read in place of a list a store does not have."),
   "nl:read:once:@lib/page-read.ts": short("A page's reading token used, until it expires two hours after the page was drawn: one a page view drawn", "request", 1, MARK, REQ("page reading")),

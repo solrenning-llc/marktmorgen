@@ -538,6 +538,15 @@ export const CART_NOTE_COMMANDS = 2;
  */
 export const RECOVERY_ADMIT_EXTRA_COMMANDS = 5;
 /**
+ * What an asked-for checkout reminder adds for its record of being in flight (lib/checkout-ask.ts, DONE; Codex X6's
+ * LOW on #4290, #5285): its take off the queue becomes ASK_TAKE (the EVAL, its ZREM and ZADD, two more than the ZREM
+ * alone) and its finish ASK_DONE (the EVAL, the index's ZREM and DONE's, two more), as Upstash bills a script. Priced
+ * on every store email with the note's own (UNIT_COST.email), as if each were an asked reminder. A finish done again
+ * by a later run (sweepAsked) is one more ASK_DONE only after a reply was lost, and the run's one ZRANGEBYSCORE of DONE
+ * is the five-minute job's own, bounded by its schedule.
+ */
+export const ASK_FLIGHT_COMMANDS = 4;
+/**
  * What reading back one delivery line adds at the most (lib/webhooks.ts, writeLines and countNotKept; Claude 7 on
  * #3446, 6889869993): a SET answered in a shape it cannot read, or a call that failed, is followed by one GET of the
  * line, at most DELIVERY_WRITE_MAX_BYTES, and a message not kept whose line is not there gives its day's count back
@@ -1382,7 +1391,7 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // A message written to the inbox, and its index.
   inbox: request("light", 12 + TAKE_COMMANDS + INBOX_OPEN_FENCE_COMMANDS, 4_000 + INBOX_LIVE_BYTES),
   // An email sent from inside a request or a job already counted, and its count.
-  email: PER_EMAIL + (TAKE_COMMANDS + CART_NOTE_COMMANDS + RECOVERY_ADMIT_EXTRA_COMMANDS) * COMMAND,
+  email: PER_EMAIL + (TAKE_COMMANDS + CART_NOTE_COMMANDS + RECOVERY_ADMIT_EXTRA_COMMANDS + ASK_FLIGHT_COMMANDS) * COMMAND,
   // An access email; and since 9 November 2026 (13 [D10], review 6748073377 of #3431, M2) the Path lead its link may
   // count when the address uses it (lib/path-lead.ts): a sign-up's and a waitlist's confirmation routes take no
   // public request, so their PATH_LEAD_COMMANDS are priced here, with the email that carried the link.
@@ -2561,7 +2570,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/email.ts", names: ["EmailMeter", "metered"] },
       { file: "lib/store-contact.ts", names: ["MAX_PER_DAY"] },
       { file: "lib/ses.ts", names: ["markMaybe", "unmarkMaybe", "notMaybeTaken"] },
-      { file: "lib/checkout-ask.ts", names: ["ASKS_PER_STORE_DAY"] },
+      { file: "lib/checkout-ask.ts", names: ["ASKS_PER_STORE_DAY", "ASK_FLIGHT_COMMANDS = 4", "ASK_TAKE", "ASK_DONE", "sweepAsked"] },
       { file: "lib/assistant-reminder-rules.ts", names: ["ASSIST_REMINDERS_PER_STORE_DAY"] },
       { file: "lib/winback.ts", names: ["ONCE_PER_DAYS"] },
       { file: "lib/checkout-recovery.ts", names: ["RECOVERY_ADMIT", "redis.call('SADD', KEYS[4], ARGV[2])", "redis.call('EXPIRE', KEYS[4], ARGV[3])", "CARTS_NOTE_SECONDS"] },

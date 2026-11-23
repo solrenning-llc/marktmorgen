@@ -195,8 +195,10 @@ export function erasureWork(size: Partial<ErasureSize>): { commands: number; byt
     commands = nextCommands;
     bytes = nextBytes;
   }
+  // Two ZREM a batch of a person's checkout asks: the queue's, and their in-flight records' (lib/checkout-ask.ts
+  // ASK_FORGET, DONE; #5285 row #4290).
   const asks = size.checkoutAsks ?? 0;
-  commands += Math.ceil(asks / ASK_ERASE_BATCH);
+  commands += 2 * Math.ceil(asks / ASK_ERASE_BATCH);
   if (!Number.isSafeInteger(commands)) throw new RangeError("Unknown erasure size");
   return { commands, bytes };
 }

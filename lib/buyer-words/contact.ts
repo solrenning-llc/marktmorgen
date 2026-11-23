@@ -26,6 +26,7 @@ const en = {
     limited: { title: "Too many messages for now", body: "To keep this form from being used to flood anybody's inbox, it takes a few at a time. Try again later." },
     closed: { title: "This store is not taking messages", body: "Nothing was sent." },
     error: { title: "We could not send it just now", body: "Try again in a moment." },
+    uncertain: { title: "We could not confirm your message was sent", body: "It may already have reached the store. Sending it again today will not send it twice. If you get no answer in a day or two, send it again." },
   } as Record<string, Notice>,
 };
 
@@ -48,6 +49,7 @@ const es: ContactWords = {
     limited: { title: "Demasiados mensajes por ahora", body: "Para que este formulario no se use para llenar el buzón de nadie, acepta unos pocos a la vez. Inténtalo más tarde." },
     closed: { title: "Esta tienda no recibe mensajes", body: "No se envió nada." },
     error: { title: "No pudimos enviarlo ahora", body: "Inténtalo de nuevo en un momento." },
+    uncertain: { title: "No pudimos confirmar que tu mensaje se envió", body: "Puede que ya haya llegado a la tienda. Si lo envías de nuevo hoy, no se enviará dos veces. Si no recibes respuesta en uno o dos días, vuelve a enviarlo." },
   },
 };
 
@@ -68,6 +70,7 @@ const fr: ContactWords = {
     limited: { title: "Trop de messages pour le moment", body: "Pour que ce formulaire ne serve pas à inonder la boîte de quelqu'un, il en accepte peu à la fois. Réessayez plus tard." },
     closed: { title: "Cette boutique ne reçoit pas de messages", body: "Rien n'a été envoyé." },
     error: { title: "Impossible de l'envoyer pour l'instant", body: "Réessayez dans un instant." },
+    uncertain: { title: "Nous n'avons pas pu confirmer l'envoi de votre message", body: "Il est peut-être déjà arrivé à la boutique. Si vous le renvoyez aujourd'hui, il ne sera pas envoyé deux fois. Sans réponse d'ici un ou deux jours, renvoyez-le." },
   },
 };
 
@@ -88,6 +91,7 @@ const de: ContactWords = {
     limited: { title: "Gerade zu viele Nachrichten", body: "Damit niemand mit diesem Formular ein Postfach flutet, nimmt es nur wenige auf einmal an. Versuche es später wieder." },
     closed: { title: "Dieser Shop nimmt keine Nachrichten an", body: "Es wurde nichts gesendet." },
     error: { title: "Wir konnten sie gerade nicht senden", body: "Versuche es gleich noch einmal." },
+    uncertain: { title: "Wir konnten nicht bestätigen, dass deine Nachricht gesendet wurde", body: "Vielleicht ist sie schon beim Shop angekommen. Wenn du sie heute noch einmal sendest, wird sie nicht doppelt verschickt. Wenn du in ein, zwei Tagen keine Antwort hast, sende sie noch einmal." },
   },
 };
 
@@ -108,6 +112,7 @@ const it: ContactWords = {
     limited: { title: "Troppi messaggi per ora", body: "Perché questo modulo non serva a riempire la casella di qualcuno, ne accetta pochi alla volta. Riprova più tardi." },
     closed: { title: "Questo negozio non riceve messaggi", body: "Non è stato inviato nulla." },
     error: { title: "Non siamo riusciti a inviarlo adesso", body: "Riprova tra un momento." },
+    uncertain: { title: "Non siamo riusciti a confermare l'invio del tuo messaggio", body: "Potrebbe essere già arrivato al negozio. Se lo invii di nuovo oggi, non verrà inviato due volte. Se non ricevi risposta entro un giorno o due, invialo di nuovo." },
   },
 };
 
@@ -128,6 +133,7 @@ const nl: ContactWords = {
     limited: { title: "Even te veel berichten", body: "Zodat dit formulier niet gebruikt wordt om iemands inbox te overspoelen, neemt het er maar een paar tegelijk aan. Probeer het later opnieuw." },
     closed: { title: "Deze winkel neemt geen berichten aan", body: "Er is niets verstuurd." },
     error: { title: "We konden het nu niet versturen", body: "Probeer het zo opnieuw." },
+    uncertain: { title: "We konden niet bevestigen dat je bericht is verstuurd", body: "Misschien is het al bij de winkel aangekomen. Als je het vandaag opnieuw stuurt, wordt het niet twee keer verstuurd. Krijg je binnen een of twee dagen geen antwoord, stuur het dan opnieuw." },
   },
 };
 
@@ -149,6 +155,7 @@ const pt: ContactWords = {
     limited: { title: "Demasiadas mensagens por agora", body: "Para que este formulário não seja usado para inundar a caixa de alguém, aceita poucas de cada vez. Tente novamente mais tarde." },
     closed: { title: "Esta loja não está a receber mensagens", body: "Nada foi enviado." },
     error: { title: "Não foi possível enviar agora", body: "Tente novamente daqui a pouco." },
+    uncertain: { title: "Não foi possível confirmar que a sua mensagem foi enviada", body: "Pode já ter chegado à loja. Se a enviar de novo hoje, não será enviada duas vezes. Se não tiver resposta dentro de um ou dois dias, envie-a de novo." },
   },
 };
 

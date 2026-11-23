@@ -15,7 +15,7 @@
  */
 import { createHash } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { isRedisConfigured } from "@/lib/redis";
 import { essentialLimitState } from "@/lib/request-guard";
 import { isHouseStore } from "@/lib/house-store";
@@ -33,7 +33,7 @@ export function contactOpen(store: Store): boolean {
   return store.contact.on && !store.suspended && !isHouseStore(store) && isSenderConfigured() && isRedisConfigured() && Boolean(store.email);
 }
 
-export type ContactResult = "sent" | "email" | "short" | "limited" | "closed" | "error";
+export type ContactResult = "sent" | "uncertain" | "email" | "short" | "limited" | "closed" | "error";
 
 /** A line with no line breaks or control characters, for a name or a subject. */
 function line(text: string, max: number): string {
@@ -58,7 +58,7 @@ export async function sendContact(input: { store: Store; name: string; email: st
   const live = await contactStoreLive(store);
   if (live !== true) return live === false ? "closed" : "error";
   const from = name || email;
-  const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+  const outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
     to: store.email,
     replyTo: email,
@@ -75,6 +75,9 @@ export async function sendContact(input: { store: Store; name: string; email: st
     idempotencyKey: `contact-${who}-${sha(`${email}|${message}`).slice(0, 24)}`,
   });
   // Filed in the studio's inbox too (lib/inbox.ts), so it can be answered there with the rest.
-  if (sent) await fileContact({ store, email, name, text: message }).catch((error) => console.error("filing a contact message failed", error));
-  return sent ? "sent" : "error";
+  if (outcome === "sent") await fileContact({ store, email, name, text: message }).catch((error) => console.error("filing a contact message failed", error));
+  // An answer that is not known (a timeout or a 5xx after which the message may have been accepted) is never told as a
+  // failure: the message may already be with the creator, and sending it again within the once-only key's day sends
+  // nothing twice (board #5285, row #2649: Claude 5's MÉDIO on #2649).
+  return outcome === "sent" ? "sent" : outcome === "uncertain" ? "uncertain" : "error";
 }

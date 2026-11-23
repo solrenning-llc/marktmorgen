@@ -1,6 +1,5 @@
 import { contactWords } from "@/lib/buyer-words/contact";
 import { LANGUAGE_CODES, type LanguageCode } from "@/lib/store-language";
-import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
 
 const EXPECTED: Record<LanguageCode, { line: string; title: string; body: string }> = {
@@ -50,11 +49,8 @@ async function main(): Promise<void> {
     is(`${code}: the complete success body does not claim receipt or promise a reply`, words.sentBody("Harbor Kitchen"), EXPECTED[code].body);
   }
 
-  part("The linked flow knows acceptance, not receipt or a future reply");
-  const source = readFileSync("lib/store-contact.ts", "utf8");
-  is("success starts with the sender's boolean answer", source.includes("const sent = await sendEmail("), true);
-  is("filing in the store inbox is best effort after sender acceptance", source.includes("if (sent) await fileContact(") && source.includes("filing a contact message failed"), true);
-  is("the public result follows acceptance and has no delivery-status read", [source.includes('return sent ? "sent" : "error"'), /deliveryStatus|delivery_status|GET[\s\S]*email/i.test(source)], [true, false]);
+  // What the flow answers (sent on acceptance, uncertain on an unknown answer, error on a refusal) is checked by
+  // behavior in tests/contact-send-outcome.test.ts, not by reading this file's source (board #5285, row #2649, LEVE 2).
   done();
 }
 

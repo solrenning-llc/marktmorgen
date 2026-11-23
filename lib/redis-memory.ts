@@ -1498,9 +1498,10 @@ export class MemoryRedis {
           if (this.run(["HGET", slots, who]) !== expected) return 0;
           return this.run(["HDEL", slots, who]);
         }
-        // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as.
-        if (key.startsWith("-- marktmorgen:hand-in-write-if:v1\n") && args[0] === "4" && args.length === 12) {
-          const [, sub, files, waiting, all, expected, json, path, bytes, review, at, member] = args;
+        // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as, and never once their erasure began (#4271).
+        if (key.startsWith("-- marktmorgen:hand-in-write-if:v2\n") && args[0] === "5" && args.length === 14) {
+          const [, sub, files, waiting, all, erased, expected, json, path, bytes, review, at, member, print] = args;
+          if (this.run(["HEXISTS", erased, print]) === 1) return -1;
           const now = this.run(["GET", sub]);
           if ((typeof now === "string" ? now : "") !== expected) return 0;
           this.run(["SET", sub, json]);

@@ -223,7 +223,7 @@ test("handIn: approved work that does not read is not handed in over", async () 
   const kept = '{"state":"approved","tries":3';
   redis.run(["SET", sub(LESSON), kept]);
   const task: Task = { prompt: "Synthetic prompt.", review: true, gate: false, file: false };
-  const result = await withReplies((_b, a) => a, () => handIn({ courseId: COURSE, lessonId: LESSON, who: WHO, email: "", task, text: "Again.", file: null, data: ROOM }));
+  const result = await withReplies((_b, a) => a, () => handIn({ erasure: { listId: "list_synthetic", email: "student@example.com" }, courseId: COURSE, lessonId: LESSON, who: WHO, email: "", task, text: "Again.", file: null, data: ROOM }));
   assert.ok(result.error, `rejected, not ${JSON.stringify(result.value)}`);
   assert.equal(redis.run(["GET", sub(LESSON)]), kept, "the record is untouched");
 });

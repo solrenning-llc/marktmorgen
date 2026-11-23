@@ -3,7 +3,7 @@ import { BlobNotFoundError } from "@vercel/blob";
 import { DataRoomError } from "@/lib/store-data";
 import { cookies } from "next/headers";
 import { originFrom } from "@/lib/request-origin";
-import { storeFolder, storeRef } from "@/lib/store";
+import { ensureListId, storeFolder, storeRef } from "@/lib/store";
 import { storeKey } from "@/lib/learn";
 import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
@@ -129,7 +129,13 @@ export async function POST(request: NextRequest) {
       // Whether handIn sent its write: from then on the work may keep the file even when the call fails (its answer
       // lost, or a step after it failing), so neither the file nor its bytes may be let go (CX-123 rule 24).
       let written = false;
-      const done = await handIn({ courseId: course.id, lessonId: lesson.id, who, email, task, text, file, data: store, writing: () => { written = true; } }).catch(async (error: unknown) => {
+      // The store's stable list id, so the write is fenced by the student's erasure print (HAND_IN_WRITE_IF, #4271).
+      // None to be had: nothing is written, and the file sent here is let go as one never written.
+      const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId;
+      const done = await (listId
+        ? handIn({ courseId: course.id, lessonId: lesson.id, who, email, task, text, file, data: store, erasure: { listId, email }, writing: () => { written = true; } })
+        : Promise.reject(new HandInChangedError())
+      ).catch(async (error: unknown) => {
         // Work that was not kept leaves no file behind it: the new file sent here (never the one the earlier work keeps)
         // is deleted, and its bytes come back once it is gone; a file that could not be deleted stays counted. Once the
         // write was sent, both stay counted, which only refuses sooner; except when the work changed under this one

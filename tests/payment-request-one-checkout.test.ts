@@ -12,6 +12,7 @@ import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscri
 import { readDraft } from "@/lib/payment-request-rules";
 import { createRequest, requestOf } from "@/lib/payment-request-store";
 import { markPaidOutside, openRequestCheckout } from "@/lib/payment-requests";
+import { isRefusal } from "@/lib/checkout-trouble";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -134,6 +135,9 @@ async function main(): Promise<void> {
     is(`${action}: the current account's 404 gives no evidence of closure`,
       [handled.ok ? "ok" : handled.reason, after?.state, after?.session, checkouts.length, sessions.get(previous)?.status],
       ["error", "open", previous, before, "open"]);
+    // Board #5285 row #4836: that 404 is no refusal of the store's account, so the creator is not emailed that Stripe
+    // "refused" (noteCheckoutTrouble) and the account is not read again (chargesOffAfterRefusal) on every press.
+    if (action === "open") is("open: that 404 is not passed on as Stripe refusing the account", !handled.ok && "error" in handled && isRefusal(handled.error), false);
   }
 
   done();

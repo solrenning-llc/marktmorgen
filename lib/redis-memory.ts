@@ -3565,6 +3565,34 @@ export class MemoryRedis {
           const taken = this.storeData([room, limit, "1", month, "a", NOTES_TOTAL_FIELD, String(-back)]);
           return [gone.length, Array.isArray(taken) ? taken[0] : -1];
         }
+        // lib/creator-card.ts v2: identity/erasure and the room/card mutation in the same step.
+        if ((key.startsWith("-- marktmorgen:card-save:v2\n") || key.startsWith("-- marktmorgen:card-drop:v2\n")) && args[0] === "4" && args.length === 12) {
+          const [, room, target, liveKey, erasing, limit, month, third, fourth, field, ref, legacyStatsId] = args;
+          if (this.run(["HGET", erasing, field]) !== null) return [-4, 0];
+          const raw = this.run(["GET", liveKey]);
+          if (raw === null) return [-4, 0];
+          if (legacyStatsId === "") {
+            if (raw !== ref) return [-4, 0];
+          } else {
+            let record: unknown;
+            try { record = JSON.parse(String(raw)); } catch { return [-5, 0]; }
+            if (!record || typeof record !== "object") return [-5, 0];
+            if ((record as { statsId?: unknown }).statsId !== legacyStatsId) return [-4, 0];
+          }
+          if (key.startsWith("-- marktmorgen:card-save:v2\n")) {
+            const taken = this.storeData([room, limit, "0", month, "s", "card", third]);
+            if (Array.isArray(taken) && taken[0] === 1) {
+              this.data.set(target, fourth);
+              this.until.delete(target);
+            }
+            return taken;
+          }
+          const held = this.run(["GET", target]);
+          if ((typeof held === "string" ? held : "") !== third) return [2, 0];
+          if (typeof held === "string") this.run(["DEL", target]);
+          return this.storeData([room, limit, "1", month, "s", "card", "0"]);
+        }
+        // v1 compatibility lets the same route regression be checked against pre-fix production without a dispatch failure.
         // lib/creator-card.ts SAVE_CARD and DROP_CARD: the card and its data-room slot in one step.
         if (key.startsWith("-- marktmorgen:card-save:v1\n") && args[0] === "2" && args.length === 7) {
           const [, room, target, limit, month, size, json] = args;

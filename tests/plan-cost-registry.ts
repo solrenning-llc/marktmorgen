@@ -49,6 +49,7 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { LANDINGS_FENCE_COMMANDS } from "@/lib/campaign-landing-store";
+import { CARD_FENCE_COMMANDS } from "@/lib/creator-card";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { MAX_BENEFITS_KEPT, MAX_BENEFIT_TEXT } from "@/lib/tier-benefit-rules";
@@ -1553,6 +1554,10 @@ export function figureCost(allowances: Record<AllowanceKind, number>, kind: Allo
 /** Every studio unit may be a campaign mutation: two fence commands on each of three attempts, with wire headroom. */
 export function campaignLandingFenceCost(allowances: Record<AllowanceKind, number>): number {
   return allowances.studio * (LANDINGS_FENCE_COMMANDS * COMMAND + 4_096 * DB_BYTE);
+}
+/** Every studio unit may be a business-card save or removal: its fence's two inner commands, with wire headroom. */
+export function creatorCardFenceCost(allowances: Record<AllowanceKind, number>): number {
+  return allowances.studio * (CARD_FENCE_COMMANDS * COMMAND + 2_048 * DB_BYTE);
 }
 /**
  * Commands each counted public request adds for a paying store: its count
@@ -3251,6 +3256,17 @@ export const COST_LINES: CostLine[] = [
     basis: "Each of the three takes one unit of the store's API figure, as every API request does, and sends more commands than the unit's 20 and TAKE_COMMANDS: the webhook settings are written by a compare-and-set script and read back, and a gift is read before it is taken back, each script billed as Upstash bills it (one, and every redis.call written in it). The excess of the dearest, API_HOOK_ACCESS_EXTRA_COMMANDS, measured through the real routes at their dearest (the last of MAX_ENDPOINTS endpoints added, one removed from a full list, a gift taken back), with the webhook settings' write losing the race to another write on every try but the last, and on every try (lib/webhooks.ts CONFIG_WRITE_TRIES; Claude 4 3Kc's MEDIUM on #5249), in tests/api-hook-access-writes-cost.test.ts, is priced on every API request of the plan's month, the most it can be. Nothing the customer reads changes: the terms, the pricing page and the developers' page still say only a contact added or a product given counts as API_WRITE_UNITS.",
   },
   {
+    id: "creator-card-erasure-fence",
+    feature: "Business-card saves and removals refuse a store that is erasing, moved or gone before changing the card or its room",
+    monthlyUsd: (tier) => creatorCardFenceCost(STORE_ALLOWANCES[tier]),
+    sources: [
+      { file: "lib/creator-card.ts", names: ["CARD_FENCE_COMMANDS", "CARD_LIVE", "SAVE_CARD", "DROP_CARD"] },
+      { file: "lib/store-live-cache.ts", names: ["storeLiveFence"] },
+      { file: "app/api/store/creator-card/route.ts", names: ["guardStoreWrite", "await storeLiveFence(store)"] },
+    ],
+    basis: "In addition to the existing studio request, every studio unit funds the card fence's two inner commands (HGET of the erasing field, GET of the store's id key or, for a store from before ids, its record) and 2048 wire bytes for the keys, ref and longer script. No extra round trip: the fence is inside the card's own script (Codex L-20261121-0150). The trial uses the same per-unit surcharge in nonPayingWorst; free-share carries its share. Prices and visible allowances do not change.",
+  },
+  {
     id: "rest-api",
     feature: "The REST API: every request with one of the store's keys, a contact added or a product given as API_WRITE_UNITS of them (17 October 2026)",
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "api"),
@@ -3807,6 +3823,8 @@ export function nonPayingWorst(): number {
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS
     // Its studio picture doors, checks and page saves, at its own studio figure (line studio-blob; Claude 7 on #2852).
     + studioBlobMonthly(allowances.studio)
+    // Its business-card saves and removals' store fence, at its own studio figure (line creator-card-erasure-fence).
+    + creatorCardFenceCost(allowances)
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.

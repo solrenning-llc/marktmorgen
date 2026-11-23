@@ -523,7 +523,10 @@ export default function DevelopersPage() {
           its new time.
         </Endpoint>
         <p>
-          {`With your Stripe account connected, it reads up to ${n(BOOKINGS_READ)} bookings from it, so it counts as ${n(BOOKINGS_COUNT)} of your API requests, however many you have. Without Stripe connected, it counts as one.`}
+          {`With your Stripe account connected, it reads up to ${n(BOOKINGS_READ)} bookings from it, so it counts as ${n(BOOKINGS_COUNT)} of your API requests, however many you have. Without Stripe connected, it counts as one.`}{" "}
+          <code className="font-mono">has_more</code> is true when your Stripe account has older checkouts than this
+          read reaches, which may hold more bookings: the list is then not all of them, and those checkouts are in your
+          Stripe dashboard.
         </p>
         <Code>{`{
   "data": [
@@ -541,7 +544,8 @@ export default function DevelopersPage() {
       "currency": "usd",
       "answers": [{ "label": "What should we cover?", "value": "Pricing my first course" }]
     }
-  ]
+  ],
+  "has_more": false
 }`}</Code>
       </LegalSection>
 

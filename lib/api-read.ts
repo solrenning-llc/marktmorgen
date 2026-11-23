@@ -27,7 +27,7 @@ import { memberPage } from "@/lib/community";
 import { readCourse } from "@/lib/course";
 import { studentPage } from "@/lib/learn";
 import { BOOK_STRIPE_PAGES, type Book, bookSizes, readBook } from "@/lib/affiliates";
-import { paidCalls } from "@/lib/calls";
+import { paidCallsRead } from "@/lib/calls";
 import { productLink } from "@/lib/checkout-recovery";
 import {
   type ReadWork, API_PAGE_ROWS, addWork, apiReadUnits, bookWork, bookingsWork, EVENTS_PROBE_MOST, eventsSentMost, eventsWork, listPageMost, numbersWork, productsPageWork, scannedPageWork, settledUnits,
@@ -401,12 +401,14 @@ export async function numbersUnits(store: Store, also: Partial<ReadWork> = {}): 
  * many there are is known only once Stripe has answered, so the further
  * requests its most (lib/api-read-rules.ts, bookingsWork) are taken before;
  * a store without Stripe connected reads nothing and takes none.
+ * `hasMore` is true when the read stopped at its last page while Stripe still had older checkouts, which may hold
+ * a booking (lib/calls.ts, paidCallsRead): the rows are then never answered as the whole list (issue #4049).
  */
-export async function bookings(store: Store, charge: Charge): Promise<Record<string, unknown>[] | Response> {
+export async function bookings(store: Store, charge: Charge): Promise<{ rows: Record<string, unknown>[]; hasMore: boolean } | Response> {
   const refused = await charge(apiReadUnits(bookingsWork(Boolean(store.stripeAccountId))));
   if (refused) return refused;
-  const rows = await paidCalls(store);
-  return rows.map((c) => ({
+  const { paid, partial } = await paidCallsRead(store);
+  const rows = paid.map((c) => ({
     id: c.session,
     product_id: c.product,
     title: c.title,
@@ -421,4 +423,5 @@ export async function bookings(store: Store, charge: Charge): Promise<Record<str
     currency: c.currency || store.currency,
     answers: c.answers,
   }));
+  return { rows, hasMore: partial };
 }

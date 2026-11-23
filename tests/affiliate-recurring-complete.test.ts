@@ -230,6 +230,33 @@ async function main(): Promise<void> {
   const fits = await readUntilWhole(12);
   is("at the ceiling itself, whole and every one counted", [fits.whole, fits.earned], [true, INVOICES_KEPT_MAX_LINES * 600]);
 
+  part("Past the ceiling, a mark whose first write is not confirmed is written again, not left to the next reading");
+  // Codex X6's LOW on #3378 @bca4245bf5 (Board #5285, row #3378): writeInvoiceKeep caught and ignored the failed write
+  // of the mark of going past the ceiling and said "ceiling" all the same: the record read before stayed, and the
+  // readings that begin again were not told reloading will not help. A write that does not say "kept" is tried once more.
+  const { product: p5 } = await setUp();
+  const terms5 = { product: p5, via: SARA, via_rate: "30", via_months: String(RECURRING_ALWAYS), via_at: String(NOW - 300 * DAY) };
+  all = [];
+  for (let i = 0; i <= INVOICES_KEPT_MAX_LINES; i += 1) all.push(inv(`in_Mark${String(i).padStart(7, "0")}`, NOW - 1000 - i, terms5));
+  const markStats = (await storeForEmail(OWNER))!.statsId!;
+  const keyOfKept = `nl:aff:${markStats}:invoices`;
+  const realPipeline = redis.pipeline.bind(redis);
+  let markFailed = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const writesMark = commands.some((c) => c[0] === "EVAL" && c.some((a) => typeof a === "string" && a.includes('"kept":null,"walk":null,"over":')));
+    if (!markFailed && writesMark) {
+      markFailed = true;
+      throw new Error("synthetic lost answer of the mark's write");
+    }
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  for (let n = 0; n < 12 && !markFailed; n += 1) await sara();
+  redis.pipeline = realPipeline;
+  is("a reading went past the ceiling and the mark's first write failed", markFailed, true);
+  const [markRaw] = (await redis.pipeline([["GET", keyOfKept]])) as unknown[];
+  const markRecord = typeof markRaw === "string" ? (JSON.parse(markRaw) as { kept?: unknown; walk?: unknown; over?: unknown }) : null;
+  is("the mark is kept all the same: nothing kept, and when it went past", [markRecord?.kept, markRecord?.walk, typeof markRecord?.over], [null, null, "number"]);
+
   part("Invoices not all read: nothing is paid from PayPal by itself, nor a batch recorded");
   // No plan, as the payday email's own test (tests/opt-out-exact.test.ts): the email is counted against the store's figure.
   await setUp(false);

@@ -1364,6 +1364,17 @@ console.log("e0bc: complete-review knows its own verdict on the PR, also for a n
     mod.comentarioDaSessao("Claude 2 lpgvy review #980 @abc1234567: READY, 0 findings\n\nFocal on the fix of the LEVE that Claude 2 main (session `01FR6Z1MtkLE`) raised in 7100000000.", "Claude 2 (main, 01FR6Z1)", S2) === false);
   is("e0bc: the session's id in its own first line is still its own",
     mod.comentarioDaSessao("Claude 2 review #981 @abc1234567: READY (session `01FR6Z1MtkLE`)\n\nbody", "Claude 2 (main, 01FR6Z1)", S2) === true);
+  // LEVE of Claude 5 ibqho on #5408 @fe7b3613dd: a session with no name word that signs on a later line ("Reviewer:
+  // Claude 6, session 018ZjhH...", Claude 6's real format, 7109479248) still reads its own verdict as its own; a sister
+  // that only cites the id in its body is still a sister's.
+  const S6 = { id: "session_018ZjhHi51AAAAAAAAAAAAAAAA" };
+  is("e0bc: the session's id on its own signature line ('Reviewer: ..., session ...') is its own",
+    mod.comentarioDaSessao("Claude 6 review #5422 @8fcb16aaa8: CHANGES\n\nReviewer: Claude 6, session 018ZjhHi51\n\nbody", "Claude 6", S6) === true);
+  is("e0bc: a 'Por:' or 'Sessão:' signature line counts too",
+    mod.comentarioDaSessao("Claude 6 review #5423 @8fcb16aaa8: READY\n\nbody\n\nPor: Claude 6 (sessão 018ZjhHi51)", "Claude 6", S6) === true
+    && mod.comentarioDaSessao("Claude 6 review #5424 @8fcb16aaa8: READY\n\nSessão: 018ZjhHi51", "Claude 6", S6) === true);
+  is("e0bc: a sister whose own signature names another session and whose body cites this id is a sister's",
+    mod.comentarioDaSessao("Claude 6 review #5425 @8fcb16aaa8: READY\n\nReviewer: Claude 6, session 018ZjhHhUo\n\nSession 018ZjhHi51 raised the LEVE; it is fixed.", "Claude 6", S6) === false);
   is("e0bc: a name word in a Claude 2 sibling's label only as part of a longer word is not the session's",
     mod.comentarioDaSessao("Claude 2 mainline review #979 @abc: READY", "Claude 2 (main, 01FR6Z1)", null) === false);
 }

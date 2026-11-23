@@ -44,6 +44,7 @@ import { productSegment } from "@/lib/product-slug";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { communityWords } from "@/lib/buyer-words/community";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import type { LanguageCode } from "@/lib/store-language";
 
@@ -55,8 +56,11 @@ export const ACTIVITY_DAYS = 30;
 export const ABOUT_POSTS_READ = 20;
 /** The most one post's record may weigh as it is kept (its title, text, poll and picture, escaped as JSON), a review ceiling. */
 export const ABOUT_POST_BYTES = 32_768;
-/** What working the counts out sends: the kept counts read, the members counted, the feed's newest, the posts, the counts kept. */
-export const ABOUT_REFRESH_COMMANDS = 5;
+/**
+ * What working the counts out sends: the kept counts read, the members counted, the feed's newest, the posts (4), and
+ * the counts kept only while the store is live (setWhileStoreLive: the EVAL and its HGET, GET and SET, 4; #5010 row 106).
+ */
+export const ABOUT_REFRESH_COMMANDS = 4 + 4;
 /** What it reads, at the most. */
 export const ABOUT_REFRESH_BYTES = ABOUT_POSTS_READ * ABOUT_POST_BYTES + 4_096;
 /** The store's public requests working the counts out takes, before it reads (tests/sk1-community-about.test.ts holds them against its cost). */
@@ -260,7 +264,10 @@ export async function aboutCounts(
   // A full window of hidden posts is kept as read (shown as unknown), so the next visits do not pay to read it again.
   if (joined !== null && read !== null) {
     const value: Kept = { at, joined, posts: read.n, more: read.more };
-    await redisPipeline([["SET", aboutKey(id), JSON.stringify(value), "EX", ABOUT_FRESH_SECONDS]]);
+    // Kept only while the store is live and not erasing, in the same Redis step (#5010 row 106, Codex G-20261119-1631):
+    // a whole-store erasure between the reads above and this write never gets the cache back. The counts already worked
+    // out still go back to this visit.
+    await setWhileStoreLive(store, aboutKey(id), JSON.stringify(value), ABOUT_FRESH_SECONDS);
   }
   return { joined, posts: read ? shownPosts(read.n, read.more) : null };
 }

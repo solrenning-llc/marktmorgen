@@ -58,8 +58,17 @@ export async function POST(request: Request) {
         ? apiError(409, "taken", "Your Stripe account already has a code with these letters. Choose another.")
         : apiError(502, "unavailable", "The code could not be made on Stripe just now. Try again in a moment.");
     }
-    await setHasDiscounts(storeRef(store), true);
-    return apiOk({ data: codeOut(made.code) });
+    // Stripe made the code: from here it is answered as made, whatever happens to the second write (issue #4076). A
+    // checkout code box that could not be switched on is said so, never "could not be made" (a retry would only meet
+    // 409 taken); making or switching off any code later switches it again.
+    const boxOn = await setHasDiscounts(storeRef(store), true).then(
+      () => true,
+      (error: unknown) => {
+        console.error("api: a code was made but the checkout's code box was not switched on", error);
+        return false;
+      },
+    );
+    return apiOk({ data: codeOut(made.code), ...(boxOn ? {} : { checkout_box: "not_switched_on" }) });
   } catch (error) {
     console.error("api: making a code failed", error);
     return apiError(502, "unavailable", "The code could not be made on Stripe just now. Try again in a moment.");

@@ -587,6 +587,9 @@ export default function DevelopersPage() {
           currency; <code className="font-mono">uses</code> and <code className="font-mono">minimum</code> are optional. A
           code that cannot be made says why, as <code className="font-mono">error</code> and{" "}
           <code className="font-mono">message</code>; the same letters twice give 409 <code className="font-mono">taken</code>.
+          A code Stripe made is always answered with the code. If your checkout&apos;s code box could not be switched on just
+          then, the answer also says <code className="font-mono">{`"checkout_box": "not_switched_on"`}</code>; making or
+          switching off any code switches it again.
         </Endpoint>
         <Endpoint method="DELETE" path="/api/v1/codes?id=promo_…">
           Switches one of your store&apos;s codes off. Stripe never deletes a code that may be on a receipt, so it stays in

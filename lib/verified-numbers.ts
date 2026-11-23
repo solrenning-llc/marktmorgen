@@ -154,8 +154,10 @@ type NumbersRead = { stats: Stats; sales: SalesStats | null; state: StatsData["s
  * The studio's numbers for the record, with the products they name (productsInStats) listed by the titles already
  * read: no listing is read for them, and a product that sold is never left out of the record (review of #5270).
  */
-export function recordNumbers(store: Store, read: NumbersRead, titles: Map<string, string>): StatsData {
-  const listed = productsInStats(store, read.stats, read.sales).map((id) => ({ id, title: titles.get(id) ?? "" }));
+export function recordNumbers(store: Store, read: NumbersRead, titles: Map<string, string> | null): StatsData {
+  // Titles that could not be read (null) list no product at all: a product that sold is never shown under a false
+  // "no longer listed" (Claude 1 on #5270); the record is made again the next day.
+  const listed = titles ? productsInStats(store, read.stats, read.sales).map((id) => ({ id, title: titles.get(id) ?? "" })) : [];
   return studioStats(store, read.stats, read.sales, read.state, listed);
 }
 
@@ -174,8 +176,8 @@ export async function refreshVerified(store: Store, now = Date.now(), how: "take
   // The studio's numbers, from the readings the studio keeps.
   const read = await numbersForRecord(store, now, how);
   if (!read) return null;
-  const titles = await readTitles(store).catch(() => new Map<string, string>());
-  const record = verifiedFrom(recordNumbers(store, read, titles), titles, read.at);
+  const titles = await readTitles(store).catch(() => null);
+  const record = verifiedFrom(recordNumbers(store, read, titles), titles ?? new Map<string, string>(), read.at);
   // Kept only when Redis said OK: another reply leaves the record unknown, never counted as kept (CX-123 rule 24).
   const kept = repliesFor(await redisPipeline([["SET", key(store.statsId), JSON.stringify(record), "EX", KEEP_SECONDS]]), 1);
   if (kept?.[0] !== "OK") throw new UnknownReplyError("keeping the shared numbers");

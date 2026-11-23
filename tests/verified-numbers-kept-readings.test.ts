@@ -21,7 +21,7 @@ import { POST as linksPost } from "@/app/api/store/numbers-links/route";
 import { makeLink } from "@/lib/numbers-links";
 import { addNumbersLink, addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { STORE_READINGS_PER_DAY, keptSales, keptStats } from "@/lib/store-readings";
-import { readVerified, refreshVerified, sendVerified } from "@/lib/verified-numbers";
+import { readVerified, recordNumbers, refreshVerified, sendVerified, verifiedFrom } from "@/lib/verified-numbers";
 import { paidPeriod } from "./billing-period-fixture";
 import { LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS, VERIFIED_RECORD_EXTRA_COMMANDS } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
@@ -181,6 +181,15 @@ async function main(): Promise<void> {
     redis.run(["DEL", `nl:verified:${store.statsId}`, "nl:verified:cursor"]);
     await sendVerified(Date.now() + 60_000);
     is("from the daily pass: the product that sold is listed by its title", (await readVerified(store))?.products.map((p) => [p.title, p.sales, p.cents]), [["Fictional Field Guide", 1, 5000]]);
+
+    // Claude 1's NIT on #5270 @d2fcd82600 (7093617970): when the store's titles cannot be read, a product that sold
+    // was kept with the title "" and shown as "A product no longer listed", which is not true. With the titles
+    // unknown (null), the record keeps no product list at all, never a false name.
+    const stats = (await keptStats(store, NOW))?.value;
+    const sales = (await keptSales(store, NOW))?.value;
+    if (!stats || !sales) throw new Error("no kept readings");
+    const unknownTitles = verifiedFrom(recordNumbers(store, { stats, sales, state: "ok", at: NOW }, null), new Map(), NOW);
+    is("titles unknown: no product is named, and none as no longer listed", unknownTitles.products, []);
   }
 
   done();

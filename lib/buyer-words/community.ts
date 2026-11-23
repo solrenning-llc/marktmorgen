@@ -10,6 +10,7 @@
  * third person of Portugal in Portuguese.
  */
 import { type LanguageCode, parseLanguage } from "@/lib/store-language";
+import { ANNOUNCE_EMAIL_STUDIO_REQUESTS } from "@/lib/community-text";
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 /** French takes the singular for 0 and 1. */
@@ -273,7 +274,7 @@ const en = {
   emailNeedsPro: "Emailing announcements is part of Pro, once your email settings are filled in.",
   nobodyAskedEmails: "Nobody has asked for announcement emails yet.",
   alsoEmail: (count: number) =>
-    `Also email it to the ${count} ${plural(count, "member", "members")} who asked for announcements (counts toward your monthly emails)`,
+    `Also email it to the ${count} ${plural(count, "member", "members")} who asked for announcements (counts toward your monthly emails, and as ${ANNOUNCE_EMAIL_STUDIO_REQUESTS} studio requests)`,
   onePicture: "One picture per post",
   addPicture: "Add a picture",
   askPoll: "Ask a poll",
@@ -865,7 +866,7 @@ const es: CommunityWords = {
   markAnnouncement: "Marcarla como anuncio",
   emailNeedsPro: "Enviar anuncios por email forma parte de Pro, una vez completados tus ajustes de email.",
   nobodyAskedEmails: "Nadie ha pedido todavía los anuncios por email.",
-  alsoEmail: (count) => `Enviarla también por email a los miembros que pidieron los anuncios (${count}; cuenta para tus emails del mes)`,
+  alsoEmail: (count) => `Enviarla también por email a los miembros que pidieron los anuncios (${count}; cuenta para tus emails del mes y como ${ANNOUNCE_EMAIL_STUDIO_REQUESTS} solicitudes del estudio)`,
   onePicture: "Una imagen por publicación",
   addPicture: "Añadir una imagen",
   askPoll: "Hacer una encuesta",
@@ -1443,7 +1444,7 @@ const fr: CommunityWords = {
   markAnnouncement: "La marquer comme annonce",
   emailNeedsPro: "L'envoi des annonces par e-mail fait partie de Pro, une fois vos réglages d'e-mail remplis.",
   nobodyAskedEmails: "Personne n'a encore demandé les annonces par e-mail.",
-  alsoEmail: (count) => `L'envoyer aussi par e-mail aux membres qui ont demandé les annonces (${count}${S}; compte dans vos e-mails du mois)`,
+  alsoEmail: (count) => `L'envoyer aussi par e-mail aux membres qui ont demandé les annonces (${count}${S}; compte dans vos e-mails du mois, et pour ${ANNOUNCE_EMAIL_STUDIO_REQUESTS} requêtes du studio)`,
   onePicture: "Une image par publication",
   addPicture: "Ajouter une image",
   askPoll: "Créer un sondage",
@@ -2021,7 +2022,7 @@ const de: CommunityWords = {
   markAnnouncement: "Als Ankündigung markieren",
   emailNeedsPro: "Ankündigungen per E-Mail gehören zu Pro, sobald Ihre E-Mail-Einstellungen ausgefüllt sind.",
   nobodyAskedEmails: "Noch niemand möchte Ankündigungen per E-Mail.",
-  alsoEmail: (count) => `Auch per E-Mail an die Mitglieder senden, die Ankündigungen erhalten möchten (${count}; zählt zu Ihren monatlichen E-Mails)`,
+  alsoEmail: (count) => `Auch per E-Mail an die Mitglieder senden, die Ankündigungen erhalten möchten (${count}; zählt zu Ihren monatlichen E-Mails und als ${ANNOUNCE_EMAIL_STUDIO_REQUESTS} Studio-Anfragen)`,
   onePicture: "Ein Bild pro Beitrag",
   addPicture: "Bild hinzufügen",
   askPoll: "Umfrage stellen",
@@ -2599,7 +2600,7 @@ const it: CommunityWords = {
   markAnnouncement: "Segnalo come annuncio",
   emailNeedsPro: "L'invio degli annunci via email fa parte di Pro, una volta compilate le impostazioni email.",
   nobodyAskedEmails: "Nessuno ha ancora chiesto gli annunci via email.",
-  alsoEmail: (count) => `Invialo anche via email ai membri che hanno chiesto gli annunci (${count}; conta nelle tue email del mese)`,
+  alsoEmail: (count) => `Invialo anche via email ai membri che hanno chiesto gli annunci (${count}; conta nelle tue email del mese e come ${ANNOUNCE_EMAIL_STUDIO_REQUESTS} richieste dello studio)`,
   onePicture: "Un'immagine per post",
   addPicture: "Aggiungi un'immagine",
   askPoll: "Crea un sondaggio",
@@ -3177,7 +3178,7 @@ const nl: CommunityWords = {
   markAnnouncement: "Markeer als aankondiging",
   emailNeedsPro: "Aankondigingen mailen hoort bij Pro, zodra je e-mailinstellingen zijn ingevuld.",
   nobodyAskedEmails: "Nog niemand heeft om aankondigingen per e-mail gevraagd.",
-  alsoEmail: (count) => `Mail het ook naar de leden die om aankondigingen vroegen (${count}; telt mee voor je maandelijkse e-mails)`,
+  alsoEmail: (count) => `Mail het ook naar de leden die om aankondigingen vroegen (${count}; telt mee voor je maandelijkse e-mails en als ${ANNOUNCE_EMAIL_STUDIO_REQUESTS} studioverzoeken)`,
   onePicture: "Eén afbeelding per bericht",
   addPicture: "Afbeelding toevoegen",
   askPoll: "Peiling maken",
@@ -3755,7 +3756,7 @@ const pt: CommunityWords = {
   markAnnouncement: "Marcar como anúncio",
   emailNeedsPro: "O envio de anúncios por email faz parte do Pro, depois de preenchidas as definições de email.",
   nobodyAskedEmails: "Ainda ninguém pediu os anúncios por email.",
-  alsoEmail: (count) => `Enviar também por email aos membros que pediram os anúncios (${count}; conta para os seus emails do mês)`,
+  alsoEmail: (count) => `Enviar também por email aos membros que pediram os anúncios (${count}; conta para os seus emails do mês e como ${ANNOUNCE_EMAIL_STUDIO_REQUESTS} pedidos do estúdio)`,
   onePicture: "Uma imagem por publicação",
   addPicture: "Adicionar uma imagem",
   askPoll: "Fazer uma sondagem",

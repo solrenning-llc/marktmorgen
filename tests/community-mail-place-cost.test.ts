@@ -12,6 +12,7 @@
  * Synthetic data only (tests/community-mail-read-world.ts).
  */
 import { ANNOUNCE_PLACE_COMMANDS_MOST, ANNOUNCE_PLACE_STUDIO_UNITS, queueAnnouncement } from "@/lib/community-mail";
+import { ANNOUNCE_STUDIO_REQUEST_COMMANDS } from "@/lib/community-text";
 import { MAX_SENDS_UNDER_WAY } from "@/lib/community-text";
 import { STUDIO_REQUEST_COMMANDS } from "@/lib/student-bulk-rules";
 import type { Post } from "@/lib/community";
@@ -49,6 +50,7 @@ async function main(): Promise<void> {
   part("the studio requests an emailed announcement takes cover what its place costs at the most");
   is("the bound is a number", Number.isFinite(ANNOUNCE_PLACE_COMMANDS_MOST) && ANNOUNCE_PLACE_COMMANDS_MOST > 0, true);
   is("its units cover it", ANNOUNCE_PLACE_STUDIO_UNITS * STUDIO_REQUEST_COMMANDS >= ANNOUNCE_PLACE_COMMANDS_MOST, true);
+  is("the page's copy of a studio request's commands is the priced one", ANNOUNCE_STUDIO_REQUEST_COMMANDS, STUDIO_REQUEST_COMMANDS);
 
   part(`busy: ${MAX_SENDS_UNDER_WAY} live sends and three times as many stale places`);
   seed(MAX_SENDS_UNDER_WAY, 3 * MAX_SENDS_UNDER_WAY);

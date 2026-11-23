@@ -3318,7 +3318,8 @@ export const COST_LINES: CostLine[] = [
       // places it lets go and the erasures' count read twice, at most ANNOUNCE_PLACE_COMMANDS_MOST commands, taken as
       // ANNOUNCE_PLACE_STUDIO_UNITS studio requests more than the post's own, each priced at UNIT_COST.studio
       // (tests/community-mail-place-cost.test.ts).
-      { file: "lib/community-mail.ts", names: ["holdSendPlace", "letStaleGo", "erasuresCount", "PLACE_LOOKS_MOST", "ANNOUNCE_PLACE_COMMANDS_MOST", "ANNOUNCE_PLACE_STUDIO_UNITS"] },
+      { file: "lib/community-mail.ts", names: ["holdSendPlace", "letStaleGo", "erasuresCount", "slice(0, PLACE_LOOKS_MOST)"] },
+      { file: "lib/community-text.ts", names: ["PLACE_LOOKS_MOST", "ANNOUNCE_PLACE_COMMANDS_MOST", "ANNOUNCE_PLACE_STUDIO_UNITS", "ANNOUNCE_STUDIO_REQUEST_COMMANDS"] },
       // 543 [CM2]: a post or comment held for approval is the same action, inside the community's and the member's ceilings; since unit 2 it also puts its store on
       // the daily notice's list and line (two ZADDs), and a hold with its HOLD_SWEEP sweep at its most stays inside one action's 100 commands (tests/cm2-u2-daily-notice.test.ts);
       // a hold first sweeps at most HOLD_SWEEP expired items. A member's visit to the community reads their own held items with one read (heldOf), MGET only when they have some.

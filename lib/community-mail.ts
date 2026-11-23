@@ -50,9 +50,8 @@ import {
 } from "@/lib/community";
 import { askingAgainWontTell, holdsTicket, maySeeSpace } from "@/lib/community-access";
 import { communityWords } from "@/lib/buyer-words/community";
-import { MAX_SENDS_UNDER_WAY } from "@/lib/community-text";
+import { ANNOUNCE_PLACE_COMMANDS_MOST, ANNOUNCE_PLACE_STUDIO_UNITS, MAX_SENDS_UNDER_WAY, PLACE_LOOKS_MOST } from "@/lib/community-text";
 import { ERASED_MARK, blankInLists } from "@/lib/erasure-lists";
-import { STUDIO_REQUEST_COMMANDS } from "@/lib/student-bulk-rules";
 
 export const COMMUNITY_UNSUB = /^[0-9a-f]{40}$/;
 const QUEUE = "nl:cm:mailq";
@@ -84,25 +83,11 @@ const erasuresKey = (community: string) => `nl:cm:${community}:erasures`;
  */
 export const ERASE_SENDS_READ_MOST = 2 * MAX_SENDS_UNDER_WAY;
 /**
- * The most other places one send's hold looks up past the cap (holdSendPlace), so its commands are bounded (Claude 6
- * NQoup on #5072, LEVE): with its own place, as many ids as an erasure reads. Places past it are looked up by the next
- * sends and erasures; a send that finds the cap still passed is refused as busy, as before.
+ * A send's hold looks up at most PLACE_LOOKS_MOST other places, so one queueAnnouncement sends at most
+ * ANNOUNCE_PLACE_COMMANDS_MOST commands besides its recipient list, and an emailed announcement takes
+ * ANNOUNCE_PLACE_STUDIO_UNITS studio requests more (lib/community-text.ts, where the page reads them too).
  */
-const PLACE_LOOKS_MOST = ERASE_SENDS_READ_MOST - 1;
-/**
- * The most commands one queueAnnouncement sends besides its recipient list's writes (a DEL, an RPUSH for each 500
- * members and an EXPIRE, as before #5072) and the read of who asked for the emails (lib/community.ts mailableMembers):
- * the hold's SET, SADD and EXPIRE, its SCARD and SMEMBERS, an EXISTS and at most a DEL for each place it looks up
- * (PLACE_LOOKS_MOST), the stale places' SREM, the SCARD again and its own SREM when refused; the erasures' count read
- * before and after the members; then the send's record and its place in line, or, when a person was erased meanwhile,
- * its list's DEL and the two SREMs of letGo. Held by tests/community-mail-place-cost.test.ts.
- */
-export const ANNOUNCE_PLACE_COMMANDS_MOST = 3 + 2 + 2 * PLACE_LOOKS_MOST + 3 + 2 + 2 + 3;
-/**
- * Studio requests an emailed announcement takes besides the one every post takes (app/api/store/community/route.ts),
- * before anything is read: enough, at STUDIO_REQUEST_COMMANDS each, for ANNOUNCE_PLACE_COMMANDS_MOST.
- */
-export const ANNOUNCE_PLACE_STUDIO_UNITS = Math.ceil(ANNOUNCE_PLACE_COMMANDS_MOST / STUDIO_REQUEST_COMMANDS);
+export { ANNOUNCE_PLACE_COMMANDS_MOST, ANNOUNCE_PLACE_STUDIO_UNITS };
 export const unsubKey = (token: string) => `nl:cm:unsub:${token}`;
 const JOB_ID = /^[0-9a-f]{24}$/;
 

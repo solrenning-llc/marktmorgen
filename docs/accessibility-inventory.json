@@ -1255,6 +1255,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/learning-paths/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/learning-paths",
+      "parameters": []
+    },
+    {
       "source": "app/studio/meetings/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/meetings",
@@ -1264,6 +1270,12 @@
       "source": "app/studio/memberships/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/memberships",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/moved/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/moved",
       "parameters": []
     },
     {
@@ -1561,6 +1573,7 @@
     "components/email-usage-summary.tsx",
     "components/embed-messenger.tsx",
     "components/empty-state.tsx",
+    "components/exit-notice-editor.tsx",
     "components/exit-offer-editor.tsx",
     "components/exit-offer-slot.tsx",
     "components/exit-offer.tsx",
@@ -1612,6 +1625,7 @@
     "components/join-box-editor.tsx",
     "components/kept-by-currency.tsx",
     "components/kit-editor.tsx",
+    "components/learning-paths-editor.tsx",
     "components/leave-editor.tsx",
     "components/legal-page.tsx",
     "components/lesson-comments.tsx",
@@ -1646,6 +1660,7 @@
     "components/membership-by-price.tsx",
     "components/more-from.tsx",
     "components/morning-header.tsx",
+    "components/moved-notice.tsx",
     "components/mrr-chart.tsx",
     "components/new-tab.tsx",
     "components/next-action-draft.tsx",
@@ -1763,6 +1778,7 @@
     "components/said-line.tsx",
     "components/sale-editor.tsx",
     "components/sales-blocks.tsx",
+    "components/sales-bulk-actions.tsx",
     "components/sales-goal-card.tsx",
     "components/sales-levers.tsx",
     "components/save-offer-editor.tsx",
@@ -2062,6 +2078,7 @@
     "app/api/store/email-sync/route.ts",
     "app/api/store/embed-sites/route.ts",
     "app/api/store/exit-offer/route.ts",
+    "app/api/store/exit/route.ts",
     "app/api/store/export/route.ts",
     "app/api/store/extras/route.ts",
     "app/api/store/fair/route.ts",
@@ -2104,6 +2121,7 @@
     "app/api/store/kit/route.ts",
     "app/api/store/language/route.ts",
     "app/api/store/leads/route.ts",
+    "app/api/store/learning-paths/route.ts",
     "app/api/store/leaving/route.ts",
     "app/api/store/letters/link/route.ts",
     "app/api/store/letters/open/route.ts",
@@ -2189,6 +2207,7 @@
     "app/api/store/review/route.ts",
     "app/api/store/reviews/route.ts",
     "app/api/store/sale/route.ts",
+    "app/api/store/sales-bulk/route.ts",
     "app/api/store/sales-filters/route.ts",
     "app/api/store/save-offer/route.ts",
     "app/api/store/saved-blocks/route.ts",
@@ -2346,6 +2365,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 161
+    "pageTemplates": 163
   }
 }

@@ -1,3 +1,4 @@
+import { storeLiveFence } from "@/lib/store-live-cache";
 /**
  * 639 [GL7](22), unit 2: the creator's business card on the store's contact
  * address (app/[handle]/contact/page.tsx) and its "Save contact" file
@@ -64,12 +65,12 @@ async function main(): Promise<void> {
   part("While the card is off");
   is("the contact address goes to the store, as before", await open(), { redirect: "/@anapottery" });
   is("and there is no file", (await file()).status, 404);
-  await saveCreatorCard(store.statsId!, { ...card, on: false }, store);
+  await saveCreatorCard(store.statsId!, { ...card, on: false }, store, await storeLiveFence(store));
   is("a card kept but off is not shown", await open(), { redirect: "/@anapottery" });
   is("nor given", (await file()).status, 404);
 
   part("Turned on: the card");
-  await saveCreatorCard(store.statsId!, card, store);
+  await saveCreatorCard(store.statsId!, card, store, await storeLiveFence(store));
   is("the contact address shows the card", await open(), "shown");
   const draw = (shown: CreatorCard) => renderToStaticMarkup(createElement(CreatorCardView, { card: shown, handle: "anapottery", storeName: "Ana's Pottery", words: CONTACT_WORDS.en.card }));
   const html = draw(card);
@@ -87,7 +88,7 @@ async function main(): Promise<void> {
   is("the page reads the card only with no message's notice", readFileSync("app/[handle]/contact/page.tsx", "utf8").includes("if (!card?.on) redirect(`/@${store.handle}`);"), true);
 
   part("The file to save");
-  await saveCreatorCard(store.statsId!, card, store);
+  await saveCreatorCard(store.statsId!, card, store, await storeLiveFence(store));
   const response = await file();
   const text = await response.text();
   is("a vCard, saved as a file named for the card, never kept in a cache", [response.status, response.headers.get("content-type"), response.headers.get("content-disposition"), response.headers.get("cache-control")], [200, "text/vcard; charset=utf-8", 'attachment; filename="ana-souza.vcf"', "no-store"]);
@@ -95,7 +96,7 @@ async function main(): Promise<void> {
   is("not for a store that does not exist", (await GET(new NextRequest("https://marktmorgen.com/@nobody/contact/vcard"), { params: Promise.resolve({ handle: "@nobody" }) })).status, 404);
 
   part("A store switched off after a report (lib/takedown.ts)");
-  await saveCreatorCard(store.statsId!, card, store);
+  await saveCreatorCard(store.statsId!, card, store, await storeLiveFence(store));
   await noteTakedown(owner, null, true);
   is("the file is not given", [(await file()).status, (await file()).headers.get("cache-control")], [404, "no-store"]);
   const resting = (await ContactPage({ params: Promise.resolve({ handle: "@anapottery" }), searchParams: Promise.resolve({}) })) as { type?: unknown; props?: { suspended?: boolean } } | undefined;
@@ -137,7 +138,7 @@ async function main(): Promise<void> {
   }
 
   part("Sent from under the card: the way back leads to the card (WCAG 2.4.8, 3.2.3; review of #1965)");
-  await saveCreatorCard(store.statsId!, card, store);
+  await saveCreatorCard(store.statsId!, card, store, await storeLiveFence(store));
   await setContact(owner, { on: true });
   // A sender is configured, so the form is open (lib/store-contact.ts, contactOpen); any email it tried to send would be counted here.
   const keyBefore = process.env.RESEND_API_KEY;

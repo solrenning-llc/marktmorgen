@@ -72,12 +72,24 @@ export const READER = `${READER_NAME}/1.0 (+${SITE_URL}/help#outreach)`;
 const PAGE_BYTES = 3_000_000;
 const PAGE_MS = 8_000;
 
-/** One page of somebody's site, or null when it could not or should not be read. For tests to stand in for. */
-export type PageReader = (url: string) => Promise<{ url: string; html: string } | null>;
+/**
+ * The whole of one read of a business's site, its robots.txt and every page, ends inside this. A read is one unit of
+ * the store's integrations, priced as ten seconds held while the other service answers (tests/plan-cost-registry.ts,
+ * line integrations); without it a read could take a robots.txt, a front page, a moved origin's robots.txt and the
+ * contact pages at PAGE_MS each, about 32 seconds (coordinator cb12 on #5231). The second left is for the route's own
+ * checks around it.
+ */
+export const READ_SITE_MS = 9_000;
 
-const readPage: PageReader = async (url) => {
+/**
+ * One page of somebody's site, or null when it could not or should not be read. For tests to stand in for. `timeoutMs`
+ * is how long is left of the read: a reader gives up by then.
+ */
+export type PageReader = (url: string, timeoutMs?: number) => Promise<{ url: string; html: string } | null>;
+
+const readPage: PageReader = async (url, timeoutMs = PAGE_MS) => {
   try {
-    const answer = await safeFetch(url, { maxBytes: PAGE_BYTES, timeoutMs: PAGE_MS, maxRedirects: 3, headers: { "User-Agent": READER, Accept: "text/html,text/plain;q=0.8" } });
+    const answer = await safeFetch(url, { maxBytes: PAGE_BYTES, timeoutMs: Math.max(1, Math.min(PAGE_MS, timeoutMs)), maxRedirects: 3, headers: { "User-Agent": READER, Accept: "text/html,text/plain;q=0.8" } });
     if (answer.status !== 200) return null;
     const type = (answer.headers["content-type"] ?? "").toLowerCase();
     if (type && !/text\/|html|xml/.test(type)) return null;
@@ -88,7 +100,8 @@ const readPage: PageReader = async (url) => {
   }
 };
 
-export type SiteProblem = "address" | "unreadable";
+/** "timeout": the site did not answer inside READ_SITE_MS, said to the creator as such, never as an empty result. */
+export type SiteProblem = "address" | "unreadable" | "timeout";
 
 export type SiteRead = {
   /** The business's own domain, as its addresses carry it. */
@@ -135,6 +148,36 @@ async function siteRules(origin: string, reader: PageReader): Promise<string[]> 
 }
 
 /**
+ * A reader whose pages are all asked for inside one deadline: each is told what is left and is not waited for past it,
+ * so a slow site ends the read on time. `late()` says whether a page was cut off by the deadline (a "timeout"), not
+ * merely unread.
+ */
+function deadlineReader(reader: PageReader, budgetMs: number): { within: PageReader; late: () => boolean } {
+  const ends = Date.now() + budgetMs;
+  let cut = false;
+  const within: PageReader = async (url) => {
+    const left = ends - Date.now();
+    if (left <= 0) {
+      cut = true;
+      return null;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ran = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        cut = true;
+        resolve(null);
+      }, left);
+    });
+    try {
+      return await Promise.race([reader(url, left), ran]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  return { within, late: () => cut };
+}
+
+/**
  * Reads what a creator typed as the address of a business's website, and
  * returns what that business says of itself and where it asks to be written.
  */
@@ -144,7 +187,10 @@ export async function readStoreSite(store: Store, raw: string, reader: PageReade
   return readSite(raw, reader);
 }
 
-export async function readSite(raw: string, reader: PageReader = readPage): Promise<{ ok: true; site: SiteRead } | { ok: false; reason: SiteProblem }> {
+export async function readSite(raw: string, reader: PageReader = readPage, budgetMs: number = READ_SITE_MS): Promise<{ ok: true; site: SiteRead } | { ok: false; reason: SiteProblem }> {
+  // Every page of this read is asked for inside one deadline (coordinator cb12 on #5231).
+  const { within, late } = deadlineReader(reader, budgetMs);
+  const missed = (): { ok: false; reason: SiteProblem } => ({ ok: false, reason: late() ? "timeout" : "unreadable" });
   let start: URL;
   try {
     const typed = raw.trim();
@@ -152,17 +198,25 @@ export async function readSite(raw: string, reader: PageReader = readPage): Prom
   } catch {
     return { ok: false, reason: "address" };
   }
-  const front = await reader(`${start.origin}/`);
-  if (!front) return { ok: false, reason: "unreadable" };
+  // robots.txt first (#4482): a site that closes its front page to this reader is never read, not read and then let go.
+  // A robots.txt that did not answer in time is not read as one that asks nothing: the read ends there.
+  const first = await siteRules(start.origin, within);
+  if (late()) return missed();
+  if (!robotsAllows(first, "/")) return { ok: false, reason: "unreadable" };
+  const front = await within(`${start.origin}/`);
+  if (!front) return missed();
   const home = new URL(front.url);
-  const disallows = await siteRules(home.origin, reader);
+  // A front page that moved to another origin is asked about by that origin's own robots.txt, as before.
+  const disallows = home.origin === start.origin ? first : await siteRules(home.origin, within);
+  if (late()) return missed();
   if (!robotsAllows(disallows, home.pathname || "/")) return { ok: false, reason: "unreadable" };
 
   // The few pages its own menu points to, asked for together: each once, and none that robots.txt closes.
   const wanted = contactPages(front.html, front.url)
     .filter((url) => robotsAllows(disallows, new URL(url).pathname))
     .slice(0, MAX_PAGES_READ - 1);
-  const others = await Promise.all(wanted.map((url) => reader(url)));
+  // A contact page that did not answer in time is left out, as one that did not answer at all: the front page was read.
+  const others = await Promise.all(wanted.map((url) => within(url)));
   const pages = [front, ...others.filter((page): page is { url: string; html: string } => page !== null && siteDomain(new URL(page.url).hostname) === siteDomain(home.hostname))];
 
   const found = new Map<string, FoundAddress & { refuses: boolean }>();
@@ -290,7 +344,7 @@ export type StartResult =
 export async function startPitch(
   store: Store,
   input: { goal: OutreachGoal; country: string; isCompany: boolean; page: string; email: string; company: string; about: string; notes: string },
-  options: { reader?: PageReader; now?: number } = {},
+  options: { reader?: PageReader; now?: number; readMs?: number } = {},
 ): Promise<StartResult> {
   if (!store.statsId || !isRedisConfigured()) return { ok: false, reason: "off" };
   const now = options.now ?? Math.floor(Date.now() / 1000);
@@ -335,10 +389,15 @@ export async function startPitch(
 
   // New draft work must be funded before even verifying its external page.
   if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return { ok: false, reason: "unavailable" };
-  const reader = options.reader ?? readPage;
-  if (!robotsAllows(await siteRules(page.origin, reader), `${page.pathname || "/"}${page.search}`)) return { ok: false, reason: "unreadable" };
-  const read = await reader(page.toString());
-  if (!read) return { ok: false, reason: "unreadable" };
+  // The page's robots.txt and the page itself inside the same deadline as a find (READ_SITE_MS), so the reads before
+  // the model call cannot hold the draft 16 s (coordinator 5252 on the readSite deadline). A robots.txt that did not
+  // answer in time is never read as one that asks nothing.
+  const { within, late } = deadlineReader(options.reader ?? readPage, options.readMs ?? READ_SITE_MS);
+  const rules = await siteRules(page.origin, within);
+  if (late()) return { ok: false, reason: "timeout" };
+  if (!robotsAllows(rules, `${page.pathname || "/"}${page.search}`)) return { ok: false, reason: "unreadable" };
+  const read = await within(page.toString());
+  if (!read) return { ok: false, reason: late() ? "timeout" : "unreadable" };
   const address = publishedAddresses(read.html, read.url, new URL(read.url).hostname).find((a) => a.email === email);
   if (!address) return { ok: false, reason: "unpublished" };
   const domain = siteDomain(new URL(read.url).hostname);

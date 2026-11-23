@@ -8,5 +8,6 @@
   "@/lib/submission-switch": "submission-switch-on.ts",
   "@/lib/upload-budget": "submission-upload-world.ts",
   "@/lib/vault-storage": "submission-upload-world.ts",
-  "@/lib/vault": "submission-upload-world.ts"
+  "@/lib/vault": "submission-upload-world.ts",
+  "@/lib/auth": "submission-studio-world.ts"
 }

@@ -1338,6 +1338,12 @@
       ]
     },
     {
+      "source": "app/studio/privacy/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/privacy",
+      "parameters": []
+    },
+    {
       "source": "app/studio/refund/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/refund",
@@ -1829,6 +1835,7 @@
     "components/studio-focus-clear.tsx",
     "components/studio-header.tsx",
     "components/studio-help.tsx",
+    "components/studio-privacy.tsx",
     "components/studio-screens.tsx",
     "components/studio-search.tsx",
     "components/studio-start.tsx",

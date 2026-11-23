@@ -172,6 +172,7 @@ export const STATEMENT_REVIEWS: Readonly<Record<string, { date: string; digest: 
   "page:/studio/people": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/phone": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/podcast/[product]": { date: "November 18, 2026", digest: "eba44788522343cb" },
+  "page:/studio/privacy": { date: "November 19, 2026", digest: "eba44788522343cb" },
   "page:/studio/refund": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/requests": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/reviews": { date: "November 18, 2026", digest: "eba44788522343cb" },

@@ -7,6 +7,7 @@
  * Each was a plain SET EX after the read, so a store whose erasure began meanwhile got the cache written back after
  * the erasure's walk and the late reading shown. Each now goes through setWhileStoreLive (lib/store-live-cache.ts):
  * nothing is kept for an erasing store and the reading is "not known" (null), and a live store is kept as before.
+ * When the fence cannot tell (it answers "unknown"), the reading is shown and nothing is kept.
  * Real code over the memory Redis stub, with stand-ins for Stripe; synthetic data only.
  */
 import { chargeableCurrencies } from "@/lib/payment-methods";
@@ -97,6 +98,33 @@ async function main(): Promise<void> {
     is("and no visits cache is written back", exists(key), 0);
     redis.run(["HDEL", ERASING_KEY, field]);
     is("control: a live store's visits are read and kept", [await readMailVisits(store, ["0123456789abcdef01234567"]), exists(key)], [{ "0123456789abcdef01234567": 0 }, 1]);
+  }
+
+  // Claude 1's LEVE on #5254 (7090698011), closed under the owner's zero-open-finding rule: the fence can also answer
+  // "unknown" (the owner's record not readable, or any other reply). That is not proof the store is being erased, so
+  // the reading is not thrown away as if it were: it is shown, and nothing is kept. Only "gone" makes it null.
+  part("Rows 120, 129 and 112: the live check answers neither kept nor gone");
+  {
+    const store = await liveStore();
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (batch: (string | number)[][]) => {
+      if (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).includes("marktmorgen:store-cache-live")) return [-2];
+      return real(batch);
+    }) as typeof redis.pipeline;
+    try {
+      is("the currencies read are shown", await chargeableCurrencies(store), ["usd", "cad"]);
+      is("and not kept", exists(`nl:pay:currencies:${ACCOUNT}`), 0);
+      const today = await readToday(store);
+      is("today's sales read are shown", today.sales, { sales: 0, cents: 0 });
+      is("and not kept", exists(`nl:stats:${store.statsId}:today:${today.date}`), 0);
+      const paid = await readMailRevenuePaid(store, null);
+      is("what the emails sold is shown", paid !== null && paid !== "refused", true);
+      is("and not kept", exists(`nl:stats:${store.statsId}:mailsales:v2`), 0);
+      is("the visits the emails brought are shown", await readMailVisits(store, ["0123456789abcdef01234567"]), { "0123456789abcdef01234567": 0 });
+      is("and not kept", exists(`nl:stats:${store.statsId}:mailvisits`), 0);
+    } finally {
+      redis.pipeline = real;
+    }
   }
 
   done();

@@ -177,10 +177,11 @@ export async function readMailRevenuePaid(
     const text = JSON.stringify(out);
     sized?.({ kept: Buffer.byteLength(text) });
     // Kept only while the store is live, in one step with its fence (Codex L-20261119-1738, #5010 row 112): a store
-    // erased while Stripe was read gets no revenue cache back, and the late reading is not shown.
+    // erased while Stripe was read gets no revenue cache back, and the late reading is not shown. When the fence cannot
+    // tell ("unknown"), nothing is kept and the reading is shown: only "gone" proves the store is being erased.
     if (isRedisConfigured()) {
       const kept = await setWhileStoreLive(store, cacheKey(store.statsId), text, CACHE_SECONDS).catch(() => "unknown" as const);
-      if (kept !== "kept") return null;
+      if (kept === "gone") return null;
     }
     return out;
   } catch (error) {
@@ -219,9 +220,10 @@ export async function readMailVisits(store: Pick<Store, "statsId" | "email" | "s
       const views = await campaignViews(store.statsId, broadcastIds.flatMap(broadcastCampaigns));
       if (!views) return null;
       by = Object.fromEntries(broadcastIds.map((id) => [id, broadcastCampaigns(id).reduce((sum, campaign) => sum + (Object.hasOwn(views, campaign) ? views[campaign] : 0), 0)]));
-      // The same fence (#5010 row 112): a store erased while its visits were counted gets nothing kept back.
+      // The same fence (#5010 row 112): a store erased while its visits were counted gets nothing kept back, and the
+      // count is not shown; when the fence cannot tell ("unknown"), nothing is kept and the count is shown.
       const kept = await setWhileStoreLive(store, visitsKey(store.statsId), JSON.stringify(by), CACHE_SECONDS).catch(() => "unknown" as const);
-      if (kept !== "kept") return null;
+      if (kept === "gone") return null;
     }
     return by;
   } catch (error) {

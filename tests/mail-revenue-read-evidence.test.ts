@@ -98,12 +98,19 @@ async function main(): Promise<void> {
     { value: { [cached]: 5, [newer]: 7 }, calls: 3 },
   );
   // The fresh counts are kept only through the store's fence (Codex L-20261119-1738, #5010 row 112): a store gone or
-  // being erased (0), or an answer that is not the exact 1, keeps nothing and the counts are not shown.
-  for (const [label, answer] of [["the store gone or being erased", 0], ["a plain OK", "OK"], ["no answer", null]] as const) {
+  // being erased (0) keeps nothing and the counts are not shown. An answer that is not the exact 1 nor 0 (a plain OK,
+  // no answer) does not tell whether the store is live: nothing is kept, and the counts read are shown (Claude 1's
+  // LEVE on #5254, 7090698011: only "gone" proves the erasure).
+  is(
+    "fresh visits whose fenced keep answers the store gone or being erased are unknown, not shown",
+    await withReplies([[JSON.stringify({ [cached]: 3 })], fresh, [0]], () => readMailVisits(creator, [cached, newer])),
+    { value: null, calls: 3 },
+  );
+  for (const [label, answer] of [["a plain OK", "OK"], ["no answer", null]] as const) {
     is(
-      `fresh visits whose fenced keep answers ${label} are unknown, not shown`,
+      `fresh visits whose fenced keep answers ${label} are shown, though not known to be kept`,
       await withReplies([[JSON.stringify({ [cached]: 3 })], fresh, [answer]], () => readMailVisits(creator, [cached, newer])),
-      { value: null, calls: 3 },
+      { value: { [cached]: 5, [newer]: 7 }, calls: 3 },
     );
   }
 

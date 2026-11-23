@@ -241,10 +241,11 @@ export async function chargeableCurrencies(store: Store): Promise<Currency[] | n
     const supported = listed.map((c) => c.toLowerCase());
     const ours = CURRENCIES.map((c) => c.code).filter((code) => supported.includes(code));
     // Kept only while the store is live, in one step with its fence (Codex L-20261119-1735, #5010 row 120): a store
-    // erased while Stripe was read gets nothing written back, and the late list is not known (null), never shown.
+    // erased while Stripe was read gets nothing written back, and the late list is not known (null), never shown. When
+    // the fence cannot tell ("unknown"), nothing is kept and the list read is used: only "gone" proves the erasure.
     if (cache) {
       const kept = await setWhileStoreLive(store, currenciesKey(account), ours.join(","), CURRENCIES_SECONDS).catch(() => "unknown" as const);
-      if (kept !== "kept") return null;
+      if (kept === "gone") return null;
     }
     return ours;
   } catch (error) {

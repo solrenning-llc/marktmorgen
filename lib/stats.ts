@@ -470,10 +470,11 @@ export async function readToday(store: Store, now = Date.now()): Promise<Today> 
       })
       .catch(() => null);
     // Kept only while the store is live, in one step with its fence (Codex L-20261119-1830, #5010 row 129): a store erased while Stripe or
-    // PayPal was read gets no money cache back, and the late total is not shown ("not read just now").
+    // PayPal was read gets no money cache back, and the late total is not shown ("not read just now"). When the fence
+    // cannot tell ("unknown"), nothing is kept and the total read is shown: only "gone" proves the erasure.
     if (sales) {
       const kept = await setWhileStoreLive(store, todaySalesKey(statsId, date), JSON.stringify(sales), TODAY_SALES_SECONDS).catch(() => "unknown" as const);
-      if (kept !== "kept") sales = null;
+      if (kept === "gone") sales = null;
     }
   }
   return {

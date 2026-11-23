@@ -343,9 +343,9 @@ export async function settlePlans(
     }
     // An open checkout waits two days from when it was opened; one with no readable time does not wait.
     if (state === "done" || state === "gone" || (state === "open" && !(now - since < 2 * 86400))) {
-      // A watched plan was counted done when it first settled.
-      if (state === "done" && !entry.watch) counts.done += 1;
-      else counts.dropped += 1;
+      // A watched plan was counted done when it first settled: its watch ending counts nothing more.
+      if (state !== "done") counts.dropped += 1;
+      else if (!entry.watch) counts.done += 1;
       await leave(member);
       continue;
     }

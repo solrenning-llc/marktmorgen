@@ -338,24 +338,28 @@ function isOwnInvoice(row: Record<string, unknown>, subscriptionId: string): boo
 }
 
 /**
- * Whether any of the add-on's last payments was disputed. The page is read in its exact shape (lib/stripe-list.ts):
- * a disputed charge on any readable row is a yes; "none disputed" is said only when every row of the page is readable
- * (each with its charge, or none, and that charge's own disputed true or false). Otherwise it throws, and nothing is
- * written on it this run (syncAssistant leaves the store as it is). The page is every invoice of the add-on created inside
- * DISPUTE_WINDOW_DAYS, the longest a card payment can still be disputed after it was made (#5285 row #4443, Codex X6: the
- * last three alone missed a dispute on an older payment); more of them than one page reads (has_more) is unknown, so it
- * throws, never "none disputed". A row is readable only when it is proven this add-on's own
- * (isOwnInvoice): another subscription's dispute is never a yes, and a row not proven own makes "none disputed"
- * unknown, so it throws and the next pass reads again, rather than setting a stop on a list that is not this add-on's.
- */
-/**
  * How long after a payment a card dispute can still be opened, at the longest the card networks allow (540 days); the
  * add-on's invoices of that time are read for a dispute, not only the last few.
  */
 export const DISPUTE_WINDOW_DAYS = 540;
-/** One page of them: a monthly add-on has about 18 invoices in the window, so 100 leaves room for retries. */
+/**
+ * One page of them: a monthly add-on has about 18 invoices in the window, so 100 leaves room for proration or manual
+ * invoices.
+ */
 export const DISPUTE_INVOICES_PAGE = 100;
 
+/**
+ * Whether any of the add-on's payments inside DISPUTE_WINDOW_DAYS was disputed. The page is read in its exact shape
+ * (lib/stripe-list.ts): a disputed charge on any readable row is a yes; "none disputed" is said only when every row of
+ * the page is readable (each with its charge, or none, and that charge's own disputed true or false). Otherwise it
+ * throws, and nothing is written on it this run (syncAssistant leaves the store as it is). The page is every invoice of
+ * the add-on created inside DISPUTE_WINDOW_DAYS, the longest a card payment can still be disputed after it was made
+ * (#5285 row #4443, Codex X6: the last three alone missed a dispute on an older payment); more of them than one page
+ * reads (has_more) is unknown, so it throws, never "none disputed". A row is readable only when it is proven this
+ * add-on's own (isOwnInvoice): another subscription's dispute is never a yes, and a row not proven own makes "none
+ * disputed" unknown, so it throws and the next pass reads again, rather than setting a stop on a list that is not this
+ * add-on's.
+ */
 async function disputed(subscriptionId: string, nowSeconds = Date.now() / 1000): Promise<boolean> {
   const chargeOf = (row: Record<string, unknown>) => ownField(row, "charge");
   const since = String(Math.floor(nowSeconds - DISPUTE_WINDOW_DAYS * 86_400));

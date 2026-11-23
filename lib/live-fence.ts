@@ -68,14 +68,18 @@ return 1`;
 
 /**
  * Whether the fenced store is live now: true; false when its erasure has begun or its key is no longer its own; "unknown"
- * otherwise. A store kept from before ids with no statsId cannot be told from its owner's next store, so for it only its
- * erasing mark is read (Claude 1 coord's LEVE on #5174): present is false, absent is true, any other answer unknown.
+ * otherwise. A store kept from before ids with no statsId cannot be told from its owner's next store, so for it its
+ * erasing mark and its owner's record are read together (Claude 1 coord's LEVE on #5174): the mark there is false; no
+ * mark with no record is false too, because the closing walk removes the mark in the step that deletes the record
+ * (Claude 4 AC's LEVE, 7091089516); no mark with the record there is true; any other answer unknown. Two commands.
  */
 export async function isStoreLive(fence: StoreLiveFence): Promise<boolean | "unknown"> {
   if (!isRedisConfigured()) return "unknown";
   if (fence.statsId === null) {
-    const mark = repliesFor(await redisPipeline([["HGET", fence.erasing, fence.field]]), 1)?.[0];
-    return mark === null ? true : typeof mark === "string" ? false : "unknown";
+    const [mark, record] = repliesFor(await redisPipeline([["HGET", fence.erasing, fence.field], ["EXISTS", fence.live]]), 2) ?? [];
+    if (typeof mark === "string") return false;
+    if (mark !== null) return "unknown";
+    return record === 1 ? true : record === 0 ? false : "unknown";
   }
   const answer = repliesFor(await redisPipeline([["EVAL", STORE_LIVE_READ, 2, fence.live, fence.erasing, fence.field, fence.statsId, fence.ref]]), 1)?.[0];
   return answer === 1 ? true : answer === 0 ? false : "unknown";

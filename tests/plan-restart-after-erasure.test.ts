@@ -14,7 +14,7 @@
  * subscription id, Claude 1 coord's B2 probe on #5174, and refuses the plan of a closing store with its refund.)
  * Synthetic store, Stripe and Redis stand-in only.
  */
-import { ERASING_KEY, claimHandle, ensureStatsId, ensureStoreId, erasingField, setSubscription, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
+import { ERASING_KEY, claimHandle, ensureStatsId, ensureStoreId, erasingField, ownerKey, setSubscription, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { storeIsLive } from "@/lib/store-live-cache";
 import type { Store } from "@/lib/store";
 import { pauseEmail, pauseOf, pausePlan, runBreaks } from "@/lib/plan-pause";
@@ -167,8 +167,12 @@ async function main() {
   {
     // Claude 1 coord's LEVE on #5174: such a store cannot be told from its owner's next one, so only its erasing mark
     // is read; before, it was always "unknown" and its restart was lost every time.
+    // Claude 4 AC's LEVE on #5174 (7091089516): the closing walk removes the mark in the same step that deletes the
+    // owner's record, so "no mark" alone cannot tell "never erased" from "already erased"; the record is read with it.
     const legacy: Pick<Store, "email" | "sid" | "extra" | "statsId"> = { email: "restart-legacy@example.com", sid: "", extra: false, statsId: null };
-    is("no erasing mark: live", await storeIsLive(legacy), true);
+    is("no erasing mark and no owner record (already erased): not live", await storeIsLive(legacy), false);
+    redis.run(["SET", await ownerKey(storeRef(legacy)), JSON.stringify({ handle: "restartlegacy" })]);
+    is("no erasing mark, its owner record there: live", await storeIsLive(legacy), true);
     redis.run(["HSET", ERASING_KEY, await erasingField(storeRef(legacy)), String(Date.now())]);
     is("its erasing mark there: not live", await storeIsLive(legacy), false);
   }

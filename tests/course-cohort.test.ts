@@ -26,6 +26,7 @@ import {
   opensAt,
   editCourse,
   emptyCourse,
+  parseCourse,
 } from "@/lib/course";
 
 const DAY = 86_400;
@@ -140,4 +141,17 @@ test("taking the date off puts every student back on their own clock", () => {
 
 test("a course saved before any of this existed is a rolling one", () => {
   assert.equal(emptyCourse().startsAt, null);
+});
+
+test("a kept date is read only when it is one the studio could have saved (Claude 5's LEVE on #3653)", () => {
+  // The studio keeps a whole number of seconds from 2020-01-01 on (editCourse "start"). A record damaged into a
+  // negative, fractional, far-off or non-numeric date reads as no date: never a cohort that began in 1969 (every
+  // module open at once) nor one in the year 33658 (nothing ever opens).
+  const kept = (startsAt: unknown) => parseCourse(JSON.stringify({ ...emptyCourse(), startsAt }))?.startsAt;
+  const real = EARLIEST_START + 400 * 86_400;
+  assert.equal(kept(real), real, "a date the studio saved reads back");
+  assert.equal(kept(EARLIEST_START), EARLIEST_START, "the earliest date reads back");
+  for (const damaged of [-1, 0, EARLIEST_START - 1, real + 0.5, 1e15, Number.MAX_SAFE_INTEGER, "1700000000", true]) {
+    assert.equal(kept(damaged), null, `a kept start of ${String(damaged)} reads as no date`);
+  }
 });

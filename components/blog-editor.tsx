@@ -22,6 +22,7 @@ const MESSAGES: Record<string, string> = {
   title: "Give the post a title.",
   body: "Write the post before saving it.",
   full: "A blog holds up to 200 posts. Delete one first.",
+  gone: "This post was deleted, maybe in another tab, so it was not saved. Your words are still here: copy them before you leave.",
   unknown: "That post or its count could not be verified. Reload the blog to check it.",
   unconfirmed: "Your change could not be confirmed. Reload the blog and check it before trying again.",
   none: "This account has no store yet.",

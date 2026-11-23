@@ -16,7 +16,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ han
   const decoded = decodeURIComponent((await params).handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null;
   if (!store || store.posts === 0 || store.suspended) return new Response("Not found", { status: 404 });
-  const listing = await publishedPosts(store.statsId, 1).catch(() => null);
+  const listing = await publishedPosts(store.statsId, 1).catch((error: unknown) => {
+    // A 503 with Retry-After, never an empty feed; the cause is kept in the logs (Claude 7's LEVE on #2695, board #5285).
+    console.error("reading a store's blog feed failed", error);
+    return null;
+  });
   if (listing === null) return new Response(blogReadingWords(store.language).unavailable, {
     status: 503,
     headers: { "Retry-After": "60", "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" },

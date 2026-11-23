@@ -21,7 +21,6 @@
  * (lib/store.ts, posts), so the store page links to the blog without asking.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { types } from "node:util";
 import { UnknownReplyError, countOf } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -42,24 +41,9 @@ const pubKey = (statsId: string) => `nl:blog:pub:${statsId}`;
 const POST_ID = /^[0-9a-f]{10}$/;
 const PRODUCT_ID = /^[A-Za-z0-9_-]{1,40}$/;
 
-/** Local equivalent until the independently reviewed shared reply reader reaches main. */
-function blogReplies(reply: unknown, size: number): unknown[] | null {
-  try {
-    if (types.isProxy(reply) || !Array.isArray(reply) || Object.getOwnPropertySymbols(reply).length) return null;
-    if (Object.getOwnPropertyDescriptor(reply, "length")?.value !== size || Object.getOwnPropertyNames(reply).length !== size + 1) return null;
-    const out: unknown[] = [];
-    for (let i = 0; i < size; i++) {
-      const field = Object.getOwnPropertyDescriptor(reply, String(i));
-      if (!field || !Object.hasOwn(field, "value")) return null;
-      out.push(field.value);
-    }
-    return out;
-  } catch { return null; }
-}
-
 /** Each mutation changes at most one member; the last reply is the confirmed total. */
 function confirmedMutation(reply: unknown): { total: number | null } | null {
-  const values = blogReplies(reply, 4);
+  const values = blogReadArray(reply, 4);
   if (!values || values.slice(0, 3).some((value) => value !== 0 && value !== 1)) return null;
   return { total: countOf(values[3]) };
 }
@@ -160,18 +144,18 @@ export async function allPosts(statsId: string | null): Promise<PostMeta[]> {
 export async function publishedPosts(statsId: string | null, page: number): Promise<{ posts: PostMeta[]; total: number }> {
   if (!statsId || !isRedisConfigured()) return { posts: [], total: 0 };
   const start = (Math.max(1, page) - 1) * POSTS_PER_PAGE;
-  const reply = blogReplies(await redisPipeline([
+  const reply = blogReadArray(await redisPipeline([
     ["ZREVRANGE", pubKey(statsId), start, start + POSTS_PER_PAGE - 1],
     ["ZCARD", pubKey(statsId)],
   ]), 2);
   const ids = reply?.[0], total = reply ? countOf(reply[1]) : null;
-  if (total === null || types.isProxy(ids) || !Array.isArray(ids)) throw new UnknownReplyError("a blog page count");
-  const rawIds = blogReplies(ids, Math.min(POSTS_PER_PAGE, Math.max(0, total - start)));
+  if (total === null || !blogReadArray(ids)) throw new UnknownReplyError("a blog page count");
+  const rawIds = blogReadArray(ids, Math.min(POSTS_PER_PAGE, Math.max(0, total - start)));
   if (!rawIds || rawIds.some((id) => typeof id !== "string" || !POST_ID.test(id)) || new Set(rawIds).size !== rawIds.length) throw new UnknownReplyError("a blog page index");
   const list = rawIds as string[];
   if (list.length === 0) return { posts: [], total };
-  const response = blogReplies(await redisPipeline([["HMGET", metaKey(statsId), ...list]]), 1);
-  const metas = response ? blogReplies(response[0], list.length) : null;
+  const response = blogReadArray(await redisPipeline([["HMGET", metaKey(statsId), ...list]]), 1);
+  const metas = response ? blogReadArray(response[0], list.length) : null;
   if (!metas) throw new UnknownReplyError("blog page metadata");
   const posts: PostMeta[] = [];
   for (const [i, raw] of metas.entries()) {
@@ -187,7 +171,7 @@ export async function publishedTotal(statsId: string | null): Promise<number | n
   if (!statsId) return 0;
   if (!isRedisConfigured()) return null;
   try {
-    const reply = blogReplies(await redisPipeline([["ZCARD", pubKey(statsId)]]), 1);
+    const reply = blogReadArray(await redisPipeline([["ZCARD", pubKey(statsId)]]), 1);
     return reply ? countOf(reply[0]) : null;
   } catch {
     return null;
@@ -234,11 +218,17 @@ export async function readPosts(statsId: string | null, metas: PostMeta[]): Prom
  */
 async function mutationReply(commands: (string | number)[][]): Promise<ReturnType<typeof confirmedMutation>> {
   let reply: unknown;
-  try { reply = await redisPipeline(commands); } catch { return null; }
+  try {
+    reply = await redisPipeline(commands);
+  } catch (error) {
+    // Still unconfirmed, never retried; the cause is kept in the logs (Claude 4's LOW on #2695, board #5285).
+    console.error("a blog write was sent and its reply did not come back", error);
+    return null;
+  }
   return confirmedMutation(reply);
 }
 
-export type SaveResult = { ok: true; post: Post; published: number | null } | { ok: false; reason: "title" | "body" | "full" | "unknown" | "unconfirmed" | "off" };
+export type SaveResult = { ok: true; post: Post; published: number | null } | { ok: false; reason: "title" | "body" | "full" | "gone" | "unknown" | "unconfirmed" | "off" };
 
 /**
  * Writes a post: a new one when `id` is null, else the one with that id. A
@@ -259,11 +249,14 @@ export async function savePost(
   if (!input.body) return { ok: false, reason: "body" };
   let before: PostMeta | null = null;
   if (id) {
-    const reply = blogReplies(await redisPipeline([["HGET", metaKey(statsId), id]]), 1);
+    const reply = blogReadArray(await redisPipeline([["HGET", metaKey(statsId), id]]), 1);
+    // A confirmed absence (deleted, perhaps in another tab) is "gone", a definite answer, never "unknown" (Claude 6's
+    // LOW 1 on #2695, board #5285); a record in another shape stays unknown.
+    if (reply && reply[0] === null) return { ok: false, reason: "gone" };
     before = parseMeta(reply?.[0]);
     if (!before || before.id !== id) return { ok: false, reason: "unknown" };
   } else {
-    const reply = blogReplies(await redisPipeline([["HLEN", metaKey(statsId)]]), 1);
+    const reply = blogReadArray(await redisPipeline([["HLEN", metaKey(statsId)]]), 1);
     const count = reply ? countOf(reply[0]) : null;
     // Unlike GET, HLEN/ZCARD always answer an integer, including zero for an absent key.
     if (count === null) return { ok: false, reason: "unknown" };

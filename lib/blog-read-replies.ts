@@ -1,7 +1,13 @@
-/** Pure validation for blog reads; no commands, writes, counters or defaults. */
+import { types } from "node:util";
+
+/**
+ * Pure validation for blog reads; no commands, writes, counters or defaults. The blog's one reader of a reply: a Proxy,
+ * a hole, a getter, an extra field or a symbol is refused (store-blog's own copy of it is gone, Claude 4's LEVE 2 on
+ * #2695, board #5285).
+ */
 export function blogReadArray(raw: unknown, size?: number): unknown[] | null {
   try {
-    if (!Array.isArray(raw) || Object.getOwnPropertySymbols(raw).length) return null;
+    if (types.isProxy(raw) || !Array.isArray(raw) || Object.getOwnPropertySymbols(raw).length) return null;
     const length = Object.getOwnPropertyDescriptor(raw, "length")?.value;
     if (!Number.isSafeInteger(length) || length < 0 || (size !== undefined && length !== size)) return null;
     if (Object.getOwnPropertyNames(raw).length !== length + 1) return null;

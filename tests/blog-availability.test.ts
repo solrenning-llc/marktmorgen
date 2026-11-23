@@ -42,11 +42,16 @@ async function main(){
  is("unavailable RSS is not cached as an empty feed",response?.headers.get("cache-control"),"no-store");
  is("RSS asks the reader to retry",Number(response?.headers.get("retry-after"))>0,true);
  const page=readFileSync("app/[handle]/blog/page.tsx","utf8");
- const expression=page.match(/publishedPosts\(store.statsId,\s*page\)(?:\.catch\(\(\)\s*=>\s*null\))?/)?.[0];
+ // The page's own read, its catch included, run as written (Claude 7's LEVE on #2695: the catch now logs the cause).
+ const expression=page.match(/publishedPosts\(store\.statsId,\s*page\)\.catch\([\s\S]*?\n  \}\)/)?.[0];
  assert.ok(expression);
- const read=new Function("publishedPosts","store","page","return "+expression) as (reader:typeof publishedPosts,shop:typeof store,page:number)=>Promise<unknown>;
- const pageRead=await Promise.allSettled([read(publishedPosts,store,1)]);
+ const pageModule={exports:{} as unknown};
+ new Function("module",ts.transpileModule(`module.exports=(publishedPosts,store,page,console)=>${expression};`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText)(pageModule);
+ const read=pageModule.exports as (reader:typeof publishedPosts,shop:typeof store,page:number,log:{error:(...a:unknown[])=>void})=>Promise<unknown>;
+ const pageLogs:unknown[][]=[];
+ const pageRead=await Promise.allSettled([read(publishedPosts,store,1,{error:(...a)=>pageLogs.push(a)})]);
  is("actual public page read resolves unavailable",pageRead.map(r=>r.status==="fulfilled"?[r.status,r.value]:[r.status]),[["fulfilled",null]]);
+ is("and the page's read logs its cause once",pageLogs.length,1);
  // Execute the current paid wrapper with the actual size/reader and a synthetic, observed prepaid admission.
  const source=readFileSync("lib/store-sitemap.ts","utf8").match(/export async function paidStoreSitemap[\s\S]*?\n}/)?.[0];
  assert.ok(source);
@@ -54,8 +59,12 @@ async function main(){
  const buildWrapper=new Function("sitemapSize","takePublicRequest","sitemapUnits","storeSitemap",javascript+";return paidStoreSitemap;");
  let admitted=0;
  const actualWrapper=buildWrapper(sitemapSize,async(_s:unknown,_who:unknown,_now:unknown,units:number)=>{assert.ok(units>0);admitted++;return true;},sitemapUnits,storeSitemap) as (shop:typeof store)=>Promise<unknown>;
+ // Claude 4's LEVE 1 on #2695 (board #5285): a blog that does not read leaves only the blog out of the map, never the
+ // whole map. Before, this wrapper resolved null for the whole store.
  const map=await Promise.allSettled([actualWrapper(store)]);
- is("paid sitemap wrapper resolves unavailable",map.map(r=>r.status==="fulfilled"?[r.status,r.value]:[r.status]),[["fulfilled",null]]);
+ const drawn=map[0].status==="fulfilled"?map[0].value:undefined;
+ is("paid sitemap wrapper still draws the store's map",Array.isArray(drawn),true);
+ is("with no blog address in it, none invented",Array.isArray(drawn)&&drawn.some((entry:{url:string})=>entry.url.includes("/blog")),false);
  is("reader follows exactly one prepaid admission",admitted,1);
  is("reader recovery never removes the inconsistent stored index",await redis.pipeline([["ZCARD",`nl:blog:pub:${store.statsId}`]]),[1]);
  part("Unavailable feedback is rendered in every supported store language");
@@ -76,9 +85,17 @@ async function main(){
  redis.pipeline=async commands=>{const result=await pipeline(commands);return commands[0][0]==="HSET"&&String(commands[0][1]).startsWith("nl:blog:meta:")?[result[0],result[1],result[2],null]:result;};
  try{
   const result=await call("Confirmed post, unknown count");
-  is("confirmed post is not a missing post or a failed new save",[result.status,result.data.ok,result.data.countUnavailable,typeof result.data.post?.id],[200,true,true,"string"]);
+  // Claude 7's LEVE on #2695: the count that did not come back is read once more, so the record is not left stale.
+  is("confirmed post is not a missing post or a failed new save",[result.status,result.data.ok,result.data.countUnavailable,typeof result.data.post?.id],[200,true,false,"string"]);
   is("confirmed id points to the saved content",(await readPost(store.statsId,result.data.post?.id??""))?.title,"Confirmed post, unknown count");
-  is("unknown total never overwrites cached count with zero",(await storeForEmail(email))?.posts,1);
+  is("the record takes the count read again, never zero",(await storeForEmail(email))?.posts,(await redis.pipeline([["ZCARD",`nl:blog:pub:${store.statsId}`]]))[0]);
+ }finally{redis.pipeline=pipeline;}
+ const before=(await storeForEmail(email))?.posts;
+ redis.pipeline=async commands=>{const result=await pipeline(commands);if(commands.length===1&&commands[0][0]==="ZCARD"&&String(commands[0][1]).startsWith("nl:blog:pub:"))return[null];return commands[0][0]==="HSET"&&String(commands[0][1]).startsWith("nl:blog:meta:")?[result[0],result[1],result[2],null]:result;};
+ try{
+  const result=await call("Confirmed post, count unknown twice");
+  is("both counts unknown: the post is saved and the count said unconfirmed",[result.status,result.data.ok,result.data.countUnavailable],[200,true,true]);
+  is("both counts unknown: the cached count is kept, never zero",(await storeForEmail(email))?.posts,before);
  }finally{redis.pipeline=pipeline;}
  redis.pipeline=async commands=>{const result=await pipeline(commands);return commands[0][0]==="HSET"&&String(commands[0][1]).startsWith("nl:blog:meta:")?[null,result[1],result[2],result[3]]:result;};
  try{const result=await call("Unconfirmed write");is("uncertain mutation has a distinct retry-check response",[result.status,result.data.error],[503,"unconfirmed"]);}finally{redis.pipeline=pipeline;}
@@ -137,9 +154,19 @@ async function main(){
  try{
   const response=await POST(new NextRequest("https://marktmorgen.com/api/store/blog",{method:"POST",headers:{"content-type":"application/json","x-nimbus-store":store.sid,cookie},body:JSON.stringify({action:"delete",id:deleteId})}));
   const data=await response.json() as {ok?:boolean;countUnavailable?:boolean};
-  is("three deletion ACKs retain the confirmed outcome",[response.status,data.ok,data.countUnavailable],[200,true,true]);
+  is("three deletion ACKs retain the confirmed outcome, its count read again",[response.status,data.ok,data.countUnavailable],[200,true,false]);
   is("the acknowledged deletion removed the actual post",await readPost(store.statsId,deleteId),null);
-  is("unknown deletion total does not replace the cached count",(await storeForEmail(email))?.posts,cached);
+  is("the record takes the deletion's count read again",(await storeForEmail(email))?.posts,(await redis.pipeline([["ZCARD",`nl:blog:pub:${store.statsId}`]]))[0]);
+ }finally{redis.pipeline=pipeline;}
+ const secondId="abcde34567";
+ await savePost(store.statsId,null,input,()=>secondId,ROOM);
+ await setPostCount(email,7);
+ redis.pipeline=async commands=>{const result=await pipeline(commands);if(commands.length===1&&commands[0][0]==="ZCARD"&&String(commands[0][1]).startsWith("nl:blog:pub:"))return[null];return commands[0][0]==="HDEL"&&String(commands[0][1]).startsWith("nl:blog:meta:")?[result[0],result[1],result[2],null]:result;};
+ try{
+  const response=await POST(new NextRequest("https://marktmorgen.com/api/store/blog",{method:"POST",headers:{"content-type":"application/json","x-nimbus-store":store.sid,cookie},body:JSON.stringify({action:"delete",id:secondId})}));
+  const data=await response.json() as {ok?:boolean;countUnavailable?:boolean};
+  is("both deletion counts unknown: still confirmed, the count said unconfirmed",[response.status,data.ok,data.countUnavailable],[200,true,true]);
+  is("both deletion counts unknown: the cached count is kept",(await storeForEmail(email))?.posts,7);
  }finally{redis.pipeline=pipeline;}
  done();
 }

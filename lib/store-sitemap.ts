@@ -27,7 +27,7 @@ import { KIND, readListings, visibleCount } from "@/lib/catalog";
 import { collectionSegment, shownCollections } from "@/lib/store-collections";
 import { productSegment } from "@/lib/product-slug";
 import { pageOut } from "@/lib/site-page-rules";
-import { POSTS_PER_PAGE, postSegment, publishedPosts, publishedTotal } from "@/lib/store-blog";
+import { POSTS_PER_PAGE, type PostMeta, postSegment, publishedPosts, publishedTotal } from "@/lib/store-blog";
 import { type SitemapSize, sitemapUnits } from "@/lib/public-read-rules";
 import { takePublicRequest } from "@/lib/traffic";
 import { SITE_URL } from "@/lib/site-url";
@@ -116,11 +116,19 @@ export async function storeSitemap(store: Store, nowSeconds = Math.floor(Date.no
   // The community's About page, only while the creator has it on and its setting reads exactly so (lib/community-about.ts):
   // one command, after the map is paid for (paidStoreSitemap) and counted in its cost (tests/plan-cost-registry.ts, sitemapRead).
   if (await aboutListed(store)) out.push({ url: `${root}/community/about` });
-  const posts = [];
-  for (let page = 1; posts.length < MAX_POSTS && page <= Math.min(postPages, MAX_POST_PAGES); page += 1) {
-    const { posts: some, total } = await publishedPosts(store.statsId, page);
-    posts.push(...some);
-    if (!some.length || page * POSTS_PER_PAGE >= total) break;
+  // A blog that does not read (a published id with no record, a reply in another shape) leaves only the blog's
+  // addresses out of this drawing of the map, never the store's other pages: before, it took the whole map down (Claude
+  // 4's LEVE 1 on #2695, board #5285). The blog itself still says it could not be read, never that it is empty.
+  let posts: PostMeta[] = [];
+  try {
+    for (let page = 1; posts.length < MAX_POSTS && page <= Math.min(postPages, MAX_POST_PAGES); page += 1) {
+      const { posts: some, total } = await publishedPosts(store.statsId, page);
+      posts.push(...some);
+      if (!some.length || page * POSTS_PER_PAGE >= total) break;
+    }
+  } catch (error) {
+    console.error("a store's blog could not be read for its map; its addresses are left out this time", error);
+    posts = [];
   }
   if (posts.length) {
     out.push({ url: `${root}/blog`, lastModified: new Date(Math.max(...posts.map((p) => p.updatedAt)) * 1000).toISOString() });

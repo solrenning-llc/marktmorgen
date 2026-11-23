@@ -106,8 +106,18 @@ export async function DELETE(request: Request) {
     if (after.state !== "ok") return apiOk({ stopped: id, listed: false, data: null, message: "The code was switched off. Your discount codes could not be read back from Stripe just now; read them again with GET /api/v1/codes." });
     // "No live code" only from a list read to its end; a page with more behind it leaves the box as it was.
     const live = after.codes.some((c) => c.active);
-    if (live || after.complete) await setHasDiscounts(storeRef(store), live);
-    return apiOk({ data: after.codes.map(codeOut), has_more: !after.complete });
+    // Switched off on Stripe already (issue #4294): a code box that could not be written is said beside the codes,
+    // never as 502 "could not be switched off"; the next code made or switched off writes it again.
+    const boxSet = live || after.complete
+      ? await setHasDiscounts(storeRef(store), live).then(
+          () => true,
+          (error: unknown) => {
+            console.error("api: a code was switched off but the checkout's code box was not updated", error);
+            return false;
+          },
+        )
+      : true;
+    return apiOk({ data: after.codes.map(codeOut), has_more: !after.complete, ...(boxSet ? {} : { checkout_box: "not_updated" }) });
   } catch (error) {
     console.error("api: switching a code off failed", error);
     return unreadable();

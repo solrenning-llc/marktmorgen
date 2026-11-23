@@ -689,29 +689,36 @@ async function addOlder(courseId: string, room: DataStore, walk: Walk): Promise<
     : reply[0] !== "0" ? { cursor: reply[0], offset: 0, added: cycleAdded }
     : cycleAdded ? { cursor: "0", offset: 0, added: false }
     : "done";
-  await keepWalk(courseId, room, walk, next);
-  return { added, roomFull: false, done: next === "done" };
+  // A first place that does not fit is said as a full room, never a walk that silently never moves (Claude 5 iYwjc's
+  // LEVE A on #5481): the step is tried again on a later draw, and what it added stays added (ZADD NX).
+  const kept = await keepWalk(courseId, room, walk, next);
+  return { added, roomFull: !kept, done: kept && next === "done" };
 }
 
 /**
  * Writes the walk's place: the first write takes its room for CERT_WALK_SECONDS and sets that expiry (SET NX EX); later
- * writes keep it (SET XX KEEPTTL), so the room taken is the key's for exactly as long as it lives. A first write with no
- * room left writes nothing, and the walk starts again at the start on the next draw.
+ * writes keep it (SET XX KEEPTTL), so the room taken is the key's for exactly as long as it lives. False when a first
+ * write finds the room full: nothing is written, and the caller says the room is full. A room that could not be read
+ * throws, and the walk is left for the next draw.
  */
-async function keepWalk(courseId: string, room: DataStore, before: Walk, next: Walk | "done"): Promise<void> {
+async function keepWalk(courseId: string, room: DataStore, before: Walk, next: Walk | "done"): Promise<boolean> {
   const what = "the studio's walk of a course's older certificates";
   // Only a walk whose place was not kept yet (no key) takes room; one that went round and starts again keeps its key.
   if (before.fresh) {
     const now = Date.now();
-    const taken = await takeData(room, [{ until: now + CERT_WALK_SECONDS * 1000, bytes: WALK_BYTES }], now).catch(() => null);
-    if (!taken?.ok) return;
+    const taken = await takeData(room, [{ until: now + CERT_WALK_SECONDS * 1000, bytes: WALK_BYTES }], now);
+    if (!taken.ok) {
+      if (taken.reason === "full") return false;
+      throw new UnknownReply(what);
+    }
     const [set] = exactReplies(await redisPipeline([["SET", atCursorKey(courseId), walkValue(next), "NX", "EX", CERT_WALK_SECONDS]]), 1, what);
     if (set !== "OK" && set !== null) throw new UnknownReply(what);
     if (set === null) await redisPipeline([["SET", atCursorKey(courseId), walkValue(next), "XX", "KEEPTTL"]]);
-    return;
+    return true;
   }
   const [set] = exactReplies(await redisPipeline([["SET", atCursorKey(courseId), walkValue(next), "XX", "KEEPTTL"]]), 1, what);
   if (set !== "OK" && set !== null) throw new UnknownReply(what);
+  return true;
 }
 
 /**

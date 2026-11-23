@@ -80,6 +80,37 @@ async function main(): Promise<void> {
     is("at most 100 commands, inside one buyer action", commands <= 100, true);
   }
 
+  part("A take-back whose reference pipeline fails, then the erasure: the room comes back once (Claude 5 iYwjc's LEVE B on #5481)");
+  {
+    redis.clear();
+    // Another student's certificate in the same course first, so a room given back twice would show (it never goes below 0).
+    await press("kept-student@example.com");
+    const run = redis.run.bind(redis);
+    let erasedOnce = false;
+    redis.run = ((c: (string | number)[]) => {
+      if (!erasedOnce && c[0] === "SADD" && String(c[1]).includes(":certs:by:")) { erasedOnce = true; run(suppressCommand(LIST, "partial@example.com")); }
+      return run(c);
+    }) as typeof redis.run;
+    let failed = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      // The take-back's second pipeline (its record already deleted): its two SREMs, the slot's EVAL and the by-time ZREM.
+      if (!failed && commands.length === 4 && commands[0][0] === "SREM" && commands[3][0] === "ZREM" && String(commands[3][1]).endsWith(":certs:at")) {
+        failed = true;
+        throw new Error("the take-back's reference pipeline failed");
+      }
+      return original(commands);
+    }) as typeof redis.pipeline;
+    const roomBefore = (await dataUsed(ROOM))?.used ?? -1;
+    const partial = await press("partial@example.com").catch(() => null);
+    redis.pipeline = original;
+    redis.run = run;
+    is("(the press was taken back and its reference pipeline failed)", [partial?.ok ?? false, failed], [false, true]);
+    // The erasure then finds the id on the lists: the record is gone, and its ZREM removes the by-time entry.
+    await forgetCertificatesPerson([course.id], "partial@example.com", ROOM);
+    is("after the erasure, the room is exactly what it was: the by-time entry given back once", ((await dataUsed(ROOM))?.used ?? -1) - roomBefore, 0);
+    is("and the student is off every list (the other student's stays)", [redis.run(["ZCARD", `nl:course:${course.id}:certs:at`]), redis.run(["SCARD", `nl:course:${course.id}:certs:all`])], [1, 1]);
+  }
+
   part("A store with no list id yet: the erasure makes one, and the press reads the print under it (6QpVd, MEDIUM)");
   {
     redis.clear();

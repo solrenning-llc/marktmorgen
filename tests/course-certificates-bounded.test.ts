@@ -140,6 +140,14 @@ async function main(): Promise<void> {
   const full = await certificatesFor(FULL, { room: small });
   is("none added, all three said as waiting, the room said full", [full?.unlisted, full?.list.length, full?.roomFull, redis.run(["ZCARD", atKey(FULL)])], [3, 0, true, 0]);
 
+  part("A fresh walk with no room for its place says the room is full, never a walk that silently never moves (Claude 5 iYwjc's LEVE A on #5481)");
+  const NOPLACE = "7".repeat(12);
+  // Its one waiting id's record is gone: nothing to add, so only the walk's place needs room, and the room is full.
+  redis.run(["SADD", allKey(NOPLACE), idOf(40_000)]);
+  let noPlace = await certificatesFor(NOPLACE, { room: small });
+  for (let draw = 0; draw < 4; draw += 1) noPlace = await certificatesFor(NOPLACE, { room: small });
+  is("after five draws: the one waiting said as waiting, the room said full, no place written", [noPlace?.unlisted, noPlace?.roomFull, redis.run(["GET", cursorKey(NOPLACE)])], [1, true, null]);
+
   part("A walk that does not read is left for the next draw and never hides the page (Claude 5 iYnra's NIT 8)");
   const ODD = "b".repeat(12);
   seedOlder(ODD, 40_000, 3);

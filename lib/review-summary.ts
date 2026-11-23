@@ -179,8 +179,9 @@ export function hiddenLine(summary: Summary): string {
 
 /**
  * How many times one order may save its review in one of the store's months (app/api/store/review; #5010 row 180):
- * the first review and each rewrite. Deleting a review is never counted against it. With the review doors open 60 days
- * (lib/review-proof.ts), this bounds a month's review writes, which the cost line "review-writes" of
- * tests/plan-cost-registry.ts prices at their worst.
+ * the first review and each rewrite. Deleting a review is never counted against it. With the review request sent up to
+ * MAX_ASK_DAYS after an order (lib/review-ask.ts) and its link open 60 days (lib/review-proof.ts), this bounds a
+ * month's review writes, which the cost line "review-writes" of tests/plan-cost-registry.ts prices at their worst
+ * (REVIEW_DOOR_MONTHS store months of orders).
  */
 export const REVIEW_SAVES_PER_ORDER_MONTH = 2;

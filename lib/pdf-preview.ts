@@ -37,7 +37,7 @@
 import { createHash } from "node:crypto";
 import { PDFDocument } from "pdf-lib";
 import { carryTags } from "@/lib/pdf-preview-tags";
-import { readFileWhole } from "@/lib/file-store";
+import { deleteFile, readFileWhole } from "@/lib/file-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
 import { copyFolder, problemKey, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
@@ -46,8 +46,11 @@ import { type DataStore, dataUsed, keepFor } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
-/** The caller keeps a record only while its exact store scope is still live. */
-export type PreviewKeeper = (key: string, value: string, seconds: number) => Promise<"kept" | "gone" | "unknown">;
+/**
+ * The caller keeps a record only while its exact store scope is still live: "erased" when the store's erasure has
+ * begun or it is deleted, "gone" when it is only no longer that scope's (moved to another account: it may be live).
+ */
+export type PreviewKeeper = (key: string, value: string, seconds: number) => Promise<"kept" | "erased" | "gone" | "unknown">;
 
 /** The most pages a preview may hold. */
 export const MAX_PREVIEW_PAGES = 10;
@@ -145,6 +148,14 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
     if (isRedisConfigured()) {
       // This is after the file write: deletion may have passed this key while the preview was being made.
       const saved = await keep(key, JSON.stringify(copy), PREVIEW_SECONDS);
+      if (saved === "erased") {
+        // The erasure's folder cleanup may have passed before this file was written: nothing would delete it later.
+        // Only on a known erasure: a store moved meanwhile ("gone") may be live and have kept a record for this very
+        // path, and an unknown answer may have kept this one. A delete is free on both file stores
+        // (lib/spend-cost-table.ts; Vercel Blob's in tests/plan-cost-registry.ts), and one that fails is logged.
+        await deleteFile([pathname], "site_cleanup").catch((error: unknown) => console.error("an erased store's new preview file could not be deleted", error));
+        return null;
+      }
       if (saved === "gone") return null;
       if (saved !== "kept") throw new UnknownReplyError("keeping a preview's record");
     }

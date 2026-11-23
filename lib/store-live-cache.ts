@@ -16,7 +16,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { claimValue } from "@/lib/claim-mark";
-import { setIfStoreLive, type StoreLiveFence } from "@/lib/live-fence";
+import { setIfStoreLive, setIfStoreLiveTelling, type StoreLiveFence } from "@/lib/live-fence";
 import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 
 /** The fence of this store (lib/live-fence.ts): its id key, or its record and statsId for a store kept from before ids. */
@@ -35,6 +35,15 @@ export async function storeLiveFence(store: Pick<Store, "email" | "sid" | "extra
  */
 export async function setWhileStoreLive(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, value: string, seconds: number): Promise<"kept" | "gone" | "unknown"> {
   return setIfStoreLive(await storeLiveFence(store), key, value, seconds);
+}
+
+/**
+ * setWhileStoreLive telling "erased" (its erasure begun, or its id key and its record gone or replaced) from "gone" (no
+ * longer this ref's, as after a move, or its id still being set, so it may still be live): lib/live-fence.ts
+ * setIfStoreLiveTelling, with the store's own record key and id.
+ */
+export async function setWhileStoreLiveTelling(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, value: string, seconds: number): Promise<"kept" | "erased" | "gone" | "unknown"> {
+  return setIfStoreLiveTelling(await storeLiveFence(store), await ownerKey(storeRef(store)), store.sid ?? "", key, value, seconds);
 }
 
 // The same identity rule as SET_IF_STORE_LIVE, for a mark taken once (lib/claim-mark.ts claimMark's SET NX): a job that

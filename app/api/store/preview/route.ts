@@ -5,7 +5,7 @@ import { normaliseHandle, setProductPreview, storeForHandle } from "@/lib/store"
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { plain, serveFile } from "@/lib/serve-file";
 import { MAX_PREVIEW_PAGES, previewCopy } from "@/lib/pdf-preview";
-import { setWhileStoreLive } from "@/lib/store-live-cache";
+import { setWhileStoreLiveTelling } from "@/lib/store-live-cache";
 import { clientAddress, withinEssentialLimit, limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /** Making a preview the first time reads the whole PDF: give it the time a big one needs. */
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
   const copy = await previewCopy(product.file, product.preview, store, {
     take: (units) => holdPublicRequests(store, units, now),
     give: (units) => givePublicRequests(store, units, now),
-  }, (key, value, seconds) => setWhileStoreLive(store, key, value, seconds));
+  }, (key, value, seconds) => setWhileStoreLiveTelling(store, key, value, seconds));
   if (!copy) return plain(404, "This product has no preview right now.");
   return serveFile(copy, { paid: false });
 }

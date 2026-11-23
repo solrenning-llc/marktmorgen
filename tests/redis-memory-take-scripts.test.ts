@@ -89,6 +89,18 @@ const CASES: Record<string, Case[]> = {
     { what: "no record", setup: [], keys: ["k:live", "k:erasing", "k:cache"], argv: ["f1", "v", 60, "st1", ""] },
     { what: "an erasing store", setup: [["SET", "k:live", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:live", "k:erasing", "k:cache"], argv: ["f1", "v", 60, "", "ref1"] },
   ],
+  "store-cache-live-telling:v1": [
+    { what: "an id key holding its ref", setup: [["SET", "k:live", "ref1"]], keys: ["k:live", "k:erasing", "k:cache", "k:owner"], argv: ["f1", "v", 60, "", "ref1", "s1"] },
+    { what: "an id key holding another ref", setup: [["SET", "k:live", "ref2"]], keys: ["k:live", "k:erasing", "k:cache", "k:owner"], argv: ["f1", "v", 60, "", "ref1", "s1"] },
+    { what: "no id key and no record: erased", setup: [], keys: ["k:live", "k:erasing", "k:cache", "k:owner"], argv: ["f1", "v", 60, "", "ref1", "s1"] },
+    { what: "no id key, the record still carrying this sid", setup: [["SET", "k:owner", JSON.stringify({ sid: "s1", statsId: "st1" })]], keys: ["k:live", "k:erasing", "k:cache", "k:owner"], argv: ["f1", "v", 60, "", "ref1", "s1"] },
+    { what: "no id key, the record another store's", setup: [["SET", "k:owner", JSON.stringify({ sid: "s2", statsId: "st2" })]], keys: ["k:live", "k:erasing", "k:cache", "k:owner"], argv: ["f1", "v", 60, "", "ref1", "s1"] },
+    { what: "no id key, a record that does not parse", setup: [["SET", "k:owner", "{not json"]], keys: ["k:live", "k:erasing", "k:cache", "k:owner"], argv: ["f1", "v", 60, "", "ref1", "s1"] },
+    { what: "an owner's record carrying its statsId", setup: [["SET", "k:live", record("st1")]], keys: ["k:live", "k:erasing", "k:cache", "k:owner"], argv: ["f1", "v", 60, "st1", "", ""] },
+    { what: "an owner's record of another store", setup: [["SET", "k:live", record("st2")]], keys: ["k:live", "k:erasing", "k:cache", "k:owner"], argv: ["f1", "v", 60, "st1", "", ""] },
+    { what: "no record, from before ids", setup: [], keys: ["k:live", "k:erasing", "k:cache", "k:owner"], argv: ["f1", "v", 60, "st1", "", ""] },
+    { what: "an erasing store", setup: [["SET", "k:live", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:live", "k:erasing", "k:cache", "k:owner"], argv: ["f1", "v", 60, "", "ref1", "s1"] },
+  ],
   "store-claim-live:v1": [
     { what: "an id key holding its ref", setup: [["SET", "k:live", "ref1"]], keys: ["k:live", "k:erasing", "k:mark"], argv: ["f1", "v", 60, "", "ref1"] },
     { what: "the mark already taken", setup: [["SET", "k:live", "ref1"], ["SET", "k:mark", "w"]], keys: ["k:live", "k:erasing", "k:mark"], argv: ["f1", "v", 60, "", "ref1"] },

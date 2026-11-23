@@ -19,6 +19,9 @@ const limited = (id: string, stock: number) => parseProduct({ id, title: `Print 
 
 /** When set, the expire answer names this session instead of the one in the path. */
 let answerFor: string | null = null;
+/** When set, a read of a checkout names this session; and the status that read gives. */
+let readFor: string | null = null;
+let readStatus = "expired";
 const asked: string[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -26,6 +29,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.stripe.com" && expire && (init?.method ?? "GET") === "POST") {
     asked.push(expire[1]);
     return new Response(JSON.stringify({ id: answerFor ?? expire[1], status: "expired" }));
+  }
+  // A lapsed hold's checkout, read when stock is counted: its status, and the session the answer names.
+  const one = /^\/v1\/checkout\/sessions\/([^/]+)$/.exec(url.pathname);
+  if (url.hostname === "api.stripe.com" && one && (init?.method ?? "GET") === "GET") {
+    return new Response(JSON.stringify({ id: readFor ?? one[1], status: readStatus, payment_status: readStatus === "complete" ? "paid" : "unpaid" }));
   }
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
@@ -75,6 +83,23 @@ async function main(): Promise<void> {
   is("control: Stripe was asked to close it", asked.includes("cs_test_expireownbind01"), true);
   is("an expired receipt for another checkout lets none of its units go", await stockLeft(creator, d), 2);
   answerFor = null;
+
+  part("Counting stock: a lapsed hold whose checkout is read at Stripe");
+  const e = limited("printE", 3);
+  const lapsed = (session: string) =>
+    redis.pipeline([["HSET", `nl:stock:${creator.statsId}:${e.id}`, session, JSON.stringify({ until: Date.now() - 60_000 })]]);
+  await lapsed("cs_test_expireownread001");
+  readFor = "cs_test_expireownother4";
+  readStatus = "expired";
+  is("a read naming another, expired checkout lets none of this one's units go", await stockLeft(creator, e), 2);
+  is("and its hold stays", (await field(e, "cs_test_expireownread001")) !== null, true);
+  await lapsed("cs_test_expireownread001");
+  readStatus = "complete";
+  is("a read naming another, paid checkout does not mark this one sold either: the unit stays held", await stockLeft(creator, e), 2);
+  is("and its hold stays, not written as a sale", (await field(e, "cs_test_expireownread001")) !== null, true);
+  readFor = null;
+  readStatus = "expired";
+  is("control: its own expired checkout lets the unit go", await stockLeft(creator, e), 3);
   done();
 }
 

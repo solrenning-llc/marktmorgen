@@ -174,7 +174,7 @@ async function giveBackUnlessShared(statsId: string, c: Connection, host = ""): 
  * provider that does not confirm is only logged, as a disconnect's give-back is: the closing goes on either way. The
  * count of grants given back, for the walk's log.
  */
-export async function giveBackForClosing(statsId: string): Promise<number> {
+export async function giveBackForClosing(statsId: string, after: () => Promise<void> = async () => {}): Promise<number> {
   let given = 0;
   for (const provider of ["google", "zoom"] as const) {
     try {
@@ -183,6 +183,9 @@ export async function giveBackForClosing(statsId: string): Promise<number> {
     } catch (error) {
       console.error(`giving a closing store's ${provider} grant back failed`, error);
     }
+    // The caller's lock made to last after each provider (forgetLive's keep, Claude 5 icRk's LEVE on #5477): a provider
+    // call takes at most its own limit, under the lock's time. A lock that ran out throws here, as keep does.
+    await after();
   }
   return given;
 }

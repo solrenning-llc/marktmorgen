@@ -3674,9 +3674,11 @@ export const STALE_ID_WIRE_BYTES = (MAX_TEAM + 10) * 1024;
 /**
  * What giving a closing store's grants back reads at the most (issue #4012, lib/closed-store-data.ts forgetLive,
  * giveBackForClosing and giveMetaBackForClosing): for Google and for Zoom its connection (GET) and its account's index
- * (SMEMBERS), and for Meta the same two. It writes nothing here; the provider's own revoke is a call to it, not a command.
+ * (SMEMBERS), and for Meta the same two; and the store's lock made to last after each of the three give-backs
+ * (holdLock: EVAL, GET, EXPIRE; Claude 5 icRk's LEVE on #5477). It writes nothing else here; the provider's own revoke
+ * is a call to it, not a command.
  */
-export const CLOSING_GIVE_BACK_COMMANDS = 2 * 2 + 2;
+export const CLOSING_GIVE_BACK_COMMANDS = 2 * 2 + 2 + 3 * 3;
 export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS) + CLAIMS_LEFT_COMMANDS + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS + DUE_READ_COMMANDS + ERASING_MARK_COMMANDS + FENCED_PREPARE_COMMANDS + MAX_TEAM * STALE_ID_COMMANDS + CLOSING_GIVE_BACK_COMMANDS;
 
 /**

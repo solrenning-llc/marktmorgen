@@ -505,11 +505,14 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     await keep();
     // Its meeting and Meta grants given back at the provider before their connections go with its keys (issue #4012),
     // each only when no other connection here uses the same account. After the erasing mark, so no plan starts on this
-    // store any more; it reads (CLOSING_GIVE_BACK_COMMANDS) and writes nothing here, and a give-back that fails is only
-    // logged, as a disconnect's is, never a reason to keep the store's data.
+    // store any more; it reads and renews the lock (CLOSING_GIVE_BACK_COMMANDS) and writes nothing else here, and a
+    // give-back that fails is only logged, as a disconnect's is, never a reason to keep the store's data.
+    // The store's lock is made to last after each give-back (keep), since each provider call can take most of the lock's
+    // time (Claude 5 icRk's LEVE on #5477): slow providers never put the store's erasure off to the next walk.
     if (store.statsId) {
-      await giveBackForClosing(store.statsId);
+      await giveBackForClosing(store.statsId, keep);
       await giveMetaBackForClosing(store.statsId);
+      await keep();
     }
     await dropTeam(store, apply);
     if (store.sid) await revokeAllKeys(store.sid, apply);

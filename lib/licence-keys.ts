@@ -1269,13 +1269,24 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   let pages = REFUND_PAGES;
   // A run that resumes a pass first reads the newest page, so a refund made meanwhile does not wait for the pass: what
   // it reads there never moves the pass or the place, and the next pass reads it again (each handled one stays handled).
+  // A run that stops before the end of the pass (out of time or of the pass's lookups) still keeps the lost disputes'
+  // place it read, once every one it read is handled, as every run did before the pass (Claude 4 AC's NIT on #5321):
+  // otherwise, while a pass runs, every run reads the same newest pages of lost disputes again. confirmLostRead keeps it
+  // only when all of them are in the read set; the refunds' own place does not move here.
+  const keepLostPlace = async (): Promise<void> => {
+    const lost = lostRead as LostRead | null;
+    if (lost) await confirmLostRead(lost, refundSeenKey(store));
+  };
   if (after) {
     pages -= 1;
     const top = await readPage("");
     await takeLost();
     const topBudget = { left: REFUND_TOP_LOOKUPS };
     for (const refund of top?.rows ?? []) {
-      if (Date.now() >= deadline) return revoked;
+      if (Date.now() >= deadline) {
+        await keepLostPlace();
+        return revoked;
+      }
       if ((await handleRow(refund, topBudget)) === "short") break;
     }
   }
@@ -1321,6 +1332,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
         after = through;
         await keepPass();
       }
+      await keepLostPlace();
       return revoked;
     }
     if (!read.hasMore) {

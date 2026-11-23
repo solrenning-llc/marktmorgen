@@ -76,10 +76,10 @@ import { activationsOf } from "@/lib/licence-activations";
 import { paypalOrdersOf } from "@/lib/paypal-sales";
 import { preordersOf } from "@/lib/preorders";
 import { toldOf } from "@/lib/closing-buyers";
-import { paidCheckoutsOf } from "@/lib/person-copy-stripe";
+import { MAX_PAID_CHECKOUTS, paidCheckoutsOf } from "@/lib/person-copy-stripe";
 import { readGift } from "@/lib/gifts";
 import { isGroupJob, readGroup } from "@/lib/group-buy";
-import { type Bought, packageKeys, packagesKey } from "@/lib/call-packages";
+import { type Bought, packageKeys } from "@/lib/call-packages";
 import { readShipped } from "@/lib/shipments";
 import { callScope, readRecords } from "@/lib/meet-records";
 import { heldPaymentsOf } from "@/lib/closing-holds";
@@ -261,6 +261,13 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
 const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true });
+
+/**
+ * The most Redis commands the call-packages copier sends for one copy (#5125 (1)): one GET a package checkout of the
+ * person's, and a copy lists at most MAX_PAID_CHECKOUTS of their checkouts (lib/person-copy-stripe.ts). Before, it read
+ * the store's whole set of packages, which never shrinks, and one GET a package anyone bought there.
+ */
+export const CALL_PACKAGE_COPY_READS_MAX = MAX_PAID_CHECKOUTS;
 
 /** One reader per copied module, each only reading. */
 // A Stripe Checkout Session id, the same shape lib/call-packages.ts keeps a package under.
@@ -593,12 +600,15 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return out;
   },
   "lib/call-packages.ts": async (s) => {
-    // The store's packages, exactly: a set that cannot be read is never "none sold", which would leave theirs out.
-    const checkouts = stringList(repliesFor(await redisPipeline([["SMEMBERS", packagesKey(s.statsId)]]), 1)?.[0]);
-    if (!checkouts) throw new UnknownReplyError("the store's call packages");
+    // Only the person's own packages (#5125 (1)): a package is kept under the checkout that paid for it, and is written
+    // down only for a checkout marked kind "package" (lib/call-packages.ts, recordPackage), so the person's paid
+    // checkouts, already read whole for this copy (checkoutsOf), name every package of theirs. The store's whole set of
+    // packages (packagesKey), which never shrinks, is no longer read: one GET a package checkout of theirs, at most
+    // CALL_PACKAGE_COPY_READS_MAX.
+    const checkouts = (await checkoutsOf(s)).filter((c) => c.meta.kind === "package").map((c) => c.id);
     const out: unknown[] = [];
-    // Each listed package read exactly too: one that cannot be read, or a member that is not a checkout id, fails
-    // the copy, never taken as somebody else's (packageForCopy). A record that ran out is none.
+    // Each package read exactly: one that cannot be read fails the copy, never taken as somebody else's
+    // (packageForCopy). A record that ran out is none; the record's own buyer still decides whose it is.
     for (const checkout of checkouts) {
       const bought = await packageForCopy(checkout);
       // The booking link's token is a key, left out: they have it in the email that sent it.

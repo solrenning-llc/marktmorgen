@@ -42,7 +42,10 @@ function oddClaim(real: Pipe, key: string): Pipe {
   let setDone = false;
   let getDone = false;
   return (async (commands: (string | number)[][]) => {
-    if (!setDone && commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === key) {
+    // A mark taken plain (SET) or through claimWhileStoreLive (an EVAL whose key is its fifth argument; Codex
+    // L-20261120-1745 moved the yearly offer's mark there): it lands, and its answer comes back in another shape.
+    const claim = commands.length === 1 && ((commands[0][0] === "SET" && commands[0][1] === key) || (commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:store-claim-live:v1\n") && commands[0][5] === key));
+    if (!setDone && claim) {
       setDone = true;
       await real(commands);
       return ["QUEUED"];

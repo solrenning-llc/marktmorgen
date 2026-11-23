@@ -317,6 +317,84 @@ async function main(): Promise<void> {
   is("an add-on is marked as one, and the plan's reminders pass it over", [isAddOn(addOn), failedPlan(addOn), dueReminder({ ...addOn, status: "active" }, now / 1000)], [true, null, null]);
   is("only an active one answers: an unpaid month is not given on credit", [assistantPlanOf({ ...addOn, status: "active" })?.active, assistantPlanOf(addOn)?.active], [true, false]);
 
+  // Codex L-20261120-2338 (MEDIUM, #5010 row 14): a reply that comes back from the model after the store's erasure
+  // passed the private keys must not write them again: the conversation (keepThread) and the creator's list of
+  // unanswered questions (the missed list) are written only while the store is still its own and not being erased, in
+  // the same step as the write (lib/store-live-cache.ts); a store gone meanwhile gets no private output.
+  part("A reply delayed past the store's erasure writes no private output");
+  {
+    const { ERASING_KEY, erasingField, storeRef, closeStoreRecord, storeIdCommand } = await import("@/lib/store");
+    const erasedOwner = "assist-erased@example.com";
+    await claimHandle(erasedOwner, "assisterased", "Erased Shop", "Gone soon.");
+    await setSubscription(erasedOwner, { customerId: "cus_AssistErase1", subscriptionId: "sub_AssistErasePlan", active: true, tier: "creator", trialEnds: 0, period: paidPeriod(now) });
+    await ensureStatsId(erasedOwner);
+    await setAssistant(erasedOwner, { on: true, notes: "Every file is a PDF." });
+    await setAssistantPlan(erasedOwner, plan);
+    const erased = (await storeForEmail(erasedOwner))!;
+    const missed = `nl:assist:missed:${erased.statsId}`;
+    const field = await erasingField(storeRef(erased));
+    const original = redis.pipeline.bind(redis);
+    const fenced = (c: (string | number)[]) => c[0] === "EVAL" && /^-- marktmorgen:store-(cache|push)-live:v\d+\n/.test(String(c[1])) && String(c[5]).startsWith("nl:assist:");
+    const plain = (c: (string | number)[]) => (c[0] === "SET" && String(c[1]).startsWith("nl:assist:c:")) || (c[0] === "LPUSH" && c[1] === missed);
+    /** Runs `during` right before the first private write, and records what the fenced writes answered and whether a plain write happened. */
+    const racing = async (during: () => Promise<void>, ask: () => ReturnType<typeof askAssistant>) => {
+      let hits = 0;
+      const answers: unknown[] = [];
+      let plainWrites = 0;
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        if (commands.some(plain)) plainWrites += 1;
+        if (commands.some(fenced) && hits === 0) {
+          hits += 1;
+          await during();
+        }
+        const reply = await original(commands);
+        if (commands.some(fenced)) answers.push((reply as unknown[])[0]);
+        return reply;
+      }) as typeof redis.pipeline;
+      try {
+        return { result: await ask(), hits, answers, plainWrites };
+      } finally {
+        redis.pipeline = original;
+      }
+    };
+    const missedLines = async () => ((await original([["LRANGE", missed, 0, -1]]))[0] as string[] | null) ?? [];
+
+    // Control: the live store keeps both its unanswered question and its conversation.
+    next = { reply: JSON.stringify({ status: "unknown", reply: "" }) };
+    const live = await racing(async () => undefined, () => askAssistant({ store: erased, text: "Is the Cedar workbook included?", facts: "Every file is a PDF.", now }));
+    is("live: answered, the question kept and the conversation kept through the fence, never a plain write", [live.result.ok, live.hits, live.answers, live.plainWrites, (await missedLines()).length], [true, 1, [1, 1], 0, 1]);
+
+    // Erasing while the model is asked: the unanswered question is not written, and nothing is answered.
+    next = { reply: JSON.stringify({ status: "unknown", reply: "" }) };
+    const erasing = await racing(
+      async () => { await original([["HSET", ERASING_KEY, field, String(now)], ["DEL", missed]]); },
+      () => askAssistant({ store: erased, text: "Is Nara Vale's cohort workbook included?", facts: "Every file is a PDF.", now }),
+    );
+    is("erasing: no private output, the question not kept, nothing answered", [erasing.result.ok ? "answered" : erasing.result.reason, erasing.hits, erasing.answers, erasing.plainWrites, await missedLines()], ["off", 1, [0], 0, []]);
+    await original([["HDEL", ERASING_KEY, field]]);
+
+    // Erasing while a valid answer is awaited: the conversation is not written either.
+    answer("Every file is a PDF.");
+    const erasingThread = await racing(
+      async () => { await original([["HSET", ERASING_KEY, field, String(now)]]); },
+      () => askAssistant({ store: erased, text: "Is it a PDF?", facts: "Every file is a PDF.", now }),
+    );
+    is("erasing, a valid answer: no conversation written, nothing answered", [erasingThread.result.ok ? "answered" : erasingThread.result.reason, erasingThread.hits, erasingThread.answers, erasingThread.plainWrites], ["off", 1, [0], 0]);
+    await original([["HDEL", ERASING_KEY, field]]);
+
+    // The store closed for good while the model was asked (the real close, with the missed list among its keys):
+    // the late reply brings nothing back.
+    next = { reply: JSON.stringify({ status: "unknown", reply: "" }) };
+    const closed = await racing(
+      async () => {
+        const done = await closeStoreRecord(erased, [missed]);
+        if (!done) throw new Error("synthetic close did not complete");
+      },
+      () => askAssistant({ store: erased, text: "Is the workbook of Nara Vale included?", facts: "Every file is a PDF.", now }),
+    );
+    is("closed: the id key is gone, no private output, the question not written back, nothing answered", [(await original([storeIdCommand(erased.sid)]))[0], closed.result.ok ? "answered" : closed.result.reason, closed.hits, closed.answers, closed.plainWrites, await missedLines()], [null, "off", 1, [0], 0, []]);
+  }
+
   part("What the pages say is the code's");
   const pages = JSON.stringify(FEATURE_PAGES) + JSON.stringify(HELP_SECTIONS);
   is("the feature page and the help state the allowance from the code", pages.split(assistantAllowanceWords()).length - 1 >= 2, true);

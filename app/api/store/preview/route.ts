@@ -1,4 +1,4 @@
-import { givePublicRequests, holdPublicRequests, takePublicRequest } from "@/lib/traffic";
+import { givePublicRequests, holdPublicRequests, takePublicRequestExact } from "@/lib/traffic";
 import type { NextRequest } from "next/server";
 import { readListing } from "@/lib/catalog";
 import { normaliseHandle, setProductPreview, storeForHandle } from "@/lib/store";
@@ -6,7 +6,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { plain, serveFile } from "@/lib/serve-file";
 import { MAX_PREVIEW_PAGES, previewCopy } from "@/lib/pdf-preview";
 import { setWhileStoreLive } from "@/lib/store-live-cache";
-import { clientAddress, withinEssentialLimit } from "@/lib/request-guard";
+import { clientAddress, withinEssentialLimit, limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /** Making a preview the first time reads the whole PDF: give it the time a big one needs. */
 export const maxDuration = 60;
@@ -25,7 +25,10 @@ export async function GET(request: NextRequest) {
   const store = await storeForHandle(normaliseHandle(params.get("handle") ?? ""));
   if (!store) return plain(404, "There is no such store.");
   // One of the store's public requests for its window (lib/traffic.ts).
-  if (!(await takePublicRequest(store))) return plain(429, "This store can't show previews right now. Try again later.");
+  const taken = await takePublicRequestExact(store).catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return plain(429, "This store can't show previews right now. Try again later.");
   const product = await readListing(store, (params.get("product") ?? "").slice(0, 40));
   if (!product || product.hidden || product.preview < 1 || !product.file) return plain(404, "This product has no preview.");
   // Measuring the store's storage before a new preview is kept is paid from its public requests first (lib/stamp-cost-rules.ts).

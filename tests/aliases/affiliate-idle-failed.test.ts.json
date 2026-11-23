@@ -1,0 +1,5 @@
+{
+  "@/lib/affiliates": "affiliate-idle-failed-world.ts",
+  "@/lib/affiliate-payday": "affiliate-idle-failed-payday-world.ts",
+  "@/lib/paypal-payouts": "affiliate-idle-failed-payday-world.ts"
+}

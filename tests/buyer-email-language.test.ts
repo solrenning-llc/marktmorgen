@@ -104,7 +104,7 @@ async function main(): Promise<void> {
   );
   const sent = emails[before];
   is("control: the email went, in German", [response.status, Boolean(sent), sent?.text.split("\n")[0].includes("hat Ihnen")], [200, true, true]);
-  is("its HTML is marked German (lang=\"de-DE\")", Boolean(sent?.html && /^<div lang="de-DE"/.test(sent.html)), true);
+  is("its HTML is a whole document marked German (lang=\"de-DE\")", Boolean(sent?.html && /^<!doctype html><html lang="de-DE">/.test(sent.html) && /<div role="article"[^>]* lang="de-DE"/.test(sent.html)), true);
   is("and its text and HTML say the same first paragraph", Boolean(sent?.html?.includes(sent.text.split("\n")[0].replace(/&/g, "&amp;"))), true);
 
   await setLanguage(OWNER, "en");

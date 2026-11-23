@@ -34,6 +34,7 @@ import { isHouseStore } from "@/lib/house-store";
 import { assistantWords } from "@/lib/buyer-words/assistant";
 import { UnknownReplyError, listSlots, repliesFor, stringList } from "@/lib/redis-reply";
 import type { Listing, Store } from "@/lib/store";
+import { pushWhileStoreLive, setWhileStoreLive } from "@/lib/store-live-cache";
 import {
   ASSISTANT_FACTS_BYTES,
   ASSISTANT_HISTORY_BYTES,
@@ -284,9 +285,17 @@ export async function deleteThread(store: Store, token: unknown): Promise<boolea
   return true;
 }
 
-async function keepThread(statsId: string, token: string, turns: AssistantTurn[]): Promise<void> {
-  const kept: Kept = { s: statsId, turns: turns.slice(-ASSISTANT_TURNS_KEPT) };
-  await redisPipeline([["SET", threadKey(token), JSON.stringify(kept), "EX", ASSISTANT_KEEP_SECONDS]]);
+/**
+ * Keeps the conversation, only while the store is still its own and not being erased (lib/store-live-cache.ts
+ * setWhileStoreLive, in the same step as the write; Codex L-20261120-2338): a reply that comes back from the model
+ * after the store's erasure passed this key must not write it again. True when kept; false when the store is gone,
+ * and then nothing is kept; an answer not known throws (rule 24), never "kept".
+ */
+async function keepThread(store: Store, token: string, turns: AssistantTurn[]): Promise<boolean> {
+  const kept: Kept = { s: store.statsId!, turns: turns.slice(-ASSISTANT_TURNS_KEPT) };
+  const answer = await setWhileStoreLive(store, threadKey(token), JSON.stringify(kept), ASSISTANT_KEEP_SECONDS);
+  if (answer === "unknown") throw new UnknownReplyError("the store assistant's conversation kept");
+  return answer === "kept";
 }
 
 /** The conversation as the model reads it: the newest turns that fit, with addresses, numbers and links taken out of the buyer's. */
@@ -368,7 +377,8 @@ export async function askAssistant(input: { store: Store; token?: unknown; text:
   const finish = async (reply: { text: string; status: "answer" | "unknown" | "handoff" }): Promise<AssistantAnswer> => {
     // Kept as the model read it: an address, a phone number or a link typed into a question is not kept.
     const turns: AssistantTurn[] = [...before, { at: now, from: "buyer", text: forAi(text, 600) }, { at: now, from: "ai", text: reply.text, status: reply.status }];
-    await keepThread(store.statsId!, token, turns);
+    // A store erased while the model was asked keeps nothing and answers nothing (Codex L-20261120-2338).
+    if (!(await keepThread(store, token, turns))) return { ok: false, reason: "off" };
     return { ok: true, thread: { token, turns: turns.slice(-ASSISTANT_TURNS_KEPT) }, reply: { ...reply, label: ASSISTANT_LABEL } };
   };
 
@@ -432,13 +442,13 @@ export async function askAssistant(input: { store: Store; token?: unknown; text:
   // Not known, or not shown. When the model said it did not know, the creator sees the question; never who asked:
   // an address, a phone number or a link typed into it is taken out first, as in the conversation kept.
   if (json && json.status === "unknown") {
-    await redisPipeline([
-      // Kept as the model read it (forAi): an address, a phone number or a link typed into the question is not kept
-      // for the creator, who never learns who asked (audit MEDIUM 1, 9 Nov 2026).
-      ["LPUSH", missedKey(store.statsId), JSON.stringify({ q: forAi(text, MAX_ASSISTANT_QUESTION), at: Math.floor(now / 1000) })],
-      ["LTRIM", missedKey(store.statsId), 0, ASSISTANT_MISSED_KEPT - 1],
-      ["EXPIRE", missedKey(store.statsId), ASSISTANT_MISSED_SECONDS],
-    ]).catch((error) => console.error("keeping an unanswered question failed", error));
+    // Kept as the model read it (forAi): an address, a phone number or a link typed into the question is not kept
+    // for the creator, who never learns who asked (audit MEDIUM 1, 9 Nov 2026). The line, the list's bound and its
+    // renewal are one step, taken only while the store is still its own and not being erased (Codex L-20261120-2338):
+    // a reply delayed past the store's erasure never writes the list again. Gone: nothing is kept and nothing answered.
+    const kept = await pushWhileStoreLive(store, missedKey(store.statsId), JSON.stringify({ q: forAi(text, MAX_ASSISTANT_QUESTION), at: Math.floor(now / 1000) }), ASSISTANT_MISSED_KEPT, ASSISTANT_MISSED_SECONDS)
+      .catch((error: unknown) => (console.error("keeping an unanswered question failed", error), "unknown" as const));
+    if (kept === "gone") return { ok: false, reason: "off" };
   }
   return finish({ text: w.unknown(store.name), status: "unknown" });
 }
@@ -483,7 +493,8 @@ export async function handToCreator(input: { store: Store; token?: unknown; emai
   if (!filed.ok) return { ok: false, reason: filed.reason === "email" ? "email" : filed.reason === "limited" ? "limited" : filed.reason === "short" ? "question" : "closed" };
   if (thread) {
     const turns: AssistantTurn[] = [...thread.turns, ...(question ? [{ at: now, from: "buyer" as const, text: forAi(question, 600) }] : []), { at: now, from: "ai", text: assistantWords(store.language).handoffDone(store.name), status: "sent" }];
-    await keepThread(store.statsId, thread.token, turns);
+    // Handed over already; a store erased meanwhile gets no conversation written again, and none is answered.
+    if (!(await keepThread(store, thread.token, turns))) return { ok: true, thread: null };
     return { ok: true, thread: { token: thread.token, turns: turns.slice(-ASSISTANT_TURNS_KEPT) } };
   }
   return { ok: true, thread: null };

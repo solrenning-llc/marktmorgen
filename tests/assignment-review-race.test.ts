@@ -46,7 +46,7 @@ async function aheadOf<T>(when: (batch: Batch) => boolean, before: () => Promise
 }
 
 const handInText = (text: string, name: string, now: number) =>
-  handIn({ data: ROOM, courseId: COURSE, lessonId: LESSON, who: WHO, email: "student@example.com", task: TASK, text, file: file(name), now });
+  handIn({ erasure: { listId: "list_synthetic", email: "student@example.com" }, data: ROOM, courseId: COURSE, lessonId: LESSON, who: WHO, email: "student@example.com", task: TASK, text, file: file(name), now });
 
 const approve = (feedback = "Clear now.") =>
   review({ data: ROOM, courseId: COURSE, lessonId: LESSON, who: WHO, email: "student@example.com", verdict: "approved", feedback, now: 300 });

@@ -54,6 +54,10 @@ test("the browser's first page is an unmeasured warm-up, closed before any sampl
     "nothing the warm-up sees is recorded or counted");
   assert.doesNotMatch(body, /setCacheDisabled|setCPUThrottlingRate/,
     "it changes no measured condition; each sample still sets its own");
+  // The warm-up is the front page and only the front page: the flake it absorbs is "/" sample 1, so a warm-up aimed at
+  // another route would leave that sample cold again (Codex X6's LOW on #4338, #5285).
+  assert.deepEqual(body.match(/\.goto\([^,)]*/g), ['.goto(LOCAL+"/"'],
+    "the warm-up loads the site's front page, once, before the first measured sample");
   assert.match(runner.slice(samples), /Network\.setCacheDisabled",\{cacheDisabled:true\}/,
     "every measured sample still runs with the HTTP cache disabled");
 });

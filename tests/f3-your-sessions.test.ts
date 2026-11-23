@@ -96,7 +96,7 @@ async function main(): Promise<void> {
 
   part("Only this client's own bookings");
   const mine = [booking(ANA, NOW + 48 * HOUR), booking(" Ana@Example.com ", NOW + 2 * HOUR, { buyerTz: "Europe/Lisbon" }), booking(ANA, NOW - 72 * HOUR), booking(ANA, NOW - 24 * HOUR)];
-  const others = [booking(BEN, NOW + 3 * HOUR, { title: "Ben's private call" }), booking(null, NOW + 4 * HOUR, { title: "Nobody's call" })];
+  const others = [booking(BEN, NOW + 3 * HOUR, { title: "Ben's private call" })];
   const twice = booking(ANA, NOW + 5 * HOUR, { title: "Read under two addresses" });
   const view = await clientSessions(store, TOKEN, reads(asAna, () => Promise.resolve({ paid: [...others, ...mine, twice, { ...twice, email: BEN }], partial: false })), NOW);
   if (view.state !== "shown") throw new Error(`expected shown, got ${view.state}`);
@@ -105,6 +105,10 @@ async function main(): Promise<void> {
   is("each in the zone she booked in", view.upcoming.map((c) => c.tz), ["Europe/Lisbon", "America/New_York"]);
   is("nothing left out, nothing unread", [view.upcomingMore, view.pastMore, view.partial], [0, 0, false]);
   is("no notes or tasks: none carries a share mark yet", [view.notes, view.tasks], [[], []]);
+  is("a booking whose buyer address did not read is shown to nobody, and the list says it may be incomplete (LOW 3 on #3453)", await (async () => {
+    const nobody = await clientSessions(store, TOKEN, reads(asAna, () => Promise.resolve({ paid: [...mine, booking(null, NOW + 4 * HOUR, { title: "Nobody's call" })], partial: false })), NOW);
+    return nobody.state === "shown" ? [nobody.upcoming.length + nobody.past.length, nobody.partial] : nobody.state;
+  })(), [mine.length, true]);
   is("a zone that cannot be read is shown in UTC, never dropped", await (async () => {
     const odd = await clientSessions(store, TOKEN, reads(asAna, () => Promise.resolve({ paid: [booking(ANA, NOW + HOUR, { buyerTz: "Mars/Olympus" })], partial: false })), NOW);
     return odd.state === "shown" ? odd.upcoming.map((c) => c.tz) : odd.state;

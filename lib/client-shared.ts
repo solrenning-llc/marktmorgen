@@ -63,7 +63,8 @@ export type ClientNote = { id: string; session: string; at: number; text: string
 export type ClientTask = { id: string; session: string; text: string; due: string; done: boolean };
 
 export type ClientShared =
-  | { ok: true; calls: ClientCall[]; notes: ClientNote[]; tasks: ClientTask[] }
+  /** `unsure`: bookings whose buyer address did not read, shown to nobody; more than 0 means the list may be incomplete. */
+  | { ok: true; calls: ClientCall[]; notes: ClientNote[]; tasks: ClientTask[]; unsure: number }
   /** "client": no readable client address; "unreadable": a list, or a call in it, could not be read. */
   | { ok: false; reason: "client" | "unreadable" };
 
@@ -88,14 +89,25 @@ const finite = (n: unknown): n is number => typeof n === "number" && Number.isFi
  * list unknown: a booking of this client could be the one that was dropped.
  * A booking read twice under two different addresses belongs to nobody.
  */
-function owners(calls: readonly SharedCallIn[]): Map<string, { owner: string | null; call: ClientCall }> | null {
+function owners(calls: readonly SharedCallIn[]): { out: Map<string, { owner: string | null; call: ClientCall }>; unsure: Set<string> } | null {
   const out = new Map<string, { owner: string | null; call: ClientCall }>();
+  const unsure = new Set<string>();
   for (const raw of calls) {
     if (!raw || typeof raw !== "object") return null;
     const { session, email, start, end, title } = raw as Record<string, unknown>;
     if (typeof session !== "string" || (email !== null && typeof email !== "string") || !finite(start) || !finite(end) || typeof title !== "string") return null;
+    // lib/calls.ts callFromRow turns a booking's id it cannot read into "": that booking did not read, so the list is
+    // unknown (Claude 1 cloud on #3453). A reference of another shape is not a booking, as before.
+    if (session === "") return null;
     if (!SESSION.test(session)) continue;
+    // A booking whose buyer address does not read (lib/calls.ts callFromRow answers null for it) could be this
+    // client's: it is shown to nobody, and counted, so the answer says the list may be incomplete instead of being
+    // one booking shorter in silence (Claude 1 cloud's LOW 3 on #3453).
     const owner = address(email);
+    if (owner === null) {
+      unsure.add(session);
+      continue;
+    }
     const seen = out.get(session);
     if (seen) {
       if (seen.owner !== owner) seen.owner = null;
@@ -103,7 +115,8 @@ function owners(calls: readonly SharedCallIn[]): Map<string, { owner: string | n
     }
     out.set(session, { owner, call: { session, start, end, title } });
   }
-  return out;
+  for (const session of unsure) out.delete(session);
+  return { out, unsure };
 }
 
 /** True when an item is marked shared, is about this client, and belongs to one of their bookings. */
@@ -130,28 +143,37 @@ export function sharedWithClient(input: {
   if (!booked) return { ok: false, reason: "unreadable" };
 
   const calls: ClientCall[] = [];
-  for (const { owner, call } of booked.values()) if (owner === client) calls.push(call);
+  for (const { owner, call } of booked.out.values()) if (owner === client) calls.push(call);
   calls.sort((a, b) => a.start - b.start || a.session.localeCompare(b.session));
   const own = new Set(calls.map((call) => call.session));
 
   const notes: ClientNote[] = [];
   for (const raw of input.notes) {
-    if (!raw || typeof raw !== "object" || !visible(raw, client, own)) continue;
-    if (typeof raw.id !== "string" || !NOTE_ID.test(raw.id) || typeof raw.text !== "string" || !raw.text.trim()) continue;
-    notes.push({ id: raw.id, session: raw.session as string, at: finite(raw.at) ? raw.at : 0, text: raw.text });
+    // An entry that is not a note did not read: it could be one shared with this client, so the answer is unknown
+    // (Claude 1 cloud's LOW 4 on #3453), never a list with one missing. The same for a note shared with this client
+    // whose id or words do not read; a note that reads with no words has nothing to show.
+    if (!raw || typeof raw !== "object") return { ok: false, reason: "unreadable" };
+    if (!visible(raw, client, own)) continue;
+    if (typeof raw.id !== "string" || !NOTE_ID.test(raw.id) || typeof raw.text !== "string") return { ok: false, reason: "unreadable" };
+    if (!raw.text.trim()) continue;
+    // A shared note's time that is not a number did not read: unknown, never shown dated 1 January 1970.
+    if (!finite(raw.at)) return { ok: false, reason: "unreadable" };
+    notes.push({ id: raw.id, session: raw.session as string, at: raw.at, text: raw.text });
   }
   notes.sort((a, b) => b.at - a.at || a.id.localeCompare(b.id));
 
   const tasks: ClientTask[] = [];
   for (const raw of input.tasks) {
-    if (!raw || typeof raw !== "object" || !visible(raw, client, own)) continue;
-    // The task read as the CRM reads it (lib/person-tasks.ts): one that is not a whole, valid task is not shown.
+    if (!raw || typeof raw !== "object") return { ok: false, reason: "unreadable" };
+    if (!visible(raw, client, own)) continue;
+    // The task read as the CRM reads it (lib/person-tasks.ts): one shared with this client that is not a whole, valid
+    // task did not read, so the answer is unknown, never a list with one missing (Claude 1 cloud's LOW 4 on #3453).
     const [task] = parseTasks([raw]);
-    if (!task) continue;
+    if (!task) return { ok: false, reason: "unreadable" };
     tasks.push({ id: task.id, session: raw.session as string, text: task.text, due: task.due, done: task.done });
   }
   // Open before done; within each, the order the creator keeps them in.
   tasks.sort((a, b) => Number(a.done) - Number(b.done));
 
-  return { ok: true, calls, notes, tasks };
+  return { ok: true, calls, notes, tasks, unsure: booked.unsure.size };
 }

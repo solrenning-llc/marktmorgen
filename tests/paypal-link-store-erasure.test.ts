@@ -3,7 +3,7 @@
  * to check the app, and a store's erasure can begin or end meanwhile; a plain SET after it would write the sealed
  * Secret back into nl:pp:<statsId>, an erased family, with no expiry. The write is one step that sees the store's
  * own key and no erasing mark. Held too: the connection stays inside the integration unit's 10 commands
- * (tests/plan-cost-registry.ts, UNIT_COST.integration: request("wait", 10 + TAKE_COMMANDS, ...)), counted as
+ * (tests/plan-cost-registry.ts, UNIT_COST.integration: request("wait", 10 + TAKE_COMMANDS + HOST_CALENDAR_ROUTE_EXTRA_COMMANDS, ...)), counted as
  * Upstash bills a script (1 + every call inside it). Synthetic PayPal only.
  */
 import { connectPayPal, readPayPal } from "@/lib/paypal-payouts";

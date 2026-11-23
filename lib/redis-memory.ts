@@ -1988,8 +1988,8 @@ export class MemoryRedis {
           if ((mode === "new" && there !== 0) || (mode !== "new" && there !== 1)) return 2;
           this.run(["SET", target, value, "EX", seconds]);
           if (mode === "edit") {
-            this.run(openScore === "" ? ["ZREM", open, id] : ["ZADD", open, openScore, id]);
-            this.run(dueScore === "" ? ["ZREM", due, member] : ["ZADD", due, dueScore, member]);
+            if (openScore !== "-") this.run(openScore === "" ? ["ZREM", open, id] : ["ZADD", open, openScore, id]);
+            if (dueScore !== "-") this.run(dueScore === "" ? ["ZREM", due, member] : ["ZADD", due, dueScore, member]);
           }
           return 1;
         }

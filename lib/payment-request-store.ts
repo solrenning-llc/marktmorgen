@@ -114,8 +114,8 @@ const SAVE =
   'if (ARGV[2] == "new" and there ~= 0) or (ARGV[2] ~= "new" and there ~= 1) then return 2 end\n' +
   'redis.call("SET", KEYS[2], ARGV[3], "EX", ARGV[4])\n' +
   'if ARGV[2] == "edit" then\n' +
-  '  if ARGV[6] == "" then redis.call("ZREM", KEYS[3], ARGV[5]) else redis.call("ZADD", KEYS[3], ARGV[6], ARGV[5]) end\n' +
-  '  if ARGV[8] == "" then redis.call("ZREM", KEYS[4], ARGV[7]) else redis.call("ZADD", KEYS[4], ARGV[8], ARGV[7]) end\n' +
+  '  if ARGV[6] == "" then redis.call("ZREM", KEYS[3], ARGV[5]) elseif ARGV[6] ~= "-" then redis.call("ZADD", KEYS[3], ARGV[6], ARGV[5]) end\n' +
+  '  if ARGV[8] == "" then redis.call("ZREM", KEYS[4], ARGV[7]) elseif ARGV[8] ~= "-" then redis.call("ZADD", KEYS[4], ARGV[8], ARGV[7]) end\n' +
   'end\n' +
   'return 1';
 
@@ -129,18 +129,22 @@ export const PAYREQ_FENCE_COMMANDS = 2;
  * when the record is not as `mode` needs, so nothing was written either. A
  * reply of another shape throws UnknownReplyError (rule 24): never "saved".
  */
-async function writeRecord(held: fencedLock.Held, store: Pick<Store, "email" | "sid" | "extra" | "statsId">, request: PaymentRequest, mode: "new" | "edit", now: number): Promise<"saved" | "lost" | "gone"> {
+async function writeRecord(held: fencedLock.Held, store: Pick<Store, "email" | "sid" | "extra" | "statsId">, request: PaymentRequest, mode: "new" | "edit", now: number, keepIndex = false): Promise<"saved" | "lost" | "gone"> {
   const fence = await storeLiveFence(store);
   // A payment request is kept only under a store with an id (createRequest refuses one without), so its fence is the
   // id key's own ref; a fence for a store from before ids has no ref to hold and writes nothing.
   if (fence.statsId !== "") return "gone";
   const member = `${request.sid}|${request.id}`;
-  const open = mode === "edit" && statusOf(request, now) === "open" ? String(request.expiresAt) : "";
-  const next = mode === "edit" ? nextReminderAt(request, now) : null;
+  // A change that leaves what the indexes are read from as it was (keepIndex) leaves them alone: "-" tells SAVE not to
+  // touch them, two commands fewer (row 141 of #5010, coordinator ca12). A write-back that only fixes the indexes
+  // (lib/payment-requests.ts, sendDueReminders) never passes it, so they are always rewritten there.
+  const open = keepIndex ? "-" : mode === "edit" && statusOf(request, now) === "open" ? String(request.expiresAt) : "";
+  const reminder = mode === "edit" && !keepIndex ? nextReminderAt(request, now) : null;
+  const next = keepIndex ? "-" : reminder === null ? "" : String(reminder);
   const reply = exactReply.repliesFor(
     await redisPipeline([[
       "EVAL", SAVE, 6, held.key, recordKey(request.id), openKey(request.sid), DUE, fence.live, fence.erasing,
-      held.token, mode, JSON.stringify(request), keepSeconds(request, now), request.id, open, member, next === null ? "" : String(next),
+      held.token, mode, JSON.stringify(request), keepSeconds(request, now), request.id, open, member, next,
       fence.field, fence.ref,
     ]]),
     1,
@@ -322,6 +326,7 @@ export async function changeRequest<T>(
   id: string,
   change: (current: PaymentRequest) => { next: PaymentRequest | null; answer: T },
   now = Date.now(),
+  options: { reindex?: boolean } = {},
 ): Promise<{ request: PaymentRequest; answer: T } | null> {
   if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
   return withLock(writeKey(id), 10, 5_000, async (held) => {
@@ -330,7 +335,10 @@ export async function changeRequest<T>(
     const { next, answer } = change(current);
     if (next) {
       // Written back as it now is, for the rest of the days it is kept, its open entry and reminder in step.
-      const written = await writeRecord(held, store, next, "edit", now);
+      // What the open and reminder indexes are read from (statusOf, nextReminderAt): unchanged, they stay as written.
+      const same = !options.reindex && next.state === current.state && next.expiresAt === current.expiresAt &&
+        next.autoReminders === current.autoReminders && next.sent.length === current.sent.length && next.sent.every((at, i) => at === current.sent[i]);
+      const written = await writeRecord(held, store, next, "edit", now, same);
       if (written === "gone") return null;
       if (written === "lost") throw new fencedLock.LockBusyError("a payment request's lock ran out before its change was written");
     }

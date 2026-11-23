@@ -67,8 +67,8 @@ test("the erasure stays incomplete when the link use could not be erased, keeps 
   await setSubscription(owner, { customerId: "cus_ErasureAfter", subscriptionId: "sub_ErasureAfter", active: true, tier: "pro", period: paidPeriod() });
   const shop = (await storeForEmail(owner))!;
   const listId = shop.listId as string;
-  await redisPipeline([["HSET", leadsKey(listId), EMAIL, JSON.stringify({ agreed: true, t: TOKEN })]]);
-  await rememberLinkKeys([TOKEN]);
+  await redisPipeline([["HSET", leadsKey(listId), EMAIL, JSON.stringify({ agreed: true, t: TOKEN, clicks: "2026-11-01T00:00:00.000Z" })]]);
+  await rememberLinkKeys(listId, [{ email: EMAIL, token: TOKEN }]);
   const linkKey = keyIndex(linkKeyOf(TOKEN));
   const contactRead = (commands: Commands) => commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === leadsKey(listId);
   // Only the first read of the contact's row (lib/mail-clicks.ts's) fails.
@@ -110,8 +110,8 @@ test("control: with nothing failing, the row and the link key go in one erasure"
     await setSubscription(owner, { customerId: "cus_ErasureAfterC", subscriptionId: "sub_ErasureAfterC", active: true, tier: "pro", period: paidPeriod() });
     const shop = (await storeForEmail(owner))!;
     const listId = shop.listId as string;
-    await redisPipeline([["HSET", leadsKey(listId), EMAIL, JSON.stringify({ agreed: true, t: TOKEN })]]);
-    await rememberLinkKeys([TOKEN]);
+    await redisPipeline([["HSET", leadsKey(listId), EMAIL, JSON.stringify({ agreed: true, t: TOKEN, clicks: "2026-11-01T00:00:00.000Z" })]]);
+    await rememberLinkKeys(listId, [{ email: EMAIL, token: TOKEN }]);
     const linkKey = keyIndex(linkKeyOf(TOKEN));
     const result = await erasePerson(shop, EMAIL, { kind: "person" });
     assert.equal(result.ok, true);

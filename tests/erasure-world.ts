@@ -147,7 +147,7 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   await upsertContact(listId, email, { agreed: true, explicit: true, source: "free", sid, clicks: true, productId: w.plain, title: "The Guide" }, ROOM);
   const token = (await tokensFor(listId, [email], store.handle)).get(email);
   if (!token) throw new Error("no unsubscribe token");
-  const keys = await rememberLinkKeys([token]);
+  const keys = await rememberLinkKeys(listId, [{ email, token }]);
   await noteClick(keys.get(token) as string, `s-${hex(8)}-${hex(8)}`);
   // This week's delivery check (lib/mail-health.ts).
   await redisPipeline([["SET", `nl:mail:health:${sid}:seen:${sha(email).slice(0, 32)}`, "1", "EX", 86_400]]);

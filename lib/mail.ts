@@ -665,7 +665,7 @@ export async function sendTo(
       await rampBack(watched, chunk.length);
       return told({ done, rest: emails.slice(i), stopped: "retry" });
     }
-    const keys = counting?.size ? await rememberLinkKeys([...counting].map((email) => tokens.get(email) ?? "")) : new Map<string, string>();
+    const keys = counting?.size ? await rememberLinkKeys(store.listId as string, [...counting].map((email) => ({ email, token: tokens.get(email) ?? "" }))) : new Map<string, string>();
     const messages: BatchMessage[] = chunk
       .filter((email) => tokens.has(email))
       .map((email) => {

@@ -55,7 +55,7 @@ import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALP
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, replyList, repliesFor, stringList } from "@/lib/redis-reply";
 import { StripeListUnreadable, type StripeRow, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
@@ -607,7 +607,64 @@ const REFUND_LOOKBACK_SECONDS = 30 * 86_400;
 /** Pages of a hundred refunds, and payments looked up, per store per run. */
 const REFUND_PAGES = 3;
 const REFUND_LOOKUPS = 20;
+/**
+ * The lookups of a run, out of REFUND_LOOKUPS, kept for the refunds on the list to try again, for the lost disputes and
+ * for the newest page a run that resumes a pass reads first (#5285 row #2868): the pass keeps the rest, at least the four
+ * a row may take, so the first row of each part a run reads is always read whole and every part goes on.
+ */
+const REFUND_REREAD_LOOKUPS = 4;
+const REFUND_LOST_LOOKUPS = 4;
+const REFUND_TOP_LOOKUPS = 4;
 const INTENT_PATTERN = /^pi_[A-Za-z0-9]{6,200}$/;
+const REFUND_ID = /^(re|pyr)_[A-Za-z0-9]{3,250}$/;
+/** Where a pass over the refunds stands between runs (revokeRefunded), in the store's nl:keys: keys (erased with it). */
+const refundPassKey = (store: Store) => `nl:keys:${store.statsId}:refunds:pass`;
+/** How long a pass is kept: well past the runs it takes, and short enough that one left behind is started again. */
+const REFUND_PASS_SECONDS = 7 * 86_400;
+/**
+ * Refunds Stripe finished (succeeded) whose key could not be revoked for sure, refund id to payment, in the store's
+ * nl:keys: keys (erased with it), as lib/gifts.ts keeps them: read again from Stripe and tried again first on every run,
+ * and let go only once handled or once Stripe says there is nothing to take back, so one row that can never be handled
+ * does not hold the place forever (#5285 row #2868, Codex X6's LOW 2). At most REFUND_RETRY_CAP; with the list full, the
+ * row holds the place at its time instead. Kept as long as the refunds read (renewed with every row put on it).
+ */
+const refundRetryKey = (store: Store) => `nl:keys:${store.statsId}:refunds:retry`;
+/** The last refund on the list a run read again: the next run reads on from the one after it, in the order of their ids. */
+const refundRetryFromKey = (store: Store) => `nl:keys:${store.statsId}:refunds:retry:from`;
+const REFUND_RETRY_CAP = 100;
+const REFUND_RETRY_KEEP_SECONDS = 2 * 30 * 86_400 + 86_400;
+/** The time a run gives the list to try again before its pages (at least one row is read whenever the deadline allows). */
+const REFUND_REREAD_MS = 2_000;
+/**
+ * Refunds on the list to try again read again from Stripe (GET /refunds/{id}, its charge expanded) per store per run,
+ * before any key is revoked for them. Priced in tests/plan-cost-registry.ts (NOT_A_COST).
+ */
+export const KEYS_REFUND_REREADS_PER_STORE = 10;
+
+type KeysRefundPass = { since: number; after: string; newest: number; account: string; waiting?: number; unread?: true };
+/** A kept pass in its exact shape, as lib/gifts.ts reads its own; null when there is none or it is in any other shape. */
+function readKeysRefundPass(raw: unknown, now: number): KeysRefundPass | null {
+  if (typeof raw !== "string") return null;
+  let pass: unknown;
+  try {
+    pass = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!pass || typeof pass !== "object" || Array.isArray(pass)) return null;
+  const { since, after, newest, account, waiting, unread } = pass as Record<string, unknown>;
+  if (!Number.isSafeInteger(since) || (since as number) < 0 || !Number.isSafeInteger(newest) || (newest as number) < 0) return null;
+  if (typeof after !== "string" || !/^[A-Za-z0-9_]{3,255}$/.test(after)) return null;
+  if (typeof account !== "string" || !/^acct_[A-Za-z0-9]{1,255}$/.test(account)) return null;
+  if (waiting !== undefined && (!Number.isSafeInteger(waiting) || (waiting as number) < 0)) return null;
+  if (unread !== undefined && unread !== true) return null;
+  // Figures a pass never keeps, each of which would move the place wrongly: its newest refund and the time it waits at
+  // lie within its window, from its start to now (with the place's 300 s margin).
+  const latest = now + 300;
+  if ((newest as number) < (since as number) || (newest as number) > latest) return null;
+  if (waiting !== undefined && ((waiting as number) < (since as number) || (waiting as number) > latest)) return null;
+  return { since: since as number, after, newest: newest as number, account, ...(waiting === undefined ? {} : { waiting: waiting as number }), ...(unread ? { unread: true as const } : {}) };
+}
 
 /** A sale's key whose record settle has not written yet: unknown for the refund job, which leaves the refund unread. */
 class RecordNotWrittenYet extends UnknownReplyError {
@@ -828,288 +885,479 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   const account = store.stripeAccountId as string;
   const now = Math.floor(Date.now() / 1000);
   // The walk's place, read exactly (rule 24): only GET's exact null is "no place yet"; another shape stops the run with
-  // the place as it was, never a newer start that would then be written over the real, older place.
+  // the place as it was, never a newer start that would then be written over the real, older place. Read after it:
+  // where an unfinished pass stands, and the list of refunds to try again with its place (#5285 row #2868, Codex X6's
+  // LOW 2).
   const anchorRead = repliesFor(await redisPipeline([["GET", refundAnchorKey(store)]]), 1);
   const anchorRaw = anchorRead?.[0];
   if (!anchorRead || (anchorRaw !== null && !(typeof anchorRaw === "string" && /^\d{1,12}$/.test(anchorRaw)))) {
     throw new UnknownReplyError("the license keys' refund place");
   }
+  // Read after the place, in one request: a reply cut short reads as no pass (started over from the place, read again,
+  // never skipped) and as a list in another shape (left as it is, read again next run).
+  const kept = repliesFor(await redisPipeline([["GET", refundPassKey(store)], ["HGETALL", refundRetryKey(store)], ["GET", refundRetryFromKey(store)]]), 3);
+  const begun = [anchorRaw, kept?.[0] ?? null, kept ? kept[1] : undefined, kept?.[2] ?? null];
   const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : now - REFUND_LOOKBACK_SECONDS;
   // A little overlap, so a refund created in the second the last run read is
   // not missed; the set of refunds already read keeps it from counting twice.
-  const since = Math.max(0, anchor - 300);
-  let newest = anchor;
-  let lookups = REFUND_LOOKUPS;
+  const fresh = Math.max(0, anchor - 300);
+  // A pass over the refunds longer than one run goes on where the last run stopped, as lib/gifts.ts does (#5285 row
+  // #2868, Codex X6's LOW 2): before, a run read the newest REFUND_PAGES pages every time and the place moved only once
+  // they were all read and sure, so one refund left unresolved early held it, and with more than REFUND_PAGES x 100
+  // refunds after it the older ones were never read; the place then lapsed and the read started again a month back,
+  // and a full refund never read left its key valid. A pass kept in another shape, of another account or of another
+  // place's window, is started over from the place, which never moved past it: read again, never skipped.
+  const keptPass = readKeysRefundPass(begun[1], now);
+  const pass = keptPass && keptPass.account === account && (anchorRaw === null || keptPass.since === fresh) ? keptPass : null;
+  const since = pass ? pass.since : fresh;
+  let newest = pass ? pass.newest : anchor;
+  // The last refund the pass went through (handled, held or kept on the list): the next run goes on from the row after
+  // it, read from Stripe after that row, so rows that keep failing never take every lookup of every run.
+  let after = pass ? pass.after : "";
+  // The oldest refund the pass read that could not be handled and is not on the list to try again (Infinity: none): the
+  // place waits at it when the pass ends, so the next pass reads it again (a refund still on its way, as before).
+  let waiting = pass?.waiting ?? Infinity;
+  // Whether the pass read a row that is not readable: the place then stays where it was when the pass ends.
+  let unread = pass?.unread === true;
+  const passNow = (): KeysRefundPass => ({ since, after, newest, account, ...(Number.isFinite(waiting) ? { waiting } : {}), ...(unread ? { unread } : {}) });
   let revoked = 0;
-  let after = "";
-  let complete = false;
-  // A refund whose sale could not be told for sure is left unread, and the
-  // anchor stays, so the next run looks at it again.
+  let ended = false;
+  // The lost disputes' read not done to its end, or one not handled: the place stays (as before).
   let unsure = false;
-  let lostRead: LostRead | null = null;
   const handles = saleHandles(store);
 
-  for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
-    const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
-    query.append("expand[]", "data.charge");
-    if (after) query.set("starting_after", after);
-    // A page in another shape is not "no refunds": the run stops here unsure, so the place stays (CX-123 rule 30).
-    let listed: ReturnType<typeof readStripePage>;
-    try {
-      // Each row in the shape lib/refunds.ts reads a refund (its payment an id or null): any other row is unreadable.
-      const raw = await onAccount("GET", account, `/refunds?${query}`);
-      const latest = Math.floor(Date.now() / 1000) + 300;
-      listed = readStripePage(raw, row => refundRowKnown(row) && (row.created as number) <= latest);
-    } catch (error) {
-      if (!(error instanceof StripeListUnreadable)) throw error;
-      console.error("reading a store's refunds for license keys failed", store.handle, error);
-      unsure = true;
-      break;
+  /**
+   * One refund (or lost dispute) row read whole and handled, with the lookups it may take from `budget`: "done" when it
+   * was handled or needs nothing (and then it is marked read or never needed to be), "failed" when its sale could not be
+   * told for sure or its key revoked for sure (left unread: kept on the list to try again when Stripe finished it, else
+   * the place waits at it), "short" when the budget ran out before it could be (read again on a later run).
+   */
+  const handleRow = async (refund: Record<string, unknown>, budget: { left: number }): Promise<"done" | "failed" | "short"> => {
+    const id = typeof refund.id === "string" ? refund.id : "";
+    if (!id) return "done";
+    // A full refund that needs an action (requires_action) is on its way, as a pending one (Claude 1 and Claude 6 on
+    // #2868): skipped, a newer refund moved the anchor past it and, once it succeeded, its key stayed valid for good.
+    // One whose charge does not read as refunded in full yet proves nothing, and keeps the place from moving past it.
+    const actionNeeded = refund.object !== "dispute" && refund.status === "requires_action";
+    if (actionNeeded && !refundedInFull(refund.charge)) {
+      return "failed";
     }
-    // A row that cannot be read proves nothing, and keeps the place from moving past it.
-    if (listed.unreadable > 0) unsure = true;
-    const refunds: Record<string, unknown>[] = listed.rows;
-    // Lost disputes, read once with the first page; more than it reads, or a failed read, keeps the anchor.
-    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("keys", store.statsId ?? account)) : null;
-    if (lost) lostRead = lost;
-    if (lost && !lost.complete) unsure = true;
-    const rows = [...(lost?.rows ?? []), ...refunds];
-    for (const refund of rows) {
-      if (Date.now() >= deadline) break;
-      const id = typeof refund.id === "string" ? refund.id : "";
-      const created = typeof refund.created === "number" ? refund.created : 0;
-      if (!id) continue;
-      // A full refund that needs an action (requires_action) is on its way, as a pending one (Claude 1 and Claude 6 on
-      // #2868): skipped, a newer refund moved the anchor past it and, once it succeeded, its key stayed valid for good.
-      // One whose charge does not read as refunded in full yet proves nothing, and keeps the place from moving past it.
-      const actionNeeded = refund.object !== "dispute" && refund.status === "requires_action";
-      if (actionNeeded && !refundedInFull(refund.charge)) {
-        unsure = true;
-        continue;
-      }
-      const givesBack = rowGivesBack(refund) || actionNeeded;
-      // A refund Stripe answers exactly failed or canceled takes nothing back, but may undo the mark a pending one left
-      // (PENDING_REFUND_SALE): its sale is looked up like any refund's, and only that mark is cleared. Any other row
-      // that gives nothing back is skipped as before (Claude 2's focal money review of #2868, LOW).
-      const undone = !givesBack && refund.object !== "dispute" && (refund.status === "failed" || refund.status === "canceled");
-      if (!givesBack && !undone) continue;
-      // A full refund not yet through: the keyless sale is marked pending, and the refund stays unread until it settles.
-      // A succeeded part of a full refund whose rest is still pending counts as pending too (below).
-      let pending = givesBack && refund.object !== "dispute" && REFUND_ON_ITS_WAY.has(refund.status as string);
-      const [seen] = await redisPipeline([["SISMEMBER", refundSeenKey(store), id]]);
-      if (Number(seen) === 1) {
-        newest = Math.max(newest, created);
-        continue;
-      }
-      const intent = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-      if (!INTENT_PATTERN.test(intent)) {
-        // No payment to look up (a charge made without one): no sale of this store can be told from it, so it is
-        // read, and a lost dispute like it never holds the place back (review of #2158).
-        await redisPipeline([
-          ["SADD", refundSeenKey(store), id],
-          ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
-        ]);
-        newest = Math.max(newest, created);
-        continue;
-      }
-      if (lookups <= 0) continue;
-      lookups -= 1;
-
-      // Which sale that payment was: a checkout of this store, or an offer.
-      const sales: { reference: string; products: string[] }[] = [];
-      // A list in another shape is not "no checkout": the refund stays unread and is read again (sweep A3 finding 2).
-      let session: StripeRow | null;
-      try {
-        session = onlyRow(await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`), checkoutLegible);
-      } catch (error) {
-        if (!(error instanceof StripeListUnreadable)) throw error;
-        console.error("reading the checkout of a refunded payment failed", store.handle, error);
-        unsure = true;
-        continue;
-      }
-      if (session) {
-        const meta = ownField(session, "metadata") as Record<string, string>;
-        // The product, the one ticked, and every product of a bundle among them.
-        if (handles.has(meta.store ?? "")) sales.push({ reference: session.id, products: deliveredIds(meta) });
-      } else if (lookups > 0) {
-        lookups -= 1;
-        const pi: unknown = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(intent)}`);
-        // The payment in its exact shape, its metadata as Stripe gives it: anything else is not "no offer" nor "not a
-        // plan", and the refund stays unread (Claude 4's second review of #2868, CX-123 rule 24).
-        const piMeta = plainObject(pi) ? ownField(pi, "metadata") : undefined;
-        if (!plainObject(pi) || ownField(pi, "object") !== "payment_intent" || ownField(pi, "id") !== intent || !stripeMetadata(piMeta)) {
-          console.error("reading a refunded payment failed", store.handle, new StripeReplyUnreadable("a payment"));
-          unsure = true;
-          continue;
-        }
-        const meta = piMeta;
-        if (meta.kind === "upsell" && handles.has(meta.store ?? "")) sales.push({ reference: intent, products: deliveredIds(meta) });
-        else if (lookups > 0) {
-          // A payment plan's first payment belongs to an invoice, not to the
-          // checkout: found through the invoice, the plan is refunded like any sale.
-          lookups -= 1;
-          const plan = await planSaleOf(account, intent, pi).catch((error: unknown) => {
-            // Stripe saying there is no such thing is an answer: not a plan.
-            if (error instanceof StripeError && error.status >= 400 && error.status < 500 && error.status !== 429) return null;
-            console.error("finding a refunded payment plan failed", error);
-            return undefined;
-          });
-          if (plan === undefined) {
-            unsure = true;
-            continue;
-          }
-          if (plan && handles.has(plan.meta.store ?? "")) sales.push({ reference: plan.session, products: deliveredIds(plan.meta) });
-        } else {
-          unsure = true;
-          continue;
-        }
-      } else {
-        unsure = true;
-        continue;
-      }
-
-      // A succeeded refund that is only part of a charge read as refunded in full (Stripe counts a refund still pending
-      // in amount_refunded) takes nothing back while another refund of that charge is on its way: it may still fail,
-      // and a key revoked then stays revoked on a sale mostly paid. All of the charge's refunds are read (one lookup);
-      // while one is on its way the sale is held exactly like a pending refund, and anything unknown keeps the refund
-      // unread (Claude 2's focal money review of #2868 at 9fa5c95602, HIGH). A single refund of the whole charge, and
-      // a lost dispute, need no read.
-      if (sales.length > 0 && givesBack && !pending && refund.object !== "dispute" && !wholeOnItsOwn(refund)) {
-        if (lookups <= 0) continue;
-        lookups -= 1;
-        try {
-          if ((await chargeRefundsSettled(account, refund)) === "held") pending = true;
-        } catch (error) {
-          if (!(error instanceof StripeListUnreadable)) throw error;
-          console.error("reading the refunds of a refunded charge failed", store.handle, error);
-          unsure = true;
-          continue;
-        }
-      }
-
-      // The refund is marked read only once every key it takes back is revoked for sure: a reply in an unknown shape
-      // throws UnknownReplyError, and the refund stays unread for the next run (sweep A3 finding 2, CX-123 rule 24).
-      let here = 0;
-      // A sale marked pending by this refund (now or before): the refund stays unread, read again next run.
-      let held = false;
-      try {
-        for (const sale of sales) {
-          for (const productId of sale.products) {
-            const product = await readListing(store, productId);
-            // Only a product the store no longer lists is gone, with no key to revoke. One it still lists whose listing
-            // came back empty (outside the catalog head, its GET answered in an unknown shape) is unknown: the refund
-            // stays unread for the next run (review of #2868, CX-123 rule 24).
-            if (!product && hasProduct(store, productId)) throw new UnknownReplyError("a refunded product's listing");
-            if (!product) continue;
-            if (undone) {
-              // Only the pending mark is cleared, and only while it is still there: a key, the final mark or nothing
-              // stays as it is (SALE_SWAP). Asked whether or not the product still hands out keys.
-              await swapSale(store, product, sale.reference, PENDING_REFUND_SALE, "");
-              continue;
-            }
-            let heldHere = false;
-            // A sale of a product set to hand out keys takes the refunded mark in the key's place when it has none yet,
-            // with HSETNX, so it is never given one: settle's HSETNX of a key and this one cannot both win (Claude 2's
-            // second money review of #2868, HIGH). A product never set up for keys gets no mark and keeps no data for it.
-            let taken = true;
-            if (product.keys) {
-              // A pending refund writes its own mark, which denies the key the same way but can still be undone.
-              const mark = pending ? PENDING_REFUND_SALE : REFUNDED_SALE;
-              const marked = countOf(repliesFor(await orderWrite(store, [["HSETNX", saleKey(store, product), sale.reference, mark]]), 1)?.[0]);
-              if (marked !== 0 && marked !== 1) throw new UnknownReplyError("HSETNX of a refunded sale's mark");
-              taken = marked === 0;
-              if (!taken && pending) heldHere = true;
-            }
-            if (taken) {
-              const key = repliesFor(await redisPipeline([["HGET", saleKey(store, product), sale.reference]]), 1)?.[0];
-              // The sale's place holds its key, or the mark of a refund read before. No writer stores an empty key, and a
-              // place just seen taken is not empty, so "" (or none, after the mark lost) is unknown, never "no key" (Claude
-              // 4's second review of #2868, CX-123 rule 24). A product never set up for keys answers none: no key.
-              if (key === null && !product.keys) continue;
-              if (typeof key !== "string" || !key) throw new UnknownReplyError("HGET of a sale's license key");
-              if (key === PENDING_REFUND_SALE) {
-                // Still pending: held. Through (succeeded, or a dispute lost): the mark turns final, only while it is
-                // still the pending one; a key settled after another run cleared it is revoked next run (0 is unknown).
-                if (pending) heldHere = true;
-                else if (!(await swapSale(store, product, sale.reference, PENDING_REFUND_SALE, REFUNDED_SALE))) {
-                  throw new UnknownReplyError("the swap of a pending refund's mark");
-                }
-              } else if (key !== REFUNDED_SALE) {
-                if (pending) {
-                  // A key already given stays valid while the refund is pending: it may still fail, and a key revoked
-                  // then would stay revoked on a sale that was paid. The refund stays unread and is read again until it
-                  // goes through (the key is revoked then) or fails (the key stays as it is; Claude 5's pre-review of
-                  // claude5/licence-refunds-combined, HIGH 2).
-                  heldHere = true;
-                } else {
-                  // A key whose record settle has not written yet is not "nothing to revoke": the refund stays unread
-                  // and the next run revokes the record written meanwhile (Claude 2's second money review of #2868,
-                  // MEDIUM).
-                  if (!(await setRevoked(store, product, key, true, "refund"))) throw new RecordNotWrittenYet();
-                  here += 1;
-                }
-              }
-            }
-            // A buyer still waiting for a key from an empty pool keeps the place while the refund is pending, and is
-            // served if it fails; once it is through, they are not given one.
-            if (heldHere) {
-              held = true;
-              continue;
-            }
-            const dropped = countOf(repliesFor(await redisPipeline([["HDEL", waitingKey(store, product), sale.reference]]), 1)?.[0]);
-            if (dropped === null) throw new UnknownReplyError("HDEL of a buyer waiting for a license key");
-          }
-        }
-      } catch (error) {
-        if (!(error instanceof UnknownReplyError)) throw error;
-        console.error("revoking a refunded sale's license key could not be confirmed", store.handle, error);
-        unsure = true;
-        continue;
-      }
-      if (held) {
-        unsure = true;
-        continue;
-      }
-      revoked += here;
+    const givesBack = rowGivesBack(refund) || actionNeeded;
+    // A refund Stripe answers exactly failed or canceled takes nothing back, but may undo the mark a pending one left
+    // (PENDING_REFUND_SALE): its sale is looked up like any refund's, and only that mark is cleared. Any other row
+    // that gives nothing back is skipped as before (Claude 2's focal money review of #2868, LOW).
+    const undone = !givesBack && refund.object !== "dispute" && (refund.status === "failed" || refund.status === "canceled");
+    if (!givesBack && !undone) return "done";
+    // A full refund not yet through: the keyless sale is marked pending, and the refund stays unread until it settles.
+    // A succeeded part of a full refund whose rest is still pending counts as pending too (below).
+    let pending = givesBack && refund.object !== "dispute" && REFUND_ON_ITS_WAY.has(refund.status as string);
+    const [seen] = await redisPipeline([["SISMEMBER", refundSeenKey(store), id]]);
+    if (Number(seen) === 1) {
+      return "done";
+    }
+    const intent = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
+    if (!INTENT_PATTERN.test(intent)) {
+      // No payment to look up (a charge made without one): no sale of this store can be told from it, so it is
+      // read, and a lost dispute like it never holds the place back (review of #2158).
       await redisPipeline([
         ["SADD", refundSeenKey(store), id],
         ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
       ]);
-      newest = Math.max(newest, created);
+      return "done";
     }
-    if (!listed.hasMore) {
-      complete = true;
+    if (budget.left <= 0) return "short";
+    budget.left -= 1;
+
+    // Which sale that payment was: a checkout of this store, or an offer.
+    const sales: { reference: string; products: string[] }[] = [];
+    // A list in another shape is not "no checkout": the refund stays unread and is read again (sweep A3 finding 2).
+    let session: StripeRow | null;
+    try {
+      session = onlyRow(await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`), checkoutLegible);
+    } catch (error) {
+      if (!(error instanceof StripeListUnreadable)) throw error;
+      console.error("reading the checkout of a refunded payment failed", store.handle, error);
+      return "failed";
+    }
+    if (session) {
+      const meta = ownField(session, "metadata") as Record<string, string>;
+      // The product, the one ticked, and every product of a bundle among them.
+      if (handles.has(meta.store ?? "")) sales.push({ reference: session.id, products: deliveredIds(meta) });
+    } else if (budget.left > 0) {
+      budget.left -= 1;
+      const pi: unknown = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(intent)}`);
+      // The payment in its exact shape, its metadata as Stripe gives it: anything else is not "no offer" nor "not a
+      // plan", and the refund stays unread (Claude 4's second review of #2868, CX-123 rule 24).
+      const piMeta = plainObject(pi) ? ownField(pi, "metadata") : undefined;
+      if (!plainObject(pi) || ownField(pi, "object") !== "payment_intent" || ownField(pi, "id") !== intent || !stripeMetadata(piMeta)) {
+        console.error("reading a refunded payment failed", store.handle, new StripeReplyUnreadable("a payment"));
+        return "failed";
+      }
+      const meta = piMeta;
+      if (meta.kind === "upsell" && handles.has(meta.store ?? "")) sales.push({ reference: intent, products: deliveredIds(meta) });
+      else if (budget.left > 0) {
+        // A payment plan's first payment belongs to an invoice, not to the
+        // checkout: found through the invoice, the plan is refunded like any sale.
+        budget.left -= 1;
+        const plan = await planSaleOf(account, intent, pi).catch((error: unknown) => {
+          // Stripe saying there is no such thing is an answer: not a plan.
+          if (error instanceof StripeError && error.status >= 400 && error.status < 500 && error.status !== 429) return null;
+          console.error("finding a refunded payment plan failed", error);
+          return undefined;
+        });
+        if (plan === undefined) {
+          return "failed";
+        }
+        if (plan && handles.has(plan.meta.store ?? "")) sales.push({ reference: plan.session, products: deliveredIds(plan.meta) });
+      } else {
+        return "short";
+      }
+    } else {
+      return "short";
+    }
+
+    // A succeeded refund that is only part of a charge read as refunded in full (Stripe counts a refund still pending
+    // in amount_refunded) takes nothing back while another refund of that charge is on its way: it may still fail,
+    // and a key revoked then stays revoked on a sale mostly paid. All of the charge's refunds are read (one lookup);
+    // while one is on its way the sale is held exactly like a pending refund, and anything unknown keeps the refund
+    // unread (Claude 2's focal money review of #2868 at 9fa5c95602, HIGH). A single refund of the whole charge, and
+    // a lost dispute, need no read.
+    if (sales.length > 0 && givesBack && !pending && refund.object !== "dispute" && !wholeOnItsOwn(refund)) {
+      if (budget.left <= 0) return "short";
+      budget.left -= 1;
+      try {
+        if ((await chargeRefundsSettled(account, refund)) === "held") pending = true;
+      } catch (error) {
+        if (!(error instanceof StripeListUnreadable)) throw error;
+        console.error("reading the refunds of a refunded charge failed", store.handle, error);
+        return "failed";
+      }
+    }
+
+    // The refund is marked read only once every key it takes back is revoked for sure: a reply in an unknown shape
+    // throws UnknownReplyError, and the refund stays unread for the next run (sweep A3 finding 2, CX-123 rule 24).
+    let here = 0;
+    // A sale marked pending by this refund (now or before): the refund stays unread, read again next run.
+    let held = false;
+    try {
+      for (const sale of sales) {
+        for (const productId of sale.products) {
+          const product = await readListing(store, productId);
+          // Only a product the store no longer lists is gone, with no key to revoke. One it still lists whose listing
+          // came back empty (outside the catalog head, its GET answered in an unknown shape) is unknown: the refund
+          // stays unread for the next run (review of #2868, CX-123 rule 24).
+          if (!product && hasProduct(store, productId)) throw new UnknownReplyError("a refunded product's listing");
+          if (!product) continue;
+          if (undone) {
+            // Only the pending mark is cleared, and only while it is still there: a key, the final mark or nothing
+            // stays as it is (SALE_SWAP). Asked whether or not the product still hands out keys.
+            await swapSale(store, product, sale.reference, PENDING_REFUND_SALE, "");
+            continue;
+          }
+          let heldHere = false;
+          // A sale of a product set to hand out keys takes the refunded mark in the key's place when it has none yet,
+          // with HSETNX, so it is never given one: settle's HSETNX of a key and this one cannot both win (Claude 2's
+          // second money review of #2868, HIGH). A product never set up for keys gets no mark and keeps no data for it.
+          let taken = true;
+          if (product.keys) {
+            // A pending refund writes its own mark, which denies the key the same way but can still be undone.
+            const mark = pending ? PENDING_REFUND_SALE : REFUNDED_SALE;
+            const marked = countOf(repliesFor(await orderWrite(store, [["HSETNX", saleKey(store, product), sale.reference, mark]]), 1)?.[0]);
+            if (marked !== 0 && marked !== 1) throw new UnknownReplyError("HSETNX of a refunded sale's mark");
+            taken = marked === 0;
+            if (!taken && pending) heldHere = true;
+          }
+          if (taken) {
+            const key = repliesFor(await redisPipeline([["HGET", saleKey(store, product), sale.reference]]), 1)?.[0];
+            // The sale's place holds its key, or the mark of a refund read before. No writer stores an empty key, and a
+            // place just seen taken is not empty, so "" (or none, after the mark lost) is unknown, never "no key" (Claude
+            // 4's second review of #2868, CX-123 rule 24). A product never set up for keys answers none: no key.
+            if (key === null && !product.keys) continue;
+            if (typeof key !== "string" || !key) throw new UnknownReplyError("HGET of a sale's license key");
+            if (key === PENDING_REFUND_SALE) {
+              // Still pending: held. Through (succeeded, or a dispute lost): the mark turns final, only while it is
+              // still the pending one; a key settled after another run cleared it is revoked next run (0 is unknown).
+              if (pending) heldHere = true;
+              else if (!(await swapSale(store, product, sale.reference, PENDING_REFUND_SALE, REFUNDED_SALE))) {
+                throw new UnknownReplyError("the swap of a pending refund's mark");
+              }
+            } else if (key !== REFUNDED_SALE) {
+              if (pending) {
+                // A key already given stays valid while the refund is pending: it may still fail, and a key revoked
+                // then would stay revoked on a sale that was paid. The refund stays unread and is read again until it
+                // goes through (the key is revoked then) or fails (the key stays as it is; Claude 5's pre-review of
+                // claude5/licence-refunds-combined, HIGH 2).
+                heldHere = true;
+              } else {
+                // A key whose record settle has not written yet is not "nothing to revoke": the refund stays unread
+                // and the next run revokes the record written meanwhile (Claude 2's second money review of #2868,
+                // MEDIUM).
+                if (!(await setRevoked(store, product, key, true, "refund"))) throw new RecordNotWrittenYet();
+                here += 1;
+              }
+            }
+          }
+          // A buyer still waiting for a key from an empty pool keeps the place while the refund is pending, and is
+          // served if it fails; once it is through, they are not given one.
+          if (heldHere) {
+            held = true;
+            continue;
+          }
+          const dropped = countOf(repliesFor(await redisPipeline([["HDEL", waitingKey(store, product), sale.reference]]), 1)?.[0]);
+          if (dropped === null) throw new UnknownReplyError("HDEL of a buyer waiting for a license key");
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      console.error("revoking a refunded sale's license key could not be confirmed", store.handle, error);
+      return "failed";
+    }
+    if (held) {
+      return "failed";
+    }
+    revoked += here;
+    await redisPipeline([
+      ["SADD", refundSeenKey(store), id],
+      ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+    ]);
+    return "done";
+  };
+
+  /** One page of refunds since the pass's start in its exact shape (lib/stripe-list.ts); null when it could not be read. */
+  const readPage = async (from: string): Promise<ReturnType<typeof readStripePage> | null> => {
+    const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
+    query.append("expand[]", "data.charge");
+    if (from) query.set("starting_after", from);
+    // A page in another shape is not "no refunds": the pass stays on it, so the place stays (CX-123 rule 30).
+    try {
+      // Each row in the shape lib/refunds.ts reads a refund (its payment an id or null): any other row is unreadable.
+      const raw = await onAccount("GET", account, `/refunds?${query}`);
+      const latest = Math.floor(Date.now() / 1000) + 300;
+      return readStripePage(raw, row => refundRowKnown(row) && (row.created as number) <= latest);
+    } catch (error) {
+      if (!(error instanceof StripeListUnreadable)) throw error;
+      console.error("reading a store's refunds for license keys failed", store.handle, error);
+      return null;
+    }
+  };
+
+  /**
+   * Puts refunds Stripe finished whose work could not be done on the list to try again, as lib/gifts.ts does; true only
+   * when every one is kept for sure. Only a refund that succeeded (the owner's decision 18 of 9 November 2026; reviews
+   * of #3302): the list tries a row again as finished, so a refund not final yet is never put on it and holds the place.
+   */
+  const keepForLater = async (rows: Record<string, unknown>[]): Promise<boolean> => {
+    const fields: string[] = [];
+    for (const row of rows) {
+      const { id, payment_intent: pi } = row;
+      if (row.object !== "refund" || row.status !== "succeeded" || typeof id !== "string" || typeof pi !== "string" || !REFUND_ID.test(id) || !INTENT_PATTERN.test(pi)) return false;
+      fields.push(id, pi);
+    }
+    // Only rows not on the list yet count against its cap, each slot read from the reply's own data (replyList).
+    const ids = fields.filter((_, i) => i % 2 === 0);
+    const read = repliesFor(await redisPipeline([["HLEN", refundRetryKey(store)], ["HMGET", refundRetryKey(store), ...ids]]), 2);
+    const counted = countOf(read?.[0]);
+    const slots = replyList(read?.[1]);
+    let added: number | null = slots && slots.length === ids.length ? 0 : null;
+    for (const value of slots ?? []) {
+      if (added === null) break;
+      if (value === null) added += 1;
+      else if (typeof value !== "string") added = null;
+    }
+    if (counted === null || added === null || counted + added > REFUND_RETRY_CAP) {
+      console.error("reading refunds for license keys: the list to try again is full or unknown; the place waits at the rows", store.handle);
+      return false;
+    }
+    const kept = repliesFor(await redisPipeline([["HSET", refundRetryKey(store), ...fields], ["EXPIRE", refundRetryKey(store), REFUND_RETRY_KEEP_SECONDS]]), 2);
+    const wrote = countOf(kept?.[0]);
+    return wrote !== null && wrote <= rows.length && kept?.[1] === 1;
+  };
+
+  /**
+   * A refund on the list read again from Stripe before anything is taken back: the row itself when it succeeded on a
+   * charge refunded in full; "drop" when Stripe failed or canceled it, or its charge is not refunded in full (nothing to
+   * take back); "keep" when it is not final, in another shape, or Stripe could not be asked (read again later).
+   */
+  const reread = async (id: string, pi: string): Promise<Record<string, unknown> | "drop" | "keep"> => {
+    let row: unknown;
+    try {
+      row = await onAccount("GET", account, `/refunds/${encodeURIComponent(id)}?${new URLSearchParams([["expand[]", "charge"]])}`);
+    } catch (error) {
+      console.error("reading refunds for license keys: a row to try again could not be read again; kept", store.handle, error);
+      return "keep";
+    }
+    if (!plainObject(row) || row.object !== "refund" || row.id !== id || row.payment_intent !== pi || !refundRowKnown(row)) return "keep";
+    if (row.status === "failed" || row.status === "canceled") return "drop";
+    if (row.status !== "succeeded" || !plainObject(row.charge)) return "keep";
+    return (row.charge as Record<string, unknown>).refunded === true ? row : "drop";
+  };
+
+  // The refunds on the list to try again, first, at most KEYS_REFUND_REREADS_PER_STORE a run and at most
+  // REFUND_REREAD_MS of the run, in the order of their ids from the one after the last this store's runs read, with
+  // their own REFUND_REREAD_LOOKUPS: each read again from Stripe and handled as the row Stripe sends; let go once handled,
+  // or once Stripe failed or canceled it or its charge is not refunded in full. A list read in another shape, or a row on
+  // it that is not a refund and a payment, is left as it is and read again next run: never taken as empty or dropped.
+  const flat = stringList(begun[2]);
+  if (!flat || flat.length % 2 !== 0) console.error("reading refunds for license keys: the list to try again was read in another shape; read again next run", store.handle);
+  else if (flat.length > 0) {
+    const listed: [string, string][] = [];
+    for (let i = 0; i < flat.length; i += 2) {
+      if (REFUND_ID.test(flat[i]) && INTENT_PATTERN.test(flat[i + 1])) listed.push([flat[i], flat[i + 1]]);
+      else console.error("reading refunds for license keys: a row to try again in another shape; kept", store.handle);
+    }
+    listed.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const from = begun[3];
+    const place = typeof from === "string" && REFUND_ID.test(from) ? from : null;
+    const past = place === null ? 0 : listed.findIndex(([id]) => id > place);
+    const start = past < 0 ? 0 : past;
+    const until = Math.min(deadline, Date.now() + REFUND_REREAD_MS);
+    const budget = { left: REFUND_REREAD_LOOKUPS };
+    let last = "";
+    for (let k = 0; k < Math.min(listed.length, KEYS_REFUND_REREADS_PER_STORE); k += 1) {
+      if (Date.now() >= deadline || (k > 0 && Date.now() >= until)) break;
+      const [id, pi] = listed[(start + k) % listed.length];
+      const verdict = await reread(id, pi);
+      if (verdict !== "keep" && verdict !== "drop") {
+        const outcome = await handleRow(verdict, budget);
+        // Out of lookups: this row and the ones after it are read again from here next run.
+        if (outcome === "short") break;
+        last = id;
+        if (outcome === "failed") continue;
+      } else {
+        last = id;
+        if (verdict === "keep") continue;
+      }
+      const gone = repliesFor(await redisPipeline([["HDEL", refundRetryKey(store), id]]), 1);
+      if (countOf(gone?.[0]) === null) console.error("reading refunds for license keys: letting go of a row was left unknown; read again next run", store.handle);
+    }
+    // The place moves past every row read this run; a write left unknown reads the same rows again next run.
+    if (last) {
+      const moved = repliesFor(await redisPipeline([["SET", refundRetryFromKey(store), last, "EX", REFUND_RETRY_KEEP_SECONDS]]), 1);
+      if (moved?.[0] !== "OK") console.error("reading refunds for license keys: the place on the list to try again was left unknown", store.handle);
+    }
+  }
+
+  // Lost disputes, read once a run from the pass's start, as before: with the first page of refunds the run reads and
+  // inside its deadline; more than it reads, a failed read or a row not handled keeps the place. They take their own
+  // REFUND_LOST_LOOKUPS, never the pass's.
+  let lostRead: LostRead | null = null;
+  const lostBudget = { left: REFUND_LOST_LOOKUPS };
+  const takeLost = async (): Promise<void> => {
+    if (lostRead || Date.now() >= deadline) return;
+    const read = await lostDisputesOrRetry(account, since, deadline, lostCursorKey("keys", store.statsId ?? account));
+    lostRead = read;
+    if (!read.complete) unsure = true;
+    for (const row of read.rows) {
+      if (Date.now() >= deadline) {
+        unsure = true;
+        return;
+      }
+      if ((await handleRow(row, lostBudget)) !== "done") unsure = true;
+    }
+  };
+
+  // The pass's own lookups, REFUND_LOOKUPS less what the newest page may take: a row takes at most four (its checkout,
+  // its payment, a plan's invoice, its charge's refunds), so the first row a run reads is always read whole.
+  const budget = { left: REFUND_LOOKUPS - REFUND_TOP_LOOKUPS };
+  let pages = REFUND_PAGES;
+  // A run that resumes a pass first reads the newest page, so a refund made meanwhile does not wait for the pass: what
+  // it reads there never moves the pass or the place, and the next pass reads it again (each handled one stays handled).
+  if (after) {
+    pages -= 1;
+    const top = await readPage("");
+    await takeLost();
+    const topBudget = { left: REFUND_TOP_LOOKUPS };
+    for (const refund of top?.rows ?? []) {
+      if (Date.now() >= deadline) return revoked;
+      if ((await handleRow(refund, topBudget)) === "short") break;
+    }
+  }
+  const keepPass = async () => {
+    // Either reply leaves a place that skips nothing: the one written, or the one kept before it (read again).
+    await redisPipeline([["SET", refundPassKey(store), JSON.stringify(passNow()), "EX", REFUND_PASS_SECONDS]]);
+  };
+  for (let page = 0; page < pages; page += 1) {
+    if (Date.now() >= deadline) break;
+    const read = await readPage(after);
+    if (!read) break;
+    await takeLost();
+    const failed: Record<string, unknown>[] = [];
+    let stopped = false;
+    let through = "";
+    for (const refund of read.rows) {
+      if (Date.now() >= deadline) {
+        stopped = true;
+        break;
+      }
+      const outcome = await handleRow(refund, budget);
+      if (outcome === "short") {
+        stopped = true;
+        break;
+      }
+      if (outcome === "failed") failed.push(refund);
+      newest = Math.max(newest, typeof refund.created === "number" ? refund.created : 0);
+      if (typeof refund.id === "string" && refund.id) through = refund.id;
+    }
+    // A refund Stripe finished goes on the list to try again, so the place need not wait for it. Any other row not
+    // handled (a refund not final yet, or one the list could not keep for sure: full, or a reply left unknown) holds the
+    // place at its time; a row not readable, whose time is not known, keeps the place where it was.
+    const finished = failed.filter((refund) => refund.object === "refund" && refund.status === "succeeded");
+    const listed = finished.length > 0 && (await keepForLater(finished));
+    for (const refund of failed) {
+      if (listed && refund.object === "refund" && refund.status === "succeeded") continue;
+      waiting = Math.min(waiting, typeof refund.created === "number" ? refund.created : since);
+    }
+    if (read.unreadable > 0) unread = true;
+    if (stopped) {
+      // Out of time or of lookups: the pass goes on next run from the last row this one went through.
+      if (through) {
+        after = through;
+        await keepPass();
+      }
+      return revoked;
+    }
+    if (!read.hasMore) {
+      ended = true;
       break;
     }
-    // More to read but no readable row to go on from: the rest is not known.
-    if (!listed.lastId) {
-      unsure = true;
+    // The next page is read from the last row, or, when that row is not readable, from the last readable one, which
+    // reads the rows after it again (never skipped). A page with no readable row at all has nothing to go on from: the
+    // pass stays on it and the place where it was, so nothing behind it is passed over.
+    const next = read.lastId ?? (through || null);
+    if (!next) {
+      console.error("reading refunds for license keys: a page with no readable row; the pass stays on it", store.handle);
       break;
     }
-    after = listed.lastId;
+    after = next;
+    await keepPass();
   }
-  // Only moved forward past what was read to the end: a run cut short by
-  // its deadline, its pages or its lookups starts from the same place next
-  // time, and the refunds it already handled are skipped as read.
-  // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead); a sweep
-  // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed
-  // meanwhile is read from the top next run (review of #2158, inbox C4-24).
-  if (lostRead) {
-    if (!(await confirmLostRead(lostRead, refundSeenKey(store)))) unsure = true;
-    else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
+  // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead), and the
+  // place with it. A run that read every refund from the place to now (no pass resumed) moves as before: to the newest
+  // closing of the whole sweep when it went on from a kept place, else past the newest it read. A run that resumed a
+  // pass read the refunds only up to when the pass began, so it moves no further than the pass's newest refund (as
+  // lib/gifts.ts): a refund made since is read by the next pass.
+  const lost = lostRead as LostRead | null;
+  if (!lost) unsure = true;
+  else if (!(await confirmLostRead(lost, refundSeenKey(store)))) unsure = true;
+  else if (lost.complete) newest = pass ? (lost.resumed ? Math.min(newest, Math.max(lost.newest, since)) : newest) : lost.resumed ? lost.newest : Math.max(newest, lost.newest);
+  if (ended && !unsure) {
+    // Never past a refund the pass read that could not be handled and is not on the list: the next pass reads it again
+    // from there. A pass that read a row not readable lets the pass go and keeps the place where it was.
+    const to = Math.min(Math.max(newest, anchor), Math.max(waiting, since));
+    const closed = repliesFor(await redisPipeline([...(unread ? [] : [["SET", refundAnchorKey(store), String(to), "EX", REFUND_LOOKBACK_SECONDS * 2]]), ["DEL", refundPassKey(store)]]), unread ? 1 : 2);
+    if (!closed) console.error("ending a pass over refunds for license keys was left unknown", store.handle);
+    return revoked;
   }
-  // The place moves only past what was read to the end, sure, with lookups left and inside its time. A store with no place yet keeps
-  // the one it started from, so the next run reads the same window and the lost disputes' kept place still counts; its
-  // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
-  // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
-  const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
-  if (done) await redisPipeline([["SET", refundAnchorKey(store), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
-  else if (!(Number(anchorRaw) > 0)) {
+  if (!(Number(anchorRaw) > 0)) {
+    // A store with no place yet keeps the one it started from, so the next run reads the same window and the lost
+    // disputes' kept place still counts; its refunds already read are kept as long (reviews of #2158).
     await redisPipeline([
       ["SET", refundAnchorKey(store), String(anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],
       ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
     ]);
   }
+  // A pass not ended, or ended while a lost dispute was left: kept, so the next run goes on from it.
+  if (after) await keepPass();
   return revoked;
 }
 

@@ -301,6 +301,30 @@ async function main() {
     is("Month 2 opens after the new purchase's end: not sent, although the row's old stamp runs later", await run(second + 60 * DAY), []);
     current = course;
   }
+
+  part("A store switched off after notices about its content (Claude 6's LOW 2 on #3406, #5285 row): nothing read, nothing sent; back on, it goes out");
+  {
+    await fresh([session("cs_test_once", first, false)]);
+    await recordEnrollment(store, buyer, product.id, first);
+    await openedOn(first);
+    (store as { suspended?: string }).suspended = "notice";
+    const before = redis.keys().length;
+    let read = 0;
+    const plain = redis.pipeline;
+    redis.pipeline = async (commands) => {
+      read += commands.filter((c) => String(c[1] ?? "").startsWith(`nl:course:${courseId}`)).length;
+      return plain(commands);
+    };
+    try {
+      is("switched off: no 'now open' email", await run(first + 30 * DAY), []);
+    } finally {
+      redis.pipeline = plain;
+    }
+    is("and none of its students is read", read, 0);
+    is("and nothing is written for it", redis.keys().length, before);
+    delete (store as { suspended?: string }).suspended;
+    is("back on inside the window: Month 1 goes out", await run(first + 31 * DAY), [subject("Month 1")]);
+  }
   done();
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

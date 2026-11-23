@@ -64,7 +64,8 @@ async function main(): Promise<void> {
   is("said in words", [laterWords(0), laterWords(1), laterWords(13)], ["the same day", "1 day later", "13 days later"]);
 
   part("Read back safely");
-  is("anything else is nothing", [parsePaths(null), parsePaths({ at: "x" }), parsePaths({ at: 1, next: { x: [{ id: "y", buyers: 2, days: 1 }] } })?.next], [null, null, {}]);
+  // A snapshot with a part that does not read is no reading, never the rest of it (#4071; tests/next-bought-exact.test.ts).
+  is("anything else is nothing", [parsePaths(null), parsePaths({ at: "x" }), parsePaths({ at: 1, next: { x: [{ id: "y", buyers: 2, days: 1 }] } })], [null, null, null]);
 
   part("Kept from the all-time reading");
   await claimHandle("owner@example.com", "harbor", "Harbor Kitchen", "");

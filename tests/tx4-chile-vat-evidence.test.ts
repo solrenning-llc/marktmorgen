@@ -26,3 +26,12 @@ test("Chile evidence says no registration threshold was found and the statute wa
   const doc = readFileSync(path, "utf8");
   for (const text of ["No monetary registration threshold was identified in the sources read", "must not be gated on a sales counter", "Statute not read"]) assert.ok(doc.includes(text), text);
 });
+// Board #5285, row #2633 (Claude 5's LOWs #3 and #4 on #2633): phrases being present never proved the note free of
+// an added conclusion or a zero cost, and the note had no owner-dependent list, unlike the other TX4 notes.
+test("Chile evidence adds no zero cost and no conclusion about the LLC, and lists what depends on the owner", () => {
+  const doc = readFileSync(path, "utf8");
+  assert.doesNotMatch(doc, /(?:USD|EUR|CLP|US\$|€|\$)\s*0(?:[.,]0+)?\b/i);
+  assert.doesNotMatch(doc, /(?:LLC|Marktmorgen)\s+(?:is|are)\s+(?:not\s+(?:a|the)\s+(?:digital\s+intermediation\s+)?platform|exempt|below)/i);
+  assert.doesNotMatch(doc, /(?:LLC|Marktmorgen)\s+(?:must|will|need(?:s)? to)\s+(?:file|register|appoint|pay)/i);
+  for (const text of ["Owner-dependent", "reviewed legal facts", "complete funded cost evidence", "not compliance, profitability, deployment or customer-availability certification"]) assert.ok(doc.includes(text), text);
+});

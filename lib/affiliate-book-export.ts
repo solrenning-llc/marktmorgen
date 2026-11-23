@@ -6,8 +6,9 @@
  * (listAffiliates), and sends a line for each sale, lead, share, payout and invoice. Nothing caps its rows but the
  * store's data room, so it took one essential request whatever the programme's size.
  *
- * While a plan runs it now takes, from the store's studio figure and before anything is read, the units of that work at
- * the programme's size, counted first (lib/affiliates.ts bookSizes) as bookWork counts a reading of the book, at the
+ * While a plan runs it now holds, from the store's studio figure and before anything is read, the units of its reading
+ * at the programme's size (bookExportSettled with no file yet), counted first (lib/affiliates.ts bookSizes) as bookWork
+ * counts a reading of the book, and counts the file's own size once it is made (bookExportSettled with its bytes), at the
  * unit of a whole store export (lib/store-export.ts: EXPORT_COMMANDS_PER_UNIT commands, EXPORT_BYTES_PER_UNIT bytes,
  * and the wait on Stripe's pages as EXPORT_WAIT_UNITS covers a whole export's). Once the plan has ended, the store has
  * ENDED_BOOK_EXPORTS of its own instead (lib/plan-closing-rules.ts), never taken from a figure, priced with its
@@ -70,9 +71,9 @@ export function bookExportWorkUnits(w: ReadWork): number {
 }
 
 /**
- * The studio units held before the spreadsheet reads, at a programme of these sizes: its work at the most, the file
- * at a line for every entry and every invoice kept. Once the file is made, what its real size did not need is given
- * back (bookExportSettled); nothing else is, since what was read is not measured.
+ * The most studio units a spreadsheet takes at a programme of these sizes: its work at the most, the file at a line for
+ * every entry and every invoice kept. The route holds only its reading's part first (bookExportSettled with no file)
+ * and counts the file's real size once it is made; this is the bound the plan's figure is checked against.
  */
 export function bookExportUnits(sizes: BookSizes): number {
   return bookExportWorkUnits(bookExportWork(sizes));

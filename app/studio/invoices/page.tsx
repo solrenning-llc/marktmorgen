@@ -48,7 +48,7 @@ export default async function StudioInvoicesPage({ searchParams }: Params) {
           <p className="eyebrow">Your plan</p>
           <h1 className="t-h2 mt-3">Your plan&apos;s invoices</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
-            {`The invoices Marktmorgen has made for this store's plan, newest first, read from Stripe when this page opens. Each one opens on Stripe's own page, where you can see it, download it and, if it is not paid yet, pay it.${read.state === "none" ? "" : ` Each read takes one of ${ESSENTIAL_WORDS}, and only while fewer than ${PLAN_INVOICES_PER_DAY} of them have been used, so changing or canceling your plan always keeps the rest. ${ESSENTIAL_LARGE_WORDS} It takes none of your studio's monthly requests beyond this page's own. Only the plan subscription your store has now is listed: invoices of an earlier one are not shown here.`}`}
+            {`The invoices Marktmorgen has made for this store's plan, newest first, read from Stripe when this page opens. Each one opens on Stripe's own page, where you can see it, download it and, if it is not paid yet, pay it.${read.state === "none" ? "" : ` Each read takes one of ${ESSENTIAL_WORDS}, and only while fewer than ${PLAN_INVOICES_PER_DAY} of them have been used, so changing or canceling your plan always keeps the rest. Reading these invoices takes none of your studio's monthly requests beyond this page's own. ${ESSENTIAL_LARGE_WORDS} Only the plan subscription your store has now is listed: invoices of an earlier one are not shown here.`}`}
           </p>
           <PlanInvoicesList read={read} />
         </main>

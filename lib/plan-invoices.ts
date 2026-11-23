@@ -46,7 +46,7 @@ export const ESSENTIAL_WORDS = `the ${ESSENTIAL_PER_DAY} requests your store has
  * counted from the studio's monthly requests by their size while a plan runs, and from downloads of their own once it
  * has ended (ENDED_STORE_EXPORTS, ENDED_LIST_DOWNLOADS, ENDED_BOOK_EXPORTS).
  */
-export const ESSENTIAL_LARGE_WORDS = "A large download (your whole store, your list or your affiliate spreadsheet) also counts from your studio’s monthly requests by its size while your plan runs, and from downloads of its own once your plan has ended.";
+export const ESSENTIAL_LARGE_WORDS = "A large download (your whole store, your list or your affiliate spreadsheet) also counts from your studio's requests for this month (or this trial) by its size while your plan runs, and from downloads of its own once your plan has ended.";
 /** What a refusal says: the counter runs 24 hours from its first request, not from midnight. */
 export const PLAN_INVOICES_USED = `Your invoices are read only while fewer than ${PLAN_INVOICES_PER_DAY} of ${ESSENTIAL_WORDS} have been used, so the rest always stays for changing or canceling your plan. ${PLAN_INVOICES_PER_DAY} or more have been used, so they were not read. Nothing was changed. Try again tomorrow.`;
 

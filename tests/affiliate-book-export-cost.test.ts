@@ -15,12 +15,13 @@
 import { NextRequest } from "next/server";
 import { GET as exportRoute } from "@/app/api/store/affiliates/export/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { putMember } from "@/lib/team";
 import { bookSizes } from "@/lib/affiliates";
 import { BOOK_CSV_HEADER_BYTES, BOOK_RECORDS_MAX_BYTES, bookExportSettled, bookExportUnits, bookExportWork } from "@/lib/affiliate-book-export";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { BOOK_PAYPAL_REFUNDS, type BookSizes } from "@/lib/api-read-rules";
 import { ENDED_BOOK_EXPORTS } from "@/lib/plan-closing-rules";
-import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
+import { allowanceUsed, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { MAX_STORE_BYTES, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { TIERS } from "@/lib/plan";
@@ -46,7 +47,10 @@ const real = redis.pipeline.bind(redis);
 let counting = false;
 let commands = 0;
 let bytes = 0;
+/** While set, the book's records answer in a shape no reading accepts (a failed reading, #5256 audit). */
+let breakBook = false;
 redis.pipeline = (async (batch: Commands) => {
+  if (breakBook && batch.some((c) => String(c[0]).toUpperCase() === "HGETALL" && /^nl:aff:[^:]+:sales$/.test(String(c[1])))) throw new Error("synthetic: the book does not read");
   const replies = await real(batch);
   if (counting) {
     for (const c of batch) {
@@ -113,6 +117,7 @@ async function main(): Promise<void> {
   const sizes = (await bookSizes(store))!;
   const work = bookExportWork(sizes);
   const units = bookExportUnits(sizes);
+  const reading = bookExportSettled(sizes, 0);
   const before = await allowanceUsed(store, "studio");
   counting = true;
   commands = 0;
@@ -123,33 +128,56 @@ async function main(): Promise<void> {
   counting = false;
   is("the spreadsheet is sent", [response.status, (response.headers.get("content-type") ?? "").startsWith("text/csv"), csv.split("\n").length > 120], [200, true, true]);
   const kept = bookExportSettled(sizes, Buffer.byteLength(csv, "utf8"));
-  is(`it holds ${units} studio units before reading, and keeps ${kept} once the file (${Buffer.byteLength(csv, "utf8")} bytes) is made`, [(await allowanceUsed(store, "studio")) - before, kept <= units, kept > 1], [kept, true, true]);
+  is(`it holds ${reading} studio units for its reading first, and takes ${kept} in all once the file (${Buffer.byteLength(csv, "utf8")} bytes) is made, never more than its bound (${units})`, [(await allowanceUsed(store, "studio")) - before, reading <= kept, kept <= units, kept > 1], [kept, true, true, true]);
   is("what it keeps still covers its work with the file as sent", kept * UNIT_COST.studio >= bookExportCost({ ...work, sent: Buffer.byteLength(csv, "utf8") }), true);
   is(`what it sends to Redis (${commands}) is within the work counted (${work.commands}) and the take's own`, commands <= work.commands + 8, true);
   is(`what moves to and from Redis (${bytes}) is within the bytes counted (${work.bytes})`, bytes <= work.bytes, true);
   is(`the file (${csv.length} bytes) is within what it may send (${work.sent})`, csv.length <= work.sent && work.sent >= BOOK_CSV_HEADER_BYTES, true);
   is(`the Stripe pages it asks (${stripePages}) are within those counted (${work.stripePages})`, stripePages <= work.stripePages, true);
 
-  part("With the figure short, nothing of the book is read, and the answer says what it needs");
+  part("A reading that fails keeps only what its reading took: two clicks on a book that does not read never empty the month (#5256 audit 7bab 1, 3c4a)");
+  {
+    const failedBefore = await allowanceUsed(store, "studio");
+    breakBook = true;
+    const one = await get(session);
+    const two = await get(session);
+    breakBook = false;
+    is("both answered as failures, no file", [one.status, two.status], [500, 500]);
+    is(`each kept only its reading's units (${reading}), never the whole bound (${units})`, (await allowanceUsed(store, "studio")) - failedBefore, 2 * reading);
+  }
+
+  part("With the figure short of its reading, nothing of the book is read, and the answer says what it needs");
   const used = await allowanceUsed(store, "studio");
-  if (!(await takeAllowance(store, "studio", STORE_ALLOWANCES.creator.studio - used - 1)).ok) throw new Error("setup: the figure could not be filled");
+  if (!(await takeAllowance(store, "studio", STORE_ALLOWANCES.creator.studio - used - reading + 1)).ok) throw new Error("setup: the figure could not be filled");
   counting = true;
   commands = 0;
   const short = await get(session);
   counting = false;
   const words = await short.text();
-  is("refused, saying how many it needs and how many are left", [short.status, words.startsWith(`This download needs ${units.toLocaleString("en-US")} of your`), / left\./.test(words)], [429, true, true]);
+  is("refused, saying how many it needs and how many are left", [short.status, words.startsWith(`This download needs ${reading.toLocaleString("en-US")} of your`), / left\./.test(words)], [429, true, true]);
   is("no record of the book was read", commands < 20, true);
+  // With exactly its reading's units left it goes through, though less than the whole bound is left (7bab 7).
+  await giveAllowance(store, "studio", 1);
+  is("with exactly its reading's units left, it goes through", (await get(session)).status, 200);
 
-  part("Once the plan has ended: its own downloads, never the figure, then said");
-  const { store: ended, session: endedSession } = await shop("book-export-ended@example.com", "bookexportended");
+  part("Once the plan has ended: the owner's own downloads, never the figure; failures and a teammate spend none");
+  const ENDED_OWNER = "book-export-ended@example.com";
+  const { store: ended, session: endedSession } = await shop(ENDED_OWNER, "bookexportended");
   await seed(ended, 3, 1);
-  await setSubscription("book-export-ended@example.com", { customerId: "cus_bookexportended", subscriptionId: "sub_bookexportended", active: false, tier: "creator", period: paidPeriod() });
-  const endedStore = (await storeForEmail("book-export-ended@example.com"))!;
+  const admin = "book-export-admin@example.com";
+  if (!(await putMember(ended, admin, "admin"))) throw new Error("setup: admin");
+  await setSubscription(ENDED_OWNER, { customerId: "cus_bookexportended", subscriptionId: "sub_bookexportended", active: false, tier: "creator", period: paidPeriod() });
+  const endedStore = (await storeForEmail(ENDED_OWNER))!;
   const endedBefore = await allowanceUsed(endedStore, "studio");
+  const adminSession = await openSession(admin);
+  is("a teammate with export is refused, before anything is counted", (await get(adminSession)).status, 403);
+  breakBook = true;
+  const failures = [(await get(endedSession)).status, (await get(endedSession)).status];
+  breakBook = false;
+  is("two failed readings in a row", failures, [500, 500]);
   const answers: number[] = [];
   for (let i = 0; i <= ENDED_BOOK_EXPORTS; i += 1) answers.push((await get(endedSession)).status);
-  is(`${ENDED_BOOK_EXPORTS} downloads, then refused`, answers, [...Array.from({ length: ENDED_BOOK_EXPORTS }, () => 200), 429]);
+  is(`still ${ENDED_BOOK_EXPORTS} downloads for the owner after them, then refused`, answers, [...Array.from({ length: ENDED_BOOK_EXPORTS }, () => 200), 429]);
   is("nothing taken from the ended store's figure", (await allowanceUsed(endedStore, "studio")) - endedBefore, 0);
   is("the refusal says so", (await (await get(endedSession)).text()).includes("since your plan ended"), true);
 

@@ -387,7 +387,8 @@ export function AffiliateStudio({
             </form>
             <span className="text-sm text-ink-soft">{`Owed now, in all: ${money(owedTotal, currency)}`}</span>
           </div>
-          {pendingPayoutsChecked ? payPanel : <p className="notice notice-warn mt-5" role="alert">Pending payments could not be checked. New payment batches and batch files are unavailable until you reload and this check succeeds. Your saved records and full export remain available.</p>}
+          <p className="mt-2 text-sm text-ink-soft">The file is counted from your studio&apos;s requests by its size.</p>
+          {pendingPayoutsChecked ? payPanel : <p className="notice notice-warn mt-5" role="alert">Pending payments could not be checked. New payment batches and batch files are unavailable until you reload and this check succeeds. Your saved records and full export (counted from your studio's requests by its size) remain available.</p>}
           {pendingPayoutsChecked && !settled ? (
             <p className="notice notice-warn mt-5" role="status">
               {!refundsChecked

@@ -19,6 +19,8 @@ const en = {
   openDiscord: "Open Discord",
   keepNote: "The roles stay while what you bought is yours. When a membership ends or a purchase is refunded in full, they are taken back at the next check.",
   backToStore: (store: string) => `Back to ${store}`,
+  /** The expired order link's way to the store's orders page (Claude 2 Pfn2k's LEVE on #5369). */
+  newOrderLink: "Get a new order link",
   notices: {
     declined: { title: "Nothing was changed", body: "You said no on Discord's page. Press the button again whenever you want to join." },
     link: { title: "This order link has expired", body: "A link to your purchases works for 24 hours. Ask for a new one on the store's orders page, then use the Discord button there." },
@@ -46,6 +48,7 @@ const es: DiscordWords = {
   openDiscord: "Abrir Discord",
   keepNote: "Los roles se mantienen mientras lo que compraste sea tuyo. Si una membresía termina o se reembolsa una compra por completo, se retiran en la siguiente comprobación.",
   backToStore: (store) => `Volver a ${store}`,
+  newOrderLink: "Pedir un nuevo enlace de pedido",
   notices: {
     declined: { title: "No se cambió nada", body: "Dijiste que no en la página de Discord. Pulsa el botón de nuevo cuando quieras unirte." },
     link: { title: "Este enlace de pedido ha caducado", body: "Un enlace a tus compras funciona durante 24 horas. Pide uno nuevo en la página de pedidos de la tienda y usa allí el botón de Discord." },
@@ -66,6 +69,7 @@ const fr: DiscordWords = {
   openDiscord: "Ouvrir Discord",
   keepNote: "Les rôles restent tant que votre achat vous appartient. Quand un abonnement prend fin ou qu'un achat est remboursé en totalité, ils sont retirés lors de la prochaine vérification.",
   backToStore: (store) => `Retour à ${store}`,
+  newOrderLink: "Demander un nouveau lien de commande",
   notices: {
     declined: { title: "Rien n'a été modifié", body: "Vous avez refusé sur la page de Discord. Appuyez de nouveau sur le bouton quand vous voulez rejoindre le serveur." },
     link: { title: "Ce lien de commande a expiré", body: "Un lien vers vos achats fonctionne pendant 24 heures. Demandez-en un nouveau sur la page des commandes de la boutique, puis utilisez le bouton Discord qui s'y trouve." },
@@ -86,6 +90,7 @@ const de: DiscordWords = {
   openDiscord: "Discord öffnen",
   keepNote: "Die Rollen bleiben, solange Ihnen gehört, was Sie gekauft haben. Endet eine Mitgliedschaft oder wird ein Kauf vollständig erstattet, werden sie bei der nächsten Prüfung entzogen.",
   backToStore: (store) => `Zurück zu ${store}`,
+  newOrderLink: "Neuen Bestelllink anfordern",
   notices: {
     declined: { title: "Nichts wurde geändert", body: "Sie haben auf der Seite von Discord abgelehnt. Tippen Sie erneut auf die Schaltfläche, wann immer Sie beitreten möchten." },
     link: { title: "Dieser Bestelllink ist abgelaufen", body: "Ein Link zu Ihren Käufen funktioniert 24 Stunden lang. Fordern Sie auf der Bestellseite des Shops einen neuen an und nutzen Sie dort die Discord-Schaltfläche." },
@@ -106,6 +111,7 @@ const it: DiscordWords = {
   openDiscord: "Apri Discord",
   keepNote: "I ruoli restano finché ciò che hai acquistato è tuo. Quando un abbonamento finisce o un acquisto viene rimborsato per intero, vengono tolti al controllo successivo.",
   backToStore: (store) => `Torna a ${store}`,
+  newOrderLink: "Chiedi un nuovo link dell'ordine",
   notices: {
     declined: { title: "Non è cambiato nulla", body: "Hai rifiutato sulla pagina di Discord. Premi di nuovo il pulsante quando vuoi entrare." },
     link: { title: "Questo link dell'ordine è scaduto", body: "Un link ai tuoi acquisti funziona per 24 ore. Chiedine uno nuovo nella pagina degli ordini del negozio e usa lì il pulsante Discord." },
@@ -126,6 +132,7 @@ const nl: DiscordWords = {
   openDiscord: "Discord openen",
   keepNote: "De rollen blijven zolang wat je kocht van jou is. Eindigt een lidmaatschap of wordt een aankoop volledig terugbetaald, dan worden ze bij de volgende controle weggehaald.",
   backToStore: (store) => `Terug naar ${store}`,
+  newOrderLink: "Een nieuwe bestellink aanvragen",
   notices: {
     declined: { title: "Er is niets veranderd", body: "Je zei nee op de pagina van Discord. Druk opnieuw op de knop wanneer je lid wilt worden." },
     link: { title: "Deze bestellink is verlopen", body: "Een link naar je aankopen werkt 24 uur. Vraag een nieuwe aan op de bestelpagina van de winkel en gebruik daar de Discord-knop." },
@@ -147,6 +154,7 @@ const pt: DiscordWords = {
   openDiscord: "Abrir o Discord",
   keepNote: "Os cargos mantêm-se enquanto o que comprou for seu. Quando uma assinatura termina ou uma compra é reembolsada na totalidade, são retirados na verificação seguinte.",
   backToStore: (store) => `Voltar a ${store}`,
+  newOrderLink: "Pedir uma nova ligação para a encomenda",
   notices: {
     declined: { title: "Nada foi alterado", body: "Recusou na página do Discord. Carregue de novo no botão quando quiser entrar." },
     link: { title: "Esta ligação para a encomenda expirou", body: "Uma ligação para as suas compras funciona durante 24 horas. Peça uma nova na página de encomendas da loja e use aí o botão do Discord." },

@@ -131,6 +131,16 @@ async function quietPass(): Promise<void> {
   await pipeline([["DEL", at]]);
   is("the next day's walk reads it again", await run(), { status: 200, looked: [0, 1, 2], place: "3", failed: 0 });
   inject = null;
+
+  // Issue #4005 (Codex U): a store first visited later in the day can sort anywhere in the day's list, before the
+  // stores already walked too; it is still looked at that day, and the stores already looked at are not read again.
+  part("Quiet pass: a store visited for the first time later in the day is looked at that day");
+  const folders = `nl:traffic:folders:${month}`;
+  await pipeline([["DEL", at, `nl:quiet:done:${new Date().toISOString().slice(0, 10)}`, folders], ["SADD", folders, stores[1].folder, stores[2].folder]]);
+  is("the first run of the day looks at the two stores there", (await run()).looked, [1, 2]);
+  await pipeline([["SADD", folders, stores[0].folder]]);
+  is("a store added before them is looked at by the next run, and only it", (await run()).looked, [0]);
+  is("a later run that day reads no store again", (await run()).looked, []);
 }
 
 async function pictures(): Promise<void> {

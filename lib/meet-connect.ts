@@ -159,6 +159,25 @@ async function grantStillUsed(provider: MeetProvider, accountId: string, self: s
 }
 
 /**
+ * One connection leaving its account's index and counting who is left, in one step (Claude 3 xy6b's LOW on #5476): two
+ * disconnects of one account run under two locks, so a count read before leaving let each see the other and keep the
+ * grant, and nobody gave it back. KEYS[1] the account's index, ARGV[1] the member.
+ */
+export const LEAVE_ACCOUNT = `-- marktmorgen:meet-leave-account:v1
+redis.call("SREM", KEYS[1], ARGV[1])
+return redis.call("SCARD", KEYS[1])`;
+
+/** How many connections are left on the account once this one has left its index; null when the answer does not read. */
+async function leaveAccount(provider: MeetProvider, accountId: string, member: string): Promise<number | null> {
+  try {
+    const read = repliesFor(await redisPipeline([["EVAL", LEAVE_ACCOUNT, 1, userKey(provider, accountId), member]]), 1);
+    return read ? countOf(read[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Gives a connection's grant back only when nothing else here uses its account (grantStillUsed). `removed` is true only
  * when the provider confirmed it; `shared` when the grant was kept for another connection; neither when the index
  * could not be read (kept) or the provider did not confirm.
@@ -656,8 +675,10 @@ export async function disconnectFor(statsId: string, provider: MeetProvider, hos
       const left = salvage(read[0], statsId, provider, host);
       // A grant another store or team host still uses is kept at the provider (issue #4011); an index that cannot be
       // read keeps the text and throws, so a retry decides once it reads.
-      const shared = left.token && left.accountId ? await grantStillUsed(provider, left.accountId, memberOf(statsId, host)) : false;
-      if (shared === null) throw new UnknownReplyError("the stores still connected to a damaged meeting connection's account");
+      // Left in the same step as the count, so of two disconnects at once exactly one sees nobody left (#5476 LOW).
+      const others = left.accountId ? await leaveAccount(provider, left.accountId, memberOf(statsId, host)) : 0;
+      if (others === null) throw new UnknownReplyError("the stores still connected to a damaged meeting connection's account");
+      const shared = Boolean(left.token) && others > 0;
       if (left.token && !shared) {
         // Not forgotten until the provider confirmed the access is back: a
         // failed or unconfirmed revoke throws (ProviderError included) and
@@ -682,10 +703,16 @@ export async function disconnectFor(statsId: string, provider: MeetProvider, hos
     // leave a connection the creator asked to end. One the provider did not
     // confirm is said in the answer, never taken as given back.
     // A grant another store or team host still uses is kept at the provider (issue #4011), and said so.
-    const back = await giveBackUnlessShared(statsId, c, host).catch((error) => {
-      console.error("giving a meeting connection back failed", error);
-      return { removed: false, shared: false };
-    });
+    // The connection leaves its account's index first, in the same step as counting who is left (Claude 3 xy6b's LOW on
+    // #5476): of two disconnects of one account at once, exactly one sees nobody left and gives the grant back. A count
+    // that does not read keeps the grant, never revoked on an unread answer.
+    const others = await leaveAccount(provider, c.account.id, memberOf(statsId, host));
+    const back = others === 0
+      ? { removed: await giveBack(statsId, c, host).catch((error) => {
+          console.error("giving a meeting connection back failed", error);
+          return false;
+        }), shared: false }
+      : { removed: false, shared: others !== null };
     const removed = back.removed;
     const kept = back.shared ? { sharedGrantKept: true } : {};
     if (!removed && !back.shared) console.error("a meeting connection was disconnected here without the provider confirming its access was given back", provider, host ? "host" : "store");

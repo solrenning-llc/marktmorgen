@@ -117,10 +117,12 @@ async function main() {
   }
 
   part("An index that cannot be read keeps the grant");
-  await seed("google", [A, B]);
+  // The store alone on its account, so an index read as empty would give the grant back: a read that does not answer,
+  // whether the index's members or the count left after leaving it (LEAVE_ACCOUNT), never does.
+  await seed("google", [A]);
   const real = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "SMEMBERS")) return [{ unexpected: true }];
+    if (commands.some((c) => c[0] === "SMEMBERS" || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:meet-leave-account:")))) return [{ unexpected: true }];
     return real(commands);
   }) as typeof redis.pipeline;
   const unread = await disconnectFor(A, "google").catch((error: unknown) => error);

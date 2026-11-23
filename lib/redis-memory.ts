@@ -4238,6 +4238,12 @@ export class MemoryRedis {
           return 1;
         }
         if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
+        // lib/meet-connect.ts LEAVE_ACCOUNT: a connection leaves its account's index and counts who is left, in one step.
+        if (key.startsWith("-- marktmorgen:meet-leave-account:v1\n") && args[0] === "1" && args.length === 3) {
+          this.scriptCalls += 2;
+          this.run(["SREM", args[1], args[2]]);
+          return this.run(["SCARD", args[1]]);
+        }
         // The take scripts and their kin, mirrored from the tests' stand-in (lib/redis-memory-take.ts), by the name on the
         // script's first line, so `next dev` and the demo store run them too (#4969's Mobile render). Last, before the
         // refusal: a script the chain above already runs is never taken here.

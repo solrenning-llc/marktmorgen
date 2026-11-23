@@ -9,7 +9,7 @@
  * keeps losing grants nothing. Checked with both reads held until each has read: the grants never pass the portion,
  * and a give-back racing a take keeps the take. Synthetic store id; the in-memory Redis.
  */
-import { rampBack, rampRoom, startRamp } from "@/lib/mail-health";
+import { RAMP_TRIES, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
 import { RAMP_FIRST, RAMP_TRIGGER } from "@/lib/mail-health-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -25,7 +25,15 @@ let gather = 0;
 let reads = 0;
 let wake: () => void = () => {};
 let allRead = Promise.resolve();
+/** While set, every swap of the ramp answers 0 (the record changed since it was read), and each round is counted. */
+let losing = false;
+let rounds = { gets: 0, swaps: 0 };
 redis.pipeline = (async (commands: (string | number)[][]) => {
+  if (losing && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === KEY) rounds.gets += 1;
+  if (losing && commands.length === 1 && commands[0][0] === "EVAL" && commands[0][3] === KEY) {
+    rounds.swaps += 1;
+    return [0];
+  }
   const answer = await real(commands);
   if (gather && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === KEY) {
     reads += 1;
@@ -62,6 +70,21 @@ async function main(): Promise<void> {
   gather = 0;
   is("the take is granted", taken, 40);
   is("what is left is the portion less what is still out: 100 - 40, never the whole portion again", left(), RAMP_FIRST - 40);
+
+  part("A swap that keeps losing (Claude 3 xvBY8's LEVE on #5463): nothing granted or given back, and never past RAMP_TRIES rounds");
+  redis.clear();
+  await startRamp(ID, RAMP_TRIGGER);
+  const record = redis.run(["GET", KEY]);
+  losing = true;
+  rounds = { gets: 0, swaps: 0 };
+  is("a take whose every swap answers 0 is granted nothing", await rampRoom(ID, 40), 0);
+  is(`in exactly RAMP_TRIES (${RAMP_TRIES}) rounds of a read and a swap, the bound the cost line prices`, rounds, { gets: RAMP_TRIES, swaps: RAMP_TRIES });
+  is("and the record is as it was", redis.run(["GET", KEY]), record);
+  rounds = { gets: 0, swaps: 0 };
+  await rampBack(ID, 40);
+  is(`a give-back whose every swap answers 0 stops after RAMP_TRIES (${RAMP_TRIES}) rounds`, rounds, { gets: RAMP_TRIES, swaps: RAMP_TRIES });
+  losing = false;
+  is("and leaves what is left as it was (the capacity stays taken, the safe way)", left(), RAMP_FIRST);
 
   part("Control: one sender alone, as before");
   redis.clear();

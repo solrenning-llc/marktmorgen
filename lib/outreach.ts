@@ -152,10 +152,14 @@ export async function readSite(raw: string, reader: PageReader = readPage): Prom
   } catch {
     return { ok: false, reason: "address" };
   }
+  // robots.txt first (#4482): a site that closes its front page to this reader is never read, not read and then let go.
+  const first = await siteRules(start.origin, reader);
+  if (!robotsAllows(first, "/")) return { ok: false, reason: "unreadable" };
   const front = await reader(`${start.origin}/`);
   if (!front) return { ok: false, reason: "unreadable" };
   const home = new URL(front.url);
-  const disallows = await siteRules(home.origin, reader);
+  // A front page that moved to another origin is asked about by that origin's own robots.txt, as before.
+  const disallows = home.origin === start.origin ? first : await siteRules(home.origin, reader);
   if (!robotsAllows(disallows, home.pathname || "/")) return { ok: false, reason: "unreadable" };
 
   // The few pages its own menu points to, asked for together: each once, and none that robots.txt closes.

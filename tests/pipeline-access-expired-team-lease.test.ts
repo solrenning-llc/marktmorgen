@@ -16,6 +16,8 @@ import { done, is, part } from "./check";
 
 const OWNER = "pacc-lease@example.com";
 const SAM = "sam@example.com";
+/** A teammate already restricted, so the access slot holds a record before the request (Claude 5 ichw on #5111). */
+const MIA = "mia@example.com";
 const realFetch = globalThis.fetch;
 globalThis.fetch = async () => { throw new Error("No network in the pipeline-access lease fixture"); };
 
@@ -34,13 +36,14 @@ async function setup() {
     active: true, tier: "pro", period: paidPeriod() });
   const store = (await storeForEmail(OWNER))!;
   await putMember(store, SAM, "support");
+  await putMember(store, MIA, "support");
   const session = await openSession(OWNER);
-  const post = async () => {
+  const post = async (email = SAM) => {
     const response = await POST(new NextRequest("https://marktmorgen.com/api/store/pipeline-access", {
       method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` },
-      body: JSON.stringify({ email: SAM, pipeline: "sales0", access: "view" }),
+      body: JSON.stringify({ email, pipeline: "sales0", access: "view" }),
     }));
-    return { status: response.status, body: await response.json() as { ok?: boolean; error?: string } };
+    return { status: response.status, body: await response.json() as { ok?: boolean; error?: string; message?: string } };
   };
   return { store, post, key: `nl:crm:pacc:${store.statsId}`, lock: `nl:team:lock:${store.sid}` };
 }
@@ -130,9 +133,14 @@ async function main(): Promise<void> {
       }
       return count(commands);
     }) as typeof redis.pipeline;
-    // The access slot of the store's data room (lib/pipeline-access.ts ACCESS_SLOT) before the request.
+    // Another teammate restricted first, so the slot holds a record and over-giving shows (Claude 5 ichw on #5111).
+    is("another teammate is restricted first", (await post(MIA)).body.ok, true);
+    // The access slot of the store's data room (lib/pipeline-access.ts ACCESS_SLOT) and its total "#" before the request.
     const slot = async () => Number((await real([["HGET", dataKey(store)!, "crm:pacc"]]))[0] ?? 0);
+    const total = async () => Number((await real([["HGET", dataKey(store)!, "#"]]))[0] ?? 0);
     const slotBefore = await slot();
+    const totalBefore = await total();
+    is("the slot holds the other teammate's record before the request", slotBefore > 0, true);
     let answer: Awaited<ReturnType<typeof post>>;
     measuring = true;
     measured = 0;
@@ -145,8 +153,11 @@ async function main(): Promise<void> {
     is("the stale request never reports success", [answer.status, answer.body.ok, answer.body.error], [503, false, "unavailable"]);
     is("an earlier release never deletes a successor's team lease", (await real([["GET", lock]]))[0],
       replacement ? "successor-team-lease" : null);
-    // Claude 3's LEVE on #5111: the lease lost means nothing was written, for certain, so the room the write took back.
-    is("the data room taken for the field that was never written is given back", await slot(), slotBefore);
+    // Claude 3's LEVE on #5111: the lease lost means nothing was written, for certain, so the room the write took goes
+    // back, exactly: neither kept nor given back twice (Claude 5 ichw on #5111).
+    is("the data room taken for the field that was never written is given back, exactly", [await slot(), await total()], [slotBefore, totalBefore]);
+    is("the creator is told it was not saved, never that it could not be confirmed",
+      [/was not saved/.test(answer.body.message ?? ""), /could not confirm/.test(answer.body.message ?? "")], [true, false]);
     // Claude 5 iYzLs's LEVE on #5111: the give-back is priced. Over the plain write (the healthy path less its fence),
     // the refused path's billed commands are within what the line funds a studio unit, and the give-back's EVAL bytes
     // within its funded bytes.

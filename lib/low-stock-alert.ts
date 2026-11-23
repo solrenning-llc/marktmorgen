@@ -255,7 +255,7 @@ async function checkOne(entry: string, now: number, deps: LowStockDeps): Promise
   if (!store.statsId || store.suspended) return "later";
   const product = await deps.readProduct(store, productId);
   if (!product) {
-    // Still listed but unreadable: it waits. Gone exactly: its number goes too.
+    // Still listed but unreadable: it waits. Gone exactly: its number goes too, and its room comes back (setLowStock).
     if (store.catalog.items.some((item) => item.id === productId)) return "later";
     return (await setLowStock(store, productId, 0, null, now)) === "off" ? "done" : "later";
   }

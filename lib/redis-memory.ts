@@ -3561,6 +3561,15 @@ export class MemoryRedis {
           if (place === "1") this.run(["DECR", dayCount]);
           return 1;
         }
+        // lib/low-stock.ts LOW_STOCK_OFF: a low-stock number deleted and its slot given back to the store's room in one
+        // step, also when there was no number (Codex X6 on #3650); the room's part is TAKE_DATA's give-back.
+        if (key.startsWith("-- marktmorgen:low-stock-off:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, room, record, month, slot, field] = args;
+          this.scriptCalls += 1;
+          const removed = Number(this.run(["HDEL", record, field]));
+          const given = this.storeData([room, "0", "2", month, "s", slot, "0"]);
+          return [removed, Array.isArray(given) ? given[0] : -1];
+        }
         // lib/low-stock-alert.ts LOW_STOCK_RESCHEDULE: a product's next check, set only while its score is still the one
         // the job read (Codex X6's LOW on #3814).
         if (key.startsWith("-- marktmorgen:low-stock-reschedule:v1\n") && args[0] === "1" && args.length === 5) {
@@ -3570,6 +3579,16 @@ export class MemoryRedis {
           if (score === null || Number(score) !== Number(readAt)) return 0;
           this.run(["ZADD", set, "XX", next, entry]);
           return 1;
+        }
+        // lib/low-stock.ts LOW_STOCK_SAVE: a low-stock number's slot taken in the store's room (TAKE_DATA, refused past
+        // the room) and the number written, in one step: never one without the other (Codex X6 on #3650).
+        if (key.startsWith("-- marktmorgen:low-stock-save:v1\n") && args[0] === "2" && args.length === 9) {
+          const [, room, record, limit, month, slot, bytes, field, value] = args;
+          this.scriptCalls += 1;
+          const taken = this.storeData([room, limit, "0", month, "s", slot, bytes]);
+          if (!Array.isArray(taken) || taken[0] !== 1) return taken;
+          this.run(["HSET", record, field, value]);
+          return taken;
         }
         if (key.startsWith("-- marktmorgen:form-keep:v1\n") && args[0] === "1" && args.length === 4) {
           const listKey = args[1];

@@ -13,7 +13,8 @@ import { setProductExtras } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { stockLeft } from "@/lib/stock";
-import { LOW_STOCK_DUE, lowStockOf, lowStockTouched, setLowStock } from "@/lib/low-stock";
+import { LOW_STOCK_BYTES, LOW_STOCK_DUE, lowStockOf, lowStockTouched, setLowStock } from "@/lib/low-stock";
+import { dataKey, noteData } from "@/lib/store-data";
 import { readFileSync } from "node:fs";
 import { LOW_STOCK_RUN_PRODUCTS, LOW_STOCK_WAIT_MS, type LowStockDeps, runLowStockChecks } from "@/lib/low-stock-alert";
 import { store as redis } from "./redis-stub";
@@ -82,10 +83,15 @@ async function main(): Promise<void> {
   part("A product gone leaves the set, and its number goes with it");
   for (let i = 0; i < LOW_STOCK_RUN_PRODUCTS + 3; i += 1) redis.run(["ZREM", LOW_STOCK_DUE, `${store.sid}|extra${String(i).padStart(4, "0")}`]);
   redis.run(["HSET", `nl:ls:${sid}`, "gone000001", JSON.stringify({ low: 3, seen: 5 })]);
+  // Its room, held as a save holds it (Codex X6 on #3650: a product's deletion left its slot counted until the store closed).
+  await noteData(store, [{ slot: "ls:gone000001", bytes: LOW_STOCK_BYTES + 10, set: true }]);
+  const room = dataKey(store)!;
+  is("its room held", Number(redis.run(["HGET", room, "ls:gone000001"]) ?? 0) > 0, true);
   redis.run(["ZADD", LOW_STOCK_DUE, 0, `${store.sid}|gone000001`]);
   await runLowStockChecks(Date.now() + 30_000, real);
   is("off the set", redis.run(["ZSCORE", LOW_STOCK_DUE, `${store.sid}|gone000001`]), null);
   is("its number gone", redis.run(["HEXISTS", `nl:ls:${sid}`, "gone000001"]), 0);
+  is("and its room given back", redis.run(["HGET", room, "ls:gone000001"]), null);
 
   part("A sale makes its product due at once; a product with no number is never added (Revisor 1 on #3814)");
   redis.run(["ZADD", LOW_STOCK_DUE, Date.now() + LOW_STOCK_WAIT_MS, member]);

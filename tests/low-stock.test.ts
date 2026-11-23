@@ -11,7 +11,7 @@ import { addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/sto
 import { LOW_STOCK_BYTES, lowStockOf, noteUnitsLeft, setLowStock } from "@/lib/low-stock";
 import { MAX_LOW_STOCK } from "@/lib/stock-alert-rules";
 import { CLOSING, COUNTED_FAMILIES, closingFamilyOf } from "@/lib/data-families";
-import { dataUsed, noteData } from "@/lib/store-data";
+import { dataKey, dataUsed, noteData } from "@/lib/store-data";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { FAMILIES } from "./store-data-registry";
 import { store as redis } from "./redis-stub";
@@ -117,23 +117,52 @@ async function main(): Promise<void> {
   redis.pipeline = pipeline;
   is("the other write kept", await lowStockOf(store, pid), { low: 5, seen: 7 });
 
-  part("Off keeps the room counted, so a save racing it never leaves a record uncounted (Codex G on #3650)");
-  const before = (await dataUsed(store))?.used ?? 0;
+  part("Off gives the room back in the same step as the number (Codex G and Codex X6 on #3650)");
+  const slotKey = dataKey(store)!;
+  const slotOf = (id: string) => redis.run(["HGET", slotKey, `ls:${id}`]);
+  const totalOf = () => Number(redis.run(["HGET", slotKey, "#"]) ?? 0);
+  // The number and its room stand or fall together: a number with no room would be uncounted, a room with no number stranded.
+  const together = (id: string) => (redis.run(["HEXISTS", key, id]) === 1) === Number(slotOf(id) ?? 0) >= LOW_STOCK_BYTES;
+  const held = Number(slotOf(pid) ?? 0);
+  is("its room held while the number is set", held >= LOW_STOCK_BYTES, true);
+  const before = totalOf();
   is("off", await setLowStock(store, pid, 0, 7), "off");
   is("gone", redis.run(["HEXISTS", key, pid]), 0);
-  is("its room still counted: over, never under", ((await dataUsed(store))?.used ?? 0) >= before, true);
+  is("its slot given back", slotOf(pid), null);
+  is("the room's total down by exactly what it held and the slot's own field", totalOf(), before - held - 64);
   is("off again is still off", await setLowStock(store, pid, "", 7), "off");
-  // A save whose room is taken, then an off that runs before the save's HSET: the record the save writes must stay counted.
+  is("and gives nothing more back", totalOf(), before - held - 64);
+
+  part("A slot left with no number (a save whose write never came) is given back by the next off");
+  const lone = await addProduct("owner@example.com", "Cup", "", "30", null);
+  if (!lone.ok) throw new Error("no product");
+  const loneId = lone.product.id;
+  await noteData(store, [{ slot: `ls:${loneId}`, bytes: LOW_STOCK_BYTES + 10, set: true }]);
+  is("a slot held with no number", [redis.run(["HEXISTS", key, loneId]), Number(slotOf(loneId) ?? 0) > 0], [0, true]);
+  is("off finds no number", await setLowStock(store, loneId, 0, null), "off");
+  is("and still gives the slot back", slotOf(loneId), null);
+
+  part("A save is its room and its number in one step: one never stands without the other");
+  const writes = (id: string) => (c: (string | number)[]) =>
+    (c[0] === "HSET" && c[1] === key && c[2] === id) || (c[0] === "EVAL" && String(c[1]).includes("low-stock-save") && c.includes(id));
+  const offs = (id: string) => (c: (string | number)[]) =>
+    (c[0] === "HDEL" && c[1] === key && c[2] === id) || (c[0] === "EVAL" && String(c[1]).includes("low-stock-off") && c.includes(id));
+  const pipeline2 = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => (commands.some(writes(loneId)) ? [["ERR"]] : pipeline2(commands));
+  is("a save whose write is not confirmed", await setLowStock(store, loneId, 5, 9), "unknown");
+  redis.pipeline = pipeline2;
+  is("leaves no number", redis.run(["HEXISTS", key, loneId]), 0);
+  is("and no room held for it", slotOf(loneId), null);
+
+  part("A save racing an off: the number and its room stand or fall together, whichever goes first");
   const racing = await addProduct("owner@example.com", "Jug", "", "30", null);
   if (!racing.ok) throw new Error("no product");
   const rid = racing.product.id;
-  const slotKey = (await import("@/lib/store-data")).dataKey(store)!;
-  const roomOf = () => Number(redis.run(["HGET", slotKey, `ls:${rid}`]) ?? 0);
   is("set first", await setLowStock(store, rid, 5, 9), "saved");
+  // An off that runs while the save is on its way to its write (Codex G's MEDIUM on #3650).
   let offDuring = false;
-  const pipeline2 = redis.pipeline.bind(redis);
   redis.pipeline = async (commands) => {
-    if (!offDuring && commands.some((c) => c[0] === "HSET" && c[1] === key && c[2] === rid)) {
+    if (!offDuring && commands.some(writes(rid))) {
       offDuring = true;
       redis.pipeline = pipeline2;
       await setLowStock(store, rid, 0, 9);
@@ -142,22 +171,39 @@ async function main(): Promise<void> {
   };
   is("the racing save", await setLowStock(store, rid, 6, 9), "saved");
   redis.pipeline = pipeline2;
-  is("the record it wrote is there", typeof redis.run(["HGET", key, rid]), "string");
-  is("and its room is counted", roomOf() >= LOW_STOCK_BYTES, true);
-  // A save whose HSET is not confirmed: the room stays taken, and a later off does not under-count either.
-  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "HSET" && c[1] === key) ? [["ERR"]] : pipeline2(commands));
-  is("an unconfirmed save", await setLowStock(store, rid, 7, 9), "unknown");
+  is("an off ran during it", offDuring, true);
+  is("the number it wrote is there", typeof redis.run(["HGET", key, rid]), "string");
+  is("and its room is held", together(rid), true);
+  // A save that runs while the off is on its way to its delete (Codex G's reverse order, and Codex X6's stranded slot).
+  let saveDuring = false;
+  redis.pipeline = async (commands) => {
+    if (!saveDuring && commands.some(offs(rid))) {
+      saveDuring = true;
+      redis.pipeline = pipeline2;
+      await setLowStock(store, rid, 7, 9);
+    }
+    return pipeline2(commands);
+  };
+  is("the racing off", await setLowStock(store, rid, 0, 9), "off");
   redis.pipeline = pipeline2;
-  is("its room still counted", roomOf() >= LOW_STOCK_BYTES, true);
+  is("a save ran during it", saveDuring, true);
+  is("no number left", redis.run(["HEXISTS", key, rid]), 0);
+  is("and no room left held for it", together(rid), true);
+  is("set again", await setLowStock(store, rid, 5, 9), "saved");
+  is("with its room", together(rid), true);
 
-  part("A full data room writes nothing for a product whose room is not taken yet");
+  part("A full data room writes nothing for a product whose room is not held");
   const fresh = await addProduct("owner@example.com", "Vase", "", "30", null);
   if (!fresh.ok) throw new Error("no product");
   await noteData(store, [{ slot: "filler", bytes: 10 ** 12, set: true }]);
   is("refused", await setLowStock(store, fresh.product.id, 5, 9), "full");
   is("nothing written", redis.run(["HEXISTS", key, fresh.product.id]), 0);
-  // A product whose room is still counted from before (turned off, kept counted) takes nothing more to save again.
-  is("saved again within the room it already holds", await setLowStock(store, pid, 5, 9), "saved");
+  is("and no room taken", slotOf(fresh.product.id), null);
+  // A product whose number is set holds its room, so changing the number takes nothing more.
+  is("a set number changed within the room it holds", await setLowStock(store, rid, 4, 9), "saved");
+  // One turned off gave its room back, so it waits for room like any other.
+  is("a number turned off and set again in a full room", await setLowStock(store, pid, 5, 9), "full");
+  is("writes nothing", redis.run(["HEXISTS", key, pid]), 0);
 
   part("Its family is counted, said on closing and bounded");
   is("counted in the room", COUNTED_FAMILIES.includes("nl:ls:"), true);

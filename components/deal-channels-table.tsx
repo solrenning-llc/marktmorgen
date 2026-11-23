@@ -3,6 +3,7 @@ import { StudioEmptyState } from "@/components/empty-state";
 import { type DealChannels, dealTotals, dealsByChannel } from "@/lib/deal-channels";
 import { formatMoney } from "@/lib/money";
 import { buyerLedger } from "@/lib/segments";
+import { countLedger } from "@/lib/person-agenda-read";
 import type { Store } from "@/lib/store";
 
 /**
@@ -13,9 +14,12 @@ import type { Store } from "@/lib/store";
  * and nothing else changes.
  */
 export async function DealChannelsLoader({ store, deals, stages }: { store: Store; deals: readonly Deal[]; stages: readonly Stage[] }) {
-  const ledger = await buyerLedger(store).catch(() => null);
+  // Counted as studio requests before anything big is read, as every other reader of the ledger does (board #5285,
+  // row #2270): with too few left, Stripe is not read and the table says how many this needs.
+  const counting = countLedger(store);
+  const ledger = await buyerLedger(store, counting.count).catch(() => null);
   const result = ledger ? dealsByChannel(deals, stages, (email) => ledger.buyers.get(email)?.channel ?? null, ledger.partial) : null;
-  return <DealChannelsTable result={result} currency={store.currency} />;
+  return <DealChannelsTable result={result} currency={store.currency} note={ledger ? undefined : counting.said.message || undefined} />;
 }
 
 /** What the page shows while the ledger is read. */
@@ -39,7 +43,7 @@ export function DealChannelsWaiting() {
  * reader says each figure with its channel and its kind; the words say what
  * the numbers are and are not.
  */
-export function DealChannelsTable({ result, currency }: { result: DealChannels | null; currency: string }) {
+export function DealChannelsTable({ result, currency, note }: { result: DealChannels | null; currency: string; note?: string }) {
   return (
     <section aria-labelledby="deal-channels-title" className="mt-10">
       <h2 id="deal-channels-title" className="t-h3">
@@ -50,7 +54,9 @@ export function DealChannelsTable({ result, currency }: { result: DealChannels |
       </p>
       {result === null ? (
         <p className="mt-4 text-ink-soft" role="status">
-          Your sales could not be read just now, so this table is not shown. Your deals are all still here; open this page again in a few minutes.
+          {note
+            ? `${note} This table is not shown; your deals are all still here.`
+            : "Your sales could not be read just now, so this table is not shown. Your deals are all still here; open this page again in a few minutes."}
         </p>
       ) : result.rows.length === 0 ? (
         <StudioEmptyState title="No deals yet" body="Once you add some, this shows which channels bring the people your deals are with." className="mt-4" />

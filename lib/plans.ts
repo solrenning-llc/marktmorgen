@@ -87,6 +87,12 @@ export const LATE_REFUND_WATCH_DAYS = 30;
 /** Days between the reads of a plan watched for a late refund failed later. */
 export const LATE_REFUND_RECHECK_DAYS = 7;
 const DAY = 86_400;
+/**
+ * "The next day" for a plan read again by the next daily run: an hour short of a day from this run's start, as a
+ * daily cron starts some minutes either side of 24 hours later and a run reads only what is due when it starts. Due
+ * at exactly a day, a run a few minutes early skipped the plan to the day after (#3367, LOW 3 of 6938631896).
+ */
+const NEXT_RUN = DAY - 3_600;
 
 /**
  * Whether Stripe refused a call because of the creator's own account: our access to it revoked, or the account
@@ -352,7 +358,7 @@ export async function settlePlans(
     if (state === "untold") {
       // Every late payment given back, a buyer still to be told: tried again the next day, nothing owed any more.
       counts.untold += 1;
-      await moveTo(member, now + DAY, memberOf({ ...entry, since: now + DAY, owed: 0 }));
+      await moveTo(member, now + NEXT_RUN, memberOf({ ...entry, since: now + NEXT_RUN, owed: 0 }));
       continue;
     }
     if (state === "owed") {
@@ -360,23 +366,23 @@ export async function settlePlans(
       // left than one try gives back): its account answered, so no day of refusals counts; tried again the next day.
       counts.owed += 1;
       const owed = entry.owed || now;
-      const next = memberOf({ ...entry, since: now + DAY, owed });
+      const next = memberOf({ ...entry, since: now + NEXT_RUN, owed });
       // Owed for PLAN_OWED_TELL_DAYS for a reason only the creator can end (their balance, Stripe refusing the
       // refund): the creator is told once, the mark written before the email and given back when it was not sent.
       // Invoices the creator alone can put right (`short`), or none named when they could not be listed whole.
       const short = outcome?.short ?? [];
       if (entry.owedTold || (!short.length && !outcome?.unlisted) || now - owed < PLAN_OWED_TELL_DAYS * DAY) {
-        await moveTo(member, now + DAY, next);
+        await moveTo(member, now + NEXT_RUN, next);
         continue;
       }
-      const marked = memberOf({ ...entry, since: now + DAY, owed, owedTold: true });
-      if (!(await moveTo(member, now + DAY, marked))) continue;
+      const marked = memberOf({ ...entry, since: now + NEXT_RUN, owed, owedTold: true });
+      if (!(await moveTo(member, now + NEXT_RUN, marked))) continue;
       const said = await withCutoff(deadline, () => tellPlanOwed({ sid: entry.sid, product: entry.product, account, session, days: PLAN_OWED_TELL_DAYS, invoices: short })).catch((error: unknown) => {
         console.error("telling a creator about a plan's payment owed back failed", error);
         return "unsent" as const;
       });
       if (said === "unsent") {
-        await moveTo(marked, now + DAY, next);
+        await moveTo(marked, now + NEXT_RUN, next);
         console.error(`a plan's payment after its end has been owed for ${PLAN_OWED_TELL_DAYS} days; its creator could not be emailed now, tried again the next day`, account);
         continue;
       }

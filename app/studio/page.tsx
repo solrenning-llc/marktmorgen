@@ -319,7 +319,7 @@ const NEXT_WHEN_NOT = [
 
 const PAYPAL_READY_TAX_ON_TOP = {
   title: "PayPal says your account can take payments",
-  body: "PayPal is not offered at checkout while tax is added on top of your prices, because a PayPal payment would not include the tax. Under Sales tax, choose that your prices already include it to show the PayPal button.",
+  body: "PayPal is not offered at checkout while tax is added on top of your prices, because a PayPal payment would not include the tax. Under Tax and invoices, choose \u201cMy prices already include it\u201d to show the PayPal button.",
 };
 
 const PAYPAL_NOTICES: Record<string, { title: string; body: string }> = {

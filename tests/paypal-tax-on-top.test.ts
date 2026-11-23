@@ -84,6 +84,8 @@ async function main(): Promise<void> {
   const studio = readFileSync(join(process.cwd(), "app/studio/page.tsx"), "utf8");
   is("the studio tells the tax editor whether the store sells through PayPal", studio.includes("paypal={sellsThroughPayPal(store)}"), true);
   is("after connecting PayPal, a store with tax on top is not told a PayPal button now shows", /params\.paypal === "ready" && taxOnTop\(store\) \? PAYPAL_READY_TAX_ON_TOP/.test(studio), true);
+  // Claude 1 2as's LEVE on #5243: the notice names the section and the choice as the studio prints them.
+  is("that notice names the studio's own section and choice", studio.includes("Under Tax and invoices, choose \\u201cMy prices already include it\\u201d to show the PayPal button.") && editor.includes("Tax and invoices") && editor.includes("My prices already include it"), true);
   is("the connected PayPal box says it is not offered while tax is on top", /\{taxOnTop\(store\) \? \(\s*<p className="mt-2 text-sm text-ink">\s*Not offered at checkout while tax is added on top of your prices/.test(studio), true);
 
   part("The funnel review names the real cause (a store selling by PayPal alone, with tax on top)");
@@ -91,6 +93,10 @@ async function main(): Promise<void> {
   const issues = savedOfferIssues(paypalOnly, product, [product]);
   is("the review says tax on top is why PayPal is not offered", issues.some((issue) => issue.startsWith("Store payments are unavailable: PayPal is not offered while tax is added on top of your prices")), true);
   is("not the generic plan and connection words", issues.includes("Store payments are unavailable. Review the store plan and payment connection."), false);
+  // Claude 6 hsz3's LEVE on #5243: only a step the creator can take; tax cannot be changed without Stripe.
+  is("without Stripe: only \"Connect Stripe\", never the tax choice", issues.some((issue) => issue.endsWith("Connect Stripe to take payments.")) && !issues.some((issue) => issue.includes("include it")), true);
+  const halfSet = savedOfferIssues({ ...paypalOnly, stripeAccountId: "acct_1TestHarbor0001" } as typeof base, product, [product]);
+  is("with Stripe connected but no card payments yet: finish Stripe, or include tax", halfSet.some((issue) => issue.endsWith("Finish setting up your Stripe account to take card payments, or under Tax and invoices choose \u201cMy prices already include it\u201d.")), true);
   is("control: the same store with tax included has no payment issue", savedOfferIssues({ ...paypalOnly, tax: { ...paypalOnly.tax, included: true } }, product, [product]).some((issue) => issue.startsWith("Store payments are unavailable")), false);
   is("the PayPal checkout route asks paypalReady", readFileSync(join(process.cwd(), "app/api/store/paypal/checkout/route.ts"), "utf8").includes("paypalReady(store, product)"), true);
 

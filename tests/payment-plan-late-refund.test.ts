@@ -418,8 +418,10 @@ async function main(): Promise<void> {
     is("still watched", await inALine(w.session), true);
     // Past the watch: let go.
     Date.now = () => (clock + 40 * DAY) * 1000;
-    await settlePlans();
+    const letGo = await settlePlans();
     is("let go once the watch has run out", await inALine(w.session), false);
+    // Counted done once, when it first settled: never counted again, nor as dropped (Claude 6 i51q's NIT on #5385).
+    is("the end of the watch counts it neither done again nor dropped", [letGo.done, letGo.dropped], [0, 0]);
     // A plan whose late payments were all given back with nothing refunded here is not watched longer than one with them.
     Date.now = () => clock * 1000;
     reset();

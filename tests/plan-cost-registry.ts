@@ -71,6 +71,7 @@ import { MAIL_GAP_COMMANDS_PER_CHECK, MAIL_GAP_TRIAL_CHECKS, mailGapCheckLimit }
 /** A gap mark moved: its key (the gate's, the longest, is 92 characters with a 32-character store id: nl:mgap:gate:{32}:{32}:{13}) with a time or a claim value (23), rounded up (tests/store-data-registry.ts, MARK). */
 const MAIL_GAP_MARK_BYTES = 160;
 import { BESIDE_SAVE_COMMANDS } from "@/lib/store-data";
+import { STORE_KEEP_LIVE_COMMANDS } from "@/lib/live-fence";
 import { WINBACK_OFFER_COMMANDS } from "@/lib/winback";
 import { MAX_DOOR_BYTES } from "@/lib/upload-door";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
@@ -1370,6 +1371,18 @@ export function teamLogFenceUsd(tier: Tier): number {
   // And on every essential request of the month (Claude 6 i51q on #4988), counted apart from the studio figure: a
   // teammate's export goes through studioAccess, a teammate leaving through the team route.
   return (STORE_ALLOWANCES[tier].studio + ESSENTIAL_PER_DAY * DAY_WINDOWS) * TEAM_LOG_LINES_PER_STUDIO_REQUEST * TEAM_LOG_FENCE_COMMANDS * COMMAND;
+}
+
+/**
+ * An after-payment thanks note written fenced by the store's erasure (lib/thanks-note-store.ts writeThanksNote,
+ * lib/live-fence.ts keepIfStoreLive; Codex X4-20261119-1743, #5010 row 134): STORE_KEEP_LIVE_COMMANDS in place of the
+ * plain SET's one, so STORE_KEEP_LIVE_COMMANDS - 1 more, which take a note save past the studio request's priced
+ * commands (28 against 27, Claude 7 fdy on #5164; tests/thanks-note-fence-cost.test.ts holds the count and this line). A note can be saved again and again,
+ * so saves are bounded only by the studio figure: priced on every studio request of the month (coordinator 00:53 on
+ * #5164). The trial's are in nonPayingWorst, which prices this line at the trial's figure.
+ */
+export function thanksNoteFenceUsd(tier: Tier): number {
+  return STORE_ALLOWANCES[tier].studio * (STORE_KEEP_LIVE_COMMANDS - 1) * COMMAND;
 }
 
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
@@ -3035,7 +3048,7 @@ export const COST_LINES: CostLine[] = [
     feature: "The studio's own reads and writes: every page of it drawn (STUDIO_PAGE_UNITS each), every save and read, its refreshing; and the never-paused plan, cancel, delete and data-download requests (17 October 2026)",
     // And the beside pool's read, take and give-back on a product save while the store pays, priced on every studio
     // request (besideSaveUsd; TAKE_DATA's inner commands, as Upstash bills them).
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier) + aboutFenceUsd(tier) + newFeedFenceUsd(tier) + teamLogFenceUsd(tier),
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier) + aboutFenceUsd(tier) + newFeedFenceUsd(tier) + teamLogFenceUsd(tier) + thanksNoteFenceUsd(tier),
     sources: [
       // A product's long description written fenced by the store's erasure (aboutFenceUsd).
       { file: "lib/product-about-live.ts", names: ["ABOUT_FENCE_EXTRA_COMMANDS", "ABOUT_WRITE_IF_STORE_LIVE"] },
@@ -3056,6 +3069,9 @@ export const COST_LINES: CostLine[] = [
       // The activity log's fence, priced on every studio request (teamLogFenceUsd).
       { file: "lib/team.ts", names: ["TEAM_LOG_COMMANDS", "TEAM_LOG_FENCE_COMMANDS", "KEEP_LOG_IF_LIVE"] },
       { file: "lib/studio-route.ts", names: ["logTeam(access.store.sid"] },
+      // An after-payment thanks note kept only while its store is live, priced on every studio request (thanksNoteFenceUsd).
+      { file: "lib/live-fence.ts", names: ["KEEP_IF_STORE_LIVE", "STORE_KEEP_LIVE_COMMANDS", "keepIfStoreLive"] },
+      { file: "lib/thanks-note-store.ts", names: ["keepIfStoreLive(await storeLiveFence(room)"] },
       // A product's removal admits its ordinary request and WAITLIST_DROP_UNITS together before anything goes, for its
       // waitlist's hold and drop (or its drop finished when asked again): at most WAITLIST_DROP_COMMANDS commands and
       // WAITLIST_DROP_BYTES bytes inside the additional unit (#4462; tests/waitlist-removed-drop-pending.test.ts).

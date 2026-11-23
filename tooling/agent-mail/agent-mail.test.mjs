@@ -1010,10 +1010,18 @@ console.log("a family with a verdict on the head is left out of a new review req
   r = run(["request-review", "--from", "Claude 4 X", "--pr", "944", "--sha", H62, "--text", "answered in writing"], { ...m62, ...as("c4"), FAKE_COMMENTS: "" });
   const idD = /pedido registrado: (\S+)/.exec(r.out)?.[1] ?? "";
   is("c944: nor a family whose CHANGES on this head is in the mail", r.ok && !/^Exclui: .*claude-7/m.test(pedido(idD)) && /podem revisar: [^\n]*claude-7/.test(r.out), r.out + pedido(idD));
-  r = run(["claim-review", "--as", "Claude 7 X"], { ...m62, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", FAKE_COMMENTS: "" });
-  is("c944: and that family can take it", /pegou:/.test(r.out), r.out);
+  // LOW 1 of Claude 7 xAF on #5261: the family listed as able to review is the one claim-review gives it to, also when
+  // its CHANGES on this head is written on the PR.
+  r = run(["claim-review", "--as", "Claude 7 X"], { ...m62, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", FAKE_COMMENTS: comMudancas });
+  is("c944: and that family can take it, with its CHANGES on the PR too", /pegou:/.test(r.out), r.out);
   run(["release-review", "--as", "Claude 7 X", idD], { ...m62, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
   run(["cancel-review", "--as", "Claude 4 X", idD, "--reason", "test"], { ...m62, ...as("c4") });
+  // LOW 2 of Claude 7 xAF on #5261: as in the mail, any READY on this head takes the family out, also after its CHANGES.
+  const mudouParaPronto = comMudancas + JSON.stringify([`Claude 7 X review #944 @${H62.slice(0, 10)}: READY (the LOW answered)\n\nbody`, "COLLABORATOR"]) + "\n";
+  r = run(["request-review", "--from", "Claude 4 X", "--pr", "944", "--sha", H62, "--text", "after ready"], { ...m62, ...as("c4"), FAKE_COMMENTS: mudouParaPronto });
+  const idE = /pedido registrado: (\S+)/.exec(r.out)?.[1] ?? "";
+  is("c944: a family with CHANGES and then READY on this head, on the PR, is left out, as in the mail", r.ok && /^Exclui: .*claude-7/m.test(pedido(idE)) && /podem revisar: (?![^\n]*claude-7)/.test(r.out), r.out + pedido(idE));
+  run(["cancel-review", "--as", "Claude 4 X", idE, "--reason", "test"], { ...m62, ...as("c4") });
   r = run(["request-review", "--from", "Claude 4 X", "--pr", "944", "--sha", H62, "--text", "down"], { ...m62, ...as("c4"), FAKE_COMMENTS_DOWN: "1" });
   is("c944: with the PR's comments unreadable, the request is still written and says so (NOT CHECKED)", r.ok && /pedido registrado/.test(r.out) && /NÃO FORAM CONFERIDOS/.test(r.out), r.out);
 }
@@ -1069,7 +1077,9 @@ console.log("ce2d: claim-review and claim-enqueue on those formats");
   g(["init", "-q", "--bare", "mail61.git"]); g(["push", "-q", "../mail61.git", "HEAD:refs/heads/correio"], join(T, "w"));
   const m61 = { CORREIO_REPO: join(T, "mail61.git"), CORREIO_GIT_DIR: join(T, "dir61.git") };
   const comentarios = [
-    JSON.stringify([`Focal cost review (Claude 1 cloud, money-reviewer lane)\n#61 @${c61}: CHANGES, 1 MEDIUM\n\nbody`, "COLLABORATOR"]),
+    // A READY: since #5261 only a READY keeps a family out of a review request or a take (a CHANGES does not), and the
+    // point here is that the verdict on the second line is read.
+    JSON.stringify([`Focal cost review (Claude 1 cloud, money-reviewer lane)\n#61 @${c61}: READY, 0 findings\n\nbody`, "COLLABORATOR"]),
     JSON.stringify([`re-review needed #61 @${c61}, pushed by Claude 4 X\nThis answers Claude 2 X's CHANGES`, "COLLABORATOR"]),
     JSON.stringify([`Codex N1 CHANGES (transcrito por Claude 5, cloud X) @${c61}: MEDIUM`, "COLLABORATOR"]),
   ].join("\n") + "\n";

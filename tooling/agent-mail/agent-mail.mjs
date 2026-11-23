@@ -1171,14 +1171,15 @@ export function vereditoDeIrmaNoPr(pr, sha, eu) {
 }
 
 /**
- * As famílias com READY neste head no PR e nenhum CHANGES nele: só elas ficam de fora de um novo pedido de revisão do
- * mesmo head (LEVE do Claude 2 main no #5261). null = NÃO CONFERIDO.
+ * As famílias com READY neste head no PR: só elas ficam de fora de um novo pedido de revisão do mesmo head e de pegá-lo
+ * (LEVE do Claude 2 main no #5261). Como no correio (revisoresDoHead com soReady), um READY tira a família mesmo depois
+ * de um CHANGES dela (LEVE 2 do Claude 7 xAF no #5261). null = NÃO CONFERIDO.
  */
 export function aprovadoresNoPr(pr, sha) {
   const f = revisoresNoPr(pr, sha);
   if (f === null) return null;
   const corpos = corposNoPr.get(`${pr}@${String(sha).slice(0, 10)}`) ?? new Map();
-  return new Set([...f].filter((fam) => { const vs = (corpos.get(fam) ?? []).map((c) => c.veredito); return vs.includes("READY") && !vs.includes("CHANGES"); }));
+  return new Set([...f].filter((fam) => (corpos.get(fam) ?? []).some((c) => c.veredito === "READY")));
 }
 
 export function registrarRevisao({ eu, pr, sha, resultado, link, agora = new Date() }) {
@@ -1351,8 +1352,10 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     // Na hora de pegar, confere de novo os commits do PR (o head pode ter mudado): se a família de `eu` tem commit nele,
     // devolve sozinha com o motivo, para ela não receber esse pedido de novo, e segue para o próximo.
     for (const p of lista.filter((x) => revisaoParaMim(x, eu, agora, c))) {
-      // ce2d: quem deu veredito neste head só no PR também devolve, com o motivo; sem ler o PR, nada é entregue.
-      const noPr = revisoresNoPr(p.pr, p.sha);
+      // ce2d: quem deu READY neste head só no PR também devolve, com o motivo; sem ler o PR, nada é entregue. Um CHANGES
+      // não devolve: é a mesma regra do request-review, para quem ele mostra como apto ser quem recebe (LEVE 1 do
+      // Claude 7 xAF no #5261).
+      const noPr = aprovadoresNoPr(p.pr, p.sha);
       if (noPr === null) return { espera: `as revisões escritas no #${p.pr} não puderam ser conferidas agora (NÃO CONFERIDO); nada foi pegado; tente de novo` };
       if (noPr.has(familia(eu))) {
         const carimboV = agora.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");

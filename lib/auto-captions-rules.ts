@@ -19,7 +19,9 @@
  *     on the card the plan is paid with (lib/billing.ts, chargeNow), so
  *     nothing is ever owed afterward;
  *   - what the service does not deliver within GIVE_UP_HOURS is refunded,
- *     language by language.
+ *     language by language, once the service says what it delivered; an
+ *     answer that stays unknown is asked again for DELIVERY_LOOK_DAYS, then
+ *     kept for a person, never refunded on it (#5010 row 190).
  *
  * At its dearest a minute costs us ten cents for each language asked, and a
  * dime more should the service count the spoken language on its own as well,
@@ -37,6 +39,11 @@ export const MAX_AUTO_LANGUAGES = 3;
 export const MAX_AUTO_MINUTES = 240;
 /** How long the service has to deliver before what it did not is refunded. */
 export const GIVE_UP_HOURS = 48;
+/**
+ * Past GIVE_UP_HOURS, how many days a request whose answer from the service stays unknown is asked again before it is
+ * kept for a person (lib/auto-captions.ts, DELIVERY_LOOKS_MS). The Terms and the help say it in these words.
+ */
+export const DELIVERY_LOOK_DAYS = 14;
 
 /** Minutes of video, as they are charged: rounded up. */
 export function chargedMinutes(seconds: number): number {

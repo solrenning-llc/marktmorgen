@@ -1192,11 +1192,19 @@ export async function noteSignIn(
   return cookie;
 }
 
-/** Carries the browsers an account knows to its new address, when it moves. */
+/** A remembered browser, as noteSignIn writes it into an account's set: 40 hex. */
+const DEVICE_MEMBER = /^[0-9a-f]{40}$/;
+
+/**
+ * Carries the browsers an account knows to its new address, when it moves. The old set is read exactly (rule 24):
+ * one reply, every member a browser as noteSignIn writes it; anything else throws and nothing is moved or deleted (the
+ * move route logs it). A set read whole is copied and the old one deleted in one trip, as before.
+ */
 export async function moveDevices(from: string, to: string): Promise<void> {
   if (!isRedisConfigured()) return;
-  const [members] = await redisPipeline([["SMEMBERS", await devicesKey(from)]]);
-  const list = Array.isArray(members) ? members.filter((m): m is string => typeof m === "string") : [];
+  const list = stringList(repliesFor(await redisPipeline([["SMEMBERS", await devicesKey(from)]]), 1)?.[0]);
+  if (!list || !list.every((member) => DEVICE_MEMBER.test(member))) throw new UnknownReplyError("the browsers an account signs in from");
+  // One trip, as before: the move's priced envelope counts its pipelines (tests/move-cost.test.ts).
   await redisPipeline([
     ...(list.length ? [["SADD", await devicesKey(to), ...list], ["EXPIRE", await devicesKey(to), DEVICE_TTL_SECONDS]] : []),
     ["DEL", await devicesKey(from)],

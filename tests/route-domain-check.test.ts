@@ -10,14 +10,21 @@
  *   - reached on a domain that is not the store's, or on its own domain once
  *     the store is off Pro, a route answers the way the layout does: the
  *     funnel, the certificate and the card send the visitor to the same
- *     address on marktmorgen.com; the map and the rules, which a crawler
- *     reads for that host only, are not there (404), never cached;
+ *     address on marktmorgen.com; the map, which a crawler reads for that
+ *     host only, is not there (404); the rules let crawlers follow that
+ *     host's addresses to marktmorgen.com; neither is ever cached;
  *   - nothing is written or paid for before that answer;
  *   - on the store's own proven domain, on Pro, each is served as before;
  *   - on marktmorgen.com nothing changes, and the store's map there does not
  *     carry the domain headers a visitor sent (proxy.ts);
+ *   - what a shared cache may keep of the map and the rules is the same
+ *     bytes on marktmorgen.com and on the store's own domain, every answer
+ *     that depends on the host is never cached, and a domain's crawler files
+ *     are rewritten only to its own store's address (CDN keying by host);
+ *   - the proxy takes the domain headers' names from lib/domain-gate.ts;
  *   - the layout answers exactly as before.
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { NextRequest } from "next/server";
 import StoreLayout from "@/app/[handle]/layout";
@@ -28,6 +35,7 @@ import { GET as sitemapRoute } from "@/app/[handle]/store-sitemap/route";
 import { GET as robotsRoute } from "@/app/[handle]/store-robots/route";
 import { type CreatorCard, saveCreatorCard } from "@/lib/creator-card";
 import { SITE_URL } from "@/lib/site-url";
+import { domainKey } from "@/lib/domains";
 import { claimHandle, ensureStatsId, ensureStoreId, setDomain, setSubscription, storeForEmail } from "@/lib/store";
 import { proxy } from "@/proxy";
 import { answering } from "./security/next-headers";
@@ -51,8 +59,10 @@ function asked(url: string, reachedOn: string | null, path: string): NextRequest
   return new NextRequest(url, { headers });
 }
 
-type Seen = { status: number; location: string | null; cache: string | null };
+type Seen = { status: number; location: string | null; cache: string | null; body?: string };
 const seen = (response: Response): Seen => ({ status: response.status, location: response.headers.get("location"), cache: response.headers.get("cache-control") });
+/** The answer with its text, for the rules a crawler reads. */
+const read = async (response: Response): Promise<Seen> => ({ ...seen(response), body: await response.text() });
 
 /** Commands that change something in Redis: a public request taken, a mark written. */
 const WRITES = /^(SET|SETEX|SETNX|INCR|INCRBY|DECR|DECRBY|HSET|HINCRBY|HDEL|EXPIRE|PEXPIRE|EVAL|EVALSHA|DEL|ZADD|ZREM|SADD|SREM|LPUSH|RPUSH|LTRIM)$/i;
@@ -82,12 +92,15 @@ async function main(): Promise<void> {
       certificate: async () => seen(await certificateRoute(asked(`${base}/certificate/${CERT}/pdf`, reachedOn, `/certificate/${CERT}/pdf`), params({ id: CERT }))),
       vcard: async () => seen(await vcardRoute(asked(`${base}/contact/vcard`, reachedOn, "/contact/vcard"), params({}))),
       sitemap: async () => seen(await sitemapRoute(asked(`${base}/sitemap.xml`, reachedOn, "/sitemap.xml"), params({}))),
-      robots: async () => seen(await robotsRoute(asked(`${base}/robots.txt`, reachedOn, "/robots.txt"), params({}))),
+      robots: async () => read(await robotsRoute(asked(`${base}/robots.txt`, reachedOn, "/robots.txt"), params({}))),
     };
   };
 
   const away = (path: string): Seen => ({ status: 307, location: `${SITE_URL}${path}`, cache: "no-store" });
   const gone: Seen = { status: 404, location: null, cache: "no-store" };
+  // The rules on a host that does not serve the store: every address there sends the visitor to marktmorgen.com, so
+  // crawlers are told, in so many words, that they may follow those addresses and see where they went; never cached.
+  const followAway: Seen = { status: 200, location: null, cache: "no-store", body: "User-agent: *\nAllow: /\n" };
 
   part("Off Pro, reached on its own domain: the layout's answer, nothing written or paid");
   const lost = routes("lostshop", LOST_DOMAIN, LOST_DOMAIN);
@@ -102,7 +115,7 @@ async function main(): Promise<void> {
     is("the certificate's file too", await lost.certificate(), away(`/@lostshop/certificate/${CERT}/pdf`));
     is("the card's file too", await lost.vcard(), away("/@lostshop/contact/vcard"));
     is("the map is not there for that host, and no cache keeps the answer", await lost.sitemap(), gone);
-    is("nor are the rules", await lost.robots(), gone);
+    is("its rules let crawlers follow the addresses there to marktmorgen.com, and no cache keeps them", await lost.robots(), followAway);
   } finally {
     redis.run = run;
   }
@@ -114,7 +127,7 @@ async function main(): Promise<void> {
   is("the certificate's file too", await stranger.certificate(), away(`/@proshop/certificate/${CERT}/pdf`));
   is("the card's file too", await stranger.vcard(), away("/@proshop/contact/vcard"));
   is("the map is not there", await stranger.sitemap(), gone);
-  is("nor are the rules", await stranger.robots(), gone);
+  is("its rules let crawlers follow the addresses there to marktmorgen.com", await stranger.robots(), followAway);
 
   part("On Pro, reached on its own proven domain: served as before");
   const own = routes("proshop", PRO_DOMAIN, PRO_DOMAIN);
@@ -136,6 +149,45 @@ async function main(): Promise<void> {
   is("the store's map here is reached with the request's headers rewritten", spoofed.headers.has("x-middleware-override-headers"), true);
   is("and without the domain headers a visitor sent", [passed.includes("x-nimbus-domain"), passed.includes("x-nimbus-path")], [false, false]);
   is("still served from the store's map", spoofed.headers.get("x-middleware-rewrite"), "https://marktmorgen.com/@lostshop/store-sitemap");
+
+  part("What a shared cache may keep is the same on every host that reaches it (CDN keying, Codex X6 LOW 3)");
+  // Whether the CDN keys the rewritten /@x/store-robots and /@x/store-sitemap by host is not something a synthetic
+  // test can see. What these hold is what keeps a cache that did not key by host from mixing hosts up: an answer a
+  // cache may keep (public, s-maxage) is the same bytes on marktmorgen.com and on the store's own domain; every
+  // answer that depends on the host is no-store; and a domain's /robots.txt and /sitemap.xml are rewritten only to
+  // its own store's address, so a kept answer under one store's address is only ever reached from that store's
+  // domain or from marktmorgen.com. Left to a check on the real CDN: within the hour a kept answer lives, a domain
+  // whose store has just left Pro could be given that store's kept answer.
+  const kept = async (call: () => Promise<Response>) => {
+    const response = await call();
+    return { cache: response.headers.get("cache-control") ?? "", body: await response.text() };
+  };
+  const files = {
+    robots: (handle: string, host: string, reachedOn: string | null) => robotsRoute(asked(reachedOn ? `https://${host}/robots.txt` : `https://${host}/@${handle}/store-robots`, reachedOn, "/robots.txt"), { params: Promise.resolve({ handle: `@${handle}` }) }),
+    sitemap: (handle: string, host: string, reachedOn: string | null) => sitemapRoute(asked(reachedOn ? `https://${host}/sitemap.xml` : `https://${host}/@${handle}/sitemap.xml`, reachedOn, "/sitemap.xml"), { params: Promise.resolve({ handle: `@${handle}` }) }),
+  };
+  for (const [name, file] of Object.entries(files)) {
+    const here = await kept(() => file("proshop", "marktmorgen.com", null));
+    const onDomain = await kept(() => file("proshop", PRO_DOMAIN, PRO_DOMAIN));
+    is(`the ${name} a cache may keep is the same bytes on marktmorgen.com and on the store's own domain`, [/s-maxage=/.test(here.cache), /s-maxage=/.test(onDomain.cache), here.body === onDomain.body], [true, true, true]);
+    const elsewhere = [await kept(() => file("proshop", "other.example.com", "other.example.com")), await kept(() => file("lostshop", LOST_DOMAIN, LOST_DOMAIN))];
+    is(`the ${name} answered on a host that does not serve the store is never kept by a cache`, elsewhere.map((answer) => answer.cache), ["no-store", "no-store"]);
+  }
+  for (const [host, handle] of [[PRO_DOMAIN, "proshop"], [LOST_DOMAIN, "lostshop"]] as const) {
+    // A proven domain points at its store (lib/domains.ts, handleForDomain), as connecting and proving it leaves it.
+    await redis.pipeline([["SET", domainKey(host), handle]]);
+    const robots = await proxy(new NextRequest(`https://${host}/robots.txt`, { headers: { host } }));
+    const sitemap = await proxy(new NextRequest(`https://${host}/sitemap.xml`, { headers: { host } }));
+    is(`${host}'s crawler files are rewritten only to its own store's address`, [new URL(robots.headers.get("x-middleware-rewrite") ?? "https://x/").pathname, new URL(sitemap.headers.get("x-middleware-rewrite") ?? "https://x/").pathname], [`/@${handle}/store-robots`, `/@${handle}/store-sitemap`]);
+  }
+
+  part("One source for the domain headers' names (Claude 1 and Codex G/X6 LOW 1)");
+  const proxySource = readFileSync("proxy.ts", "utf8");
+  is("the proxy, which sets them, takes their names from lib/domain-gate.ts, which reads them", [
+    /import \{[^}]*\bDOMAIN_HEADER\b[^}]*\bPATH_HEADER\b[^}]*\} from "@\/lib\/domain-gate";/.test(proxySource),
+    proxySource.includes('"x-nimbus-domain"'),
+    proxySource.includes('"x-nimbus-path"'),
+  ], [true, false, false]);
 
   part("The layout answers as before");
   const layout = async (handle: string, reachedOn: string | null, path: string): Promise<string> => {

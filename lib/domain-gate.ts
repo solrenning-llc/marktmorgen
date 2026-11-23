@@ -16,7 +16,8 @@ import type { Store } from "@/lib/store";
  * page. Next's layouts do not wrap route handlers, so each route under a
  * store's address that a domain also serves makes it itself, before it reads
  * or spends anything (issue #4111): offDomainRedirect for one a visitor
- * opens, offDomainNotFound for a file only that host's crawlers read.
+ * opens, offDomainNotFound for the map only that host's crawlers read, and
+ * offDomainRobots for that host's crawler rules.
  */
 export const DOMAIN_HEADER = "x-nimbus-domain";
 /** The path and query a visitor asked for on a creator's domain, before it was rewritten. */
@@ -52,4 +53,22 @@ export function offDomainRedirect(store: Gated, asked: Asked): Response | null {
  */
 export function offDomainNotFound(store: Gated, asked: Asked): Response | null {
   return offDomainTarget(store, asked) ? new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } }) : null;
+}
+
+/**
+ * The rules a crawler reads for a host that does not serve the store: on a
+ * creator's domain once the store is off Pro, or on a domain that is not the
+ * store's. Every address there sends the visitor to the same address on
+ * marktmorgen.com (offDomainRedirect, the store layout), so crawlers are told
+ * in so many words that they may follow them: blocking them would keep the
+ * crawler from seeing where each page went, and the domain's old addresses
+ * could stay listed with nothing behind them. Until #4113's review (Claude 1;
+ * Codex G and X6, LOW 2) this was a 404, which crawlers read the same way only
+ * by default. Never cached: the same address on the store's own domain, on
+ * Pro, gives the store's own rules. Null when served.
+ */
+export function offDomainRobots(store: Gated, asked: Asked): Response | null {
+  return offDomainTarget(store, asked)
+    ? new Response("User-agent: *\nAllow: /\n", { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } })
+    : null;
 }

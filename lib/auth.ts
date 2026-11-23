@@ -1203,7 +1203,15 @@ const DEVICE_MEMBER = /^[0-9a-f]{40}$/;
 export async function moveDevices(from: string, to: string): Promise<void> {
   if (!isRedisConfigured()) return;
   const list = stringList(repliesFor(await redisPipeline([["SMEMBERS", await devicesKey(from)]]), 1)?.[0]);
-  if (!list || !list.every((member) => DEVICE_MEMBER.test(member))) throw new UnknownReplyError("the browsers an account signs in from");
+  if (!list || !list.every((member) => DEVICE_MEMBER.test(member))) {
+    // Not read exactly: nothing is moved, and the old address's set is deleted all the same (Claude 7 xAF's LEVE on
+    // #5233; the coordinator's choice (A), 7062). Kept, it would vouch for those browsers for up to DEVICE_TTL_SECONDS to
+    // whoever makes an account at that address later, with no "new sign-in" email for them. This overrides, on purpose,
+    // the note that a read not known must not delete (Claude 5 ibqho on #5146): the cost now is at most a "new sign-in"
+    // email to the account for a browser it knew, the safe way. One DEL, on this path only; the move's own trip is as before.
+    await redisPipeline([["DEL", await devicesKey(from)]]).catch(() => undefined);
+    throw new UnknownReplyError("the browsers an account signs in from");
+  }
   // One trip, as before: the move's priced envelope counts its pipelines (tests/move-cost.test.ts).
   await redisPipeline([
     ...(list.length ? [["SADD", await devicesKey(to), ...list], ["EXPIRE", await devicesKey(to), DEVICE_TTL_SECONDS]] : []),

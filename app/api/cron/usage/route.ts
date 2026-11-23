@@ -165,8 +165,11 @@ async function videoRun(): Promise<VideoRun> {
       console.error("writing to a creator about video hours failed", error);
     }
   }
+  // An inventory that could not be read is never logged as "every store inside" (Claude 3 ivvh on #5466): said as unread.
   console.log(
-    out.stores === 0 && out.paused === 0
+    out.unread
+      ? `video-watch: unread, the stores to look at are unknown; of those read, ${out.stores} past a plan's hours, ${out.billed} billed ${centsWords(out.cents)}, ${out.paused} playback paused, ${out.failed} failed, ${out.told} written to`
+      : out.stores === 0 && out.paused === 0
       ? "video-watch: every store inside its hours"
       : `video-watch: ${out.stores} past a plan's hours, ${out.billed} billed ${centsWords(out.cents)}, ${out.paused} playback paused, ${out.failed} failed, ${out.told} written to`,
   );
@@ -248,7 +251,9 @@ async function visitsRun(): Promise<VisitsRun> {
     }
   }
   console.log(
-    out.resting === 0
+    out.unread
+      ? `visits-watch: unread, the stores to look at are unknown; of those read, ${out.resting} resting, ${out.failed} failed, ${out.told} written to`
+      : out.resting === 0
       ? "visits-watch: every store inside its visits"
       : `visits-watch: ${out.resting} resting, ${out.failed} failed, ${out.told} written to`,
   );

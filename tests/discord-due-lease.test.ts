@@ -232,6 +232,49 @@ async function main(): Promise<void> {
     is("its line in the cost registry names the job's commands", /lib\/discord-store\.ts/.test(NOT_A_COST.DISCORD_DUE_PER_RUN ?? "") && /never zero/.test(NOT_A_COST.DISCORD_DUE_PER_RUN ?? ""), true);
   }
 
+  part("The rejoin path, counted exactly (Claude 1's MEDIUM on #5306): gone at the first member read, back at the second");
+  {
+    // Cy is a member of a real store with a real server, in line. Her record is gone at the sweep's first member read
+    // and back right after it, as a rejoin between that read and dropDue leaves it: the path that runs the second
+    // readMember and checkSoon's ZADD (lib/discord-access.ts), which the registry says this test holds.
+    const CY = "300000000000000034";
+    const cyEntry = `${store.sid}|${CY}`;
+    const membersOf = `nl:dc:mem:${room}`;
+    const beaRecord = (await plain([["HGET", membersOf, BEA]]))[0];
+    is("set-up: a member record to give Cy", typeof beaRecord, "string");
+    await plain([["HSET", membersOf, CY, String(beaRecord)]]);
+    await checkSoon(store.sid, CY);
+    const real = redis.pipeline.bind(redis);
+    const commands: (string | number)[][] = [];
+    let firstRead = true;
+    redis.pipeline = (async (batch: (string | number)[][]) => {
+      commands.push(...batch);
+      if (firstRead && batch.some((c) => c[0] === "HGET" && c[1] === membersOf && c[2] === CY)) {
+        firstRead = false;
+        const kept = (await plain([["HGET", membersOf, CY]]))[0];
+        await plain([["HDEL", membersOf, CY]]);
+        const answer = await real(batch);
+        await plain([["HSET", membersOf, CY, String(kept)]]);
+        return answer;
+      }
+      return real(batch);
+    }) as typeof redis.pipeline;
+    try {
+      clock += DUE_LEASE_SECONDS * 1_000 + CHECK_HOURS * 3_600_000 + 2_000;
+      const swept = await sweepDiscord(Date.now() + 30_000, clock);
+      is("Cy counted as gone by this run", swept.gone >= 1, true);
+    } finally {
+      redis.pipeline = real as typeof redis.pipeline;
+    }
+    const lease = commands.findIndex((c) => c[0] === "ZADD" && c[1] === "nl:dc:due" && c[2] === "XX" && c.slice(3).map(String).includes(cyEntry));
+    is("set-up: the run leased Cy", lease >= 0, true);
+    const after = commands.slice(lease + 1);
+    const forCy = (op: string) => after.filter((c) => c[0] === op && c[1] === "nl:dc:due" && c.slice(2).map(String).includes(cyEntry)).length;
+    is("exactly two member reads for her: the check's and the rejoin's", after.filter((c) => c[0] === "HGET" && c[1] === membersOf && c[2] === CY).length, 2);
+    is("exactly one ZREM of dropDue and one ZADD of checkSoon on the line", [forCy("ZREM"), forCy("ZADD")], [1, 1]);
+    is("and she is back in line, so a later refund is checked", (await score(cyEntry)) !== null, true);
+  }
+
   done();
 }
 

@@ -52,6 +52,7 @@ import { askingAgainWontTell, holdsTicket, maySeeSpace } from "@/lib/community-a
 import { communityWords } from "@/lib/buyer-words/community";
 import { MAX_SENDS_UNDER_WAY } from "@/lib/community-text";
 import { ERASED_MARK, blankInLists } from "@/lib/erasure-lists";
+import { STUDIO_REQUEST_COMMANDS } from "@/lib/student-bulk-rules";
 
 export const COMMUNITY_UNSUB = /^[0-9a-f]{40}$/;
 const QUEUE = "nl:cm:mailq";
@@ -82,6 +83,26 @@ const erasuresKey = (community: string) => `nl:cm:${community}:erasures`;
  * for places whose send is gone (a refused send's lost SREM). More than that refuses the erasure for its retry.
  */
 export const ERASE_SENDS_READ_MOST = 2 * MAX_SENDS_UNDER_WAY;
+/**
+ * The most other places one send's hold looks up past the cap (holdSendPlace), so its commands are bounded (Claude 6
+ * NQoup on #5072, LEVE): with its own place, as many ids as an erasure reads. Places past it are looked up by the next
+ * sends and erasures; a send that finds the cap still passed is refused as busy, as before.
+ */
+const PLACE_LOOKS_MOST = ERASE_SENDS_READ_MOST - 1;
+/**
+ * The most commands one queueAnnouncement sends besides its recipient list's writes (a DEL, an RPUSH for each 500
+ * members and an EXPIRE, as before #5072) and the read of who asked for the emails (lib/community.ts mailableMembers):
+ * the hold's SET, SADD and EXPIRE, its SCARD and SMEMBERS, an EXISTS and at most a DEL for each place it looks up
+ * (PLACE_LOOKS_MOST), the stale places' SREM, the SCARD again and its own SREM when refused; the erasures' count read
+ * before and after the members; then the send's record and its place in line, or, when a person was erased meanwhile,
+ * its list's DEL and the two SREMs of letGo. Held by tests/community-mail-place-cost.test.ts.
+ */
+export const ANNOUNCE_PLACE_COMMANDS_MOST = 3 + 2 + 2 * PLACE_LOOKS_MOST + 3 + 2 + 2 + 3;
+/**
+ * Studio requests an emailed announcement takes besides the one every post takes (app/api/store/community/route.ts),
+ * before anything is read: enough, at STUDIO_REQUEST_COMMANDS each, for ANNOUNCE_PLACE_COMMANDS_MOST.
+ */
+export const ANNOUNCE_PLACE_STUDIO_UNITS = Math.ceil(ANNOUNCE_PLACE_COMMANDS_MOST / STUDIO_REQUEST_COMMANDS);
 export const unsubKey = (token: string) => `nl:cm:unsub:${token}`;
 const JOB_ID = /^[0-9a-f]{24}$/;
 
@@ -172,7 +193,8 @@ async function holdSendPlace(community: string, id: string): Promise<boolean> {
   if ((await count()) <= MAX_SENDS_UNDER_WAY) return true;
   const listed = repliesFor(await redisPipeline([["SMEMBERS", key]]), 1)?.[0];
   if (!Array.isArray(listed) || listed.some((other) => typeof other !== "string")) throw new UnknownReplyError("a community's announcements under way");
-  const others = (listed as string[]).filter((other) => other !== id && JOB_ID.test(other));
+  // At most PLACE_LOOKS_MOST of them a hold, so its commands stay inside ANNOUNCE_PLACE_COMMANDS_MOST.
+  const others = (listed as string[]).filter((other) => other !== id && JOB_ID.test(other)).slice(0, PLACE_LOOKS_MOST);
   // A place is live while its record or its held mark is there (Claude 4 AC on #5072, LEVE): EXISTS of both answers 0
   // only for a place neither of them holds.
   const there = others.length ? repliesFor(await redisPipeline(others.map((other) => ["EXISTS", jobKey(other), heldKey(other)])), others.length) : [];

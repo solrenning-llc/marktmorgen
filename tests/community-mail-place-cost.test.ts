@@ -55,12 +55,22 @@ async function main(): Promise<void> {
   const busy = await sentBy(() => queueAnnouncement(store, config, post));
   is(`RED: sent ${busy}, within the bound`, busy <= ANNOUNCE_PLACE_COMMANDS_MOST, true);
 
-  part("queued: only stale places, past the cap, all walked at the most the hold walks");
-  seed(0, 3 * MAX_SENDS_UNDER_WAY);
+  part("queued: only stale places past the cap, as many as one hold looks up");
+  seed(0, 2 * MAX_SENDS_UNDER_WAY - 1);
   let queued: Awaited<ReturnType<typeof queueAnnouncement>> | undefined;
   const room = await sentBy(async () => { queued = await queueAnnouncement(store, config, post); });
   is(`sent ${room}, within the bound`, room <= ANNOUNCE_PLACE_COMMANDS_MOST, true);
-  is("the post's send is queued once enough stale places are let go", queued?.ok, true);
+  is("every stale place let go, and the post's send queued", [queued?.ok, db.run(["SCARD", sends])], [true, 1]);
+
+  part("more stale places than one hold looks up: the next post looks up the rest");
+  seed(0, 3 * MAX_SENDS_UNDER_WAY);
+  let first: Awaited<ReturnType<typeof queueAnnouncement>> | undefined;
+  const many = await sentBy(async () => { first = await queueAnnouncement(store, config, post); });
+  is(`sent ${many}, within the bound`, many <= ANNOUNCE_PLACE_COMMANDS_MOST, true);
+  is("this post refused as busy, the places it looked up let go", [first?.ok ? "queued" : first?.reason, db.run(["SCARD", sends])], ["busy", 3 * MAX_SENDS_UNDER_WAY - (2 * MAX_SENDS_UNDER_WAY - 1)]);
+  let second: Awaited<ReturnType<typeof queueAnnouncement>> | undefined;
+  const next = await sentBy(async () => { second = await queueAnnouncement(store, config, post); });
+  is(`the next post sent ${next}, within the bound, and is queued`, [next <= ANNOUNCE_PLACE_COMMANDS_MOST, second?.ok, db.run(["SCARD", sends])], [true, true, 1]);
   done();
 }
 

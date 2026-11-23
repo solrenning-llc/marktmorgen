@@ -2359,8 +2359,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/group-buy.ts", names: ["placesHeld", "admitOrders(store, 1)", "settleAdmitted(store, hour)"] },
       // A gift's and a purchase for several's exact reads and "OK"-checked writes, a place's compare-and-set scripts and a
       // checkout's room given back once (#2872; Claude 7's LEVE 1): a few commands an order, inside ORDER_COMPUTE. The
-      // gift's draft is written fenced on the store being live (Codex L-20261120-1034): one EVAL with its HGET, GET and
-      // SET in place of the SET, 3 commands more for a gift's checkout, measured in tests/gift-pending-erasure-fence.test.ts.
+      // gift's draft is written fenced on the store being live (Codex L-20261120-1034): one EVAL in place of the SET,
+      // billed at most 1 and the four redis.call in its text (HGET, a GET on either branch, SET; three run), 4 commands
+      // more for a gift's checkout, measured in tests/gift-pending-erasure-fence.test.ts (Claude 5 icB3's LEVE on #5094).
       { file: "lib/gifts.ts", names: ["readGiftExactly", "setWhileStoreLive(store, giftKey(gift.id)"] },
       { file: "lib/group-buy.ts", names: ["readGroupExactly", "PLACE_CLAIM", "PLACE_DROP"] },
       { file: "lib/purchase-email.ts", names: ["firstToGiveRoomBack"] },

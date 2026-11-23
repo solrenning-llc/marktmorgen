@@ -40,8 +40,17 @@ async function main(): Promise<void> {
     const { store, product } = await shop();
     const real = redis.pipeline.bind(redis);
     let commands = 0;
+    // Billed as Upstash bills a script, at the most (1 and each redis.call in its text), and the draft's write told by
+    // its script (Claude 5 icB3's LEVE on #5094): a return to the plain SET, or a script with more calls, fails here.
+    let billed = 0;
+    let fenced = 0;
     redis.pipeline = (async (batch: (string | number)[][]) => {
       commands += batch.length;
+      for (const c of batch) {
+        const script = c[0] === "EVAL" ? String(c[1]) : "";
+        billed += script ? 1 + (script.match(/redis\.call\(/g) ?? []).length : 1;
+        if (script.startsWith("-- marktmorgen:store-cache-live:v3\n")) fenced += 1;
+      }
       return real(batch);
     }) as typeof redis.pipeline;
     const started = await startGift(store, product, INPUT);
@@ -50,7 +59,9 @@ async function main(): Promise<void> {
     const key = started.ok ? `nl:gift:${started.gift.id}` : "";
     const ttl = Number((await redis.pipeline([["TTL", key]]))[0]);
     is("its draft is kept, for GIFT_PENDING_SECONDS", [drafts().length, ttl > GIFT_PENDING_SECONDS - 5 && ttl <= GIFT_PENDING_SECONDS], [1, true]);
-    is("in one write: the fenced script, one pipeline command", commands, 1);
+    is("in one write: the fenced script, one pipeline command", [commands, fenced], [1, 1]);
+    // The cost line's figure (tests/plan-cost-registry.ts, the lib/gifts.ts line): 4 commands more than the plain SET.
+    is("billed at most 4 commands more than the plain SET it replaced", billed - 1, 4);
   }
 
   part("The store's erasure began before the draft is written");

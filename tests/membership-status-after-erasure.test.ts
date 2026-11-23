@@ -66,6 +66,23 @@ async function main(): Promise<void> {
     is("an answer other than kept or gone throws UnknownReplyError", error instanceof UnknownReplyError, true);
   }
 
+  part("A store from before ids with no statsId: the fence cannot tell it, so nothing is kept, and its erasure is still read (review of #5272)");
+  {
+    redis.clear();
+    await claimHandle("member-legacy@example.test", "memberlegacy", "Fictional Old Club", "");
+    await setStripeAccount("member-legacy@example.test", ACCOUNT, true);
+    // A store kept from before ids: no id and no statsId (as tests/ad-events-erasure.test.ts reads one).
+    const store: Store = { ...(await storeForEmail("member-legacy@example.test"))!, sid: "", statsId: "" };
+    is("(control) the store has neither an id nor a statsId", [/^[0-9a-f]{32}$/.test(store.sid ?? ""), store.statsId || null], [false, null]);
+    const key = `nl:member:status:${ACCOUNT}:${SUB}`;
+    is("a live old store's membership is active, as on main, never an error", await membershipStatus(store, SUB).catch((error) => (error instanceof UnknownReplyError ? "unknown" : "threw")), "active");
+    is("and nothing is kept for it (no fence can hold the write)", exists(key), 0);
+    await erasing(store, true);
+    const late = await membershipStatus(store, SUB);
+    is("an old store being erased: no membership (null), never live", [late, isLive(late)], [null, false]);
+    is("and still nothing is kept", exists(key), 0);
+  }
+
   done();
 }
 

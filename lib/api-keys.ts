@@ -297,7 +297,9 @@ export async function keyRecords(sid: string, _strict?: true): Promise<KeyRecord
   const out: KeyRecord[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const s = parseStored(flat[i + 1]);
-    if (!s) continue;
+    // A record naming another id than the field it is kept under is not that key (resolveKey, keyStates and
+    // revokeKeyOutcome refuse it too): never listed, paused or held under the id it names (#4175).
+    if (!s || s.id !== flat[i]) continue;
     const usedAt = Math.max(s.usedAt, Number(used.get(s.id)) || 0);
     out.push({ id: s.id, name: s.name, hint: s.hint, madeAt: s.madeAt, usedAt, write: s.write, agent: s.agent, maker: s.maker ?? null, hold: holdOf(held.get(s.id)) });
   }

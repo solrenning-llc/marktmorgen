@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   {
     redis.clear();
     const got = await withBetween(async () => {});
-    is("the link is given", got.threw, false, got.error);
+    is(`the link is given${got.error ? ` (${got.error})` : ""}`, got.threw, false);
     is("one grant is written", linkKeys().length, 1);
     is("and the erasure that comes later finds it and deletes it", [await forgetNoted(STATS, member), linkKeys()], [1, []]);
   }

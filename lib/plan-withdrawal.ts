@@ -178,10 +178,14 @@ export async function withdrawFromPlan(store: Store, statement: WithdrawalStatem
   // The receipt: each try counted before it is made, so none is ever tried past the ceiling.
   let receipt: "sent" | "unsent" | "before" = "before";
   if (!record.sent && record.tries < PLAN_WITHDRAW_ACK_SENDS) {
-    const counted = repliesFor(await redisPipeline([["HINCRBY", key, "tries", 1]]), 1);
+    const counted = repliesFor(await redisPipeline([["HINCRBY", key, "tries", 1]]).catch(() => null), 1);
     const tries = counted ? countOf(counted[0]) : null;
-    if (tries === null || tries < 1) return "error";
-    if (tries <= PLAN_WITHDRAW_ACK_SENDS) {
+    // The statement is already recorded: a count that does not read sends no receipt and says it was not sent, never
+    // "your withdrawal was not sent" (Claude 5's LEVE A on #2849). The next statement counts and tries again.
+    if (tries === null || tries < 1) {
+      console.error(`plan-withdraw: the receipt of store ${store.sid}'s withdrawal could not be counted; not sent`);
+      receipt = "unsent";
+    } else if (tries <= PLAN_WITHDRAW_ACK_SENDS) {
       const sent = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: statement.email, replyTo: SUPPORT_EMAIL, subject: ack.subject, text: ack.text }).catch(() => false);
       receipt = sent ? "sent" : "unsent";
       if (sent) {
@@ -204,8 +208,11 @@ export async function withdrawFromPlan(store: Store, statement: WithdrawalStatem
     const owed = counted ? countOf(counted[0]) : null;
     const tried = counted ? countOf(counted[1]) : null;
     if (owed === null || owed > 1 || tried === null || tried < 1) {
+      // The statement is recorded and the refund is not asked for again: nothing is sent on an unknown count, and the
+      // creator is asked to confirm again, which counts and tries anew ("pending"), never told it was not sent
+      // (Claude 5's LEVE A on #2849).
       console.error(`plan-withdraw: the note to support about store ${store.sid}'s withdrawal could not be counted; not sent (${kept})`);
-      return "error";
+      return "pending";
     }
     if (tried > PLAN_WITHDRAW_SUPPORT_TRIES) return "unreached";
     const note = supportNote({ store: store.name || store.handle, sid: store.sid, subscription: sub, when: ack.when, email: statement.email, why: kept });

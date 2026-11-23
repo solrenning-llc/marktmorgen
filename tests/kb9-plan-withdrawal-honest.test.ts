@@ -132,6 +132,51 @@ async function main() {
   const slowAt = (await redisPipeline([["HGET", planWithdrawKey(who.store.sid, slow.subId), "at"]]))[0];
   is("the statement is recorded and not answered 'error'", [typeof slowAt, slowState === "error"], ["string", false]);
 
+  // Claude 5's LEVE A on #2849 (#5285 row #2849): a count read after the statement was recorded is never "not sent".
+  part("The receipt's count does not read after the statement is recorded: 'not sent' is never said");
+  for (const [label, answer] of [["unreadable", null], ["rejected", "throw"]] as const) {
+    const counted = await paidShop({ at: REAL - 5 * DAY });
+    who.store = await counted.store();
+    world.emails = [];
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "HINCRBY" && c[2] === "tries")) {
+        if (answer === "throw") throw new Error("Redis request timed out");
+        return commands.map(() => answer);
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const state = await post({ name: NAME, email: ADDRESS }).catch((error: Error) => `threw ${error.message}`);
+    redis.pipeline = real;
+    const at = (await redisPipeline([["HGET", planWithdrawKey(who.store.sid, counted.subId), "at"]]))[0];
+    is(`${label}: the statement is recorded`, typeof at, "string");
+    is(`${label}: not answered 'error' (the page would say "not sent" next to "You withdrew")`, state === "error" || String(state).startsWith("threw"), false);
+    is(`${label}: no receipt is tried on an unknown count`, receipts().length, 0);
+  }
+
+  part("The note to support's count does not read after the statement is recorded: 'pending', never 'error'");
+  for (const [label, answer] of [["unreadable", null], ["rejected", "throw"]] as const) {
+    const noted = await paidShop({ at: REAL - 6 * DAY });
+    who.store = await noted.store();
+    world.emails = [];
+    stripeDown = true;
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "HINCRBY" && c[2] === "ht")) {
+        if (answer === "throw") throw new Error("Redis request timed out");
+        return commands.map(() => answer);
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const state = await post({ name: NAME, email: ADDRESS }).catch((error: Error) => `threw ${error.message}`);
+    redis.pipeline = real;
+    stripeDown = false;
+    const at = (await redisPipeline([["HGET", planWithdrawKey(who.store.sid, noted.subId), "at"]]))[0];
+    is(`${label}: the statement is recorded`, typeof at, "string");
+    is(`${label}: answered 'pending' (confirm again to pass it on), never 'error'`, state, "pending");
+    is(`${label}: support was not emailed on an unknown count`, world.emails.filter((e) => e.to === SUPPORT).length, 0);
+  }
+
   done();
 }
 

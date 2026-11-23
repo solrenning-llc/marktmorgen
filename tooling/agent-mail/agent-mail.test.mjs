@@ -1402,6 +1402,8 @@ console.log("three READY from three outside families on the exact head before a 
   is("1442: two READY on the head are not enough: verify-enqueue refuses and says 3", !r.ok && /2 READY/.test(r.out) && /\b3\b/.test(r.out) && /1442/.test(r.out), r.out);
   r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 2 Q"]) });
   is("1442: a READY from the author's family does not count", !r.ok && /2 READY/.test(r.out), r.out);
+  is("1442: on an unprefixed branch the refusal names the requester's family it counted as the author (NIT of Claude 5 id8Ws on #5408)",
+    /sem a família claude-2 \(quem pediu, num ramo sem prefixo de família\)/.test(r.out), r.out);
   r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS: ready(["Claude 1 Q"], ["Claude 3 Q"], ["Claude 4 Q", "0000000000"]) });
   is("1442: a READY on another head does not count", !r.ok && /2 READY/.test(r.out), r.out);
   r = run(["verify-enqueue", "--as", "Claude 6 X", id], { ...as("c6"), ...mq, FAKE_COMMENTS_DOWN: "1" });
@@ -1431,6 +1433,7 @@ console.log("three READY from three outside families on the exact head before a 
   is("1443: on a prefixed branch, the requester's READY counts: three from Claude 2, 5 and 6 pass", r.ok && new RegExp(`enfileire ${H3b}`).test(r.out), r.out);
   r = run(["verify-enqueue", "--as", "Claude 7 X", id3], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq, FAKE_COMMENTS: ready3("Claude 2 Q", "Claude 3 Q", "Claude 6 Q") });
   is("1443: the branch prefix's family's READY still does not count", !r.ok && /2 READY/.test(r.out), r.out);
+  is("1443: and the refusal names the branch prefix's family as the author", /sem a família claude-3 \(a do prefixo do ramo\)/.test(r.out), r.out);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

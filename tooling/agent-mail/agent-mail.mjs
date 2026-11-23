@@ -1589,7 +1589,7 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     }
     if (!cf) naoConferido.push("o conflito com o main e com a fila de integração");
     const feito = [atual && !diferente && fonte !== "ref" ? `head ${atual.slice(0, 10)} igual ao do pedido (${fonte === "ramo" ? `pelo ramo ${ramoPedido}` : "pela referência"})` : null, cf ? `sem conflito com o main e com os ${cf.grupos} grupo(s) da fila de integração` : null].filter(Boolean);
-    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta confere os ${READY_EXIGIDAS} READY de fora no verify-enqueue e no complete-enqueue; não confere as 9 verificações, os CHANGES e achados ainda abertos, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1))` };
+    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta confere os ${READY_EXIGIDAS} READY de fora no verify-enqueue e no complete-enqueue (sem a família de quem pediu, a do prefixo do ramo e as com commit no PR); não confere a família de quem abriu o PR num ramo sem prefixo de família e sem commit dela, as 9 verificações, os CHANGES e achados ainda abertos, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1), OWNER-20261123-1442)` };
   }
   return { pedido: alvo };
 }

@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { setAssistReminder, setAssistant, setNextOffer } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
 import { clearAssistantMissed } from "@/lib/store-assistant";
+import { readNextExpect } from "@/lib/setting-expect";
 
 /**
  * The Store assistant's setting (lib/store-assistant-rules.ts), from the
@@ -9,7 +10,9 @@ import { clearAssistantMissed } from "@/lib/store-assistant";
  * creator's notes for it; `{ clear: true }` forgets the questions it could
  * not answer, once read; `{ next: { on, email } }` switches the next
  * product after a purchase on or off, and its line in the confirmation
- * email (lib/next-offer-rules.ts); `{ remind: { on } }` switches the box
+ * email (lib/next-offer-rules.ts), with `expect`, the setting as the page
+ * read it, compared with what is saved under the store's lock ("changed",
+ * 409, nothing written: lib/setting-expect.ts); `{ remind: { on } }` switches the box
  * that asks for one checkout reminder on or off (lib/assistant-reminder-rules.ts).
  * What a store's pages say to buyers is the "page"
  * permission. Switching it on is allowed before the add-on is paid for: the
@@ -25,7 +28,10 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true });
     }
     if (guarded.body.next && typeof guarded.body.next === "object") {
-      const changed = await setNextOffer(guarded.ref, guarded.body.next);
+      const expect = readNextExpect(guarded.body.expect);
+      if (expect === "invalid") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      const changed = await setNextOffer(guarded.ref, guarded.body.next, expect ?? undefined);
+      if (changed === "changed") return Response.json({ ok: false, error: "changed" }, { status: 409 });
       if (!changed) return Response.json({ ok: false, error: "none" }, { status: 400 });
       return Response.json({ ok: true, next: changed.nextOffer });
     }

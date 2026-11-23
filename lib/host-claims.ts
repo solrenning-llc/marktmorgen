@@ -255,7 +255,7 @@ export async function confirmClaim(ids: string[], claim: string, start: number, 
       for (const id of again) if (!now.has(id)) lost.add(id);
     }
   }
-  for (const _ of lost) failed.push("a paid booking's host claim");
+  if (lost.size) failed.push(...Array.from(lost, () => "a paid booking's host claim"));
   // The PTTL read with the write counts only when the write was answered; otherwise it is read again, all at once.
   const ttls = new Map<string, number>();
   const reread: string[] = [];

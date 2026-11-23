@@ -220,7 +220,8 @@ const CHECKOUT_STATES: ReadonlySet<string> = new Set(["open", "complete", "expir
  * Whether the checkout Stripe answered for a request's session is that request's own (#4447): its id must be the
  * request's session, and a paid one must name this request and this store in its metadata. Anything else is someone
  * else's answer. (A 404 for the session never reaches here: inside the window it may come from an account other than the
- * one the checkout was opened on, so the caller lets it throw into its error handling, X8 after #4513.)
+ * one the checkout was opened on, so the caller answers "error" without passing it on as a refusal, X8 after #4513
+ * and Board #5285 row #4836.)
  */
 function ownRequestCheckout(known: Record<string, unknown>, request: { id: string; session: string }, store: Store): boolean {
   if (known.id !== request.session) return false;
@@ -245,8 +246,16 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
     // the 23 hours it is given again (Claude 7, 14 November 2026): a second press in the 24th hour opened a second
     // checkout beside the first, and a buyer who paid both was charged twice for one request.
     if (SESSION_ID.test(request.session) && now - request.sessionAt < CHECKOUT_LIFE_MS) {
-      // The current account may not know a checkout still payable on a previous account.
-      const known = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}`)) as Record<string, unknown>;
+      // The current account may not know a checkout still payable on a previous account: its 404 is an error for the
+      // buyer (nothing new opens beside it, X8 after #4513) and no refusal of the store's account, so the creator is not
+      // told Stripe refused and the account is not read again on every press (Board #5285 row #4836).
+      let known: Record<string, unknown>;
+      try {
+        known = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}`)) as Record<string, unknown>;
+      } catch (error) {
+        if (error instanceof StripeError && error.status === 404) return { ok: false, reason: "error" };
+        throw error;
+      }
       // Read only from a reply about this very checkout in a state Stripe documents: any other 200 reply (no status, a
       // status not known here, another checkout's id) says nothing about whether it is still payable, so nothing new
       // opens beside it (Claude 7, 14 November 2026).

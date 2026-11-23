@@ -81,6 +81,7 @@ import { VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { DELIVERY_WRITE_MAX_BYTES } from "@/lib/webhook-limits";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { REVIEW_SAVES_PER_ORDER_MONTH } from "@/lib/review-summary";
+import { REVIEW_LINK_SECONDS } from "@/lib/review-proof";
 import { QUOTES_REFRESH_SECONDS } from "@/lib/store-quotes-rules";
 import { CONTACT_COMMANDS_MOST, CONTACT_READ_BYTES } from "@/lib/contacts";
 import { MAX_CART } from "@/lib/cart-rules";
@@ -1595,6 +1596,18 @@ export const REVIEW_WRITE_WORST = {
  * orders bought over about 121 days, which touch at most this many store months of ORDERS_INCLUDED each.
  */
 export const REVIEW_DOOR_MONTHS = 6;
+/**
+ * Store months one review link can touch: it is open REVIEW_LINK_SECONDS (60 days, lib/review-proof.ts) and a store
+ * month is at least 28 days, so at most ceil(60 / 28) + 1 = 4 (tests/review-route-units.test.ts checks it on every
+ * start day of real calendars).
+ */
+export const REVIEW_LINK_MONTHS = Math.ceil(REVIEW_LINK_SECONDS / (28 * 86_400)) + 1;
+/**
+ * The most reviews one order deletes in a store month (Claude 5 ia5d's MEDIUM 2 on #5400). Deleting is never refused,
+ * and a review can be deleted through its link while the link is open, so in one month an order can delete every
+ * review it saved through that link: at most REVIEW_SAVES_PER_ORDER_MONTH in each store month the link touches.
+ */
+export const REVIEW_DELETES_PER_ORDER_MONTH = REVIEW_SAVES_PER_ORDER_MONTH * REVIEW_LINK_MONTHS;
 
 /**
  * The line "review-writes": every order the doors leave open saving its review REVIEW_SAVES_PER_ORDER_MONTH times,
@@ -1613,7 +1626,7 @@ export function reviewWritesMonthlyUsd(tier: Tier): number {
 export function reviewWritesOrdersUsd(tier: Tier): number {
   const orders = REVIEW_DOOR_MONTHS * ORDERS_INCLUDED[tier];
   const per = (w: { commands: number; bytes: number }) => request("heavy", w.commands, w.bytes);
-  return orders * (REVIEW_SAVES_PER_ORDER_MONTH * (per(REVIEW_WRITE_WORST.save) + per(REVIEW_WRITE_WORST.remove)) + per(REVIEW_WRITE_WORST.mark));
+  return orders * (REVIEW_SAVES_PER_ORDER_MONTH * per(REVIEW_WRITE_WORST.save) + REVIEW_DELETES_PER_ORDER_MONTH * per(REVIEW_WRITE_WORST.remove) + per(REVIEW_WRITE_WORST.mark));
 }
 
 /** What one request costs: its call, CPU, memory, database commands and the bytes it moves through the database. */
@@ -3091,13 +3104,14 @@ export const COST_LINES: CostLine[] = [
     feature: "A buyer's review written, rewritten or deleted, and the store page's quotes refreshed after it (#5010 row 180, 23 November 2026)",
     monthlyUsd: reviewWritesMonthlyUsd,
     sources: [
+      { file: "lib/review-proof.ts", names: ["REVIEW_LINK_SECONDS"] },
       { file: "lib/review-summary.ts", names: ["REVIEW_SAVES_PER_ORDER_MONTH"] },
       { file: "lib/store-quotes-rules.ts", names: ["QUOTES_REFRESH_SECONDS"] },
       { file: "lib/store-quotes.ts", names: ["refreshStoreQuotesHourly", 'withinLimit("quotes-refresh", storeRef(store), 1, QUOTES_REFRESH_SECONDS)'] },
       { file: "lib/review-ask.ts", names: ["MAX_ASK_DAYS"] },
       { file: "app/api/store/review/route.ts", names: ['withinMonthWhy("review-saves", proof.reference, REVIEW_SAVES_PER_ORDER_MONTH', "refreshStoreQuotesHourly(store)"] },
     ],
-    basis: "Each part of a review write measured at its worst in tests/review-route-units.test.ts (REVIEW_WRITE_WORST, Upstash billing of a script: 1 and each redis.call in its text). One order saves its review at most REVIEW_SAVES_PER_ORDER_MONTH times in the store's month (the route reads the count first and answers savedEnough past it; the save is counted only under the product's lock, just before it writes, so a busy or full save never uses it, and one that then finds no room gives it back), deletes it at most as often as it saved it, and has its refund marked once; the orders whose buyers can write in a month are REVIEW_DOOR_MONTHS store months of ORDERS_INCLUDED (a request sent up to MAX_ASK_DAYS after the order, its link open 60 days). The quotes' refresh runs at most once an hour a store, 744 in a 31-day month. The request each write takes is still counted in public-requests too, and a press that writes nothing (refused past the month's save, busy, a deletion with nothing to delete, a refund already marked) stays inside that one request (COMMANDS.laterPage + COMMANDS.laterCount and PAGE_BYTES, held in the same test).",
+    basis: "Each part of a review write measured at its worst in tests/review-route-units.test.ts (REVIEW_WRITE_WORST, Upstash billing of a script: 1 and each redis.call in its text). One order saves its review at most REVIEW_SAVES_PER_ORDER_MONTH times in the store's month (the route reads the count first and answers savedEnough past it; the save is counted only under the product's lock, just before it writes, so a busy or full save never uses it, and one that then finds no room gives it back), deletes at most REVIEW_DELETES_PER_ORDER_MONTH reviews in a month (every review it saved through its link, which is open REVIEW_LINK_SECONDS and so touches at most REVIEW_LINK_MONTHS store months; deleting is never refused; Claude 5 ia5d on #5400), and has its refund marked once; the month's save is counted per order whatever the product, since one order can hand over up to MAX_DELIVERED products (the buyer is told a review from this order was already saved); the orders whose buyers can write in a month are REVIEW_DOOR_MONTHS store months of ORDERS_INCLUDED (a request sent up to MAX_ASK_DAYS after the order, its link open 60 days). The quotes' refresh runs at most once an hour a store, 744 in a 31-day month. The request each write takes is still counted in public-requests too, and a press that writes nothing (refused past the month's save, busy, a deletion with nothing to delete, a refund already marked) stays inside that one request (COMMANDS.laterPage + COMMANDS.laterCount and PAGE_BYTES, held in the same test).",
   },
   {
     id: "page-readings",

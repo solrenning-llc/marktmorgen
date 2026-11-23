@@ -28,7 +28,8 @@ import { withinLimit } from "@/lib/request-guard";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { MAX_ASK_DAYS } from "@/lib/review-ask";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
-import { REVIEW_DOOR_MONTHS, REVIEW_WRITE_WORST, request, reviewWritesMonthlyUsd } from "./plan-cost-registry";
+import { REVIEW_DELETES_PER_ORDER_MONTH, REVIEW_DOOR_MONTHS, REVIEW_LINK_MONTHS, REVIEW_WRITE_WORST, request, reviewWritesMonthlyUsd } from "./plan-cost-registry";
+import { REVIEW_LINK_SECONDS } from "@/lib/review-proof";
 import { COMMANDS, PAGE_BYTES } from "./traffic-cost";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM, roomOnly } from "./data-room";
@@ -40,18 +41,21 @@ process.env.STRIPE_SECRET_KEY = "sk_test_review_route_units_only";
 
 const OWNER = "review-route-units@example.com";
 const HANDLE = "review-route-units";
-const ACCOUNT = "acct_" + "1TestRevUnits001";
+const ACCOUNT = "acct_1TestRevUnit";
 /** Two orders of two buyers: the second is the one whose refund is marked. */
 const ORDERS = [
   { session: "cs_test_reviewrouteunits0001", buyer: "buyer-review-units@example.com", pi: "pi_ReviewRouteUnits1" },
   { session: "cs_test_reviewrouteunits0002", buyer: "buyer-review-units-2@example.com", pi: "pi_ReviewRouteUnits2" },
   { session: "cs_test_reviewrouteunits0003", buyer: "buyer-review-units-3@example.com", pi: "pi_ReviewRouteUnits3" },
   { session: "cs_test_reviewrouteunits0004", buyer: "buyer-review-units-4@example.com", pi: "pi_ReviewRouteUnits4" },
+  { session: "cs_test_reviewrouteunits0005", buyer: "buyer-review-units-5@example.com", pi: "pi_ReviewRouteUnits5" },
 ];
 /** More reviews than the store page's quotes look at (lib/store-quotes.ts, LOOK_AT 40). */
 const OTHERS = 45;
 
 let productId = "";
+/** A second product the order hands over, ticked at checkout (lib/bundle-rules.ts deliveredIds), when set. */
+let bumpId = "";
 let order = ORDERS[0];
 let refunded = false;
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -65,7 +69,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
       amount_total: 1000,
       created: Math.floor(Date.now() / 1000) - 3600,
       mode: "payment",
-      metadata: { store: HANDLE, product: productId },
+      metadata: { store: HANDLE, product: productId, ...(bumpId ? { bump: bumpId } : {}) },
       customer_details: { email: asked.buyer },
       payment_intent: { id: asked.pi, latest_charge: { refunded, amount_refunded: refunded ? 1000 : 0 } },
     });
@@ -167,7 +171,8 @@ async function main(): Promise<void> {
   // Claude 2 lpgvy's MEDIUM 1 on #5400: the words name the bound the code keeps, never a count it does not.
   const twice = /\b(twice|dos veces|deux fois|zweimal|due volte|twee keer|duas vezes)\b/i;
   is(`with ${REVIEW_SAVES_PER_ORDER_MONTH} save a month, no language says it was saved twice`, Object.entries(GIVING_WORDS).filter(([, w]) => REVIEW_SAVES_PER_ORDER_MONTH === 1 && twice.test(w.reviewNotices.savedEnough)).map(([lang]) => lang), []);
-  is("and English says it was already saved this month", GIVING_WORDS.en.reviewNotices.savedEnough.startsWith("This review was already saved this month"), true);
+  // Claude 5 ia5d's MEDIUM 1 on #5400: the month's save is the order's, whatever the product, so the words say so.
+  is("and English says a review from this order was already saved this month", GIVING_WORDS.en.reviewNotices.savedEnough.startsWith("A review from this order was already saved this month"), true);
   // Claude 2 lpgvy's LOW 4 on #5400: a refused press stays inside the one public request it takes.
   const onePublicRequest = { commands: COMMANDS.laterPage + COMMANDS.laterCount, bytes: PAGE_BYTES };
   within("a refused save", third, onePublicRequest);
@@ -215,11 +220,39 @@ async function main(): Promise<void> {
   redis.pipeline = roomless;
   is("sent again once there is room: saved, not 'already saved this month'", statusOf(await send({ rating: "5", text: words(905) })), "saved");
 
+  part("Claude 5 ia5d's MEDIUM 1 on #5400: one order, two products: the month's save is the order's, and the words say so");
+  order = ORDERS[4];
+  const second = await addProduct(OWNER, "Rye course", "Rye in a week.", "10");
+  if (!("product" in second) || !second.product) throw new Error("no second product");
+  bumpId = (second as { product: { id: string } }).product.id;
+  nextReviewMonth();
+  is("the first product's review is saved", statusOf(await send({ rating: "5", text: words(906) })), "saved");
+  const other = await measured({ product: bumpId, rating: "4", text: words(907) });
+  is("the second product's review, the same month, is refused: one review save an order a month", [other.status, await readReview(statsId, bumpId, reviewId(statsId, bumpId, ORDERS[4].buyer))], ["savedEnough", null]);
+  is("and the words it is shown say a review from this order was saved, not that this one was", /from this order/.test(GIVING_WORDS.en.reviewNotices.savedEnough) && !/^This review was already saved/.test(GIVING_WORDS.en.reviewNotices.savedEnough), true);
+  nextReviewMonth();
+  is("next month the second product's review is saved", statusOf(await send({ product: bumpId, rating: "4", text: words(907) })), "saved");
+
+  part("Claude 5 ia5d's MEDIUM 2 on #5400: in one month an order deletes every review it saved through its link, never refused");
+  is("deletes the first product's review, saved last month", statusOf(await send({ action: "delete", confirm: "yes" })), "deleted");
+  is("and the second's, saved this month", statusOf(await send({ product: bumpId, action: "delete", confirm: "yes" })), "deleted");
+  bumpId = "";
+  // A link is open REVIEW_LINK_SECONDS; a store month is at least 28 days. Every start day of real calendars, with
+  // month-long windows (the shortest a store month is), touches at most REVIEW_LINK_MONTHS of them.
+  let most = 0;
+  for (let at = Date.UTC(2026, 0, 1); at < Date.UTC(2031, 0, 1); at += 86_400_000) {
+    const first = new Date(at);
+    const last = new Date(at + REVIEW_LINK_SECONDS * 1000);
+    most = Math.max(most, (last.getUTCFullYear() - first.getUTCFullYear()) * 12 + last.getUTCMonth() - first.getUTCMonth() + 1);
+  }
+  is(`a link touches at most ${most} calendar months, within REVIEW_LINK_MONTHS (${REVIEW_LINK_MONTHS})`, most <= REVIEW_LINK_MONTHS, true);
+  is("so an order's deletions in a month are priced at REVIEW_SAVES_PER_ORDER_MONTH a store month its link touches", REVIEW_DELETES_PER_ORDER_MONTH, REVIEW_SAVES_PER_ORDER_MONTH * REVIEW_LINK_MONTHS);
+
   part("The cost line, recomputed from the model (AC (n))");
   const per = (w: { commands: number; bytes: number }) => request("heavy", w.commands, w.bytes);
   for (const tier of ["creator", "pro", "scale"] as const) {
     const orders = REVIEW_DOOR_MONTHS * ORDERS_INCLUDED[tier];
-    const writes = orders * (REVIEW_SAVES_PER_ORDER_MONTH * (per(REVIEW_WRITE_WORST.save) + per(REVIEW_WRITE_WORST.remove)) + per(REVIEW_WRITE_WORST.mark));
+    const writes = orders * (REVIEW_SAVES_PER_ORDER_MONTH * per(REVIEW_WRITE_WORST.save) + REVIEW_DELETES_PER_ORDER_MONTH * per(REVIEW_WRITE_WORST.remove) + per(REVIEW_WRITE_WORST.mark));
     const refreshes = Math.ceil((31 * 86_400) / QUOTES_REFRESH_SECONDS) * request("light", REVIEW_WRITE_WORST.refresh.commands, REVIEW_WRITE_WORST.refresh.bytes);
     is(`${tier}: ${orders} orders' writes and a month of hourly refreshes, $${(writes + refreshes).toFixed(4)}`, Math.abs(reviewWritesMonthlyUsd(tier) - (writes + refreshes)) < 1e-12, true);
   }

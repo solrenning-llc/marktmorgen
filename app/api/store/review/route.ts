@@ -136,8 +136,10 @@ export async function POST(request: NextRequest) {
     const sentPhoto = photoPaused ? "" : read("photo");
     const checked = sentPhoto ? checkReviewPhoto(sentPhoto) : null;
     if (checked === "photo") return answer("photo");
-    // One order saves its review at most REVIEW_SAVES_PER_ORDER_MONTH times in the store's month (#5010 row 180), so a
-    // month's review writes have the bound the cost line "review-writes" prices. Deleting is never counted against it.
+    // One order saves a review at most REVIEW_SAVES_PER_ORDER_MONTH times in the store's month (#5010 row 180), whatever
+    // the product (one order can hand over up to MAX_DELIVERED; the words say a review from this order was saved; Claude 5
+    // ia5d's MEDIUM 1 on #5400), so a month's review writes have the bound the cost line "review-writes" prices. Deleting
+    // is never counted against it, and is priced at every review the order's link saved (REVIEW_DELETES_PER_ORDER_MONTH).
     // The count is read first (one GET), so a press past it is refused at once, in plain words; it is taken only under
     // the product's lock, just before the write (saveReview's admit), so a save that was busy or full never uses the
     // month's save, and one that then found no room gives it back (Claude 2 lpgvy's MEDIUM 2 on #5400). A count that

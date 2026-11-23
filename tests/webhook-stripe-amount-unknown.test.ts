@@ -24,10 +24,25 @@ const account = "acct_AmountUnknown01";
 const HANDLE = "amount-unknown-shop";
 let events: unknown[] = [];
 const intents: Record<string, Record<string, string>> = {};
+/**
+ * The events Stripe would list for this read, newest first, as Stripe does: after an anchor (`ending_before`) only
+ * the newer ones, past a cursor (`starting_after`) only the older ones. An event the code read without error moves
+ * the anchor past it and is never listed again, so a check that an event waited can tell waiting from passing over
+ * (LEVE 1 of Claude 1 on #5206 @777454ad42).
+ */
+function listed(url: URL) {
+  const rows = events as { id: string; created: number }[];
+  const at = (id: string | null) => (id ? rows.find((row) => row.id === id) : undefined);
+  const newer = at(url.searchParams.get("ending_before"));
+  if (newer) return rows.filter((row) => row.created > newer.created);
+  const older = at(url.searchParams.get("starting_after"));
+  if (older) return rows.filter((row) => row.created < older.created);
+  return rows;
+}
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.origin !== "https://api.stripe.com" || init?.method !== "GET" || new Headers(init.headers).get("Stripe-Account") !== account) throw new Error(`unexpected synthetic operation ${url}`);
-  if (url.pathname === "/v1/events") return Response.json({ data: events, has_more: false });
+  if (url.pathname === "/v1/events") return Response.json({ data: listed(url), has_more: false });
   const intent = url.pathname.match(/^\/v1\/payment_intents\/(pi_\w+)$/)?.[1];
   if (intent && intents[intent]) return Response.json({ id: intent, metadata: intents[intent] });
   return Response.json({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such object" } }, { status: 404 });

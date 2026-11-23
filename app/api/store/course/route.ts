@@ -42,7 +42,7 @@ import { dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "
 import { CERT_ID_PATTERN, courseIndexes, withdrawCertificate } from "@/lib/certificate";
 import { hasProduct, productIds, readListing } from "@/lib/catalog";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
-import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { LockBusyError, STUDIO_LOCK_WAIT_MS, withLock } from "@/lib/redis-lock";
 import { claimUpload, dropStream } from "@/lib/stream";
 import { type StreamState, isStreamPath } from "@/lib/stream-rules";
 import { noteIfFinished } from "@/lib/course-finish";
@@ -234,7 +234,7 @@ export async function POST(request: NextRequest) {
     // One change at a time per course: each reads the whole outline and writes it
     // back, so two at once (two lessons uploading, two tabs) would drop one.
     const courseInfo = product.course;
-    return await withLock(`nl:course:${courseInfo.id}:lock`, 60, 15_000, async () => {
+    return await withLock(`nl:course:${courseInfo.id}:lock`, 60, STUDIO_LOCK_WAIT_MS, async () => {
       const course = await readCourse(courseInfo.id);
       if (!course) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
 

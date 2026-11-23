@@ -42,6 +42,14 @@ const EXTEND = '-- marktmorgen:extend:v1\nif redis.call("GET", KEYS[1]) == ARGV[
 
 export type Held = { key: string; token: string; ttlSeconds: number };
 
+/**
+ * How long a studio route waits for a lock another change holds (#5010 row 182, the coordinator's B2): 914 ms at its
+ * worst in 7 tries, every sleep's jitter included, which leaves a third of SHAPES.studio's 1.5 s (tests/plan-cost-registry.ts)
+ * for the route's own work; past it the route answers busy and writes nothing. A scheduled job keeps its own longer wait
+ * (lib/plan-closing.ts). Held by tests/content-lock-wait-shape.test.ts for every lock an app/api/store route waits for.
+ */
+export const STUDIO_LOCK_WAIT_MS = 1_000;
+
 /** Thrown when a lock stayed taken for longer than we wait, or was lost before a write. */
 export class LockBusyError extends Error {
   constructor(message = "busy") {

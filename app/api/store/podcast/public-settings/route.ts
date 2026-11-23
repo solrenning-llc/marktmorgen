@@ -3,7 +3,7 @@ import { type Store, storeForEmail, withLiveStore } from "@/lib/store";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { type Listing, readListingExactly } from "@/lib/catalog";
-import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { LockBusyError, STUDIO_LOCK_WAIT_MS, withLock } from "@/lib/redis-lock";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { readPodcastSized } from "@/lib/podcast";
 import { EPISODE_ID } from "@/lib/podcast-rules";
@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return await paid(store, action === "off" ? PUBLIC_SETTINGS_WORST_BYTES.off : PUBLIC_SETTINGS_WORST_BYTES.change, (moved) => withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
+    return await paid(store, action === "off" ? PUBLIC_SETTINGS_WORST_BYTES.off : PUBLIC_SETTINGS_WORST_BYTES.change, (moved) => withLock(`nl:pod:${podcastId}:lock`, 60, STUDIO_LOCK_WAIT_MS, async () => {
       // Read again under the lock: a product removed, turned into another podcast or made a draft while this waited
       // is not written for. The store is read again under its own lock too, the one its erasure takes (withLiveStore,
       // Codex L-20261120-1151), held until the write is done: a store whose erasure began or ended is not written for,

@@ -48,14 +48,23 @@ const CURSOR_KEY = "nl:wb:cursor";
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
 const TOKEN_PATTERN = /^[0-9a-f]{40}$/;
-const LIVE = new Set(["active", "trialing", "past_due"]);
-/**
- * Before a come-back checkout is opened, every membership that has not ended counts (R43, follow-up to #3371): only
- * these two statuses have. One still taking its first payment ("incomplete"), paused or unpaid is read as running, so a
- * second membership is never opened beside it; a status not in SUB_STATUSES is not read at all (unknown, null).
- */
+/** How a membership of the product counts: true it counts, false it does not, null it is not known yet. */
+type Counts = (status: string) => boolean | null;
+/** Only these two statuses have ended a membership. */
 const ENDED = new Set(["canceled", "incomplete_expired"]);
-const NOT_ENDED = { has: (status: string) => !ENDED.has(status) };
+/**
+ * Before a come-back checkout is opened (runningFor), every membership that has not ended counts (R43, follow-up to
+ * #3371): one still taking its first payment ("incomplete"), paused or unpaid is read as running, so a second
+ * membership is never opened beside it. A status not in SUB_STATUSES is not read at all (unknown, null).
+ */
+const NOT_ENDED: Counts = (status) => !ENDED.has(status);
+/**
+ * Whether the person is back, for the offer itself (cameBackUnder): a paused, unpaid or live membership is back. One
+ * still taking its first payment ("incomplete") is not known yet (Claude 5 ichw's LEVE 1 on #5294): its attempt may
+ * expire (incomplete_expired), so no offer is sent now and the run's mark is let go, and a later run in the window
+ * decides, instead of the offer being withheld for good.
+ */
+const BACK: Counts = (status) => (status === "incomplete" ? null : !ENDED.has(status));
 /** Every status Stripe gives a subscription (https://docs.stripe.com/api/subscriptions/object, read 11/11/2026). */
 const SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
 
@@ -231,19 +240,21 @@ const CAME_BACK_PAGES = 5;
 const CAME_BACK_OFFER_PAGES = 10;
 
 /**
- * Whether this address has a live membership to this product on the creator's account now: true, false, or null
- * when it cannot be said (CX-123 rule 24, L6). "No" needs the whole list: every page read to has_more false, each a
- * list. A page that is not one, a membership without an id to go on from, or more pages than are read is unknown,
- * never "has not come back", so no offer goes to somebody who may already be back.
+ * Whether this customer holds a membership of this product on the creator's account that counts by `counts`
+ * (NOT_ENDED or BACK): true, false, or null when it cannot be said (CX-123 rule 24, L6). "No" needs the whole list:
+ * every page read to has_more false, each a list. A page that is not one, a membership without an id to go on from,
+ * more pages than are read, or a membership `counts` cannot place yet is unknown, never "has not come back", so no
+ * offer goes to somebody who may already be back.
  */
 async function cameBack(
   account: string,
   customer: string,
   product: string,
   budget: { pages: number },
-  live: { has(status: string): boolean } = LIVE,
+  counts: Counts,
 ): Promise<boolean | null> {
   let after = "";
+  let pending = false;
   for (let page = 0; page < CAME_BACK_PAGES; page += 1) {
     if (budget.pages <= 0) return null;
     budget.pages -= 1;
@@ -258,9 +269,12 @@ async function cameBack(
       const { status, metadata } = sub as { status?: unknown; metadata?: unknown };
       if (typeof status !== "string" || !SUB_STATUSES.has(status) || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
       if (!Object.values(metadata).every((value) => typeof value === "string")) return null;
-      if (live.has(status) && (metadata as Record<string, unknown>).product === product) return true;
+      if ((metadata as Record<string, unknown>).product !== product) continue;
+      const counted = counts(status);
+      if (counted === true) return true;
+      if (counted === null) pending = true;
     }
-    if (listed.has_more === false) return false;
+    if (listed.has_more === false) return pending ? null : false;
     const last = (subs as { id?: unknown }[]).at(-1)?.id;
     if (typeof last !== "string" || !SUB_PATTERN.test(last)) return null;
     after = last;
@@ -298,17 +312,17 @@ async function customersOf(account: string, email: string): Promise<string[] | n
  */
 async function cameBackUnder(account: string, customer: string, email: string, product: string): Promise<boolean | null> {
   const budget = { pages: CAME_BACK_OFFER_PAGES };
-  // A membership that has not ended counts as back, as it does before a come-back checkout is opened (runningFor): one
-  // still taking its first payment ("incomplete"), paused or unpaid gets no offer the link would then refuse (Claude
-  // 2's LOW on #3371, board #5285).
-  const own = await cameBack(account, customer, product, budget, NOT_ENDED);
+  // A paused, unpaid or live membership counts as back, as it does before a come-back checkout is opened (runningFor),
+  // so no offer goes that the link would then refuse (Claude 2's LOW on #3371, board #5285). One still taking its first
+  // payment ("incomplete") is not known yet (BACK): nothing is sent now, the mark goes, and a later run decides.
+  const own = await cameBack(account, customer, product, budget, BACK);
   if (own !== false) return own;
   try {
     const customers = await customersOf(account, email);
     if (!customers) return null;
     for (const other of customers) {
       if (other === customer) continue;
-      const back = await cameBack(account, other, product, budget, NOT_ENDED);
+      const back = await cameBack(account, other, product, budget, BACK);
       if (back !== false) return back;
     }
     return false;

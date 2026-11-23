@@ -67,6 +67,7 @@ import { CERTIFICATE_PASS_EVERY_SECONDS, CERTIFICATE_REFUND_CHECKS_PER_MONTH, CE
 import { LOST_DISPUTE_PAGES } from "@/lib/refunds";
 import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
+import { MAIL_CLICK_KEY_COMMANDS } from "@/lib/mail-clicks";
 import { MAIL_GAP_COMMANDS_PER_CHECK, MAIL_GAP_TRIAL_CHECKS, mailGapCheckLimit } from "@/lib/mail-frequency";
 /** A gap mark moved: its key (the gate's, the longest, is 92 characters with a 32-character store id: nl:mgap:gate:{32}:{32}:{13}) with a time or a claim value (23), rounded up (tests/store-data-registry.ts, MARK). */
 const MAIL_GAP_MARK_BYTES = 160;
@@ -539,6 +540,18 @@ export const CART_NOTE_COMMANDS = 2;
  * Priced on every store email with the note's own (UNIT_COST.email).
  */
 export const RECOVERY_ADMIT_EXTRA_COMMANDS = 5;
+/**
+ * What three API writes send beyond the one unit they take (UNIT_COST.api, 20 commands and TAKE_COMMANDS), at the
+ * most, as Upstash bills them (#5010 row 150, sweep 2f36; coordinator cca1): POST /api/v1/hooks (the webhook
+ * settings' compare-and-set script, the endpoint read back), DELETE /api/v1/hooks (the endpoints read, then removed)
+ * and DELETE /api/v1/access (the gift read, taken back). They keep taking one unit, as the terms, the pricing page and
+ * the developers' page say; this extra is priced on every API request of each plan ("api-hook-access-writes"),
+ * measured through the real routes in tests/api-hook-access-writes-cost.test.ts. The webhook settings' write tries
+ * again, up to CONFIG_WRITE_TRIES (lib/webhooks.ts) times, while another write changes them meanwhile, each lost try
+ * billed in full (Claude 4 3Kc's MEDIUM on #5249): the dearest is a hook removed from a full list after
+ * CONFIG_WRITE_TRIES - 1 lost tries, 65 commands, 41 past the unit (8 at the first try).
+ */
+export const API_HOOK_ACCESS_EXTRA_COMMANDS = 41;
 /**
  * What reading back one delivery line adds at the most (lib/webhooks.ts, writeLines and countNotKept; Claude 7 on
  * #3446, 6889869993): a SET answered in a shape it cannot read, or a call that failed, is followed by one GET of the
@@ -2554,6 +2567,17 @@ export const COST_LINES: CostLine[] = [
     basis: "Every monthly email sent, at the most an email costs. A review ask whose claim's stretch to SENT_MARK_SECONDS was not confirmed reads the claim again before letting it go (lib/review-requests.ts stretchLanded, 17 November 2026): a GET, a TTL and a GET in one pipeline, three commands for each such claim, about $0.000006 at Upstash's $2 a million, inside what an email is priced at. A plain batch's email that goes by Amazon (sendBatch: product updates, community announcements, review asks, imports; never a list batch) takes at most three commands more for its possibly-taken mark (lib/ses.ts, 13 November 2026): a SET NX before Amazon is asked, a GET when the batch is tried again, a DEL when Amazon says for certain it did not take it, kept two days at most; about $0.000006 at Upstash's $2 a million, inside what an email is priced at. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
   },
   {
+    id: "mail-click-keys",
+    feature: "The key a sequence email's links carry for a reader who allowed their link use to be seen (lib/mail-clicks.ts), written only while they still allow it (Codex G-20261121-0033)",
+    // Every monthly email of the plan as a sequence email to a reader who allowed it (the dearest way).
+    monthlyUsd: (tier) => monthlyEmails(tier) * MAIL_CLICK_KEY_COMMANDS * COMMAND,
+    sources: [
+      { file: "lib/mail-clicks.ts", names: ["MAIL_CLICK_KEY_COMMANDS", "MAIL_CLICK_KEY_LIVE", "rememberLinkKeys"] },
+      { file: "lib/mail.ts", names: ["rememberLinkKeys(store.listId as string"] },
+    ],
+    basis: "Before 23 November 2026 a reader's key was one plain SET a sequence email, priced nowhere of its own. It is now one script that writes the key only while the address is not deleted from the store and the reader's row still holds the token, the permission and a yes: the EVAL, two HGETs and the SET, MAIL_CLICK_KEY_COMMANDS as Upstash bills a script, held to what the real write sends by tests/mail-click-key-consent-race.test.ts. Only a sequence's emails carry a key, and only to readers who allowed it, so pricing every monthly email of the plan (monthlyEmails: none on Store) is the most it can cost. The key's 400 days of room are the nl:mail:mk: family (tests/store-data-registry.ts), unchanged.",
+  },
+  {
     id: "mail-gap",
     feature: "Nobody gets too many emails (374 [SU7], 11 November 2026): each person checked against the store's gap before a list email or automation",
     monthlyUsd: (tier) => 2 * mailGapCheckLimit(tier, false) * (MAIL_GAP_COMMANDS_PER_CHECK * COMMAND + 2 * MAIL_GAP_MARK_BYTES * DB_BYTE),
@@ -3287,6 +3311,17 @@ export const COST_LINES: CostLine[] = [
     basis: "In addition to the existing studio request, every studio unit funds six internal commands (EXISTS and HEXISTS on each of three compare-and-swap attempts) and 4096 wire bytes. No extra round trip. The trial uses the same per-unit surcharge in nonPayingWorst; free-share carries its share. Prices and visible allowances do not change.",
   },
   {
+    id: "api-hook-access-writes",
+    feature: "Adding and removing a webhook endpoint and taking back a product through the API, beyond the one API request each takes (#5010 row 150)",
+    // Every API request of the month as the dearest of the three (the most it can be).
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].api * API_HOOK_ACCESS_EXTRA_COMMANDS * COMMAND,
+    sources: [
+      { file: "app/api/v1/hooks/route.ts", names: ["addEndpoint(writer.store", "removeEndpoint(writer.store, id, false)", "webhooksView(writer.store, { log: false })"] },
+      { file: "app/api/v1/access/route.ts", names: ["takeAccess(writer.store, body)"] },
+    ],
+    basis: "Each of the three takes one unit of the store's API figure, as every API request does, and sends more commands than the unit's 20 and TAKE_COMMANDS: the webhook settings are written by a compare-and-set script and read back, and a gift is read before it is taken back, each script billed as Upstash bills it (one, and every redis.call written in it). The excess of the dearest, API_HOOK_ACCESS_EXTRA_COMMANDS, measured through the real routes at their dearest (the last of MAX_ENDPOINTS endpoints added, one removed from a full list, a gift taken back), with the webhook settings' write losing the race to another write on every try but the last, and on every try (lib/webhooks.ts CONFIG_WRITE_TRIES; Claude 4 3Kc's MEDIUM on #5249), in tests/api-hook-access-writes-cost.test.ts, is priced on every API request of the plan's month, the most it can be. Nothing the customer reads changes: the terms, the pricing page and the developers' page still say only a contact added or a product given counts as API_WRITE_UNITS.",
+  },
+  {
     id: "creator-card-erasure-fence",
     feature: "Business-card saves and removals refuse a store that is erasing, moved or gone before changing the card or its room",
     monthlyUsd: (tier) => creatorCardFenceCost(STORE_ALLOWANCES[tier]),
@@ -3676,6 +3711,14 @@ export function decideCalendarRuns(ids: number): number {
  * Each id is read past once: it is out of the index after.
  */
 export const STALE_ID_COMMANDS = Math.ceil((SERVED_COMMANDS + 2) / (MEMBER_STORES_READ - 1));
+/**
+ * What one stale id adds on the wire to the read past's removal, at the most (lib/team.ts TEAM_INDEX_OFF_TEAM v2, #5010
+ * row 133): the team record exactly as it was read, sent back so the same step compares it byte for byte with what is
+ * stored (no digest: redis.sha1hex is not confirmed on Upstash, Claude 5 ibuF's MEDIUM on #5175). A team record is at
+ * most its capped size in tests/store-data-registry.ts, (MAX_TEAM + 10) KB; an id whose team is gone sends nothing.
+ * Carried, as STALE_ID_COMMANDS is, by the closing store for each of its team places (PREPARE in closureCost).
+ */
+export const STALE_ID_WIRE_BYTES = (MAX_TEAM + 10) * 1024;
 export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS) + CLAIMS_LEFT_COMMANDS + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS + DUE_READ_COMMANDS + ERASING_MARK_COMMANDS + FENCED_PREPARE_COMMANDS + MAX_TEAM * STALE_ID_COMMANDS;
 
 /**
@@ -3775,7 +3818,7 @@ export function closureCost(tier: Tier, trial = false): { deletes: number; follo
     follows: (kept + outside) * DB_BYTE + (Math.ceil((roomKeys + outside / MARK) / FOLLOW_BATCH) + FOLLOWED_FAMILIES.length * 4) * COMMAND,
     exports: ENDED_STORE_EXPORTS * exportCost(room + MAX_STORE_BYTES),
     lists: ENDED_LIST_DOWNLOADS * endedListDownloadCost(room + MAX_STORE_BYTES),
-    prepare: PREPARE_COMMANDS * COMMAND,
+    prepare: PREPARE_COMMANDS * COMMAND + MAX_TEAM * STALE_ID_WIRE_BYTES * DB_BYTE,
     visits: CLOSING_VISIT_DAYS * closingVisitCost(),
     total: 0,
   };
@@ -3858,6 +3901,8 @@ export function nonPayingWorst(): number {
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
     // Each integration unit may be a vault open refused for storage, priced on top of its call (VAULT_REFUSED_PASS).
     + allowances.integration * VAULT_REFUSED_PASS
+    // Each API request may be one of the three API writes that send more than their unit (line api-hook-access-writes).
+    + allowances.api * API_HOOK_ACCESS_EXTRA_COMMANDS * COMMAND
     + campaignLandingFenceCost(allowances)
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS

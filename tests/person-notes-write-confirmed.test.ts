@@ -65,6 +65,39 @@ async function main(): Promise<void> {
   is("the delete did not happen: every note is still there", kept, MAX_PERSON_NOTES + 1);
   is("and the room grew by one whole save: nothing given back on a delete that did not happen", (await used()) - before, save);
 
+  part("A hash holding a note that does not read: the save is unknown, and nothing of it stays, written or counted");
+  // Codex X6's LOW on #3159 (and Claude 3's LEVE there): the note was written and its room taken, and only then did the
+  // read of the notes throw, so each press kept one more note, counted, that the studio never showed. Now the note is
+  // taken back with its room.
+  redis.clear();
+  await addPersonNote(STATS, person, "team@example.com", "Asked about a refund", ROOM);
+  redis.run(["HSET", `nl:person:${STATS}:n:${person}`, "0badc0de", "not json"]);
+  const roomBefore = await used();
+  const fieldsBefore = redis.run(["HLEN", `nl:person:${STATS}:n:${person}`]);
+  const refused = await addPersonNote(STATS, person, "team@example.com", "Promised a call back", ROOM).then(
+    () => "answered as saved",
+    (error: unknown) => (error instanceof Error ? error.name : String(error)),
+  );
+  is("the save is unknown, never answered as saved", refused, "UnknownReplyError");
+  is("no note of it stays", redis.run(["HLEN", `nl:person:${STATS}:n:${person}`]), fieldsBefore);
+  is("and no room of it stays taken", await used(), roomBefore);
+
+  part("Taking the note back not confirmed: it stays counted, never given back on a guess");
+  redis.clear();
+  await addPersonNote(STATS, person, "team@example.com", "Asked about a refund", ROOM);
+  const yardstick = await used();
+  await addPersonNote(STATS, person, "team@example.com", "Asked about shipping", ROOM);
+  const oneSave = (await used()) - yardstick;
+  redis.clear();
+  await addPersonNote(STATS, person, "team@example.com", "Asked about a refund", ROOM);
+  redis.run(["HSET", `nl:person:${STATS}:n:${person}`, "0badc0de", "not json"]);
+  const startRoom = await used();
+  restore = answerOnce("HDEL", ["?"]);
+  const unconfirmed = await addPersonNote(STATS, person, "team@example.com", "Asked about shipping", ROOM).then(() => "answered as saved", (error: unknown) => (error instanceof Error ? error.name : String(error)));
+  restore();
+  is("still unknown", unconfirmed, "UnknownReplyError");
+  is("the room taken for it stays counted", (await used()) - startRoom, oneSave);
+
   part("Control: a save and a prune that work are unchanged");
   redis.clear();
   for (let i = 0; i < MAX_PERSON_NOTES + 1; i += 1) await addPersonNote(STATS, person, "team@example.com", `Note ${i}`, ROOM, Date.now() - (MAX_PERSON_NOTES + 1 - i) * 1000);

@@ -207,7 +207,18 @@ export async function addPersonNote(statsId: string, person: string, by: string,
   );
   const [set, kept, listed, keptList] = (wrote ?? []).map(countOf);
   if (!wrote || set !== 1 || kept !== 1 || (listed !== 0 && listed !== 1) || keptList !== 1) throw new UnknownReplyError("saving a buyer's note");
-  const notes = await readPersonNotes(statsId, person);
+  let notes: PersonNote[];
+  try {
+    notes = await readPersonNotes(statsId, person);
+  } catch (error) {
+    // The notes do not read after the write (one note in the hash that does not read, or Redis not answering): this
+    // note is taken back, so a press again never adds one more note, counted, that the studio cannot show (Codex X6
+    // on #3159, LOW; Claude 3's LEVE there). Its room goes back only when its own HDEL answered 1, as a pruned note's
+    // does; any other answer keeps it counted. The read stays after the write, so two notes added at once still trim
+    // to MAX_PERSON_NOTES (tests/person-notes-trim-race.test.ts). The save is unknown either way.
+    await takeBackNote(statsId, person, id, json, room).catch((undo: unknown) => console.error("taking back a buyer's note that could not be read back failed", undo));
+    throw error;
+  }
   if (notes.length > MAX_PERSON_NOTES) {
     const dropped = notes.slice(MAX_PERSON_NOTES);
     // One HDEL a note, so each one's room goes back only when its own delete answered 1; one that answered 0 was
@@ -222,6 +233,16 @@ export async function addPersonNote(statsId: string, person: string, by: string,
     return notes.slice(0, MAX_PERSON_NOTES);
   }
   return notes;
+}
+
+/** addPersonNote's own note taken back (one HDEL), its room given back only when that HDEL answered 1. */
+async function takeBackNote(statsId: string, person: string, id: string, json: string, room: DataStore): Promise<void> {
+  const undone = repliesFor(await redisPipeline([["HDEL", notesKey(statsId, person), id]]), 1);
+  if (!undone || countOf(undone[0]) !== 1) {
+    console.error("taking back a buyer's note was not confirmed; its room stays counted");
+    return;
+  }
+  await giveData(room, [{ slot: NOTES_SLOT, bytes: noteTaken(person, id, json) }]);
 }
 
 /**

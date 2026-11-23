@@ -6,6 +6,7 @@ import { repairMove } from "@/lib/move-repair";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { recoveryLockUntil, spendLostEmailLink } from "@/lib/recovery-address";
 import { HOLD_SECONDS, TWO_STEP_COOKIE, holdSignIn, openLockedSession, twoStepOn } from "@/lib/two-step";
+import { openSessionWhile } from "@/lib/session-while";
 
 /**
  * The tap on /signin/lost/confirm (lib/recovery-address.ts). With two-step
@@ -36,17 +37,21 @@ export async function POST(request: NextRequest) {
     // A passkey removal whose days are over is applied at every login (lib/passkeys.ts).
     await pendingRemoval(email).catch(() => console.error("applying a passkey removal failed"));
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-    if (await twoStepOn(email)) {
+    const toCode = async () => {
       const held = await holdSignIn(email, true);
       const response = away("/signin/code");
       response.headers.append("Set-Cookie", `${TWO_STEP_COOKIE}=${held}; Path=/; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${secure}`);
       return response;
-    }
+    };
+    if (await twoStepOn(email)) return await toCode();
     const previous = request.cookies.get(SESSION_COOKIE)?.value;
     if (previous) await endSession(previous);
     // Locked until the lock's day; after it has run out unanswered, everything is open (lib/recovery-address.ts).
     const until = await recoveryLockUntil(email);
-    const session = until > 0 ? await openLockedSession(email, until) : await openSession(email);
+    // Two-step login turned on in another browser while this was decided: the session just opened is taken back and
+    // the login waits for the app's code, as if it had been on from the start (#4085, lib/session-while.ts).
+    const session = await openSessionWhile(email, async () => !(await twoStepOn(email)), () => (until > 0 ? openLockedSession(email, until) : openSession(email)));
+    if (session === null) return await toCode();
     opened = session;
     const response = away("/studio");
     response.headers.append("Set-Cookie", sessionCookie(session));

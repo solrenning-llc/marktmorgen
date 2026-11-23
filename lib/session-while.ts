@@ -10,8 +10,13 @@ import { UnknownReplyError } from "@/lib/redis-reply";
  * app leaves as it is (lib/two-step.ts finishSetup). Re-reading before opening would leave the window open. A
  * reading that throws, or a take-back that is not confirmed, throws (CX-123 rule 24): never a session given out.
  */
-export async function openSessionWhile(email: string, still: () => Promise<boolean>): Promise<string | null> {
-  const id = await openSession(email);
+export async function openSessionWhile(
+  email: string,
+  still: () => Promise<boolean>,
+  /** How the session is opened: a full one, or a locked one through the recovery address (#4085). */
+  open: () => Promise<string> = () => openSession(email),
+): Promise<string | null> {
+  const id = await open();
   let holds = false;
   try {
     holds = await still();

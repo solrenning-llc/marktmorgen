@@ -10,7 +10,10 @@
  */
 import { NextRequest } from "next/server";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
-import { finishSetup, startSetup, TWO_STEP_COOKIE } from "@/lib/two-step";
+import { finishSetup, holdSignIn, sendRescue, startSetup, TWO_STEP_COOKIE, twoStepOn } from "@/lib/two-step";
+import { keepRecoveryAddress, sendLostEmailLink } from "@/lib/recovery-address";
+import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
+import { POST as rescueRoute } from "@/app/api/auth/rescue/route";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { finishProvenSignIn } from "@/lib/signin-finish";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -175,6 +178,42 @@ async function main(): Promise<void> {
   const unknown = await take(SHAKY);
   is("the read after opening failed", shaky(), true);
   is("an error page, no session cookie, and none left", [where(unknown).searchParams.get("status"), cookieSet(unknown, SESSION_COOKIE), sessionsOf(SHAKY)], ["invite-error", false, 0]);
+
+  part("The recovery address's lost-inbox link (#4085)");
+  const tokenIn = (to: string, pattern: RegExp) => pattern.exec([...mails].reverse().find((m) => m.to === to)?.text ?? "")?.[1] ?? "";
+  const form = (url: string, token: string) =>
+    new NextRequest(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": `198.51.100.${++ip}` }, body: new URLSearchParams({ token }) });
+  const lostLink = async (email: string, backup: string) => {
+    await sendLostEmailLink(email, `192.0.2.${++ip}`, "https://marktmorgen.com");
+    return tokenIn(backup, /signin\/lost\/confirm\?token=([0-9a-f]{64})/);
+  };
+  const LOST_CALM = "lost.calm@race.example";
+  await keepRecoveryAddress(LOST_CALM, "lost.calm.backup@race.example");
+  const lostCalm = await lostConfirm(form("https://marktmorgen.com/api/auth/lost/confirm", await lostLink(LOST_CALM, "lost.calm.backup@race.example")));
+  is("control: the link opens a (locked) session", [where(lostCalm).pathname, cookieSet(lostCalm, SESSION_COOKIE), sessionsOf(LOST_CALM)], ["/studio", true, 1]);
+  const LOST = "lost@race.example";
+  await keepRecoveryAddress(LOST, "lost.backup@race.example");
+  const lostToken = await lostLink(LOST, "lost.backup@race.example");
+  const lostStop = beforeSessionOpens(() => turnOn(LOST, "lost.backup@race.example", "d".repeat(64)));
+  const lost = await lostConfirm(form("https://marktmorgen.com/api/auth/lost/confirm", lostToken));
+  is("the app was turned on in between", lostStop(), true);
+  is("no session; the login waits for the app's code", [where(lost).pathname, cookieSet(lost, SESSION_COOKIE), cookieSet(lost, TWO_STEP_COOKIE), sessionsOf(LOST)], ["/signin/code", false, true, 0]);
+
+  part("The rescue link, two-step login turned on again meanwhile (#4142)");
+  const rescueLink = async (email: string, backup: string, session: string) => {
+    await turnOn(email, backup, session);
+    if ((await sendRescue(await holdSignIn(email), "https://marktmorgen.com")) !== "sent") throw new Error("no rescue link");
+    return tokenIn(backup, /signin\/rescue\?token=([0-9a-f]{64})/);
+  };
+  const RESCUE_CALM = "rescue.calm@race.example";
+  const calmRescue = await rescueRoute(form("https://marktmorgen.com/api/auth/rescue", await rescueLink(RESCUE_CALM, "rescue.calm.backup@race.example", "e".repeat(64))));
+  is("control: the link turns two-step login off and opens a session", [where(calmRescue).pathname, cookieSet(calmRescue, SESSION_COOKIE), await twoStepOn(RESCUE_CALM)], ["/studio", true, false]);
+  const RESCUE = "rescue@race.example";
+  const rescueToken = await rescueLink(RESCUE, "rescue.backup@race.example", "f".repeat(64));
+  const again = beforeSessionOpens(() => turnOn(RESCUE, "rescue.backup@race.example", "9".repeat(64)));
+  const rescued = await rescueRoute(form("https://marktmorgen.com/api/auth/rescue", rescueToken));
+  is("the app was turned on again in between", [again(), await twoStepOn(RESCUE)], [true, true]);
+  is("no session; the login waits for the new app's code", [where(rescued).pathname, cookieSet(rescued, SESSION_COOKIE), cookieSet(rescued, TWO_STEP_COOKIE), sessionsOf(RESCUE)], ["/signin/code", false, true, 0]);
 
   done();
 }

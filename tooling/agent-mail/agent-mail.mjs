@@ -644,17 +644,23 @@ export function commitsDoPr(pr, ramo = null) {
   try {
     git(["fetch", "-q", "--no-tags", REPO_PRS, `+refs/heads/main:${base}`, `+${fonteDoHead(pr, ramo)}:${cabeca}`]);
     const linhas = git(["log", "--format=%an%x1f%(trailers:key=Claude-Session,valueonly,separator=%x1e)", `${base}..${cabeca}`]).split("\n").filter(Boolean);
-    const familias = new Set(), desconhecidas = new Set(), completas = new Set();
+    const familias = new Set(), desconhecidas = new Set(), completas = new Set(), porFamilia = new Map();
     for (const linha of linhas) {
+      const deste = new Set();
       const [autor, sessoes = ""] = linha.split("\x1f");
       for (const m of sessoes.matchAll(/session_([0-9A-Za-z]{20,40})/g)) completas.add(`session_${m[1]}`);
       const prefixos = [...sessoes.matchAll(/session_([0-9A-Za-z]{7})/g)].map((m) => m[1]);
-      for (const pre of prefixos) (SESSOES[pre] ? familias.add(SESSOES[pre]) : desconhecidas.add(`session_${pre}`));
+      for (const pre of prefixos) (SESSOES[pre] ? deste.add(SESSOES[pre]) : desconhecidas.add(`session_${pre}`));
       const nome = /^Claude (\d+)\b/.exec(autor);
-      if (nome) familias.add(`claude-${nome[1]}`);
-      else if (!prefixos.length && !/^Claude\b/.test(autor)) familias.add("codex");
+      if (nome) deste.add(`claude-${nome[1]}`);
+      else if (!prefixos.length && !/^Claude\b/.test(autor)) deste.add("codex");
       else if (!prefixos.length) desconhecidas.add(`autor "${autor}" sem trailer`);
+      for (const f of deste) { familias.add(f); porFamilia.set(f, (porFamilia.get(f) ?? 0) + 1); }
     }
+    // A família dominante (coordenador, dd03): a de mais commits no PR; num empate, todas as empatadas. É a autora de
+    // um PR cujo ramo não tem prefixo de família (claude/...), para a fila (0410, 3 (b)).
+    const maior = Math.max(0, ...porFamilia.values());
+    const dominantes = maior ? [...porFamilia].filter(([, n]) => n === maior).map(([f]) => f).sort() : [];
     // O tamanho da revisão (OWNER-20261122-0121-MAIL-AVAILABILITY, item 2): linhas mudadas fora dos testes desde a base
     // comum com o main (AC (f)); null quando não pôde ser lido, e então a revisão conta como longa.
     let tamanho = null;
@@ -666,7 +672,7 @@ export function commitsDoPr(pr, ramo = null) {
         tamanho += Number(mais) + Number(menos);
       }
     } catch { tamanho = null; }
-    return { familias, desconhecidas, sessoes: completas, linhas: tamanho };
+    return { familias, desconhecidas, sessoes: completas, linhas: tamanho, dominantes };
   } catch {
     return null;
   } finally {
@@ -1341,8 +1347,16 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     // HOLD de qualquer um, ou CLAIMED de outra família, segura o primeiro da fila; os mais novos esperam atrás dele.
     // ce2d: quem deu veredito neste head só no PR também não o enfileira; sem ler o PR, ele não é entregue.
     if (alvo) {
-      const doRamo = familiaDoRamo(campoCabecalho(alvo.texto, "Ramo"));
-      if (doRamo === familia(eu)) return { espera: `o primeiro da fila, #${alvo.pr}, é de um ramo da sua família (${campoCabecalho(alvo.texto, "Ramo")}); outra família o enfileira (0410, 3 (b))` };
+      const ramoAlvo = campoCabecalho(alvo.texto, "Ramo");
+      const doRamo = familiaDoRamo(ramoAlvo);
+      if (doRamo === familia(eu)) return { espera: `o primeiro da fila, #${alvo.pr}, é de um ramo da sua família (${ramoAlvo}); outra família o enfileira (0410, 3 (b))` };
+      // Ramo sem prefixo de família (claude/...): a autora é a família dominante nos commits (coordenador, dd03); sem ler
+      // os commits, o pedido não é entregue.
+      if (!doRamo) {
+        const cm = commitsDoPr(alvo.pr, ramoAlvo || null);
+        if (!cm) return { espera: `os commits do #${alvo.pr} não puderam ser lidos agora, e o ramo não diz a família do autor (NÃO CONFERIDO); a fila espera; tente de novo` };
+        if (cm.dominantes.includes(familia(eu))) return { espera: `o primeiro da fila, #${alvo.pr}, tem a maior parte dos commits da sua família, que conta como autora num ramo sem prefixo de família; outra família o enfileira (0410, 3 (b); dd03)` };
+      }
       const noPr = revisoresNoPr(alvo.pr, alvo.sha);
       if (noPr === null) return { espera: `as revisões escritas no #${alvo.pr} não puderam ser conferidas agora (NÃO CONFERIDO); a fila espera; tente de novo` };
       if (noPr.has(familia(eu))) return { espera: `o primeiro da fila, #${alvo.pr}, tem veredito da sua família neste head no PR; outra família o enfileira (FQ (1), ce2d)` };
@@ -2229,14 +2243,17 @@ async function main(argv) {
         // do autor: a de quem pede e a do prefixo do ramo (0410, 3 (b)). As famílias com commit podem enfileirar.
         const excluidas = String(o.exclui === true ? "" : o.exclui ?? "").split(",").map((n) => n.trim()).filter(Boolean).map(familia);
         const revisoresFila = tipo === "fila" ? [...revisoresDoHead(o.pr, o.sha)] : [];
-        const doRamo = tipo === "fila" ? familiaDoRamo(ramoDoHead(o.sha, o.pr)) : null;
+        const doRamoLido = tipo === "fila" ? familiaDoRamo(ramoDoHead(o.sha, o.pr)) : null;
+        // Ramo sem prefixo de família: a autora é a família dominante nos commits (coordenador, dd03).
+        const autoras = tipo === "fila" ? (doRamoLido ? [doRamoLido] : commits.dominantes) : [];
         // c944: na revisão, quem já deu READY neste head (correio ou PR) não aparece entre os que podem revisar.
         const jaRevisaram = tipo === "revisao" ? [...revisoresDoHead(o.pr, o.sha, undefined, { soReady: true }), ...(vereditos ?? [])] : [];
-        const fora = new Set([...(tipo === "revisao" ? commits.familias : []), ...revisoresFila, ...jaRevisaram, familia(o.de), ...(doRamo ? [doRamo] : []), ...excluidas]);
+        const fora = new Set([...(tipo === "revisao" ? commits.familias : []), ...revisoresFila, ...jaRevisaram, familia(o.de), ...autoras, ...excluidas]);
         console.log(tipo === "fila"
           ? `famílias com commits no PR (podem enfileirar se não forem a do autor nem revisoras, 0410 3 (b)): ${[...commits.familias].sort().join(", ") || "nenhuma além do autor"}`
           : `famílias com commits no PR (ficam de fora): ${[...commits.familias].sort().join(", ") || "nenhuma além do autor"}`);
-        if (doRamo && doRamo !== familia(o.de)) console.log(`a família do ramo do PR (${doRamo}) também fica de fora, como autora`);
+        const outrasAutoras = autoras.filter((f) => f !== familia(o.de));
+        if (outrasAutoras.length) console.log(`${doRamoLido ? `a família do ramo do PR (${doRamoLido})` : `a família com mais commits no PR, num ramo sem prefixo de família (${outrasAutoras.join(", ")})`} também fica de fora, como autora`);
         if (jaRevisaram.length) console.log(`famílias com READY neste head (ficam de fora, c944): ${[...new Set(jaRevisaram)].sort().join(", ")}`);
         const podem = [...FAMILIAS].filter((f) => !fora.has(f));
         console.log(`${tipo === "fila" ? "podem enfileirar (sem o autor, quem revisou este head pelo correio e os excluídos; confira revisões feitas fora do correio)" : "podem revisar"}: ${podem.join(", ") || "NENHUMA família; peça ao coordenador"}`);

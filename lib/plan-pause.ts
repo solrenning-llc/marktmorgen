@@ -48,6 +48,7 @@ import {
   isBillingConfigured,
   periodEnd,
   planOf,
+  legacyRestartPrice,
   restartPlan,
   setCancelAtPeriodEnd,
   stateOf,
@@ -792,8 +793,19 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
     // every batch's deadline (PAUSE_HELD_OFFSET), so it never fills this bounded batch; the
     // creator's undo and a hand restart (dropPause) still reach it.
     let current = stored.raw;
+    let priceId: string | undefined;
     if (!record.funding) {
       if (record.attempt !== undefined) { counts.failed += 1; continue; }
+      // Everything that can fail before the only POST (the customer, the card, the price lookup) runs before the
+      // attempt is written: a failure here posted nothing, so no attempt is kept, nobody is told, and the next daily
+      // run tries again (Claude 3's LEVE 5 on #3671). Only the POST and what follows it are held.
+      try {
+        priceId = await legacyRestartPrice({ customerId: record.customer, paymentMethod: record.paymentMethod, tier: record.tier });
+      } catch (error) {
+        console.error("a plan restart could not be prepared; tried again on the next run", store.handle, error);
+        counts.failed += 1;
+        continue;
+      }
       current = await markObservedAttempt(ref, stored.raw, nowSeconds);
       if (current === null) { counts.failed += 1; continue; }
     }
@@ -804,6 +816,7 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
         paymentMethod: record.paymentMethod,
         tier: record.tier,
         idempotencyKey: `restart:${record.subscription}:${record.until}`,
+        ...(priceId !== undefined ? { priceId } : {}),
         ...(record.funding ? { funding: { statsId: store.statsId ?? "", sourceSubscriptionId: record.subscription, sourceGrantId: record.funding.grantId, ref, paused: stored.raw ?? "" } } : {}),
       });
       if(started.fundedPublication===true){

@@ -58,6 +58,9 @@ export function findLesson(_course: unknown, lessonId: string) {
 export const storeFolder = async () => FOLDER;
 /** lib/auth.ts normaliseEmail, which lib/suppression.ts (the open's ask whether the buyer was deleted) reads. */
 export const normaliseEmail = (email: string) => email.trim().toLowerCase();
+/** lib/auth.ts EMAIL_PATTERN and MAX_EMAIL_LENGTH, the same values, which lib/joined-stores.ts reads for the buyer's reply email (unit 6). */
+export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const MAX_EMAIL_LENGTH = 254;
 export const storeRef = () => "owner@example.test";
 // Read by lib/auth.ts (through lib/handle-prefill.ts), which the buyer's reply email loads for its address checks (unit 6).
 export const normaliseHandle = (raw: string) => raw.trim().replace(/^@+/, "").toLowerCase();

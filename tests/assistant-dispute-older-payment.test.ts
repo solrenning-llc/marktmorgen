@@ -22,6 +22,8 @@ const DAY = 86_400;
 /** The add-on's monthly invoices, newest first: the one at `disputedAt` index has its charge disputed. */
 let disputedIndex = 3;
 let moreThanAPage = false;
+/** What Stripe says of the add-on's own subscription: set to end at the period's end, which a normal sync writes down. */
+let endsAtPeriodEnd = false;
 const asked: URLSearchParams[] = [];
 const invoices = () =>
   Array.from({ length: 8 }, (_, i) => ({
@@ -36,7 +38,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   const one = /^\/v1\/subscriptions\/(sub_\w+)$/.exec(url.pathname);
   if (one && method === "GET") {
-    return Response.json({ id: one[1], status: "active", cancel_at_period_end: false, customer: "cus_DisputeOlder01", metadata: { addon: "assistant", assistant_for: "disputeolder" }, items: { data: [{ current_period_start: period.start, current_period_end: period.end }] } });
+    return Response.json({ id: one[1], status: "active", cancel_at_period_end: endsAtPeriodEnd, customer: "cus_DisputeOlder01", metadata: { addon: "assistant", assistant_for: "disputeolder" }, items: { data: [{ current_period_start: period.start, current_period_end: period.end }] } });
   }
   if (one && method === "DELETE") return Response.json({ id: one[1], status: "canceled" });
   if (one && method === "POST") return Response.json({ id: one[1], status: "active", cancel_at_period_end: true });
@@ -81,10 +83,23 @@ async function main() {
   await freshStore();
   disputedIndex = -1;
   moreThanAPage = true;
+  // Claude 4 3Kc on #5315 @615c99f668: with nothing a normal sync would write, the store looked the same with or
+  // without the refusal. Stripe now says the add-on ends at the period's end, which a sync that went on would write
+  // down (cancelsAtEnd), so a list read in part taken as complete shows.
+  endsAtPeriodEnd = true;
   await syncAssistant((await storeForEmail(owner))!);
   const unknown = await storeForEmail(owner);
   moreThanAPage = false;
-  is("never 'none disputed' on a list read in part: the store stays as it was", [Boolean(unknown?.assistantPlan?.disputedAt), unknown?.assistantPlan?.active], [false, true]);
+  endsAtPeriodEnd = false;
+  is("never 'none disputed' on a list read in part: the store stays as it was", [Boolean(unknown?.assistantPlan?.disputedAt), unknown?.assistantPlan?.active, unknown?.assistantPlan?.cancelsAtEnd], [false, true, false]);
+
+  part("The same subscription, its invoices read whole: a sync writes it down");
+  await freshStore();
+  disputedIndex = -1;
+  endsAtPeriodEnd = true;
+  await syncAssistant((await storeForEmail(owner))!);
+  endsAtPeriodEnd = false;
+  is("control: the end at the period's end is written down", (await storeForEmail(owner))?.assistantPlan?.cancelsAtEnd, true);
   done();
 }
 

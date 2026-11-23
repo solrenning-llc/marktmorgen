@@ -943,8 +943,8 @@ export async function forgetCertificatesPerson(courseIds: string[], email: strin
     replies.forEach((n) => replyCount(n, what));
     // Each place on the by-time list this removed gives back the entry it took (#4304); one issued before that list
     // was kept and never added to it took none, and gets none back.
-    const unlisted = list.length ? replyCount(replies[3], what) : 0;
-    if (room && unlisted > 0) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: unlisted * ENTRY_BYTES }]);
+    const takenOffAt = list.length ? replyCount(replies[3], what) : 0;
+    if (room && takenOffAt > 0) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: takenOffAt * ENTRY_BYTES }]);
     gone += list.length;
   }
   return gone;

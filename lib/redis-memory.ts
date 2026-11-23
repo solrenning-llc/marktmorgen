@@ -825,6 +825,30 @@ export class MemoryRedis {
           this.run(["ZADD", line, due, id]);
           return 1;
         }
+        // lib/closed-store-data.ts HOST_CALENDAR_DEL_IF_UNCHANGED (#5010 row 105): a host's calendar deleted only if every
+        // team read is as it was ("v" and the record, or "n"), every record read is still there or still not ("1"/"0"),
+        // and every set read has the same members but the closing store's id, sorted; else -1. Each inner call counted
+        // as Upstash bills it.
+        if (key.startsWith("-- marktmorgen:host-calendar-del-if-unchanged:v1\n")) {
+          const n = Number(args[0]);
+          const keys = args.slice(1, 1 + n);
+          const argv = args.slice(1 + n);
+          const [c, g, e, m, own] = [Number(argv[0]), Number(argv[1]), Number(argv[2]), Number(argv[3]), argv[4]];
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          for (let i = 0; i < g; i += 1) {
+            const value = call(["GET", keys[c + i]]);
+            if ((value === null ? "n" : `v${String(value)}`) !== argv[5 + i]) return -1;
+          }
+          for (let i = 0; i < e; i += 1) if (String(call(["EXISTS", keys[c + g + i]])) !== argv[5 + g + i]) return -1;
+          for (let i = 0; i < m; i += 1) {
+            const members = (call(["SMEMBERS", keys[c + g + e + i]]) as string[]).map(String).filter((id) => id !== own).sort();
+            if (members.join("\n") !== argv[5 + g + e + i]) return -1;
+          }
+          return call(["DEL", ...keys.slice(0, c)]);
+        }
         // lib/host-calendar.ts: compare the exact config and keep the reading in the same operation.
         if (key.startsWith("-- marktmorgen:host-reading-current:v1\n") && args[0] === "3" && args.length === 8) {
           const [, config, target, failure, expected, value, seconds, kind] = args;

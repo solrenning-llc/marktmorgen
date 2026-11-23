@@ -25,6 +25,9 @@ import { paidPeriod } from "./billing-period-fixture";
 import { closeForErasure } from "./closed-for-erasure";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { SERVED_COMMANDS, SERVING_READ_COMMANDS, SERVING_RECHECK_COMMANDS } from "./plan-cost-registry";
+import { MEMBER_STORES_READ } from "@/lib/team";
+import { createHash } from "node:crypto";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 // An exact literal already known to tests/resend-fixture-credentials.ts, so no shared list is edited (AC (d)).
@@ -188,6 +191,40 @@ async function main(): Promise<void> {
     if (!(await putMember(live, HOST, "editor"))) throw new Error("setup: the host is not on the live store's team");
     for (let k = 0; k <= 3; k += 1) await walkAt(walkTime(at, k));
     is("the calendar stays and the store leaves the batch", [await joined(liveSid), calendarKept(HOST), batchLeft()], [true, [1, 1, 1, 1], 0]);
+  }
+
+  part("Cost (rule 964c): one host's decision, at the most the registry prices it");
+  {
+    const { at } = await setUp();
+    // The host's team index full to what is read (MEMBER_STORES_READ ids, each a store id with no team), so each of
+    // them is read by what decides it, by servesAnother and again by the recheck.
+    const index = `nl:team:of:${createHash("sha256").update(`nimbus-team-of:${HOST}`).digest("hex").slice(0, 40)}`;
+    for (let i = 0; i < MEMBER_STORES_READ; i += 1) redis.run(["SADD", index, createHash("md5").update(`full-index-${i}`).digest("hex")]);
+    let counting = false;
+    let sent = 0;
+    let inner = 0;
+    let rechecks = 0;
+    redis.pipeline = (async (commands: Command[]) => {
+      // From what decides the host, read first (its first command is the index's SMEMBERS), to the recheck's answer.
+      if (!counting && commands.some((c) => c[0] === "SMEMBERS" && c[1] === index)) counting = true;
+      const before = redis.scriptCalls;
+      const real = await realPipeline(commands);
+      if (counting) {
+        sent += commands.length;
+        inner += redis.scriptCalls - before;
+        if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:host-calendar-del-if-unchanged:"))) {
+          rechecks += 1;
+          counting = false;
+        }
+      }
+      return real;
+    }) as typeof redis.pipeline;
+    for (let k = 0; k <= 3; k += 1) await walkAt(walkTime(at, k));
+    redis.pipeline = realPipeline;
+    const priced = SERVING_READ_COMMANDS + SERVED_COMMANDS + SERVING_RECHECK_COMMANDS;
+    is("the host is decided once, with one recheck, and their calendar goes", [rechecks, calendarKept(HOST), batchLeft()], [1, [0, 0, 0, 0], 0]);
+    is(`its commands, inner calls counted, are within what the registry prices for one host (${priced})`, [sent + inner <= priced, sent + inner > 2 * MEMBER_STORES_READ], [true, true]);
+    console.log(`one host's decision with a full index: ${sent} sent and ${inner} inside the recheck, ${sent + inner} of ${priced} priced`);
   }
 
   done();

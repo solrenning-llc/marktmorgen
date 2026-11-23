@@ -165,9 +165,13 @@ async function main() {
     emailPlatform: reaches(`nl:esync:cfg:${store.statsId}`),
     phones: reaches(`nl:phone:cfg:${store.statsId}`),
     path: reaches(`nl:path:${store.sid}`),
+    // A host's own calendar is the host's, not the store's: since #5010 row 105 it is never in the store's fenced
+    // deletes, but decided once the store is finished, in its own step that deletes it only if what the decision read
+    // has not changed (decideCalendars, tests/host-calendar-join-during-closing.test.ts). By then the erasing mark has
+    // refused the plan, so a store whose plan runs again never reaches it.
     calendar: reaches(hostCalendarKeys(hostId(owner))[0]),
     record: reaches("nl:store:owner:"),
-  }, { claims: true, team: true, apiKeys: true, webhooks: true, emailPlatform: true, phones: true, path: true, calendar: true, record: true });
+  }, { claims: true, team: true, apiKeys: true, webhooks: true, emailPlatform: true, phones: true, path: true, calendar: false, record: true });
 
   for (let n = 0; n < census.length; n += 1) {
     part(`The lock runs out just before step ${n} (${census[n]}), and the plan tries to start again`);

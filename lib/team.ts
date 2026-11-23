@@ -882,6 +882,15 @@ export type JoinResult =
   | { ok: false; reason: "expired" | "gone" | "full" | "owner" };
 
 /**
+ * The keys a closing walk reads to know whether a person serves a store as one of its team (memberStoresExact): their
+ * team index and each store's team. The walk reads them once more before it deletes the person's own calendar, and
+ * deletes only if nothing it read changed since (lib/closed-store-data.ts, decideCalendars; #5010 row 105).
+ */
+export function servingKeys(email: string): { index: string; team: (sid: string) => string } {
+  return { index: indexKey(normaliseEmail(email)), team: teamKey };
+}
+
+/**
  * Spends an invitation and puts its person on the team.
  *
  * The link is deleted first, in one step, so it can only ever be used once
@@ -925,6 +934,12 @@ export async function spendInvite(token: string): Promise<JoinResult> {
     if (!already && team.members.length >= MAX_TEAM) return { ok: false, reason: "full" };
 
     const member: Member = already ?? { email, role: invite.role, joinedAt: new Date().toISOString() };
+    // The person's team index first, still under the team's lock, then the team (#5010 row 105, Codex
+    // L-20261119-0659): written the other way round, after the lock, a closing walk that read them between the two saw
+    // the team listing them and an index that did not, took them for serving no other store and deleted their own
+    // calendar while they were on this one. An index entry with no team behind it, left if the team's write fails,
+    // is no store they serve (memberStoresExact reads the team).
+    await redisPipeline([["SADD", indexKey(email), store.sid]]);
     await saveTeam(store.sid, {
       members: already ? team.members : [...team.members, member],
       invites: team.invites.filter((i) => i.id !== invite.id),
@@ -932,6 +947,8 @@ export async function spendInvite(token: string): Promise<JoinResult> {
     return { ok: true, member };
   });
   if (!joined.ok) return joined;
+  // And once more after the team: an index longer than is read (memberStoresExact) takes out, through
+  // TEAM_INDEX_OFF_TEAM, an id whose team does not list the person yet, which the write above can be for a moment.
   await redisPipeline([["SADD", indexKey(email), store.sid]]);
   return { ok: true, store, member: joined.member };
 }

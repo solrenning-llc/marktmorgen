@@ -552,8 +552,12 @@ export async function issuedKeys(
   const byEmail = options.byEmail !== false;
   if (!store.statsId || !isRedisConfigured()) return { keys: [], total: 0, revoked: 0 };
   const [raw] = await redisPipeline([["HGETALL", infoKey(store, product)]]);
+  // Read exactly (unknown is never zero): the studio shows the keys given and keyCounts counts them from this list, so
+  // a reply in another shape throws and the keys route answers an error, never "0 keys given" (Codex X6's LOW 1 on
+  // #2868, #5285). An empty hash is the list Redis answers for a product that has given none.
+  if (!Array.isArray(raw)) throw new UnknownReplyError("a product's license key records");
   const all: IssuedKey[] = [];
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
+  const flat = raw as unknown[];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const entry = parseInfo(String(flat[i]), flat[i + 1]);
     if (entry) all.push(entry);

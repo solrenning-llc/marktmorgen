@@ -149,12 +149,15 @@ export async function contactFor(store: Store, email: string, before: number, ch
   if (!affiliatesOn(store) || !creditsContacts(store.affiliates) || !store.statsId || !email || !isRedisConfigured()) return "";
   const address = normaliseEmail(email);
   if (!EMAIL_PATTERN.test(address)) return "";
-  const reply = repliesFor(await redisPipeline([["HGET", leadsKey(store.statsId), leadId(store.statsId, address)]]), 1);
+  const id = leadId(store.statsId, address);
+  const reply = repliesFor(await redisPipeline([["HGET", leadsKey(store.statsId), id]]), 1);
   if (!reply) throw new UnknownReplyError("an affiliate's contact");
   const [raw] = reply;
   if (raw === null) return "";
   const lead = parseLeadExact(raw);
-  if (!lead) throw new UnknownReplyError("an affiliate's contact");
+  // A readable record under this buyer's field whose id is another field's is not this buyer's lead (Codex
+  // P-20261119-0458): it does not read exactly, so it throws like any other, never credits and is never "no lead".
+  if (!lead || lead.id !== id) throw new UnknownReplyError("an affiliate's contact");
   if (!lead.email || lead.state === "reversed") return "";
   if (!(lead.at > 0 && lead.at < before) || (checkout && lead.ref === checkout)) return "";
   // The fingerprint is of the address written any way; the address kept must be the same person's.
@@ -264,7 +267,9 @@ export async function readLeads(store: Pick<Store, "statsId">): Promise<LeadReco
   const out: LeadRecord[] = [];
   for (let i = 0; i < list.length; i += 2) {
     const lead = parseLeadExact(list[i + 1]);
-    if (!lead) throw new UnknownReplyError("an affiliate program's lead");
+    // A readable record under another field is not this lead: deciding it by its embedded id would write a
+    // second field and leave the original behind, so the program's money would no longer have one lead a person.
+    if (!lead || lead.id !== list[i]) throw new UnknownReplyError("an affiliate program's lead");
     out.push(lead);
   }
   return out;
@@ -280,12 +285,17 @@ export async function readLeads(store: Pick<Store, "statsId">): Promise<LeadReco
  */
 export async function leadOf(store: Pick<Store, "statsId">, email: string): Promise<LeadRecord | null> {
   if (!store.statsId || !isRedisConfigured() || !email) return null;
-  const replies = repliesFor(await redisPipeline([["HGET", leadsKey(store.statsId), leadId(store.statsId, email)]]), 1);
+  const id = leadId(store.statsId, email);
+  const replies = repliesFor(await redisPipeline([["HGET", leadsKey(store.statsId), id]]), 1);
   if (!replies) throw new UnknownReplyError("a person's affiliate lead");
   const [raw] = replies;
   if (raw === null) return null;
   const lead = parseLeadExact(raw);
-  if (!lead) throw new UnknownReplyError("a person's affiliate lead");
+  // An already anonymised address is valid; any other identity must be the person whose field was read.
+  // Otherwise the copier could mistake an inconsistent record for this person having no lead at all.
+  if (!lead || lead.id !== id || (lead.email !== "" && canonicalEmail(lead.email) !== canonicalEmail(email))) {
+    throw new UnknownReplyError("a person's affiliate lead");
+  }
   return lead;
 }
 
@@ -375,7 +385,10 @@ export async function forgetLeadPerson(store: Store, email: string): Promise<num
     // again (rule 24).
     if (raw === null) return 0;
     const kept = typeof raw === "string" && parseLead(raw) ? (JSON.parse(raw) as Record<string, unknown>) : null;
-    if (!kept || typeof kept.email !== "string") throw new UnknownReplyError("a person's affiliate lead");
+    if (!kept || kept.id !== id || typeof kept.email !== "string"
+      || (kept.email !== "" && canonicalEmail(kept.email) !== canonicalEmail(email))) {
+      throw new UnknownReplyError("a person's affiliate lead");
+    }
     // The program's kept book shows the address masked (lib/affiliate-book-snapshot.ts): deleted whole, worked out again at the next load.
     // After the address comes off the lead, so a refresh that read the lead before is thrown away by the raised version and one that
     // reads it after never sees the address; and again when the address is already off, so a deletion tried again after this step

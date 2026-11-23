@@ -139,7 +139,7 @@ import { plainAmount } from "@/lib/money";
 import { alertCreator } from "@/lib/phone-alerts";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
-import { type LeadKind, type LeadReason, type LeadStatus, type SettledLead, leadsKey, parseLead, readRefundMark, settleLeads } from "@/lib/affiliate-lead-rules";
+import { type LeadKind, type LeadReason, type LeadRecord, type LeadStatus, type SettledLead, leadsKey, parseLead, readRefundMark, settleLeads } from "@/lib/affiliate-lead-rules";
 import { readMoves } from "@/lib/call-records";
 import { leadWords } from "@/lib/buyer-words/affiliate-leads";
 import { formatMoney } from "@/lib/money";
@@ -5380,6 +5380,14 @@ function bookRecords<T>(reply: unknown, parse: (raw: string) => T | null, what: 
   });
 }
 
+/** A lead's id is its hash field, including after its address is anonymised: never pay or judge another record. */
+function bookLeadRecords(reply: unknown, seen?: (record: LeadRecord, field: string, raw: string) => void): LeadRecord[] {
+  return bookRecords(reply, parseLead, "the leads in the book", (record, field, raw) => {
+    if (record.id !== field) throw new UnknownReplyError("the identity of a lead in the book");
+    seen?.(record, field, raw);
+  });
+}
+
 /** A hash of counts (HINCRBY): each a whole number as Redis writes it, or UnknownReplyError, never a zero. */
 function bookCounts(reply: unknown, what: string): Map<string, number> {
   return new Map(
@@ -5535,7 +5543,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   const written = new Set(referrals.map((r) => r.ref));
   const everything = [...referrals, ...partnerLines, ...recurringLines.filter((r) => !written.has(r.ref))];
   // All of them, read whole: the caps and the budget are counted across the program.
-  const leads = bookRecords(leadsReply, parseLead, "the leads in the book", from(leadsKey(statsId)));
+  const leads = bookLeadRecords(leadsReply, from(leadsKey(statsId)));
   // A booking's lead is reversed by a refund in full of its booking, read with the sales' refunds.
   const bookings = leads.filter((l) => l.kind === "booking" && l.pi);
   let refunds = new Map<string, number>();
@@ -7033,7 +7041,7 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
     const aff = month.slice(0, month.indexOf(":"));
     for (const goal of store.affiliates.bonuses) if (count >= goal.sales) earn(aff, goal.cents);
   }
-  for (const lead of bookRecords(leadsReply, parseLead, "the leads in the book")) {
+  for (const lead of bookLeadRecords(leadsReply)) {
     active(lead.aff, lead.at);
     if (lead.state !== "reversed") earn(lead.aff, lead.cents);
     if (lead.currency !== store.currency) foreign.add(lead.aff);

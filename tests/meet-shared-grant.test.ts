@@ -89,6 +89,20 @@ async function main() {
     is("and the host is taken out of the account's index", (await redis.pipeline([["SISMEMBER", userKey(provider), `h:${HOST}`]]))[0], 0);
   }
 
+  part("A removal notice from the provider leaves a team host's member in the account's index (Claude 5 iYwjc's MEDIUM on #5476)");
+  // The index lists a team host's own calendar as h:<host>, which is no store's id: the notice that the person removed
+  // the app reads its members as stores, so it must leave a host's alone, never drop it as a store with no connection.
+  // Dropped, a store's later disconnect would see nothing else on the account and end the grant the host's calendar uses.
+  await seed("google", [A, `h:${HOST}`]);
+  const forgot = await connect.forgetUser("google", ACCOUNT);
+  is("the store's connection is forgotten by the notice", [forgot.map((f) => f.statsId), (await redis.pipeline([["GET", storeKey("google", A)]]))[0]], [[A], null]);
+  is("the host's member stays in the account's index", (await redis.pipeline([["SISMEMBER", userKey("google"), `h:${HOST}`]]))[0], 1);
+  is("and the host's own calendar connection is untouched", typeof (await redis.pipeline([["GET", hostKey("google")]]))[0], "string");
+  await redis.pipeline([["SET", storeKey("google", B), connection("google", B)], ["SADD", userKey("google"), B]]);
+  revokes = 0;
+  await disconnectFor(B, "google");
+  is("a store connected since that disconnects keeps the grant the host still uses", revokes, 0);
+
   part("An index that cannot be read keeps the grant");
   await seed("google", [A, B]);
   const real = redis.pipeline.bind(redis);

@@ -123,7 +123,8 @@ function install(): void {
       if (postDelayMs) await new Promise((resolve) => setTimeout(resolve, postDelayMs));
       const id = `cs_test_R23Assist${String(sessions.length + 1).padStart(4, "0")}`;
       const body = new URLSearchParams(String(init?.body ?? ""));
-      const made: Session = { id, url: `https://checkout.stripe.com/c/pay/${id}`, status: "open", mode: "subscription", customer: body.get("customer") ?? "", subscription: null, metadata: { addon: body.get("metadata[addon]") ?? "", assistant_for: body.get("metadata[assistant_for]") ?? "" }, amount_subtotal: 6900, currency: "usd" };
+      const made: Session = { id, url: `https://checkout.stripe.com/c/pay/${id}`, status: "open", mode: "subscription", customer: body.get("customer") ?? "", subscription: null, metadata: { addon: body.get("metadata[addon]") ?? "", assistant_for: body.get("metadata[assistant_for]") ?? "", ...(body.get("metadata[assistant_sid]") ? { assistant_sid: body.get("metadata[assistant_sid]")! } : {}) }, amount_subtotal: 6900, currency: "usd" };
+      lastBody = body;
       sessions.push(made);
       if (key) keys.set(key, id);
       return json(made);
@@ -155,6 +156,8 @@ function install(): void {
   }) as typeof fetch;
 }
 let invoicesDisputed = false;
+/** The last checkout POST's form (#5285 row #3334, LOW 2: the add-on names its store by id). */
+let lastBody: URLSearchParams | null = null;
 /** The open pages asked to expire, and whether Stripe answers that ask with an error (#5285 row #3334, LOW 1). */
 const expired: string[] = [];
 let expireFails = false;
@@ -312,6 +315,28 @@ async function main(): Promise<void> {
   posts.length = 0;
   is("an expiry Stripe does not confirm opens nothing", [await outcome(store), posts.length], ["refused", 0]);
   expireFails = false;
+
+  // Board #5285, row #3334: Claude's LOW 2 of 6786975580. The add-on named its store only by its handle; once a store
+  // renames and releases a handle, another store of the same owner and customer can take it, and the add-on would
+  // then be read as that other store's. A new add-on names its store by id (assistant_sid) beside the handle, and an
+  // add-on that names an id is this store's only when the id is its own; one made before keeps the handle.
+  part("The add-on names its store by id: never another store's that took its handle");
+  store = await freshStore();
+  lastBody = null;
+  await outcome(store);
+  is("a new page names the store by id, on the page and on the subscription", [lastBody?.get("metadata[assistant_sid]"), lastBody?.get("subscription_data[metadata][assistant_sid]")], [store.sid, store.sid]);
+  store = await freshStore();
+  subs.push(addOn(1, "active", { metadata: { addon: "assistant", assistant_for: HANDLE, assistant_sid: "s".repeat(32) } }));
+  posts.length = 0;
+  const notMine = await outcome(store);
+  is("a live add-on naming this handle but another store's id is not adopted: a page of this store's own is opened", [notMine.startsWith("checkout "), posts.length], [true, 1]);
+  is("and the daily sync never writes it on this store", [await applyListedAssistant({ ...subs[0] }), (await storeForEmail(OWNER))?.assistantPlan?.subscriptionId ?? null], [false, null]);
+  store = await freshStore();
+  subs.push(addOn(1, "active", { metadata: { addon: "assistant", assistant_for: "someoneelse", assistant_sid: store.sid } }));
+  is("one naming this store's id is this store's, whatever handle it names", [await applyListedAssistant({ ...subs[0] }), (await storeForEmail(OWNER))?.assistantPlan?.subscriptionId], [true, subs[0].id]);
+  store = await freshStore();
+  subs.push(addOn(1, "active"));
+  is("control: one made before, with no id, is still read by its handle", [await applyListedAssistant({ ...subs[0] }), (await storeForEmail(OWNER))?.assistantPlan?.subscriptionId], [true, subs[0].id]);
 
   part("Two tabs at the same moment: both POSTs carry the same Idempotency-Key, so Stripe gives one page");
   store = await freshStore();

@@ -71,8 +71,10 @@ async function exportOf(store: Store, session: string, alter?: (command: (string
   const pipeline = redis.pipeline;
   redis.pipeline = async (list) => {
     if (list.some((c) => c[0] === "LRANGE" && c[1] === answersKey(store))) read = true;
+    const inner = redis.scriptCalls;
     const replies = await pipeline(list);
-    commands += list.length;
+    // A script's inner calls are billed one by one, as Upstash bills them (Claude 6 UoHAG on #5268).
+    commands += list.length + (redis.scriptCalls - inner);
     bytes += Buffer.byteLength(JSON.stringify(replies), "utf8");
     return alter ? replies.map((reply, i) => (alter(list[i]) === undefined ? reply : alter(list[i]))) : replies;
   };
@@ -193,6 +195,7 @@ async function main(): Promise<void> {
     const empty = await exportOf(store, session);
     is("the file is its header alone", [empty.status, empty.text.split("\r\n").length - 2], [200, 0]);
     is("nothing taken from the studio figure: there is nothing to read", empty.taken, 0);
+    is("its answers are never read: the size found none", empty.read, false);
   }
 
   done();

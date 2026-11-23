@@ -250,14 +250,14 @@ async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolea
   return { page: { data, next: next === "0" ? null : next, ...(unreadable ? { unreadable } : {}) }, readBytes };
 }
 
+/** A page of the members, with how many it holds that could not be read (only when there are any), as the list's. */
+type MembersPage = Page<Record<string, unknown>> & { unreadable?: number };
+
 /**
  * The community's members, as the creator's own member list shows them: a
  * page at its most set aside before the scan, settled at what it read and
  * sends before anything is sent, as the list's.
  */
-/** A page of the members, with how many it holds that could not be read (only when there are any), as the list's. */
-type MembersPage = Page<Record<string, unknown>> & { unreadable?: number };
-
 export async function members(store: Store, cursor: string | null, hold: Hold): Promise<MembersPage | Response> {
   const asked = listCursor(cursor, /^\d{1,20}$/);
   if (!asked.ok) return asked.refused;

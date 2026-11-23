@@ -54,6 +54,8 @@ async function withPause<T>(before: () => Promise<unknown>, write: () => Promise
 }
 
 const kept = (result: unknown) => typeof result === "object" && result !== null && (result as { ok?: unknown }).ok === true;
+/** The answer's refusal, so a store erased meanwhile is told "gone" (the route's 404), never "full" (Claude 1's NIT 1 on #5329, 7098033249). */
+const reason = (result: unknown) => (typeof result === "object" && result !== null ? (result as { reason?: unknown }).reason : undefined);
 
 async function main(): Promise<void> {
   part("Control: a live store keeps a new filter and a rename");
@@ -72,6 +74,7 @@ async function main(): Promise<void> {
     await redis.pipeline([["DEL", storeIdCommand(erased.sid)[1]], ["DEL", hash(sid)]]);
   }, () => saveSalesFilter(erased, "Courses", courses(), []));
   is("RED: the save is not called kept", kept(gone), false);
+  is("the save is refused as gone, not as full", reason(gone), "gone");
   is("RED: the erased store's filters are not recreated", await exists(hash(sid)), 0);
 
   part("The store marked erasing while the save waited: nothing is written, new or rename");
@@ -82,8 +85,10 @@ async function main(): Promise<void> {
   const mark = async () => redis.pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(erasing)), String(Date.now())]]);
   const newOne = await withPause(mark, () => saveSalesFilter(erasing, "Refunds", filterFromQuery("product=Refund&kind=products")));
   is("RED: a new filter is refused", kept(newOne), false);
+  is("the new filter is refused as gone, not as full", reason(newOne), "gone");
   const renamed = await withPause(async () => undefined, () => renameSalesFilter(erasing, keptId, "Renamed"));
   is("RED: a rename is refused too", kept(renamed), false);
+  is("the rename is refused as gone", reason(renamed), "gone");
   const raw = ((await redis.pipeline([["HGET", hash(erasing.statsId!), keptId]])) as (string | null)[])[0];
   is("the filter stays as it was before the erasure began", raw === null ? null : (JSON.parse(raw) as { name: string }).name, "Courses");
   is("and nothing new was added", await held(erasing.statsId!), 1);
@@ -94,6 +99,7 @@ async function main(): Promise<void> {
     await redis.pipeline([["SET", storeIdCommand(moved.sid)[1], "someone-else@example.test"]]);
   }, () => saveSalesFilter(moved, "Courses", courses(), []));
   is("RED: the save is not called kept", kept(movedRun), false);
+  is("the moved store's save is refused as gone, not as full", reason(movedRun), "gone");
   is("RED: nothing was written for the old store", await held(moved.statsId!), 0);
 
   part("Capacity is still checked in the same step");

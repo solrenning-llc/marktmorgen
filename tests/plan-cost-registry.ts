@@ -138,7 +138,7 @@ import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { SNS_RECEIPT_COMMANDS_MOST, SNS_RECEIPT_VALUE_BYTES_MOST } from "@/lib/sns-receipt-rules";
-import { ALL_TIME_PAGES } from "@/lib/stats";
+import { ALL_TIME_PAGES, ALL_TIME_READ_COMMANDS } from "@/lib/stats";
 import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, REFUND_TELL_TRIES_AT_MOST } from "@/lib/paypal-sales";
 import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
@@ -1808,6 +1808,19 @@ export const PAYPAL_PENDING_SWEEP = {
  * lib/llc-fixed-costs.ts, so it is not certified, never zero. Held by tests/paypal-refund-erased.test.ts.
  */
 export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1, tellAgainAfterSeconds: 3_600, markCommandsPerOwedLook: 2, recordReadsPerOwedLook: 1, writesPerOwedLookAtMost: 1 } as const;
+/**
+ * One all-time sales reading from Stripe when its ten-minute copy is gone (lib/stats.ts, readAllTimeSales): the
+ * studio's GET /api/store/stats when the creator asks for all-time numbers, and the studio page's background reading
+ * of what buyers get next, at most once every six hours a store (claimPathsRead). The same two lists of
+ * ALL_TIME_PAGES pages of a hundred as a reading of the buyers (BUYER_LEDGER_BYTES, read and then folded into its
+ * copies), waiting on the longer list page by page, and its billed commands: ALL_TIME_READ_COMMANDS, the copy's
+ * STRLEN, the PayPal count's ZCARD and the studio requests' own count (TAKE_COMMANDS). Paid in studio requests before
+ * it is read, ALL_TIME_READ_UNITS of them, with the copy and the PayPal records counted apart by size, a megabyte a
+ * request, as a reading of the buyers counts its own (pre-existing gap raised by Claude 1 in 7074257093 and Claude 4
+ * AC in 7074905617). Its copies' storage is the store's data (tests/store-data-registry.ts, nl:stats: and nl:next:).
+ * tests/all-sales-read-cost.test.ts holds the units to this line.
+ */
+export const ALL_TIME_READ = request("heavy", ALL_TIME_READ_COMMANDS + 2 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 /**
  * The copy a reading of the buyers leaves, stored for its whole life (lib/segments.ts, LEDGER_SECONDS: an hour since
  * the owner's C3-80 (b); Codex R1 on #3226): BUYER_LEDGER_BYTES at Upstash's GB-month rate for that hour. Only a

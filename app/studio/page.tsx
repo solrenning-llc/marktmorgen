@@ -68,6 +68,7 @@ import { IntroEditor } from "@/components/intro-editor";
 import { LookEditor } from "@/components/look-editor";
 import { type PaidCall, catchUpBookings, paidCallsRead } from "@/lib/calls";
 import { productsInStats, reachProducts, readAllTimeSales, resultsByCampaign, studioStats } from "@/lib/stats";
+import { countLedger } from "@/lib/person-agenda-read";
 import { ReadingFailed, ReadingsUsed, keptSales, keptStats, readingsBackAt, readingsLeft } from "@/lib/store-readings";
 import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
@@ -1846,7 +1847,9 @@ export default async function StudioPage({
                   const ids = [...new Set([...pairs.flatMap((p) => [p.from, p.id]), ...firstOnes.map(([id]) => id)])];
                   const titled = paths && ids.length ? readListings(store, ids).catch(() => []) : null;
                   if (await claimed) {
-                    after(() => readAllTimeSales(store).then(() => undefined).catch(() => undefined));
+                    // Counted in studio requests like the creator's own all-time reading (lib/stats.ts, ALL_TIME_READ):
+                    // when they cannot be counted, nothing is read, and the week's record is read again on a later visit.
+                    after(() => readAllTimeSales(store, countLedger(store).count).then(() => undefined).catch(() => undefined));
                   }
                   if (!paths) return null;
                   const listed = new Map(((await titled) ?? []).map((p) => [p.id, p]));

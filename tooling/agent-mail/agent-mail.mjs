@@ -1208,17 +1208,37 @@ export function revisoresNoPr(pr, sha) {
 }
 
 /**
- * c944 (Claude 1 yatz, coordenador 999b): outra sessão da família de `eu` já deu veredito neste head no PR? Vale o
- * veredito cujo texto não nomeia a sessão de `eu` (o nome depois do número da família, como "UoHAG" em "Claude 6 UoHAG").
- * Sem esse nome, não há como separar a própria sessão das irmãs, e a resposta é false. null = NÃO CONFERIDO.
+ * As marcas que separam a sessão de `eu` das irmãs num comentário: cada palavra do nome depois de "Claude N" (letras e
+ * dígitos, 3 ou mais, como "UoHAG" em "Claude 6 UoHAG", ou "main" e "01FR6Z1" em "Claude 2 (main, 01FR6Z1)") e os 10
+ * primeiros caracteres da sessão da nuvem que roda a ferramenta. Antes, a marca era o primeiro pedaço depois do número,
+ * com pontuação e tudo ("(main,"), que nenhum comentário escreve, e o próprio veredito contava como de uma irmã (e0bc do
+ * Claude 2 main, 23/11/2026; coordenador ee5e).
  */
-export function vereditoDeIrmaNoPr(pr, sha, eu) {
+export function marcasDaSessao(eu, sessao = sessaoAtual()) {
+  const resto = String(eu ?? "").replace(/^\s*(?:claude|codex)(?:\s*\d+)?/i, "");
+  const palavras = [...new Set(resto.match(/[A-Za-z0-9]{3,}/g) ?? [])];
+  const id = sessao?.id ? sessao.id.replace(/^session_/, "").slice(0, 10) : "";
+  return { palavras, id: /^[0-9A-Za-z]{10}$/.test(id) ? id : "" };
+}
+
+/**
+ * c944 (Claude 1 yatz, coordenador 999b): outra sessão da família de `eu` já deu veredito neste head no PR? Vale o
+ * veredito que não é da própria sessão: um comentário é dela quando a primeira linha com texto (onde o revisor se nomeia)
+ * traz uma palavra do nome de `eu`, ou quando o texto traz os 10 primeiros caracteres da sessão (marcasDaSessao). Uma
+ * palavra do nome mais abaixo não conta: "main" aparece em "origin/main" no corpo de qualquer revisão. Sem marca nenhuma, não há como separar a própria sessão das irmãs, e a
+ * resposta é false. null = NÃO CONFERIDO.
+ */
+export function vereditoDeIrmaNoPr(pr, sha, eu, sessao = sessaoAtual()) {
   const f = revisoresNoPr(pr, sha);
   if (f === null) return null;
-  const sessao = /^\s*(?:claude|codex)(?:\s*\d+)?\s+(\S+)/i.exec(String(eu))?.[1];
-  if (!sessao) return false;
-  const proprio = new RegExp(`(?:^|[^A-Za-z0-9])${sessao.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`);
-  return (corposNoPr.get(`${pr}@${String(sha).slice(0, 10)}`)?.get(familia(eu)) ?? []).some(({ corpo }) => !proprio.test(corpo));
+  const { palavras, id } = marcasDaSessao(eu, sessao);
+  if (!palavras.length && !id) return false;
+  const nomeada = (texto) => palavras.some((p) => new RegExp(`(?:^|[^A-Za-z0-9])${p}(?![A-Za-z0-9])`).test(texto));
+  const proprio = (corpo) => {
+    const cabecalho = String(corpo).split(/\r?\n/).find((l) => l.trim()) ?? "";
+    return nomeada(cabecalho) || (id !== "" && String(corpo).includes(id));
+  };
+  return (corposNoPr.get(`${pr}@${String(sha).slice(0, 10)}`)?.get(familia(eu)) ?? []).some(({ corpo }) => !proprio(corpo));
 }
 
 /**

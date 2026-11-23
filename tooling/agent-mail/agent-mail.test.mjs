@@ -1312,5 +1312,39 @@ console.log("d993: a review request on a moved head is closed as superseded; a r
     mod.devolvidoPara({ devolveram: new Set(), devolveramSessoes: new Set(["claude-5-x"]) }, "Claude 5 Q") === false, "");
 }
 
+console.log("e0bc: complete-review knows its own verdict on the PR, also for a name like 'Claude 2 (main, 01FR6Z1)' (coordinator ee5e)");
+{
+  const g8 = (args) => g(args, join(T, "p"));
+  const prDe = (n) => {
+    g8(["checkout", "-q", "-B", `e0bc-${n}`, M]); writeFileSync(join(T, "p", `e0bc-${n}.txt`), `${n}\n`); g8(["add", "."]);
+    g8(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", `e0bc ${n}\n\nClaude-Session: https://claude.ai/code/session_01S9eVA3KcXUkc6qPJmpNg4a`]);
+    g8(["push", "-q", "-f", "../prs.git", `HEAD:refs/heads/e0bc-${n}`, `HEAD:refs/pull/${n}/head`]);
+    return g8(["rev-parse", "HEAD"]);
+  };
+  g(["init", "-q", "--bare", "mail-e0bc.git"]); g(["push", "-q", "../mail-e0bc.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m = { CORREIO_REPO: join(T, "mail-e0bc.git"), CORREIO_GIT_DIR: join(T, "dir-e0bc.git") };
+  const linha = (texto) => JSON.stringify([texto, "COLLABORATOR"]) + "\n";
+  // One review per PR: a review requested, taken and completed by `nome` (session `ses`) with `noPr` as the PR's comments.
+  const conclui = (n, nome, ses, noPr) => {
+    const H = prDe(n);
+    const id = /pedido registrado: (\S+)/.exec(run(["request-review", "--from", "Claude 4 X", "--pr", String(n), "--sha", H, "--text", "t"], { ...m, ...as("c4"), FAKE_COMMENTS: "" }).out)?.[1] ?? "";
+    run(["claim-review", "--as", nome], { ...m, CLAUDE_CODE_REMOTE_SESSION_ID: ses, FAKE_COMMENTS: "" });
+    return run(["complete-review", "--as", nome, id, "--result", "READY", "--text", "ok"], { ...m, CLAUDE_CODE_REMOTE_SESSION_ID: ses, FAKE_COMMENTS: noPr(H.slice(0, 10)) });
+  };
+  const AVISO = /aviso: .*claude-2.*já tem veredito/;
+  let r = conclui(971, "Claude 2 (main, 01FR6Z1)", SES.c2, (h) => linha(`Claude 2 main review #971 @${h}: READY\n\nmerge-tree clean against origin/main`));
+  is("e0bc: the session's own verdict, named 'Claude 2 main' on the PR, is not warned about as another session's", r.ok && /concluído/.test(r.out) && !AVISO.test(r.out), r.out);
+  r = conclui(972, "Claude 2 (main, 01FR6Z1)", SES.c2, (h) => linha(`Claude 2 lpgvy review #972 @${h}: READY\n\nmerge-tree clean against origin/main, read on main`));
+  is("e0bc: a sibling's verdict is still warned about, even when its body says 'main' below the header", r.ok && AVISO.test(r.out), r.out);
+  r = conclui(973, "Claude 2 (main, 01FR6Z1)", SES.c2, (h) => linha(`Claude 2 review #973 @${h}: READY (session \`${SES.c2.replace(/^cse_/, "").slice(0, 12)}\`)\n\nbody`));
+  is("e0bc: a verdict that names only the session's id (its first 10 characters) is the session's own", r.ok && !AVISO.test(r.out), r.out);
+  r = conclui(974, "Claude 2 (main, 01FR6Z1)", SES.c2, (h) => linha(`Claude 2 Pfn2k review #974 @${h}: READY\n\nbody`));
+  is("e0bc: another Claude 2 session (Pfn2k), with no word of the name and no id of the session, is a sibling", r.ok && AVISO.test(r.out), r.out);
+  const mod = await import(TOOL);
+  is("e0bc: the marks of 'Claude 2 (main, 01FR6Z1)' and 'Claude 6 UoHAG' are their name words and the session id's first 10",
+    JSON.stringify([mod.marcasDaSessao("Claude 2 (main, 01FR6Z1)", { id: "session_01FR6Z1MtkLEMTRT4AviXXzK" }), mod.marcasDaSessao("Claude 6 UoHAG", null)]),
+    JSON.stringify([{ palavras: ["main", "01FR6Z1"], id: "01FR6Z1Mtk" }, { palavras: ["UoHAG"], id: "" }]));
+}
+
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);
 process.exitCode = falhas ? 1 : 0;

@@ -58,7 +58,11 @@ export async function POST(request: NextRequest) {
       // the store cannot win during the request (Codex L-20261120-0152); it is already saved once this answers ok.
       const addedAt = new Date().toISOString();
       const result = await connectDomain(store, text(body.name, 300), {
-        keep: async (name) => (await replaceDomainIf(ref, store.sid, null, { name, addedAt, liveAt: "" })) !== null,
+        keep: async (name) => {
+          if ((await replaceDomainIf(ref, store.sid, null, { name, addedAt, liveAt: "" })) !== null) return true;
+          // Not written: read once more whether the store holds a domain by now (another press's), to say has_one.
+          return (await storeForEmail(ref))?.domain ? "has_one" : false;
+        },
         clear: async (name) => (await replaceDomainIf(ref, store.sid, name, null)) !== null,
       });
       if (!result.ok) return fail(result.reason);

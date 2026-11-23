@@ -9,6 +9,8 @@
  * while it is still that same pending domain, and the claim is let go only once that clear is confirmed; a pending
  * write that cannot be confirmed asks the provider nothing. Synthetic store, synthetic provider, no network.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createStore, claimHandle, deleteStore as deleteWith, storeForEmail, storeRef, type Store, type StoreDomain } from "@/lib/store";
 import * as storeLib from "@/lib/store";
 import { queueDeleted } from "@/lib/closed-store-data";
@@ -48,7 +50,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
 /** The pending-domain writer the route hands connectDomain: the same store, the same id, nothing else changed. */
 const pendingFor = (ref: string, sid: string) => ({
-  keep: async (name: string) => (await replaceDomainIf(ref, sid, null, { name, addedAt: new Date(0).toISOString(), liveAt: "" })) !== null,
+  // As the route does: not written, it reads once more whether the store holds a domain by now, to say has_one.
+  keep: async (name: string) =>
+    (await replaceDomainIf(ref, sid, null, { name, addedAt: new Date(0).toISOString(), liveAt: "" })) !== null ||
+    ((await storeForEmail(ref))?.domain ? ("has_one" as const) : false),
   clear: async (name: string) => (await replaceDomainIf(ref, sid, name, null)) !== null,
 });
 
@@ -139,10 +144,13 @@ async function main(): Promise<void> {
       second = await connectDomain(onPlan(store), NAME, pendingFor(ref, store.sid)).catch(() => "threw" as const);
     };
     const first = await connectDomain(onPlan(store), NAME, pendingFor(ref, store.sid)).catch(() => "threw" as const);
-    is("the second press, read before the first wrote, is refused", second, { ok: false, reason: "unavailable" });
+    // Claude 1 f9afa7's NIT on #5108: it is told the store holds a domain, never "unavailable" while one is connected.
+    is("the second press, read before the first wrote, is told the store already has a domain", second, { ok: false, reason: "has_one" });
     is("the first press connects", first, { ok: true, name: NAME });
     is("and keeps its claim", redis.run(["GET", KEY]) !== null, true);
     is("and its domain", await domainOf(ref), NAME);
+    const route = readFileSync(join(process.cwd(), "app/api/store/domain/route.ts"), "utf8");
+    is("the route answers has_one the same way", /return \(await storeForEmail\(ref\)\)\?\.domain \? "has_one" : false;/.test(route), true);
   }
 
   part("A refusal whose clear cannot be confirmed keeps the claim, so Remove can finish it");

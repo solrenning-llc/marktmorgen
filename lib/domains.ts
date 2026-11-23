@@ -323,7 +323,8 @@ export type ConnectResult =
  * the store's write is confirmed (Codex L-20261120-0152).
  */
 export type PendingDomain = {
-  keep(name: string): Promise<boolean>;
+  /** True once written; "has_one" when not written because the store already holds a domain (another press's). */
+  keep(name: string): Promise<boolean | "has_one">;
   clear(name: string): Promise<boolean>;
 };
 
@@ -366,12 +367,15 @@ export async function connectDomain(store: Store, raw: string, pending: PendingD
   // Written into the store before the provider is asked (Codex L-20261120-0152): a delete of the store is refused while
   // it holds a domain (lib/store.ts deleteStore), so it can no longer win while this request waits and leave the domain
   // on the provider with no record to take it off. Not confirmed written: the provider is asked nothing.
-  if (!(await pending.keep(name).catch(() => false))) {
+  const kept = await pending.keep(name).catch(() => false as const);
+  if (kept !== true) {
     // Only a claim this very call took is let go: a claim that was already this store's (claimed "taken" above) may
     // be a first press's, whose pending domain is what refused this one, and it stays with it (Claude 1 on #5108).
     if (claimed === "ours") await releaseMark(domainKey(name), claim);
     cache.delete(name);
-    return { ok: false, reason: "unavailable" };
+    // A store that already holds a domain by now (a first press's, written while this one ran) is told so, as one
+    // that held it before this press is, never "unavailable" (Claude 1 f9afa7's NIT on #5108).
+    return { ok: false, reason: kept === "has_one" ? "has_one" : "unavailable" };
   }
 
   const added = await vercel("POST", `/v10/projects/${vercelProject()}/domains`, { name });

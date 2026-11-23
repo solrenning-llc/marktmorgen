@@ -33,6 +33,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { takeOnce } from "@/lib/redis-take-once";
 import { withinLimit } from "@/lib/request-guard";
 import { LOCKED_LIST } from "@/lib/locked-words";
 
@@ -269,14 +270,8 @@ export async function sendLostEmailLink(signIn: string, ip: string, origin: stri
 /** Spends a link sent to the recovery address: whose account it opens, or null. */
 export async function spendLostEmailLink(token: string): Promise<string | null> {
   if (!/^[0-9a-f]{64}$/.test(token) || !isRedisConfigured()) return null;
-  let email: unknown;
-  try {
-    [email] = await redisPipeline([["GETDEL", linkKey(token)]]);
-  } catch {
-    const [readBack] = await redisPipeline([["GET", linkKey(token)]]);
-    const [removed] = await redisPipeline([["DEL", linkKey(token)]]);
-    email = countOf(removed) === 1 ? readBack : null;
-  }
+  // Read in its exact shape, once (lib/redis-take-once.ts; #4061): an answer of another shape opens nothing.
+  const email = await takeOnce(linkKey(token));
   if (typeof email !== "string" || !email) return null;
   // Mailed to an address the owner has since taken away or replaced: it opens nothing.
   return (await linkStillBound("lost", token, await recoveryAddress(email))) ? email : null;

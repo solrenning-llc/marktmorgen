@@ -69,6 +69,7 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, SESSION_TTL_SECONDS, SessionsUnknownError, dropSecondStep, endSession, isMoving, normaliseEmail, openSession, sessionKeyOf } from "@/lib/auth";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { takeOnce } from "@/lib/redis-take-once";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
@@ -905,14 +906,8 @@ export async function sendRescue(token: string, origin: string): Promise<"sent" 
 /** Spends a link sent to the recovery address: two-step login is turned off, and the account's address is told. */
 export async function spendRescue(token: string): Promise<string | null> {
   if (!/^[0-9a-f]{64}$/.test(token) || !isRedisConfigured()) return null;
-  let email: unknown;
-  try {
-    [email] = await redisPipeline([["GETDEL", rescueKey(token)]]);
-  } catch {
-    const [readBack] = await redisPipeline([["GET", rescueKey(token)]]);
-    const [removed] = await redisPipeline([["DEL", rescueKey(token)]]);
-    email = countOf(removed) === 1 ? readBack : null;
-  }
+  // Read in its exact shape, once (lib/redis-take-once.ts; #4061): an answer of another shape turns nothing off.
+  const email = await takeOnce(rescueKey(token));
   if (typeof email !== "string" || !email) return null;
   const address = email;
   // Mailed to a recovery address the owner has since taken away or replaced: it turns nothing off.

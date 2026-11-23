@@ -1758,8 +1758,14 @@ export const NUMBERS_SUMMARY_RETRY_COMMANDS = NUMBERS_SUMMARY_RETRY.triesPerPeri
  * return already sends (the paid record's GET, then the order's record and its count in one round trip), under the
  * route's own limit per connection and store ("paypal-return", line orders). What the record and the count keep for
  * those thirty days is in tests/store-data-registry.ts (nl:ppsell:o:, nl:ppsell:try:).
+ * A try PayPal declines lets go of the pending entry it put there only while no other try has been counted since its
+ * own, read and removed in one step (PAYPAL_LET_GO_DECLINED, lib/paypal-sales.ts; Claude 6's LOW 2 on #3404, row #3404
+ * of #5285): the EVAL, the count's GET and the ZREM, billed as letGoCommandsPerDeclinedTry commands (the EVAL plus each
+ * redis.call, Upstash) where a lone ZREM was sent before, at most once an admitted try. With it an order sends at most
+ * capturesAskedPerOrderAtMost x (commandsPerCaptureAsked + letGoCommandsPerDeclinedTry) = 21 commands before settle's
+ * script, inside a fifth of its own work (ORDER_COMPUTE), held by tests/paypal-pending-requeue-exact.test.ts.
  */
-export const PAYPAL_CAPTURE_WATCH = { countCommandsPerTry: 2, watchCommandsPerCaptureAsked: 2, commandsPerCaptureAsked: 4, capturesAskedPerOrderAtMost: 3, commandsPerRefusedReturnAtMost: 2 } as const;
+export const PAYPAL_CAPTURE_WATCH = { countCommandsPerTry: 2, watchCommandsPerCaptureAsked: 2, commandsPerCaptureAsked: 4, capturesAskedPerOrderAtMost: 3, commandsPerRefusedReturnAtMost: 2, letGoCommandsPerDeclinedTry: 3 } as const;
 /**
  * The daily plans job (lib/plans.ts, settlePlans, from app/api/cron/plans/route.ts), per run, at the most:
  * - readCommandsPerRun: one pipeline reads both lines (SRANDMEMBER of the new plans, ZRANGEBYSCORE ... LIMIT of

@@ -1628,6 +1628,14 @@ export class MemoryRedis {
           this.run(["SET", record, next]);
           return 1;
         }
+        // lib/paypal-sales.ts PAYPAL_LET_GO_DECLINED: a declined try's pending entry let go of only while no other try was counted since its own.
+        if (key.startsWith("-- marktmorgen:paypal-let-go-declined:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, tries, pending, mine, order, bound] = args;
+          const held = this.run(["GET", tries]);
+          const counted = held === null ? NaN : Number(held);
+          if (!Number.isFinite(counted) || Math.min(counted, Number(bound)) !== Number(mine)) return 0;
+          return this.run(["ZREM", pending, order]);
+        }
         // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
         if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
           const [, imported, own, field, job, ...known] = args;

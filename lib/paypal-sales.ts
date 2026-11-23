@@ -119,6 +119,23 @@ redis.call('ZADD', KEYS[6], ARGV[4], ARGV[3])
 redis.call('ZREMRANGEBYSCORE', KEYS[6], '-inf', ARGV[6])
 redis.call('EXPIRE', KEYS[6], ARGV[7])
 return 1`;
+/**
+ * A declined try lets go of the order's pending entry only while no other try has been counted since its own (Claude 6's
+ * second money review of #3404, LOW 2, with Claude 3's LOW 2; row #3404 of #5285): the entry is the order's, not the
+ * try's, so a return that counted a try after this one (watchFirst's INCR comes before its ZADD) may be taking the
+ * payment under it, and a ZREM sent on its own would take that watch away. Read and removed in one step: a try counted
+ * before it keeps the entry (the sweep lets go of it when PayPal's answer or the record's end says so), one counted after
+ * it finds the entry gone and puts it back itself (its ZADD answers 1). A try counted past CAPTURE_TRIES_PER_ORDER is
+ * not one: it writes nothing and asks PayPal nothing (watchFirst's "spent"), so only the admitted tries are read, the
+ * count up to that bound. KEYS: the order's count of tries, the store's pending list. ARGV: the count this try took,
+ * the order, CAPTURE_TRIES_PER_ORDER. Answers ZREM's count, or 0 when another admitted try was counted since (or the
+ * count does not read). Billed as the EVAL plus each redis.call (Upstash): 3 commands a declined try, at most
+ * CAPTURE_TRIES_PER_ORDER an order (PAYPAL_CAPTURE_WATCH.letGoCommandsPerDeclinedTry in tests/plan-cost-registry.ts).
+ */
+const PAYPAL_LET_GO_DECLINED = `-- marktmorgen:paypal-let-go-declined:v1
+local counted = tonumber(redis.call('GET', KEYS[1]))
+if not counted or math.min(counted, tonumber(ARGV[3])) ~= tonumber(ARGV[1]) then return 0 end
+return redis.call('ZREM', KEYS[2], ARGV[2])`;
 /** A product id as the catalog makes them, and a PayPal capture id: what the refund watch reads a paid order by. */
 const PAID_PRODUCT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const CAPTURE_ID = /^[A-Za-z0-9-]{1,64}$/;
@@ -1074,7 +1091,8 @@ async function watchLater(order: string, opened: Opened): Promise<void> {
  * take anything, so a buyer is never charged for an order the sweep could not find. "gone" when the EXPIREAT answers 0
  * (the record ended since it was read: PayPal is not asked, and the sweep lets go of the entry), "added" when this call
  * put it in pending (1), "there" when it was there already (0: watched by an earlier try, whose outcome this one does
- * not know).
+ * not know). With it, the count this try took (0 when nothing was counted), which a declined try's letting go of pending
+ * reads (PAYPAL_LET_GO_DECLINED).
  *
  * The try is counted first, in a step of its own, and only an admitted try writes anything more (Codex X2's MEDIUM 2
  * and Claude 5's MEDIUM on #3411): the INCR of the order's count, read exactly (a whole number from 1), and that
@@ -1089,9 +1107,9 @@ async function watchLater(order: string, opened: Opened): Promise<void> {
  * every return sends; the record's thirty days are in tests/store-data-registry.ts (nl:ppsell:o:), and the count's
  * (nl:ppsell:try:).
  */
-async function watchFirst(order: string, opened: Opened): Promise<"added" | "there" | "gone" | "spent"> {
+async function watchFirst(order: string, opened: Opened): Promise<{ state: "added" | "there" | "gone" | "spent"; tries: number }> {
   const until = keptUntil(opened);
-  if (Math.floor(Date.now() / 1000) + CAPTURE_ROOM_SECONDS >= until) return "gone";
+  if (Math.floor(Date.now() / 1000) + CAPTURE_ROOM_SECONDS >= until) return { state: "gone", tries: 0 };
   const counted = repliesFor(
     await redisPipeline([
       ["INCR", tryKey(order)],
@@ -1102,7 +1120,8 @@ async function watchFirst(order: string, opened: Opened): Promise<"added" | "the
   if (!counted || typeof counted[0] !== "number" || !Number.isSafeInteger(counted[0]) || counted[0] < 1 || counted[1] !== 1) {
     throw new UnknownReplyError("counting a PayPal order's capture tries");
   }
-  if (counted[0] > CAPTURE_TRIES_PER_ORDER) return "spent";
+  const tries = counted[0];
+  if (tries > CAPTURE_TRIES_PER_ORDER) return { state: "spent", tries };
   const replies = repliesFor(
     await redisPipeline([
       ["ZADD", pendingKey(opened.s), String(Math.floor(Date.now() / 1000)), order],
@@ -1113,8 +1132,8 @@ async function watchFirst(order: string, opened: Opened): Promise<"added" | "the
   if (!replies || (replies[0] !== 0 && replies[0] !== 1) || (replies[1] !== 0 && replies[1] !== 1)) {
     throw new UnknownReplyError("putting a PayPal order in pending before its capture");
   }
-  if (replies[1] === 0) return "gone";
-  return replies[0] === 1 ? "added" : "there";
+  if (replies[1] === 0) return { state: "gone", tries };
+  return { state: replies[0] === 1 ? "added" : "there", tries };
 }
 
 /**
@@ -1215,7 +1234,7 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   } catch (error) {
     return unread(error, "watch");
   }
-  if (watched === "gone") return { ok: false, reason: "unknown" };
+  if (watched.state === "gone") return { ok: false, reason: "unknown" };
   // Two returns at once can both read a count under the bound; the count this step took decides (the INCR), so PayPal
   // is never asked more than CAPTURE_TRIES_PER_ORDER times an order, as above, and a refused one wrote nothing past its
   // count. A refused return proves no capture is under watch: the one that took the last try may not have written the
@@ -1223,18 +1242,26 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   // thanks page; the path that read the count at the bound keeps asking where the order stands (standing).
   // The buyer is told it is being confirmed, never that it could not be matched or that nothing was handed over: the
   // return that took the last try is usually this buyer's own other load, taking the payment now (Claude 5's LOW).
-  if (watched === "spent") return { ok: false, reason: "confirming" };
-  const watchedHere = watched === "added";
+  if (watched.state === "spent") return { ok: false, reason: "confirming" };
+  const watchedHere = watched.state === "added";
+  // A declined try lets go of the entry it put in pending only while no other try has been counted since (one step,
+  // PAYPAL_LET_GO_DECLINED; Claude 6's LOW 2 on #3404): an entry another try may be taking the payment under stays for
+  // the sweep. A removal that fails leaves it to the sweep too, which lets it go when its record ends.
+  const letGoDeclined = () =>
+    redisPipeline([["EVAL", PAYPAL_LET_GO_DECLINED, 2, tryKey(order), pendingKey(opened.s), String(watched.tries), order, String(CAPTURE_TRIES_PER_ORDER)]]).catch((again) =>
+      console.error("letting go of a declined PayPal order failed", again),
+    );
   let done: Record<string, unknown>;
   try {
     done = await call("POST", `/v2/checkout/orders/${encodeURIComponent(order)}/capture`, { body: {}, merchant: opened.m, requestId: `nl-capture-${order}` });
   } catch (error) {
     // PayPal's words for a payment it would not take (Orders v2 errors): nothing was charged. Put in pending by this
-    // call only, it holds no capture the sweep could ever find, so it is let go of pending (a removal that fails
-    // leaves it to the sweep, which lets it go when its record ends); the buyer approving again comes back here and is
-    // watched again. Already there before this call (an earlier try whose answer was lost), it stays for the sweep.
+    // call only, it holds no capture the sweep could ever find, so it is let go of pending, unless another try has been
+    // counted since (letGoDeclined; a removal that fails leaves it to the sweep, which lets it go when its record ends);
+    // the buyer approving again comes back here and is watched again. Already there before this call (an earlier try
+    // whose answer was lost), it stays for the sweep.
     if (error instanceof PayPalError && DECLINED.has(error.code)) {
-      if (watchedHere) await redisPipeline([["ZREM", pendingKey(opened.s), order]]).catch((again) => console.error("letting go of a declined PayPal order failed", again));
+      if (watchedHere) await letGoDeclined();
       return { ok: false, reason: "declined" };
     }
     // Anything else — taken already by a request that did not get to write it
@@ -1282,8 +1309,9 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   if (typeof capture.status !== "string" || !CAPTURE_PAID.has(capture.status)) {
     if (typeof capture.status === "string" && CAPTURE_TAKEN_BACK.has(capture.status)) {
       // Declined in the answer itself: nothing was charged, as with PayPal's own refusal above, so an order put in
-      // pending by this call (watchFirst) is let go of it; one there before stays for the sweep.
-      if (watchedHere) await redisPipeline([["ZREM", pendingKey(opened.s), order]]).catch((again) => console.error("letting go of a declined PayPal order failed", again));
+      // pending by this call (watchFirst) is let go of it, unless another try has been counted since (letGoDeclined);
+      // one there before stays for the sweep.
+      if (watchedHere) await letGoDeclined();
       return { ok: false, reason: "declined" };
     }
     console.error("a PayPal capture is in a status not known here; asked again by the sweep", order, capture.status);

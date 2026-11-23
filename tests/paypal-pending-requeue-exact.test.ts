@@ -24,6 +24,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { NextRequest } from "next/server";
 import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
+import { COMMAND, ORDER_COMPUTE, PAYPAL_CAPTURE_WATCH } from "./plan-cost-registry";
 
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
 const PARTNER_SECRET = "EPpartnerSecret0123456789";
@@ -179,8 +180,13 @@ async function main(): Promise<void> {
     part(`A declined try (${how}) never lets go of the entry another try is taking the payment under`);
     const lone = await open();
     captureWith = (o) => (how === "PayPal refuses the capture" ? declined() : { status: 201, body: completed(o, "49.00", "DECLINED", "lone@example.com") });
-    const loneResult = await captureOrder(store, lone);
+    const letGo: Commands = [];
+    const loneResult = await withRedis((commands) => {
+      for (const command of commands) if (command[0] === "EVAL" && String(command[1]).includes("marktmorgen:paypal-let-go-declined")) letGo.push(command);
+      return null;
+    }, () => captureOrder(store, lone));
     is("alone, it is declined and let go of pending, as before", [loneResult.ok ? "paid" : loneResult.reason, await stillPending(store, lone)], ["declined", false]);
+    is("in one step, billed as the EVAL and each redis.call, as tests/plan-cost-registry.ts prices it", letGo.map((command) => 1 + (String(command[1]).match(/redis\.call\(/g) ?? []).length), [PAYPAL_CAPTURE_WATCH.letGoCommandsPerDeclinedTry]);
 
     const order = await open();
     const reachedA = signal();
@@ -221,6 +227,12 @@ async function main(): Promise<void> {
     } finally {
       console.error = logged;
     }
+  }
+
+  part("A declined try's letting go stays inside the order's own work");
+  {
+    const perOrder = PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * (PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked + PAYPAL_CAPTURE_WATCH.letGoCommandsPerDeclinedTry);
+    is("every admitted try declined: the watch and the letting go together inside a fifth of ORDER_COMPUTE", perOrder * COMMAND < ORDER_COMPUTE / 5, true);
   }
 
   done();

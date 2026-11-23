@@ -57,7 +57,7 @@
  */
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, countWithin, repliesFor } from "@/lib/redis-reply";
 import { membershipNumbers } from "@/lib/membership-numbers";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { STORE_PAGE, missedQuestions } from "@/lib/answers";
@@ -377,16 +377,15 @@ function parseSummary(raw: unknown): VoiceSummary | null {
  */
 export async function forgetVoicePerson(statsId: string | null, now = Date.now()): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const replies = repliesFor(
-    await redisPipeline([
-      ["DEL", lockKey(statsId)],
-      ["DEL", ...keptMonths(now).map((month) => voiceKey(statsId, month))],
-    ]),
-    2,
-  );
-  // Both DELs' own counts only: any other answer throws (CX-123 rule 24), so the erasure is never reported done on it.
-  const locked = countOf(replies?.[0]);
-  const gone = countOf(replies?.[1]);
+  const commands = [
+    ["DEL", lockKey(statsId)],
+    ["DEL", ...keptMonths(now).map((month) => voiceKey(statsId, month))],
+  ];
+  const replies = repliesFor(await redisPipeline(commands), 2);
+  // Both DELs' own counts, each at most the keys it names (countWithin; row 70 of #5010): any other answer throws
+  // (CX-123 rule 24), so the erasure is never reported done on it.
+  const locked = countWithin(replies?.[0], commands[0]);
+  const gone = countWithin(replies?.[1], commands[1]);
   if (locked === null || gone === null) throw new UnknownReplyError("the customer voice summaries deleted");
   return gone;
 }

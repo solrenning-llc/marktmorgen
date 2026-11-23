@@ -24,7 +24,7 @@
 import { GRANT_MS } from "@/lib/chat-pace";
 import { roomPass } from "@/lib/chat-pass";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countWithin, repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { isResting, recordParts } from "@/lib/traffic";
 import { ROOM_IDLE_PARTS, ROOM_LIVE_PARTS } from "@/lib/traffic-rules";
@@ -101,8 +101,10 @@ export async function grantRoom(
 /** Deletes the leave one member holds in the room (lib/community-erasure.ts). */
 export async function forgetGrantPerson(id: string, who: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  // DEL's own count only: any other answer throws (CX-123 rule 24), so the erasure is never reported done on it.
-  const gone = countOf(repliesFor(await redisPipeline([["DEL", grantKey(id, who)]]), 1)?.[0]);
+  // DEL's own count, at most the one key it names (countWithin; row 70 of #5010): any other answer throws (CX-123
+  // rule 24), so the erasure is never reported done on it.
+  const command = ["DEL", grantKey(id, who)];
+  const gone = countWithin(repliesFor(await redisPipeline([command]), 1)?.[0], command);
   if (gone === null) throw new UnknownReplyError("the room leave deleted");
   return gone;
 }

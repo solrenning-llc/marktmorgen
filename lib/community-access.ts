@@ -58,7 +58,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { communityWords } from "@/lib/buyer-words/community";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, countWithin, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type DataStore, DataRoomError } from "@/lib/store-data";
 import { StripeBodyTooLarge, StripeError, onAccount } from "@/lib/stripe-account";
@@ -1081,14 +1081,15 @@ export async function openCommunityLink(token: string): Promise<LinkGrant | null
 export async function forgetAccessPerson(id: string, email: string, spaceIds: string[], productIds: string[]): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const key = emailKey(email);
-  const replies = await redisPipeline([
+  const commands = [
     ["DEL", okKey(id, email), holdingsKey(id, email), ...spaceIds.map((space) => `nl:cm:${id}:sp:ok:${space}:${key}`), ...productIds.map((p) => courseDoorKey(id, p, email))],
     ["HDEL", `nl:cm:${id}:wel`, key],
-  ]);
-  // DEL's and HDEL's own counts only (CX-123 rule 24): any other answer throws, so the erasure is never reported done on it.
-  const exact = repliesFor(replies, 2);
-  const removed = countOf(exact?.[0]);
-  const welcomed = countOf(exact?.[1]);
+  ];
+  // DEL's and HDEL's own counts, each at most the keys or fields it names (countWithin; row 71 of #5010; CX-123 rule
+  // 24): any other answer throws, so the erasure is never reported done on it.
+  const exact = repliesFor(await redisPipeline(commands), 2);
+  const removed = countWithin(exact?.[0], commands[0]);
+  const welcomed = countWithin(exact?.[1], commands[1]);
   if (removed === null || welcomed === null) throw new UnknownReplyError("the community access answers forgotten");
   return removed + welcomed;
 }

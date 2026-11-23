@@ -22,7 +22,30 @@ const html = renderToStaticMarkup(
     ],
   } as never),
 );
-const links = [...html.matchAll(/<a [^>]*>([\s\S]*?)<\/a>/g)].map((m) => m[1].replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<[^>]+>/g, "").trim());
+/**
+ * The words of a link as a screen reader's list of links reads them: the text outside every tag, with nothing inside
+ * an svg (an icon). It walks the markup once, tag by tag, so a tag can never be left half removed.
+ */
+function wordsOf(inner: string): string {
+  let words = "";
+  let inIcon = 0;
+  let at = 0;
+  while (at < inner.length) {
+    if (inner[at] !== "<") {
+      if (inIcon === 0) words += inner[at];
+      at += 1;
+      continue;
+    }
+    const end = inner.indexOf(">", at);
+    if (end < 0) throw new Error("a tag that does not close in the rendered link");
+    const tag = inner.slice(at + 1, end);
+    if (/^svg[\s>]?/.test(tag) && !tag.endsWith("/")) inIcon += 1;
+    else if (/^\/svg\b/.test(tag)) inIcon -= 1;
+    at = end + 1;
+  }
+  return words.trim();
+}
+const links = [...html.matchAll(/<a [^>]*>([\s\S]*?)<\/a>/g)].map((m) => wordsOf(m[1]));
 is("each Do it says which step it does", links, ["Do it: Add a second product", "Do it: Build a sales page"]);
 is("the step's name is for screen readers; the button still shows Do it", /Do it<span class="sr-only">: Add a second product<\/span>/.test(html), true);
 

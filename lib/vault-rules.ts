@@ -89,11 +89,13 @@ export function readVaultPath(pathname: unknown): { folder: string; ownerId: str
 export function isVaultPath(pathname: unknown): boolean {
   if (typeof pathname !== "string" || pathname.includes("..") || pathname.includes("//")) return false;
   const parts = pathname.split("/");
-  // A piece is a plain name, or a file's own last piece: its 16-hex token, "-" and a name of up to 120 characters
-  // (vaultPath), so a name the store keeps never makes a path this refuses (Codex X5 on #4356).
-  const piece = (part: string) =>
-    KEY_NAME_PATTERN.test(part) || (TOKEN_PATTERN.test(part.slice(0, 16)) && part[16] === "-" && KEY_NAME_PATTERN.test(part.slice(17)));
-  return parts.length >= 4 && parts[0] === VAULT_PREFIX && FOLDER_PATTERN.test(parts[1]) && parts.slice(2).every(piece);
+  // Every piece after the folder is a plain name. The last may instead be a file's own: its 16-hex token, "-" and a
+  // name of up to 120 characters (vaultPath), so a name the store keeps never makes a path this refuses (Codex X5 on
+  // #4356); that shape is a file's last piece only, never a folder's (board #5285, row #4356).
+  const fileLast = (part: string) => TOKEN_PATTERN.test(part.slice(0, 16)) && part[16] === "-" && KEY_NAME_PATTERN.test(part.slice(17));
+  const last = parts[parts.length - 1];
+  return parts.length >= 4 && parts[0] === VAULT_PREFIX && FOLDER_PATTERN.test(parts[1]) &&
+    parts.slice(2, -1).every((part) => KEY_NAME_PATTERN.test(part)) && (KEY_NAME_PATTERN.test(last) || fileLast(last));
 }
 
 /** Whether a path is a file of this store, on this product, option or lesson. */

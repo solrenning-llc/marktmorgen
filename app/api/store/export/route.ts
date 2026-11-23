@@ -122,13 +122,18 @@ export async function GET(request: NextRequest) {
       const days = range === "30" ? 30 : range === "90" ? 90 : range === "all" ? 0 : -1;
       if (days < 0) return plain(400, "Choose 30 days, 90 days or all time.");
       const since = days ? Math.floor(Date.now() / 1000) - days * 86400 : 0;
-      // One of the month's sales files, counted on its own before anything is read (lib/sales-files.ts).
-      const taken = await takeSalesFile(store);
+      // One of the window's sales files, the owner's own or the team's, counted on its own before anything is read
+      // (lib/sales-files.ts). Once the reading has started, a failure keeps the place: that reading was done.
+      const taken = await takeSalesFile(store, creator.role === "owner");
       if (!taken.ok) return plain(taken.status, taken.message);
-      const { csv, partial } = await salesCsv(store, since).catch(async (error: unknown) => {
-        await taken.giveBack();
-        throw error;
-      });
+      let csv: string;
+      let partial: boolean;
+      try {
+        ({ csv, partial } = await salesCsv(taken.store, since));
+      } catch (error) {
+        console.error("making a sales file failed", error);
+        return plain(502, "Stripe or our records did not answer while your sales were read. This try counted as one of your sales files, because they were read. Try again in a moment.");
+      }
       return file(csv, `${store.handle}-sales-${days ? `${days}-days` : "all"}-${day}${partial ? "-partial" : ""}.csv`);
     }
     if (what === "visits") {

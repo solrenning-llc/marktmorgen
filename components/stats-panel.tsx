@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { AllTimeSales, Ranked, RangeKey, StatsData, Today } from "@/lib/stats";
 import { StoreField } from "@/components/studio-store-pin";
+import { SALES_FILES_WORDS } from "@/lib/studio-allowance-rules";
 import { dashboardPaidComplete, dashboardProducts } from "@/lib/dashboard-coverage";
 import { ledgerPaymentsComplete } from "@/lib/payment-ledger-coverage";
 import { paidFiguresComplete } from "@/lib/paid-coverage";
@@ -1438,9 +1439,10 @@ export function StatsPanel({
                   <option value="all">All</option>
                 </select>
               </label>
-              <button type="submit" className="btn btn-primary btn-sm">
+              <button type="submit" className="btn btn-primary btn-sm" aria-describedby="sales-files-note">
                 Download sales
               </button>
+              <p id="sales-files-note" className="w-full text-xs text-ink-soft">{SALES_FILES_WORDS}</p>
             </form>
           ) : null}
           <form action="/api/store/export" method="get">

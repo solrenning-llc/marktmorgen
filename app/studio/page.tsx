@@ -178,7 +178,7 @@ import { isPaidUp } from "@/lib/billing";
 import { allowanceWindow, calendarWindow, samePeriod } from "@/lib/allowance-window";
 import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, KIND_WORDS, allowanceFor, figureUsedLine } from "@/lib/store-allowance-rules";
 import { allowanceUsedExact } from "@/lib/store-allowance";
-import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
+import { SALES_FILES_PER_MONTH, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 
 import { isSenderConfigured } from "@/lib/email";
 import { DiscountEditor } from "@/components/discount-editor";
@@ -3105,7 +3105,7 @@ export default async function StudioPage({
                       ))}
                     </dl>
                     <p className="mt-3 text-sm text-ink-soft">
-                      {`A page of the studio counts as ${STUDIO_PAGE_UNITS} studio requests, a contact added or a product given through the API as ${API_WRITE_UNITS} API requests, and a page of sales read through the API as ${API_SALES_UNITS}. Past a figure, that use waits until the figure opens again${standing === "paid" && largerOnSale ? ", or for a larger plan" : ""}, with a plain message that says when; nothing is billed. ${PLANS_ON_SALE ? "Changing or canceling your plan" : "Canceling your plan"}, deleting your store and downloading your sales always work.`}
+                      {`A page of the studio counts as ${STUDIO_PAGE_UNITS} studio requests, a contact added or a product given through the API as ${API_WRITE_UNITS} API requests, and a page of sales read through the API as ${API_SALES_UNITS}. Past a figure, that use waits until the figure opens again${standing === "paid" && largerOnSale ? ", or for a larger plan" : ""}, with a plain message that says when; nothing is billed. ${PLANS_ON_SALE ? "Changing or canceling your plan" : "Canceling your plan"}, deleting your store and downloading your sales never use up a figure. Your sales download as up to ${SALES_FILES_PER_MONTH} files a month, and ${SALES_FILES_PER_MONTH} more for your team.`}
                     </p>
                   </div>
                 ) : null}

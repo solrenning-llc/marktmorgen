@@ -1,3 +1,4 @@
+import { SALES_FILES_PER_MONTH } from "@/lib/studio-allowance-rules";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
@@ -107,7 +108,7 @@ export default async function StudioPausedPage({ searchParams }: Params) {
               {why === "daily" ? null : (
               <div className="mt-8 border-t border-line pt-6">
                 <p className="text-sm font-bold text-ink">Never paused</p>
-                <p className="mt-1 text-sm text-ink-soft">{PLANS_ON_SALE ? "Changing your plan, canceling it and taking your sales with you always work." : "Canceling your plan and taking your sales with you always work."}</p>
+                <p className="mt-1 text-sm text-ink-soft">{`${PLANS_ON_SALE ? "Changing your plan and canceling it always work" : "Canceling your plan always works"}, and you can take your sales with you as up to ${SALES_FILES_PER_MONTH} files a month.`}</p>
                 <div className="mt-4 flex flex-wrap items-end gap-3">
                   {can(view.role, "export") ? (
                     <form action="/api/store/export" method="get">

@@ -1258,7 +1258,7 @@ const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "st
  * Stripe sale whose amount was not whole minor units, left out rather than
  * written as zero ("amount").
  */
-export type SalesGap = "paypal" | "stripe-pages" | "currency" | "unread" | "amount";
+export type SalesGap = "paypal" | "stripe-pages" | "currency" | "unread" | "amount" | "file-size";
 
 /**
  * Every paid sale of this store since `since` (seconds), newest first, read
@@ -2860,13 +2860,26 @@ export const EXPORT_PAGES = 50;
  * The store's sales as CSV, newest first: every paid checkout and one-click
  * extra since `sinceSeconds` (0 for all), up to EXPORT_PAGES pages of each.
  */
-export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ csv: string; rows: number; partial: boolean; gaps: SalesGap[] }> {
-  const { sales, partial, gaps } = await readPaidSales(store, sinceSeconds, EXPORT_PAGES);
+/**
+ * The most bytes a sales file sends (#5256 audit, coordinator ea4f 10): its sales come newest first, and a sale whose
+ * line would take the file past this is left out with every older one, the file then partial ("file-size"), so what it
+ * sends is priced at a known most (tests/plan-cost-registry.ts SALES_FILE_COST). Far above what EXPORT_PAGES of sales
+ * take at their usual lines, so a real store does not reach it.
+ */
+export const SALES_FILE_MAX_BYTES = 16_000_000;
+
+export async function salesCsv(store: Store, sinceSeconds: number, maxBytes = SALES_FILE_MAX_BYTES): Promise<{ csv: string; rows: number; partial: boolean; gaps: SalesGap[] }> {
+  const read = await readPaidSales(store, sinceSeconds, EXPORT_PAGES);
+  const { sales } = read;
+  let partial = read.partial;
+  const gaps = [...read.gaps];
   const find = listingFinder(store);
   const title = async (id: string, fallback: unknown) => (await find(id))?.title ?? (typeof fallback === "string" ? fallback : "");
   const lines = [
     csvRow(["paid_at_utc", "stripe_id", "product_id", "product", "price_option", "order_bump", "kind", "amount", "discount", "tax", "currency", "buyer_email", "buyer_name", "buyer_country", "paid_with"]),
   ];
+  let bytes = Buffer.byteLength(lines[0], "utf8") + 2;
+  let rows = 0;
   for (const sale of sales) {
     const row = sale.row;
     const meta = (row.metadata ?? {}) as Record<string, string>;
@@ -2908,8 +2921,17 @@ export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ cs
         meta.paid_with === "paypal" ? "paypal" : "stripe",
       ]),
     );
+    const line = Buffer.byteLength(lines[lines.length - 1], "utf8") + 2;
+    if (bytes + line > maxBytes) {
+      lines.pop();
+      partial = true;
+      gaps.push("file-size");
+      break;
+    }
+    bytes += line;
+    rows += 1;
   }
-  return { csv: `${lines.join("\r\n")}\r\n`, rows: sales.length, partial, gaps };
+  return { csv: `${lines.join("\r\n")}\r\n`, rows, partial, gaps };
 }
 
 /** Every kept day of visits as CSV, newest first. */

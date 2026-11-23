@@ -148,6 +148,7 @@ const ORDERS_GAP: Record<SalesGap, string> = {
   currency: "Stripe did not name the currency of some orders, so their currency is blank in this file: your own Stripe account shows it.",
   unread: "Stripe did not give the date of some paid orders, so they are not in this file: your own Stripe account shows them.",
   amount: "Stripe did not give a clear amount for some paid orders, so they are not in this file: your own Stripe account lists them.",
+  "file-size": "Your orders reached the largest size one file holds, so the oldest are not in this file: your own Stripe and PayPal accounts list them.",
 };
 function ordersNote(gaps: SalesGap[]): string {
   // A partial reading that names no reason is said as it is, never put on a source.

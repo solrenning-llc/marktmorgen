@@ -23,7 +23,11 @@ export const STUDIO_SEARCH_UNITS = 2;
 export const ESSENTIAL_NEEDS: readonly Need[] = ["billing", "delete", "export", "member"];
 export const ESSENTIAL_PER_DAY = 10;
 /**
- * Sales files a store may download in each of its months (lib/sales-files.ts; #5010 row 150): counted on their own,
- * never from the studio's requests or any other figure, and priced in tests/plan-cost-registry.ts ("sales-files").
+ * Sales files a store's owner may download in each of its months, or in its trial (lib/sales-files.ts; #5010 row 150),
+ * and as many more for its team between them: counted on their own, never from the studio's requests or any other
+ * figure, and priced in tests/plan-cost-registry.ts ("sales-files").
  */
 export const SALES_FILES_PER_MONTH: number = 3;
+
+/** What the sales files hold, said before the click and on every page that promises them (#5267 audit, ea4f 5, 6, 10). */
+export const SALES_FILES_WORDS = `You can download up to ${SALES_FILES_PER_MONTH} sales files a month (or in your trial), and your team up to ${SALES_FILES_PER_MONTH} more. They never use up your monthly figures.`;

@@ -501,8 +501,10 @@ export default function TermsPage() {
           message until your next billing month or a larger plan; nothing is
           billed past it. Changing your plan, canceling it, deleting your
           store and downloading your sales are never refused for it; your
-          sales download as up to {SALES_FILES_PER_MONTH} files a month, a
-          count of their own that never comes out of these. Your
+          sales download as up to {SALES_FILES_PER_MONTH} files a month (or
+          in a trial), and {SALES_FILES_PER_MONTH} more for your team, a count
+          of their own that never comes out of these; a file whose sales were
+          read counts even if it could not be made. Your
           store&apos;s public side also answers up to{" "}
           {countWords(REQUESTS_PER_VISIT)} requests for each visit its plan
           covers and a number more ({countWords(EXTRA_REQUESTS.creator)} on{" "}

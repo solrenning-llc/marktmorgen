@@ -2526,6 +2526,8 @@ export const COST_LINES: CostLine[] = [
       // A community announcement batch reads its members' list rows once (one HMGET of at most CHECKED_BATCH_SIZE fields), far
       // inside what the batch's emails cost at PER_EMAIL (14 November 2026).
       { file: "lib/community-mail.ts", names: ["keptOnList"] },
+      // Its reader, shared with waitlist launches since #4638 (line store-email).
+      { file: "lib/list-taken-off.ts", names: ["takenOffList", "HMGET"] },
       // A review ask whose claim's stretch was not confirmed reads the claim again before letting it go (#4360).
       { file: "lib/review-requests.ts", names: ["stretchLanded"] },
     ],
@@ -2592,6 +2594,11 @@ export const COST_LINES: CostLine[] = [
       // The creator told once about an order whose affiliate link was never confirmed (owner's decision 6, 9 November 2026).
       { file: "lib/affiliates.ts", names: ["tellPending", "pendingNotice"] },
       { file: "lib/refused-tries.ts", names: ["REFUSED_TRIES", "REFUSED_TRY_COMMANDS", "REFUSED_MAX_SECONDS"] },
+      // A waitlist launch batch reads its addresses' list rows once (one HMGET of at most LAUNCH_BATCH fields), so an address
+      // the list took off for a bounce, a complaint or a refusal is passed over: far inside what the batch's emails cost at
+      // PER_EMAIL, and an address passed over takes no email (#4638).
+      { file: "lib/waitlist.ts", names: ["takenOffList(store.listId", "LAUNCH_BATCH"] },
+      { file: "lib/list-taken-off.ts", names: ["takenOffList", "HMGET"] },
       // A card notice to a member (lib/payment-recovery.ts, noticeCards) whose link's SET Redis did not answer with exactly "OK" sends
       // nothing and removes the link, in case it landed, with one DEL (lib/card-update.ts, cardLink; Claude 7's MÉDIO on #2985): one
       // command per failed notice, $0.000002 at Upstash's $2 a million, and the notice's mark let go for the next run. No email is

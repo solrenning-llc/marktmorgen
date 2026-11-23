@@ -851,6 +851,32 @@ export class MemoryRedis {
           this.run(["ZADD", line, due, id]);
           return 1;
         }
+        // lib/host-calendar.ts HOST_CONFIG_IF_STORE_LIVE: a host's settings, and by mode the reading kept or forgotten,
+        // written only while the store that asked is live and not being erased (lib/live-fence.ts's rule).
+        if (key.startsWith("-- marktmorgen:host-config-live:v1\n") && args[0] === "5" && args.length === 13) {
+          const [, live, erasing, config, good, failure, field, statsId, ref, value, mode, reading, seconds] = args;
+          if (this.run(["HGET", erasing, field]) !== null) return 0;
+          if (statsId === "") {
+            if (this.run(["GET", live]) !== ref) return 0;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return 0;
+            let record: unknown;
+            try { record = JSON.parse(String(raw)); } catch { return -1; }
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+          }
+          this.run(["SET", config, value]);
+          if (mode === "ics") {
+            this.run(["SET", good, reading, "EX", seconds]);
+            this.run(["DEL", failure]);
+          } else if (mode === "choices") {
+            this.run(["DEL", good]);
+          } else {
+            this.run(["DEL", good, failure]);
+          }
+          return 1;
+        }
         // lib/host-calendar.ts: compare the exact config and keep the reading in the same operation.
         if (key.startsWith("-- marktmorgen:host-reading-current:v1\n") && args[0] === "3" && args.length === 8) {
           const [, config, target, failure, expected, value, seconds, kind] = args;

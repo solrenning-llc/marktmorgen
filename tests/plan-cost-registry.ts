@@ -520,6 +520,17 @@ export const SHAPES = {
   wait: { seconds: 10, cpu: 0.2 },
 } as const;
 
+/**
+ * The commands a team host's calendar change or check takes beyond one integration unit (#5010 row 150 (b), Claude 6
+ * z5v4's sweep): POST /api/store/host-calendar ics-add and check, measured whole through the route on a paying store at
+ * their worst (the session read twice, the store, the two rate limits, the integration unit's take, the settings read,
+ * the write fenced on the store (HOST_CONFIG_IF_STORE_LIVE, rows 54 to 56) or the reading kept and its lock, and the
+ * page answered after it), each script billed as one plus every redis.call written in it: ics-add 22, check 21, against
+ * the unit's 10 + TAKE_COMMANDS = 14 (tests/host-calendar-erasure-fence.test.ts fails above). Any integration unit may
+ * be one of these requests, so every unit is priced with them, as the studio's keep is (coordinator 964c, e931).
+ */
+export const HOST_CALENDAR_ROUTE_EXTRA_COMMANDS = 8;
+
 /** How often a day the page that says the studio is paused is drawn at the most (app/studio/paused/page.tsx, SHOWN_PER_DAY). */
 export const PAUSED_PER_DAY = 20;
 
@@ -1388,7 +1399,7 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // public request, so their PATH_LEAD_COMMANDS are priced here, with the email that carried the link.
   transactional: PER_EMAIL + (6 + PATH_LEAD_COMMANDS + TAKE_COMMANDS) * COMMAND,
   // A call out, waited on at 2 GB for ten seconds.
-  integration: request("wait", 10 + TAKE_COMMANDS, 21_024), // +1 KiB for the exact ref/legacy cap in paypal-link-live:v2; the owner record stays inside Redis.
+  integration: request("wait", 10 + TAKE_COMMANDS + HOST_CALENDAR_ROUTE_EXTRA_COMMANDS, 21_024), // +1 KiB for the exact ref/legacy cap in paypal-link-live:v2; the owner record stays inside Redis.
   // What a buyer does inside what they bought (lib/buyer-actions.ts): the
   // heaviest is a post or comment that tells up to eleven people, their
   // devices pushed at once and waited on (their read at most
@@ -2758,7 +2769,7 @@ export const COST_LINES: CostLine[] = [
     },
     sources: [
       { file: "lib/team-scheduling-rules.ts", names: ["TEAM_LIMITS", "TRIAL_TEAM_LIMITS", "SETUP_TEAM_LIMITS"] },
-      { file: "lib/host-calendar.ts", names: ["SYNC_SECONDS", "STALE_SECONDS", "prefetchHosts", "HOST_READING_CONFIG_BYTES", "HOST_READING_FENCE_BYTES", "HOST_READING_FENCE_COMMANDS", "HOST_LOCK_OWNER_COMMANDS"] },
+      { file: "lib/host-calendar.ts", names: ["SYNC_SECONDS", "STALE_SECONDS", "prefetchHosts", "HOST_CONFIG_IF_STORE_LIVE", "HOST_READING_CONFIG_BYTES", "HOST_READING_FENCE_BYTES", "HOST_READING_FENCE_COMMANDS", "HOST_LOCK_OWNER_COMMANDS"] },
       { file: "lib/team-booking.ts", names: ["prefetchHosts", "readClaims", "rrKey"] },
       { file: "lib/team.ts", names: ["MAX_TEAM"] },
     ],

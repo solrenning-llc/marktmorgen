@@ -2,7 +2,8 @@
  * A host's calendar settings are written only when Redis says so (CX-123 rule 24).
  *
  * removeHostIcs, disconnectHostGoogle and setHostSource write the host's settings
- * (nl:hostcal:cfg:<host>) through writeConfig. When that SET's reply was not "OK"
+ * (nl:hostcal:cfg:<host>): disconnectHostGoogle and setHostSource through writeConfig, removeHostIcs through the
+ * write fenced on its store (HOST_CONFIG_IF_STORE_LIVE, #5010 rows 54 to 56), whose reply is read the same way. When that SET's reply was not "OK"
  * (missing, short, queued, another shape), the write is unknown: before this test,
  * removeHostIcs still resolved, the route answered ok and the studio said "Calendar
  * address removed.", while the sealed private iCal address stayed the host's source
@@ -48,6 +49,18 @@ const UNKNOWN_DEL: unknown[] = [[], [undefined], ["QUEUED"], [null], [-1], [1.5]
 /** A reply's shape in words, with a missing slot shown as such (JSON would print it as null). */
 const label = (shape: unknown): string => (Array.isArray(shape) ? `[${shape.map((v) => (v === undefined ? "undefined" : JSON.stringify(v))).join(",")}]` : JSON.stringify(shape));
 
+/** The fenced settings write of removeHostIcs (lib/host-calendar.ts, HOST_CONFIG_IF_STORE_LIVE). */
+const isFencedWrite = (command: (string | number)[]) => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:host-config-live:v1\n");
+/** EVAL replies that are neither the written 1 nor the gone 0. */
+const UNKNOWN_FENCED: unknown[] = [[], [undefined], ["QUEUED"], [null], [-1], [2], ["1"], [1.5], [1, 1]];
+
+/** A live store the host serves, made after seed() cleared Redis: removeHostIcs writes only while it is live. */
+async function liveStore(): Promise<Store> {
+  await claimHandle(EMAIL, "hostcfgwrite", "Host settings", "");
+  await ensureStatsId(EMAIL);
+  return (await storeForEmail(EMAIL))!;
+}
+
 function seed(source: "ics" | "google" | "none"): void {
   redis.clear();
   redis.run(["SET", CFG, JSON.stringify({ email: EMAIL, source, read: ["primary"], write: "", ics: seal(URL_ICS, `hostcal|${HOST}|ics`), icsAddedAt: "2026-11-01T00:00:00.000Z" })]);
@@ -84,22 +97,14 @@ async function fetchesOnRefresh(): Promise<number> {
 }
 
 async function main(): Promise<void> {
-  part("removeHostIcs: an unconfirmed settings write is refused, never told as removed");
-  for (const shape of UNKNOWN_SET) {
+  part("removeHostIcs: an unconfirmed fenced settings write is refused, never told as removed");
+  for (const shape of UNKNOWN_FENCED) {
     seed("ics");
-    answer(isCfgSet, shape);
-    const outcome = await thrown(() => removeHostIcs(statsStore, EMAIL));
+    const store = await liveStore();
+    answer(isFencedWrite, shape);
+    const outcome = await thrown(() => removeHostIcs(store, EMAIL));
     redis.pipeline = real;
-    is(`SET answered ${label(shape)}: removeHostIcs throws UnknownReplyError`, outcome, "UnknownReplyError");
-  }
-
-  part("removeHostIcs: forgetting what was read is read as a count");
-  for (const shape of UNKNOWN_DEL) {
-    seed("ics");
-    answer(isReadingsDel, shape);
-    const outcome = await thrown(() => removeHostIcs(statsStore, EMAIL));
-    redis.pipeline = real;
-    is(`DEL answered ${label(shape)}: removeHostIcs throws UnknownReplyError`, outcome, "UnknownReplyError");
+    is(`fenced write answered ${label(shape)}: removeHostIcs throws UnknownReplyError`, outcome, "UnknownReplyError");
   }
 
   part("disconnectHostGoogle and setHostSource: the same settings write");
@@ -138,15 +143,15 @@ async function main(): Promise<void> {
     body: JSON.stringify({ action, tz: "UTC" }),
   });
   const seedOwner = () => redis.run(["SET", ownerCfg, JSON.stringify({ email: owner, source: "ics", read: [], write: "", ics: seal(URL_ICS, `hostcal|${ownerHost}|ics`), icsAddedAt: "2026-11-01T00:00:00.000Z" })]);
-  for (const shape of [[], ["QUEUED"], [null]] as unknown[]) {
+  for (const shape of [[], ["QUEUED"], [null], [-1]] as unknown[]) {
     seedOwner();
-    answer((command) => command[0] === "SET" && command[1] === ownerCfg, shape);
+    answer((command) => isFencedWrite(command) && command[5] === ownerCfg, shape);
     const response = await POST(request("ics-remove"));
     redis.pipeline = real;
     const body = (await response.json()) as { ok: boolean };
-    is(`SET answered ${label(shape)}: ics-remove answers 500 and not ok`, [response.status, body.ok], [500, false]);
+    is(`fenced write answered ${label(shape)}: ics-remove answers 500 and not ok`, [response.status, body.ok], [500, false]);
     const config = JSON.parse(String(redis.run(["GET", ownerCfg]))) as { source: string; ics: string };
-    is(`SET answered ${label(shape)}: the address is still kept, and nobody was told otherwise`, [config.source, config.ics.length > 0], ["ics", true]);
+    is(`fenced write answered ${label(shape)}: the address is still kept, and nobody was told otherwise`, [config.source, config.ics.length > 0], ["ics", true]);
   }
   seedOwner();
   const healthy = await POST(request("ics-remove"));
@@ -156,7 +161,8 @@ async function main(): Promise<void> {
 
   part("healthy and confirmed-empty controls");
   seed("ics");
-  is("healthy: removeHostIcs resolves", await thrown(() => removeHostIcs(statsStore, EMAIL)), "resolved");
+  const healthyStore = await liveStore();
+  is("healthy: removeHostIcs resolves", await thrown(() => removeHostIcs(healthyStore, EMAIL)), "resolved");
   is("healthy: the address is forgotten and the source is none", kept(), { source: "none", ics: false });
   is("healthy: what was read from it is forgotten", [redis.run(["GET", GOOD]), redis.run(["GET", ERR])], [null, null]);
   is("healthy: the next refresh fetches nothing", await fetchesOnRefresh(), 0);
@@ -167,13 +173,14 @@ async function main(): Promise<void> {
   is("healthy: setHostSource resolves", await thrown(() => setHostSource(sourceStore, EMAIL, "none")), "resolved");
   is("healthy: the source is none", kept().source, "none");
   redis.clear();
-  is("confirmed empty: removeHostIcs with no settings resolves", await thrown(() => removeHostIcs(statsStore, EMAIL)), "resolved");
+  is("confirmed empty: removeHostIcs with no settings resolves", await thrown(() => removeHostIcs(sourceStore, EMAIL)), "resolved");
   is("confirmed empty: and writes nothing", redis.run(["GET", CFG]), null);
   is("confirmed empty: disconnectHostGoogle with no settings resolves", await thrown(() => disconnectHostGoogle(statsStore, EMAIL)), "resolved");
   is("confirmed empty: and writes nothing", redis.run(["GET", CFG]), null);
   seed("ics");
+  const emptyReadStore = await liveStore();
   redis.run(["DEL", GOOD, ERR]);
-  is("confirmed empty: removeHostIcs with nothing read yet (DEL answers 0) resolves", await thrown(() => removeHostIcs(statsStore, EMAIL)), "resolved");
+  is("confirmed empty: removeHostIcs with nothing read yet resolves", await thrown(() => removeHostIcs(emptyReadStore, EMAIL)), "resolved");
   is("confirmed empty: and the address is forgotten", kept(), { source: "none", ics: false });
 
   done();

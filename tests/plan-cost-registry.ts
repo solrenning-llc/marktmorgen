@@ -1472,10 +1472,12 @@ export const CHECKOUT_TROUBLE_READ = { commands: 1, fields: 8, bytes: 4_096 } as
 /**
  * A product save refused as stale (app/api/store/product/route.ts, lib/store.ts editProduct; tests/product-stale-save.test.ts),
  * inside the existing studio unit (not added again). The revision is compared on the product record editProduct already
- * reads under the store's lock: no command added there, and the revision itself is a few bytes on that record. A refused
- * save then reads what is saved now, to show beside the creator's words: its listing (at most one GET, never more than a
- * product's records may weigh, MAX_PRODUCT_BYTES) and, when it has one, its description (one GET, at most 5,000
- * characters of up to 4 bytes each). It writes nothing and skips what a taken save does after editProduct (the
+ * reads under the store's lock: no command added there, and the revision itself is a few bytes on that record. A record
+ * one revision past the form is first checked against the store's own listing (lib/store.ts halfWritten: the head the
+ * store record holds, or at most one GET of the listing record, never more than a product's records may weigh,
+ * MAX_PRODUCT_BYTES), so a save that stopped half-way does not hold the next one as stale (#4238, LEVE 4). A refused save
+ * then shows what is saved now, its listing from the record already read and, when it has one, its description (one GET,
+ * at most 5,000 characters of up to 4 bytes each). It writes nothing and skips what a taken save does after editProduct (the
  * introductory, yearly and description writes and the whole-catalogue read that says what went quiet), so a refusal
  * costs less than the save it replaces. Not a storage-retention or whole-page proof.
  */

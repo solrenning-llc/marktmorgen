@@ -154,6 +154,7 @@ import {
   idsOfKind,
   readDelivery,
   readListing,
+  readListingExactly,
   readListings,
   readProduct,
   readProducts,
@@ -4226,6 +4227,22 @@ export type StudioProductParts = { intro?: Intro | null; yearly?: Yearly | null;
 export const ABOUT_ROOM_SETTLE_COMMANDS = 1 + takeDataCommands(1);
 
 /**
+ * Whether a product's record is one revision past what its store lists only because the save that moved it stopped
+ * half-way (triple audit on #4238 @5bb7b1a78e, LEVE 4): PRODUCT_WITH_ABOUT wrote the record and its description, then its
+ * answer was lost or the save stopped before the listing and the store record were written, so the store still lists
+ * the revision before. That save was answered as failed, so nobody was told its words were saved, and a form opened at
+ * the revision the store lists may save over them instead of being refused as stale for good. True only on exact
+ * reads: the record exactly one revision past `baseRev`, and the store's own listing (the head it holds, or the listing
+ * record, one GET within PRODUCT_STALE_READ) at `baseRev`. A save that went through wrote both, so a form opened
+ * before it is still refused; anything not read exactly is stale.
+ */
+async function halfWritten(store: Store, product: Product, baseRev: number): Promise<boolean> {
+  if ((product.rev ?? 0) !== baseRev + 1) return false;
+  const listed = await readListingExactly(store, product.id).catch(() => "unknown" as const);
+  return listed !== null && listed !== "unknown" && (listed.rev ?? 0) === baseRev;
+}
+
+/**
  * A product's long description prepared for the catalog commit (PRODUCT_WITH_ABOUT), under the store's lock: a store from
  * before statistics ids or ids is given them first, once and for good (as ensureStoreId and storeNamedForAbout do), so
  * the text is never put under a namespace its erasure cannot find, then the write with the store's erasure fence. Shared
@@ -4278,7 +4295,7 @@ export async function editProduct(
     async (product, store, _held, save) => {
       // A form opened before another save of this product would put the older words back over the newer ones: refused,
       // here under the store's lock, so two saves from the same revision can never both be taken.
-      if (baseRev !== undefined && (product.rev ?? 0) !== baseRev) {
+      if (baseRev !== undefined && (product.rev ?? 0) !== baseRev && !(await halfWritten(store, product, baseRev))) {
         // What is saved now, as read here under the lock, goes back with the refusal: never the store record the request
         // read before it waited for the lock, which may predate the save that won (31st triple audit, MEDIUM 1; VR 2).
         // The description too, read here under the lock with the listing, so the two shown are a pair that existed (36th

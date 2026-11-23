@@ -204,6 +204,28 @@ async function main() {
   try { lostRead = await save({ ...form, rev: await revNow(), title: "Agent title", about: "words after a lost read" }); } finally { redis.pipeline = plain; }
   is("a lost read of the slot saves nothing", lostRead.body.ok === true, false);
   is("the slot was read, and the beside pool was not touched at all", [order.includes("about-slot"), order.includes("beside")], [true, false]);
+
+  part("9. A save whose fenced write landed but whose answer was lost does not hold the next save as stale (triple audit, LEVE 4)");
+  const shownRev = await revNow();
+  let loseAnswer = true;
+  redis.pipeline = async (commands) => {
+    const fencedWrite = commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:product-with-about:"));
+    if (fencedWrite && loseAnswer) {
+      loseAnswer = false;
+      await plain(commands);
+      throw Error("synthetic lost answer of the product's record and description");
+    }
+    return plain(commands);
+  };
+  let half: Answer;
+  try { half = await save({ ...form, rev: shownRev, title: "Half-written title", about: "half-written words" }); } finally { redis.pipeline = plain; }
+  is("the half-written save is answered as failed", half.body.ok === true, false);
+  is("the store still lists the revision the form was opened at", await revNow(), shownRev);
+  const next = await save({ ...form, rev: shownRev, title: "The next save's title", about: "the next save's words" });
+  is("the next save from the revision the store lists goes through", [next.status, next.body.ok], [200, true]);
+  is("and its words are what is kept", [(await readListing((await storeForEmail(owner))!, id))!.title, await readAbout((await storeForEmail(owner))!.statsId, id)], ["The next save's title", "the next save's words"]);
+  const late = await save({ ...form, rev: shownRev, title: "A tab opened before both" });
+  is("a form opened before a save that went through is still refused as stale", [late.status, late.body.error], [409, "stale"]);
   done();
 }
 

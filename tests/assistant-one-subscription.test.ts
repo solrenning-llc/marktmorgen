@@ -383,9 +383,9 @@ async function main(): Promise<void> {
   part("The start's Stripe calls are priced: every essential billing event may be an add-on start");
   const startCalls = (assistantRules as Record<string, unknown>).ASSISTANT_START_STRIPE_CALLS;
   const pages = (assistantRules as Record<string, unknown>).ASSISTANT_START_LIST_PAGES;
-  // Subscriptions, open pages, open pages read again after a 409, then the price read, the product read and write,
-  // the price write and the checkout POST.
-  is("the most calls a start makes", [typeof pages === "number" && pages > 0, startCalls === 3 * (pages as number) + 5], [true, true]);
+  // Subscriptions, open pages, open pages read again after a 409, then the expiry of a page at another price (#5285
+  // row #3334), the price read, the product read and write, the price write and the checkout POST.
+  is("the most calls a start makes", [typeof pages === "number" && pages > 0, startCalls === 3 * (pages as number) + 6], [true, true]);
   const line = COST_LINES.find((row) => row.id === "assistant-start-reads");
   is("a cost line cites the start and its count", Boolean(line?.sources.some((s) => s.file === "lib/assistant-billing.ts" && s.names.includes("startAssistant")) && line?.sources.some((s) => s.names.includes("ASSISTANT_START_STRIPE_CALLS"))), true);
   const wait = (assistantRules as Record<string, unknown>).ASSISTANT_IN_PROGRESS_WAIT_MS as number;

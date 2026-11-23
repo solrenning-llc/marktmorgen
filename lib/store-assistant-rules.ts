@@ -73,12 +73,13 @@ export const ASSISTANT_LABEL = "AI assistant";
 export const ASSISTANT_START_LIST_PAGES = 2;
 /**
  * The most Stripe calls one start of the add-on makes (lib/assistant-billing.ts, startAssistant): the subscriptions,
- * the open pages, the open pages read again after Stripe answers 409 for a key in progress, then the price read, the
- * product read and write, the price write and the checkout POST. Adopting a live add-on makes fewer (its pages, the
+ * the open pages, the open pages read again after Stripe answers 409 for a key in progress, the expiry of an open page
+ * at another price (#5285 row #3334), then the price read, the product read and write, the price write and the
+ * checkout POST. Adopting a live add-on makes fewer (its pages, the
  * invoices read and one ending). Priced at every essential billing event in tests/plan-cost-registry.ts
  * (assistant-start-reads).
  */
-export const ASSISTANT_START_STRIPE_CALLS = 3 * ASSISTANT_START_LIST_PAGES + 5;
+export const ASSISTANT_START_STRIPE_CALLS = 3 * ASSISTANT_START_LIST_PAGES + 6;
 /** How long a start waits, when Stripe answers that another tab's request under the same key is in progress, before it reads the open pages again; inside the start's cutoff. */
 export const ASSISTANT_IN_PROGRESS_WAIT_MS = 1_000;
 /**

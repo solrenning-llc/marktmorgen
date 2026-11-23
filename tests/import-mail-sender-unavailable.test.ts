@@ -10,7 +10,7 @@
  * tests/ses-mail-fixture.ts for the control. Nothing is sent anywhere.
  */
 import { NextRequest } from "next/server";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setProductLink, setStripeAccount, setSubscription } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as importPost } from "@/app/api/store/import/route";
 import { installSesMailFixture } from "./ses-mail-fixture";

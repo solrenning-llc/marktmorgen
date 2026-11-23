@@ -90,7 +90,7 @@ import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { grantUnlessErased, importedFor } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
-import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendBatch, serviceMailKnownUnavailable } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, mailDay, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { newCostCode } from "@/lib/plan-standing";
@@ -1729,6 +1729,11 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   const pause = await pauseForSending(job.sid);
   if (pause === undefined) return "retry";
   const paused = pause !== null;
+  // While no sender can take mail at all (no Amazon SES, and no Resend key or no Resend fallback proof: a check with
+  // no IO, lib/email.ts), sendBatch would answer "retry" with nothing sent. Asked before the portion is read, so a
+  // step waits with the queue untouched instead of building every letter only to put them back (#5010 row 151). A
+  // paused store sends nothing either way: its addresses are still counted as not emailed below.
+  if (!paused && serviceMailKnownUnavailable()) return "retry";
   // And until then they go out in portions that double, a hundred buyers
   // first, so that a file of dead addresses is found while few have been
   // written to. A portion not yet open is waited for; nobody is dropped.

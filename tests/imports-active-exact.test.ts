@@ -19,6 +19,7 @@ import { addRows, advanceImports, finishUpload, jobOf, readJob, runImport, start
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
@@ -58,8 +59,14 @@ async function queuedImport(): Promise<string> {
   return started.job.id;
 }
 
+// A sender that can take mail: with none at all an import's email step now waits for one before reading its
+// queue (#5010 row 151, tests/import-mail-sender-unavailable.test.ts), and these cases are about that queue.
+const mail = installSesMailFixture();
+
 async function main(): Promise<void> {
   redis.clear();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
   await claimHandle(OWNER, "imports-exact", "Imports Exact Shop", "");
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);

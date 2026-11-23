@@ -79,7 +79,7 @@ function main(): void {
   part("The page and the download");
   is("the page is the owner's only ('payments', audit 9c68)", /studioView\(await cookies\(\), [^\n]*: undefined, "payments"\)/.test(page), true);
   is("the download too", /creatorFrom\(request, "payments"\)/.test(route), true);
-  is("both read the same reading", [page.includes("keptSaleFees(store)"), route.includes("keptSaleFees(store)")], [true, true]);
+  is("the download serves only the copy the page kept, never a new reading", [page.includes("keptSaleFees(store)"), route.includes("keptSaleFeesCopy(store)"), route.includes("keptSaleFees(store)")], [true, true, false]);
   is("the download link says what it gives", page.includes(">Download every sale as a spreadsheet (CSV)</a>"), true);
   is("the page lists at most FEES_PAGE_SALES and says the download has every one", [FEES_PAGE_SALES, page.includes("sales.rows.slice(0, FEES_PAGE_SALES)"), page.includes(" The download has every one.")], [50, true, true]);
   is("a download that is not whole gives no file", route.includes("if (csv === null) return plain(503"), true);

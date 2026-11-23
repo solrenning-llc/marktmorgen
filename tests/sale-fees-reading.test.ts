@@ -37,7 +37,7 @@ import { parseCsv } from "@/lib/csv";
 import { readAtCell } from "@/lib/sale-fees-months";
 import { COST_LINES, DAY_WINDOWS, nonPayingWorst, readShapeCost } from "./plan-cost-registry";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
-import { exportReachRefusal } from "@/lib/sale-fees-view";
+import { NO_COPY_WORDS, exportReachRefusal } from "@/lib/sale-fees-view";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
 import { GET as exportFees } from "@/app/api/store/fees/export/route";
@@ -374,11 +374,18 @@ async function main(): Promise<void> {
   const session = await openSession(OWNER);
   const download = () => exportFees(new NextRequest("https://marktmorgen.com/api/store/fees/export", { method: "GET", headers: { host: "marktmorgen.com", "sec-fetch-site": "same-origin", cookie: `${SESSION_COOKIE}=${session}` } }));
   const nowSeconds = Math.floor(Date.now() / 1000);
+  const exportStore = await storeForEmail(OWNER);
+  // No copy yet: no file, and Stripe is never asked by the download (audit 8834 follow-up: the download serves only the
+  // copy the page kept).
+  const noCopy = await download();
+  is("before the page kept a reading: no file, said, and Stripe not asked", [noCopy.status, await noCopy.text(), asked.length], [409, NO_COPY_WORDS, 0]);
   for (let p = 0; p < SALE_FEES_PAGES; p += 1) pages.push(page([line("charge", 100, nowSeconds - 3600 - p * 60, charge("ch_x" + p), 3)], true));
+  // The page takes the reading; the download serves what it kept.
+  const kept = exportStore ? await keptSaleFees(exportStore) : null;
+  const askedByPage = asked.length;
   const shortFile = await download();
   const shortWords = await shortFile.text();
-  const exportStore = await storeForEmail(OWNER);
-  const kept = exportStore ? await keptSaleFees(exportStore) : null;
+  is("the download asked Stripe nothing", asked.length, askedByPage);
   const expected = kept?.kind === "read" ? exportReachRefusal(kept.kept.since, readingSince(kept.kept.at, "UTC")) : null;
   is("a reading short of the year gives no file: 409", shortFile.status, 409);
   is("with the words that say why", [expected !== null, shortWords], [true, expected]);
@@ -389,6 +396,7 @@ async function main(): Promise<void> {
   await setStripeAccount(OWNER, "acct_fixture2", true);
   const wholeSession = await openSession(OWNER);
   pages = [page([line("charge", 5000, nowSeconds - 3 * 3600, charge("ch_whole"), 175)], false)];
+  await keptSaleFees((await storeForEmail(OWNER))!);
   const wholeFile = await exportFees(new NextRequest("https://marktmorgen.com/api/store/fees/export", { method: "GET", headers: { host: "marktmorgen.com", "sec-fetch-site": "same-origin", cookie: `${SESSION_COOKIE}=${wholeSession}` } }));
   is("a whole reading gives the file", [wholeFile.status, wholeFile.headers.get("Content-Type")], [200, "text/csv; charset=utf-8"]);
   const wholeParsed = parseCsv(await wholeFile.text());

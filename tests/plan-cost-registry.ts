@@ -3123,7 +3123,7 @@ export const COST_LINES: CostLine[] = [
       + STORE_ALLOWANCES[tier].studio * readShapeCost(SALE_FEES_KEPT_SHAPE),
     sources: [
       { file: "lib/sale-fees-reading.ts", names: ["SALE_FEES_READINGS_PER_DAY", "SALE_FEES_PAGES", "SALE_FEES_COPY_MAX_BYTES", "SALE_FEES_READ_SHAPE", "SALE_FEES_KEPT_SHAPE", "SALE_FEES_READ_MS", "takeReading", "const taken = await takeReading(statsId, now)", "const deadline = Date.now() + SALE_FEES_READ_MS", "SALE_FEES_PAGE_MAX_BYTES"] },
-      { file: "app/api/store/fees/export/route.ts", names: ['creatorFrom(request, "payments")', "keptSaleFees(store)"] },
+      { file: "app/api/store/fees/export/route.ts", names: ['creatorFrom(request, "payments")', "keptSaleFeesCopy(store)"] },
     ],
     basis: "At most SALE_FEES_READINGS_PER_DAY readings a UTC day, each taken before Stripe is called and kept counted once it was; each at its worst shape: SALE_FEES_PAGES pages of the creator's account waited on one after another within the time that shape is priced at (SALE_FEES_READ_MS), the copy read and written at its largest and the day's count. Every page visit and download that takes no reading reads the copy at its largest and tries the day's count (SALE_FEES_KEPT_SHAPE), priced for every studio request of the window as a download of one unit, more than a page of STUDIO_PAGE_UNITS. The requests themselves are the studio's; the copy's day is in the data room (nl:salefees:copy:). A store that pays nothing keeps the page, so the line is in its worst too (audit f89b).",
   },

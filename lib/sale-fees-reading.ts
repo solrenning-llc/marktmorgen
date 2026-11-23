@@ -227,6 +227,19 @@ async function readCopy(statsId: string, account: string): Promise<SaleFeesKept 
 }
 
 /**
+ * The copy the page kept, and nothing else: the download serves only it, so a file is always the reading the page
+ * showed, never a new reading taken in between (the race past SALE_FEES_FRESH_SECONDS; audit 8834 follow-up). One GET,
+ * no count, no Stripe call; "none" when there is no copy for this account, "failed" without a database.
+ */
+export async function keptSaleFeesCopy(store: Account): Promise<{ kind: "read"; kept: SaleFeesKept } | { kind: "none" } | { kind: "failed" }> {
+  const { statsId, stripeAccountId: account } = store;
+  if (!statsId || !account) return { kind: "none" };
+  if (!isRedisConfigured()) return { kind: "failed" };
+  const copy = await readCopy(statsId, account);
+  return copy ? { kind: "read", kept: copy } : { kind: "none" };
+}
+
+/**
  * The store's fees and net, as kept or read now. `fresh` asks Stripe again
  * even when the copy is fresh, while the day has a reading left.
  */

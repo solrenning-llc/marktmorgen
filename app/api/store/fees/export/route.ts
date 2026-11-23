@@ -1,17 +1,17 @@
 import type { NextRequest } from "next/server";
 import { creatorFrom } from "@/lib/studio-route";
-import { SALE_FEES_FILE_MAX_BYTES, keptSaleFees } from "@/lib/sale-fees-reading";
+import { SALE_FEES_FILE_MAX_BYTES, keptSaleFeesCopy } from "@/lib/sale-fees-reading";
 import { saleFeesCsv } from "@/lib/sale-fees-months";
 import { saleFees } from "@/lib/sale-fees-rules";
-import { FILE_TOO_LARGE_WORDS, exportReachRefusal, stateWords, unavailableWords } from "@/lib/sale-fees-view";
+import { FILE_TOO_LARGE_WORDS, NO_COPY_WORDS, exportReachRefusal, stateWords, unavailableWords } from "@/lib/sale-fees-view";
 import { readingSince } from "@/lib/earnings-by-month";
 
 /**
  * Every sale's fees and what the creator kept, as a spreadsheet (282 [HG1],
  * unit 3; lib/sale-fees-months.ts, saleFeesCsv), from the same reading of the
- * creator's own Stripe account as the page (lib/sale-fees-reading.ts): the
- * kept copy while it is fresh, otherwise one of the day's readings, taken
- * before Stripe is called. It names no buyer; it is the owner's only
+ * creator's own Stripe account as the page (lib/sale-fees-reading.ts): only
+ * the copy the page kept (keptSaleFeesCopy), never a new reading, so the file
+ * is what the page showed and the download never calls Stripe. It names no buyer; it is the owner's only
  * ("payments"), as the page: each sale's net and charge id (audit 9c68). Dates in UTC. A reading that is not
  * whole gives no file: a part would look like the whole.
  */
@@ -20,8 +20,10 @@ export async function GET(request: NextRequest) {
   if (creator instanceof Response) return creator;
   const { store } = creator;
   const plain = (status: number, body: string) => new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
-  const state = await keptSaleFees(store);
-  if (state.kind !== "read") return plain(state.kind === "used" ? 429 : state.kind === "failed" ? 503 : 409, stateWords(state));
+  // Only the copy the page kept: the file is the reading the page showed, never a new one (audit 8834 follow-up).
+  const state = await keptSaleFeesCopy(store);
+  if (state.kind === "failed") return plain(503, stateWords(state));
+  if (state.kind === "none") return plain(409, NO_COPY_WORDS);
   // A reading that stopped before the year's first month gives no file: it would look like the whole year (audit 1285).
   const short = exportReachRefusal(state.kept.since, readingSince(state.kept.at, "UTC"));
   if (short !== null) return plain(409, short);

@@ -77,6 +77,9 @@ export function downloadRefusal(kept: { since: number; stored?: boolean; tooLarg
   return null;
 }
 
+/** Why the download sends no file when the page has kept no reading to make it from. */
+export const NO_COPY_WORDS = "There is no reading to make a file from yet. Open Fees and what you keep, then download from there.";
+
 /** Why the download sends no file when it would be larger than it is priced to send (SALE_FEES_FILE_MAX_BYTES; audit 2fb6). */
 export const FILE_TOO_LARGE_WORDS = "This file would be larger than a download can send, so no file is made. The figures on this page are the whole reading. Nothing here is a zero.";
 

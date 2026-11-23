@@ -168,6 +168,7 @@ async function giveBackUnlessShared(statsId: string, c: Connection, host = ""): 
   if (used !== false) return { removed: false, shared: used === true };
   return { removed: await giveBack(statsId, c, host), shared: false };
 }
+
 /**
  * Issue #4012: a closing store gives back its meeting grants at Google and Zoom before the walk deletes its connections
  * (lib/closed-store-data.ts, forgetLive, after its erasing mark): each only when nothing else here uses its account

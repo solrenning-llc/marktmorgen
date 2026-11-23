@@ -1361,6 +1361,12 @@ console.log("ZA: what a READY's text may say (owner, 23/11/2026 12h29 Fortaleza:
   for (const t of ["1 LEVE", "sem achados graves; 1 NIT", "READY with 1 LOW", "MEDIUM: a name", "ALTO no fluxo", "sem achados, mas um follow-up no #1", "sem achados (non-blocking: o texto)", "sem achados; não bloqueia: a ordem", "sem achados, fica para depois: o nome"])
     is(`ZA: a READY saying '${t}' is refused`, !aceito(t), za(t).join("; "));
   is("ZA: lowercase words that are not severities ('low-level', 'alto contraste') are not findings", aceito("sem achados; o leitor low-level e o alto contraste ficam"), za("sem achados; o leitor low-level e o alto contraste ficam").join("; "));
+  // Claude 5 iZByNH's LEVE on #5404 (7114392176): the zero declaration's own word never pairs with the first word of the
+  // next sentence ("sem achados. Alto contraste ..." is joined as "achados\n Alto"), while a finding on one line is still one.
+  for (const t of ["READY, sem achados. Alto contraste mantido nos botões.", "READY, 0 findings. Low risk: the change only renames a test.", "READY, no findings. Minor refactor of a helper, behaviour unchanged.", "READY, no findings. Major version of the fixture unchanged.", "READY, 0 findings; Low risk overall"])
+    is(`ZA: iZByNH's '${t}' is accepted`, aceito(t), za(t).join("; "));
+  for (const t of ["sem achados; achado leve no nome", "0 findings; finding low in the log", "0 findings; 1 low in the log", "sem achados. Alto: o contraste caiu"])
+    is(`ZA: iZByNH's control '${t}' is refused`, !aceito(t), za(t).join("; "));
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

@@ -397,6 +397,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Nothing was connected",
     body: "While this was connecting, Meta told us to delete this Facebook login's data. So nothing was kept, and the permission was given back to Meta. Connect again if you still want your ads read.",
   },
+  // The store's closing began while Meta answered (lib/meta-ads.ts finishMeta): nothing of the connection was kept.
+  closed: {
+    title: "Nothing was connected",
+    body: "This store is closing, so Meta was not connected to it. Nothing was kept.",
+  },
   refused: {
     title: "Meta did not finish connecting",
     body: "Nothing was kept. Connect again in a moment.",

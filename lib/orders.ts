@@ -474,7 +474,7 @@ export async function countLegacyCheckoutForConfirmation(store: Store, reference
   try {
     if (!CHECKOUT_REFERENCE.test(reference) || (paidCents !== null && (!Number.isSafeInteger(paidCents) || paidCents < 0)) ||
         !Number.isSafeInteger(now) || !Number.isSafeInteger(admission.createdAtMs) || admission.createdAtMs <= 0 ||
-        now < admission.createdAtMs || now >= admission.createdAtMs + SEEN_SECONDS * 1000 ||
+        now < admission.createdAtMs - LEGACY_CREATED_AHEAD_MS || now >= admission.createdAtMs + SEEN_SECONDS * 1000 ||
         !Number.isSafeInteger(admission.items) || admission.items < 1 || admission.items > MAX_ORDER_ITEMS) return "unknown";
     const hour = typeof admission.hour === "number" && Number.isSafeInteger(admission.hour) && admission.hour >= 0 ? String(admission.hour)
       : typeof admission.hour === "string" && /^(0|[1-9][0-9]{0,8})$/.test(admission.hour) ? admission.hour : "";

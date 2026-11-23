@@ -136,31 +136,46 @@ async function main(): Promise<void> {
   }
 
   // Claude 7 xAF's LEVE on #5341: a held set that does not read still starts the send's 60 days.
-  part("A held set that does not read: the 60 days still start, and the place is asked again");
-  {
+  // Claude 2 upbeat's LEVE on #5341 @2ce39a47c7: a send whose place could not be taken must never wait outside the
+  // ceiling, look after look. The set's read only lets go of places of sends that ended; the place is taken by the
+  // atomic script whether that read answers or not, and a send whose place is not known to be taken ends at once.
+  const offStore = { ...store, suspended: "2026-11-09T12:00:00.000Z" } as Store;
+  const seedSends = (ids: string[]) => {
     reset();
+    for (const one of ids) {
+      db.run(["SET", `nl:cm:mail:${one}`, JSON.stringify({ ...job, id: one })]);
+      db.run(["RPUSH", `nl:cm:mail:${one}:to`, ...members.map((m) => m.k)]);
+      db.run(["SADD", "nl:cm:mailq", one]);
+    }
+  };
+  const realPipeline = db.pipeline.bind(db);
+  const bend = (when: (commands: (string | number)[][]) => boolean) => {
+    db.pipeline = (async (commands: (string | number)[][]) => (when(commands) ? [7] : realPipeline(commands))) as typeof db.pipeline;
+  };
+  const heldSet = `nl:cm:mailq:held:${job.community}`;
+
+  part("A held set that never reads: the place is still taken atomically, and the ceiling of 3 holds");
+  {
     shift = 0;
-    const off = { ...store, suspended: "2026-11-09T12:00:00.000Z" } as Store;
-    db.run(["SET", `nl:cm:mail:${id}`, JSON.stringify(job)]);
-    db.run(["RPUSH", `nl:cm:mail:${id}:to`, ...members.map((m) => m.k)]);
-    db.run(["SADD", "nl:cm:mailq", id]);
-    // The held set's read answers in no known shape, once.
-    const realPipeline = db.pipeline.bind(db);
-    db.pipeline = (async (commands: (string | number)[][]) => {
-      if (commands.length === 1 && commands[0][0] === "SMEMBERS" && String(commands[0][1]).startsWith("nl:cm:mailq:held:")) return [7];
-      return realPipeline(commands);
-    }) as typeof db.pipeline;
-    const first = await advanceAnnouncement(id, async () => off, Date.now() + 10_000);
+    const ids = ["a", "b", "c", "d", "e", "f", "0"].map((d) => d.repeat(24));
+    seedSends(ids);
+    bend((commands) => commands.length === 1 && commands[0][0] === "SMEMBERS" && String(commands[0][1]).startsWith("nl:cm:mailq:held:"));
+    const all: (AnnouncementJob | null)[] = [];
+    for (const one of ids) all.push(await advanceAnnouncement(one, async () => offStore, Date.now() + 10_000));
     db.pipeline = realPipeline;
-    is("it waits, its 60 days started, no place taken", [first?.status, typeof first?.heldSince, db.run(["SISMEMBER", `nl:cm:mailq:held:${job.community}`, id])], ["waiting", "number", 0]);
-    shift = 3_600_000 + 1_000;
-    await advanceAnnouncement(id, async () => off, Date.now() + 10_000);
-    is("its next look takes its place", db.run(["SISMEMBER", `nl:cm:mailq:held:${job.community}`, id]), 1);
-    // Looked at on the way (each look keeps its record), then past 60 days from the first hold.
-    shift = 59 * 86_400_000;
-    await advanceAnnouncement(id, async () => off, Date.now() + 10_000);
-    shift = 60 * 86_400_000 + 7_200_000;
-    is("and past 60 days from the first hold it ends", (await advanceAnnouncement(id, async () => off, Date.now() + 10_000))?.status, "failed");
+    is("three wait with a place, the others end: never more than 3 held", [all.filter((a) => a?.status === "waiting").length, all.filter((a) => a?.status === "failed").length, Number(db.run(["SCARD", heldSet]))], [3, 4, 3]);
+    is("each one waiting holds its place, its 60 days started", all.filter((a) => a?.status === "waiting").every((a) => a?.heldPlaced === true && typeof a?.heldSince === "number"), true);
+  }
+
+  part("The place's own answer does not read: the send ends at once, never held outside the ceiling");
+  {
+    shift = 0;
+    seedSends([id]);
+    bend((commands) => commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:announcement-hold:v1"));
+    const ended = await advanceAnnouncement(id, async () => offStore, Date.now() + 10_000);
+    db.pipeline = realPipeline;
+    is("it ends, out of line, nothing sent", [ended?.status, db.run(["SISMEMBER", "nl:cm:mailq", id]), sent.length], ["failed", 0, 0]);
+    is("saying it could not be held", /could not be held/.test(ended?.note ?? ""), true);
   }
   Date.now = realNow;
   done();

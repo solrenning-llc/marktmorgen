@@ -91,6 +91,8 @@ export type AnnouncementJob = {
   retryAt?: number;
   /** When it began to wait on a store switched off or a plan without email (ms): it ends ANNOUNCEMENT_HELD_DAYS later. */
   heldSince?: number;
+  /** Whether it holds its place among its community's held sends (ANNOUNCEMENTS_HELD_MOST); asked again on each look until it does. */
+  heldPlaced?: boolean;
 };
 
 /**
@@ -116,8 +118,11 @@ export const ANNOUNCEMENTS_HELD_MOST = 3;
 export const ANNOUNCEMENT_HELD_RUN_COMMANDS = 3;
 /** The commands an hourly look at a held send sends of its own, besides its store's and its settings' reads: the lock's claim, its GET, its SET, the lock's release. */
 export const ANNOUNCEMENT_HELD_LOOK_OWN_COMMANDS = 4;
-/** The commands a send's first hold adds once: the community's held sends read (SMEMBERS), their records (MGET) and its own place (SADD, with SREM of any no longer held, and the set's EXPIRE). */
-export const ANNOUNCEMENT_HELD_ENTER_COMMANDS = 5;
+/**
+ * The commands a send's first hold adds once: the community's held sends read (SMEMBERS), their records (MGET), the
+ * SREM of those that ended, and its place taken (HOLD_PLACE: one EVAL and, inside it, SISMEMBER, SCARD, SADD, EXPIRE).
+ */
+export const ANNOUNCEMENT_HELD_ENTER_COMMANDS = 8;
 
 /** The sends of a community held at once (the ids of their records): at most ANNOUNCEMENTS_HELD_MOST waiting there. */
 const heldKey = (community: string) => `nl:cm:mailq:held:${community}`;
@@ -129,35 +134,52 @@ const heldKey = (community: string) => `nl:cm:mailq:held:${community}`;
  */
 async function hold(job: AnnouncementJob, note: string, ended: string, full: string): Promise<AnnouncementJob> {
   const now = Date.now();
-  const waiting = (): AnnouncementJob => ({ ...job, status: "waiting", note, retryAt: now + ANNOUNCEMENT_RETRY_SECONDS * 1000 });
-  if (job.heldSince === undefined) {
-    const key = heldKey(job.community);
-    const listed = repliesFor(await redisPipeline([["SMEMBERS", key]]), 1);
-    const ids = listed ? stringList(listed[0]) : null;
-    if (!ids) return waiting();
-    const others = ids.filter((other) => other !== job.id);
-    let still: string[] = [];
-    if (others.length) {
-      const read = repliesFor(await redisPipeline([["MGET", ...others.map(jobKey)]]), 1);
-      const values = read ? repliesFor(read[0], others.length) : null;
-      if (!values) return waiting();
-      still = others.filter((_, i) => {
-        const other = parse(values[i]);
-        return other?.status === "waiting" && typeof other.heldSince === "number";
-      });
-    }
-    if (still.length >= ANNOUNCEMENTS_HELD_MOST) return { ...job, status: "failed", note: full, retryAt: undefined };
-    const gone = others.filter((other) => !still.includes(other));
-    // Kept a day past the longest hold, from the last send held: a set whose community is gone lapses by itself.
-    await redisPipeline([["SADD", key, job.id], ...(gone.length ? [["SREM", key, ...gone]] : []), ["EXPIRE", key, (ANNOUNCEMENT_HELD_DAYS + 1) * 86_400]]);
-    return { ...waiting(), heldSince: now };
+  // Its 60 days start on its first hold, whether or not its place could be taken then (Claude 7 xAF's LEVE on #5341).
+  const heldSince = job.heldSince ?? now;
+  if (now - heldSince >= ANNOUNCEMENT_HELD_DAYS * 86_400_000) {
+    if (job.heldPlaced) await redisPipeline([["SREM", heldKey(job.community), job.id]]);
+    return { ...job, status: "failed", note: ended, retryAt: undefined, heldPlaced: undefined };
   }
-  if (now - job.heldSince >= ANNOUNCEMENT_HELD_DAYS * 86_400_000) {
-    await redisPipeline([["SREM", heldKey(job.community), job.id]]);
-    return { ...job, status: "failed", note: ended, retryAt: undefined };
+  const waiting = (placed: boolean): AnnouncementJob => ({ ...job, status: "waiting", note, retryAt: now + ANNOUNCEMENT_RETRY_SECONDS * 1000, heldSince, heldPlaced: placed || undefined });
+  if (job.heldPlaced) return waiting(true);
+  const key = heldKey(job.community);
+  // Places held by sends that ended or are gone are given back first. A send still under way is never taken out on a
+  // read: it may be entering the hold at this moment.
+  const listed = repliesFor(await redisPipeline([["SMEMBERS", key]]), 1);
+  const ids = listed ? stringList(listed[0]) : null;
+  if (!ids) return waiting(false);
+  const others = ids.filter((other) => other !== job.id);
+  if (others.length) {
+    const read = repliesFor(await redisPipeline([["MGET", ...others.map(jobKey)]]), 1);
+    const values = read ? repliesFor(read[0], others.length) : null;
+    if (!values) return waiting(false);
+    const gone = others.filter((_, i) => {
+      if (values[i] === null) return true;
+      const other = parse(values[i]);
+      return other !== null && (other.status === "sent" || other.status === "failed");
+    });
+    if (gone.length) await redisPipeline([["SREM", key, ...gone]]);
   }
-  return waiting();
+  // The place itself in one atomic step (Claude 7 xAF's MEDIUM on #5341): sends held at the same moment never pass the
+  // ceiling together. Kept a day past the longest hold, from the last send held.
+  const taken = repliesFor(await redisPipeline([["EVAL", HOLD_PLACE, 1, key, job.id, ANNOUNCEMENTS_HELD_MOST, (ANNOUNCEMENT_HELD_DAYS + 1) * 86_400]]), 1)?.[0];
+  if (taken === 0) {
+    return { ...job, status: "failed", note: full, retryAt: undefined, heldSince: undefined, heldPlaced: undefined };
+  }
+  return waiting(taken === 1);
 }
+
+/**
+ * A held send's place among its community's held sends (KEYS: the set; ARGV: the send's id, ANNOUNCEMENTS_HELD_MOST,
+ * the set's seconds): 1 when it holds one (already, or taken now), 0 when the others hold them all. Modelled by
+ * lib/redis-memory-take.ts.
+ */
+export const HOLD_PLACE = `-- marktmorgen:announcement-hold:v1
+if redis.call("SISMEMBER", KEYS[1], ARGV[1]) == 1 then return 1 end
+if redis.call("SCARD", KEYS[1]) >= tonumber(ARGV[2]) then return 0 end
+redis.call("SADD", KEYS[1], ARGV[1])
+redis.call("EXPIRE", KEYS[1], tonumber(ARGV[3]))
+return 1`;
 
 function parse(raw: unknown): AnnouncementJob | null {
   if (typeof raw !== "string") return null;
@@ -510,8 +532,8 @@ export async function advanceAnnouncement(
       return job;
     }
     // No longer held: its place among the community's held sends is given back.
-    if (job.heldSince !== undefined) await redisPipeline([["SREM", heldKey(job.community), id]]);
-    job = { ...job, status: "sending", note: "", retryAt: undefined, heldSince: undefined };
+    if (job.heldPlaced) await redisPipeline([["SREM", heldKey(job.community), id]]);
+    job = { ...job, status: "sending", note: "", retryAt: undefined, heldSince: undefined, heldPlaced: undefined };
     const community = job.community;
 
     while (job.done < job.total && Date.now() < deadline) {

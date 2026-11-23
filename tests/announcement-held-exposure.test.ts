@@ -13,7 +13,7 @@ is("a run's and a look's commands, the store's and settings' reads counted as 4 
 
 part("The worst case a store, over the longest hold");
 const { commands, usd } = announcementHeldStoreExposure();
-is("3 sends x 60 days x (288 runs x 3 + 24 looks x 8) + 3 first holds x 5", commands, 3 * (60 * (288 * 3 + 24 * 8) + 5));
+is("3 sends x 60 days x (288 runs x 3 + 24 looks x 8) + 3 first holds x 8", commands, 3 * (60 * (288 * 3 + 24 * 8) + 8));
 is("priced at a command and a kilobyte each", usd, commands * (COMMAND + 1_024 * DB_BYTE));
 is("finite and above zero, never taken as nothing", Number.isFinite(usd) && usd > 0, true);
 console.log("ANNOUNCEMENT_HELD_STORE_EXPOSURE", JSON.stringify({ commands, usd: Number(usd.toFixed(6)) }));

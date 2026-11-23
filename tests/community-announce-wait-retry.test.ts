@@ -144,13 +144,21 @@ async function main(): Promise<void> {
     db.run(["SET", `nl:cm:mail:${id}`, JSON.stringify(job)]);
     db.run(["RPUSH", `nl:cm:mail:${id}:to`, ...members.map((m) => m.k)]);
     db.run(["SADD", "nl:cm:mailq", id]);
-    db.run(["SET", `nl:cm:mailq:held:${job.community}`, "not a set"]);
+    // The held set's read answers in no known shape, once.
+    const realPipeline = db.pipeline.bind(db);
+    db.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.length === 1 && commands[0][0] === "SMEMBERS" && String(commands[0][1]).startsWith("nl:cm:mailq:held:")) return [7];
+      return realPipeline(commands);
+    }) as typeof db.pipeline;
     const first = await advanceAnnouncement(id, async () => off, Date.now() + 10_000);
-    is("it waits, its 60 days started", [first?.status, typeof first?.heldSince], ["waiting", "number"]);
-    db.run(["DEL", `nl:cm:mailq:held:${job.community}`]);
+    db.pipeline = realPipeline;
+    is("it waits, its 60 days started, no place taken", [first?.status, typeof first?.heldSince, db.run(["SISMEMBER", `nl:cm:mailq:held:${job.community}`, id])], ["waiting", "number", 0]);
     shift = 3_600_000 + 1_000;
     await advanceAnnouncement(id, async () => off, Date.now() + 10_000);
     is("its next look takes its place", db.run(["SISMEMBER", `nl:cm:mailq:held:${job.community}`, id]), 1);
+    // Looked at on the way (each look keeps its record), then past 60 days from the first hold.
+    shift = 59 * 86_400_000;
+    await advanceAnnouncement(id, async () => off, Date.now() + 10_000);
     shift = 60 * 86_400_000 + 7_200_000;
     is("and past 60 days from the first hold it ends", (await advanceAnnouncement(id, async () => off, Date.now() + 10_000))?.status, "failed");
   }

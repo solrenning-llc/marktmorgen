@@ -5,7 +5,7 @@
  * written with the writing help only a paid-up Studio or Scale plan has
  * (aiAvailableFor, lib/ai.ts: not in a trial, which leaves out paid AI
  * writing), the sender's name and postal address saved first, and nothing
- * ever sent from here. The studio labels Studio "Pro". No figure. Shown first
+ * ever sent from here. The plan is named as the studio names it (PLAN_TITLES; never "Pro", #4499). No figure. Shown first
  * in the page's own "Questions" block.
  */
 import { PLANS_ON_SALE } from "@/lib/opening";
@@ -13,7 +13,7 @@ import { PLAN_TITLES } from "@/lib/plan";
 import { ROLE_NAMES } from "@/lib/team-roles";
 
 /** The studio's own words. */
-export const OUTREACH_WORDS = { tool: "Outreach", who: "Who is writing", name: "Your name", address: "Your postal address", save: "Save", write: "Write to a business", goal: "What you are looking for", site: "Their website", country: "The country the business is in", notHere: "not from here", find: "Find where they ask to be written", addresses: "Addresses printed on their own website", draft: "Write the email", pitches: "Your pitches", gmail: "Open it in Gmail", mailApp: "Open it in my mail app", copy: "Copy it", studioPlan: "Pro" } as const;
+export const OUTREACH_WORDS = { tool: "Outreach", who: "Who is writing", name: "Your name", address: "Your postal address", save: "Save", write: "Write to a business", goal: "What you are looking for", site: "Their website", country: "The country the business is in", notHere: "not from here", find: "Find where they ask to be written", addresses: "Addresses printed on their own website", draft: "Write the email", pitches: "Your pitches", gmail: "Open it in Gmail", mailApp: "Open it in my mail app", copy: "Copy it" } as const;
 
 export function outreachBeginnerQuestions(onSale = PLANS_ON_SALE): { q: string; a: string }[] {
   const w = OUTREACH_WORDS;
@@ -21,7 +21,7 @@ export function outreachBeginnerQuestions(onSale = PLANS_ON_SALE): { q: string; 
   return [
     {
       q: "How do I write my first pitch?",
-      a: `On a paid-up ${plans} plan (your studio calls the ${PLAN_TITLES.pro} plan “${w.studioPlan}”), while the writing help is available for your store, the owner, an ${ROLE_NAMES.admin} or an ${ROLE_NAMES.editor} opens “${w.tool}” in the studio. Under “${w.who}”, fill in “${w.name}” and “${w.address}” and press “${w.save}”. Under “${w.write}”, pick one of the options under “${w.goal}”, type “${w.site}”, and pick “${w.country}” from those not marked “${w.notHere}”. Say what you would offer, and press “${w.find}”. Under “${w.addresses}”, choose one you can select and press “${w.draft}”. The draft appears under “${w.pitches}”, where you can read and change it. Then press “${w.gmail}”, “${w.mailApp}” or “${w.copy}”: you send it yourself, from your own mailbox.`,
+      a: `On a paid-up ${plans} plan, while the writing help is available for your store, the owner, an ${ROLE_NAMES.admin} or an ${ROLE_NAMES.editor} opens “${w.tool}” in the studio. Under “${w.who}”, fill in “${w.name}” and “${w.address}” and press “${w.save}”. Under “${w.write}”, pick one of the options under “${w.goal}”, type “${w.site}”, and pick “${w.country}” from those not marked “${w.notHere}”. Say what you would offer, and press “${w.find}”. Under “${w.addresses}”, choose one you can select and press “${w.draft}”. The draft appears under “${w.pitches}”, where you can read and change it. Then press “${w.gmail}”, “${w.mailApp}” or “${w.copy}”: you send it yourself, from your own mailbox.`,
     },
     {
       q: "Can I try outreach before paying?",

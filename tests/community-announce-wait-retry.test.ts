@@ -117,6 +117,43 @@ async function main(): Promise<void> {
     const resumed = await advanceAnnouncement(ids[1], async () => store, Date.now() + 10_000);
     is("back on, a held send goes out", resumed?.status, "sent");
   }
+
+  // Claude 7 xAF's MEDIUM on #5341: the place among the held sends is taken in one atomic step, so sends held at the
+  // same moment never pass the ceiling together.
+  part("Five sends held at the same moment: three wait, two end");
+  {
+    reset();
+    shift = 0;
+    const off = { ...store, suspended: "2026-11-09T12:00:00.000Z" } as Store;
+    const ids = ["5", "6", "7", "8", "9"].map((d) => d.repeat(24));
+    for (const one of ids) {
+      db.run(["SET", `nl:cm:mail:${one}`, JSON.stringify({ ...job, id: one })]);
+      db.run(["RPUSH", `nl:cm:mail:${one}:to`, ...members.map((m) => m.k)]);
+      db.run(["SADD", "nl:cm:mailq", one]);
+    }
+    const all = await Promise.all(ids.map((one) => advanceAnnouncement(one, async () => off, Date.now() + 10_000)));
+    is("exactly three wait, the others end", [all.filter((a) => a?.status === "waiting").length, all.filter((a) => a?.status === "failed").length], [3, 2]);
+  }
+
+  // Claude 7 xAF's LEVE on #5341: a held set that does not read still starts the send's 60 days.
+  part("A held set that does not read: the 60 days still start, and the place is asked again");
+  {
+    reset();
+    shift = 0;
+    const off = { ...store, suspended: "2026-11-09T12:00:00.000Z" } as Store;
+    db.run(["SET", `nl:cm:mail:${id}`, JSON.stringify(job)]);
+    db.run(["RPUSH", `nl:cm:mail:${id}:to`, ...members.map((m) => m.k)]);
+    db.run(["SADD", "nl:cm:mailq", id]);
+    db.run(["SET", `nl:cm:mailq:held:${job.community}`, "not a set"]);
+    const first = await advanceAnnouncement(id, async () => off, Date.now() + 10_000);
+    is("it waits, its 60 days started", [first?.status, typeof first?.heldSince], ["waiting", "number"]);
+    db.run(["DEL", `nl:cm:mailq:held:${job.community}`]);
+    shift = 3_600_000 + 1_000;
+    await advanceAnnouncement(id, async () => off, Date.now() + 10_000);
+    is("its next look takes its place", db.run(["SISMEMBER", `nl:cm:mailq:held:${job.community}`, id]), 1);
+    shift = 60 * 86_400_000 + 7_200_000;
+    is("and past 60 days from the first hold it ends", (await advanceAnnouncement(id, async () => off, Date.now() + 10_000))?.status, "failed");
+  }
   Date.now = realNow;
   done();
 }

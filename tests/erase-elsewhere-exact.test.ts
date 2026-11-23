@@ -581,6 +581,53 @@ async function main(): Promise<void> {
     is("and S is still in X's index", redis.run(["SISMEMBER", teamIndexKey(X), s.sid]), 1);
   }
 
+  part("MEDIUM (Codex L-20261119-0634, #5010 row 133): a team record changed between the read past's read and its removal keeps the id, whatever shape it has now");
+  for (const [label, swapped] of [
+    // parseTeam refuses lists that are objects; cjson made them tables the v1 script took for a team without X.
+    ["members and invites now JSON objects", JSON.stringify({ members: { 0: { email: X, role: "admin", joinedAt: "" } }, invites: {} })],
+    // A valid record that changed (another member added) is not the record read: no progress this time, never a guess.
+    ["a valid record that changed, still without X", JSON.stringify({ members: [{ email: "other@example.com", role: "admin", joinedAt: "" }], invites: [] })],
+  ] as [string, string][]) {
+    fresh();
+    const S_OWNER = "owner-shape@example.com";
+    await claimHandle(S_OWNER, "ownershape", "Owner Shape", "");
+    const s = (await ensureStoreId(S_OWNER))!;
+    redis.run(["SET", teamKey(s.sid), JSON.stringify({ members: [], invites: [] })]);
+    redis.run(["SADD", teamIndexKey(X), s.sid]);
+    for (let i = 0; i < MEMBER_STORES_READ + 1; i += 1) redis.run(["SADD", teamIndexKey(X), createHash("md5").update(`shape${i}`).digest("hex")]);
+    let swappedIn = false;
+    replaced = [{
+      word: "GET",
+      key: teamKey(s.sid),
+      reply: () => {
+        // The read past reads S's team without X; right after, the record changes before the removal's step.
+        const read = redis.run(["GET", teamKey(s.sid)]);
+        if (!swappedIn) {
+          swappedIn = true;
+          redis.run(["SET", teamKey(s.sid), swapped]);
+        }
+        return read;
+      },
+    }];
+    const read = await memberStoresExact(X, "f".repeat(32)).then(() => "read", (error: unknown) => (error as Error).name);
+    replaced = [];
+    is(`${label}: the read past read S's team and stayed unknown`, [swappedIn, read], [true, "UnknownReplyError"]);
+    is(`${label}: S is still in X's index`, redis.run(["SISMEMBER", teamIndexKey(X), s.sid]), 1);
+  }
+  {
+    // Control: the record unchanged since the read is still taken out, as before (the read past makes progress).
+    fresh();
+    const S_OWNER = "owner-same@example.com";
+    await claimHandle(S_OWNER, "ownersame", "Owner Same", "");
+    const s = (await ensureStoreId(S_OWNER))!;
+    redis.run(["SET", teamKey(s.sid), JSON.stringify({ members: [], invites: [] })]);
+    redis.run(["SADD", teamIndexKey(X), s.sid]);
+    for (let i = 0; i < MEMBER_STORES_READ + 1; i += 1) redis.run(["SADD", teamIndexKey(X), createHash("md5").update(`same${i}`).digest("hex")]);
+    const read = await memberStoresExact(X, "f".repeat(32)).then(() => "read", (error: unknown) => (error as Error).name);
+    is("control: an unchanged team without X stays unknown this time", read, "UnknownReplyError");
+    is("control: and S leaves X's index, so the next read gets further", redis.run(["SISMEMBER", teamIndexKey(X), s.sid]), 0);
+  }
+
   part("LEVE (Claude 4 on #3660 at 89d44aba5a): an id read past as no store (nil), whose team still lists the person, leaves the index for good");
   {
     fresh();

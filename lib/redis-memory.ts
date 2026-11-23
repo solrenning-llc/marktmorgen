@@ -3989,32 +3989,23 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
         // lib/team.ts TEAM_INDEX_OFF_TEAM: an id leaves a person's team index only when its team, read in the same step,
-        // is gone or lists everyone but them; a team record that does not read keeps the id (Codex U on #3660).
-        if (key.startsWith("-- marktmorgen:team-index-off-team:v1\n")) {
+        // is still exactly the record the read past accepted without them (its SHA-1), or still gone (an empty digest):
+        // never a second reading of the JSON (Codex L-20261119-0634 on #5010 row 133; before it, Codex U on #3660).
+        if (key.startsWith("-- marktmorgen:team-index-off-team:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const argv = args.slice(1 + count);
-          if (!Number.isInteger(count) || count < 2 || argv.length !== count) throw new Error("ERR team-index-off-team: wrong number of keys or arguments");
+          if (!Number.isInteger(count) || count < 2 || argv.length !== 2 * (count - 1)) throw new Error("ERR team-index-off-team: wrong number of keys or arguments");
           const [index, ...teams] = keys;
-          const [address, ...sids] = argv;
           let removed = 0;
           teams.forEach((team, i) => {
             this.scriptCalls += 1;
             const raw = this.run(["GET", team]);
-            let off = raw === null;
-            if (typeof raw === "string") {
-              try {
-                const parsed = JSON.parse(raw) as { members?: unknown; invites?: unknown };
-                if (Array.isArray(parsed.members) && Array.isArray(parsed.invites)) {
-                  off = !parsed.members.some((m) => !!m && typeof m === "object" && typeof (m as { email?: unknown }).email === "string" && (m as { email: string }).email.trim().toLowerCase() === address);
-                }
-              } catch {
-                off = false;
-              }
-            }
-            if (off) {
+            const seen = argv[2 * i + 1];
+            const same = seen === "" ? raw === null : typeof raw === "string" && createHash("sha1").update(raw, "utf8").digest("hex") === seen;
+            if (same) {
               this.scriptCalls += 1;
-              removed += Number(this.run(["SREM", index, sids[i]]));
+              removed += Number(this.run(["SREM", index, argv[2 * i]]));
             }
           });
           return removed;

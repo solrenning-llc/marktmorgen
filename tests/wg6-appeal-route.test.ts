@@ -272,6 +272,7 @@ async function main() {
     }
     return fakeProvider(input, init);
   };
+  const sentBeforeNewer = sent.length;
   const pendingSend = sendAgain(nextStore, nextKey, "https://marktmorgen.com");
   try {
     await started;
@@ -280,12 +281,64 @@ async function main() {
     completeSend();
     await pendingSend;
     const current = (await readAppeals(nextStore)).get(nextKey);
-    is("the handoff is confirmed with the latest attempt number", [current?.told, current?.tries], [true, 3]);
+    // Since #3612 the request is held while a try runs (held, APPEAL_WRITE): the second press finds it held, is told
+    // "unsent" and neither counts a try nor reaches the provider, so the confirmed count is that of the one try that sent.
+    is("the handoff is confirmed with the latest attempt number", [current?.told, current?.tries, sent.length - sentBeforeNewer], [true, 2, 1]);
   } finally {
     mailDown = false;
     globalThis.fetch = fakeProvider;
     completeSend();
   }
+
+  part("A confirmed send after its hold ran out still marks the newest attempt as told (#3533's swap and loop, kept by #3612)");
+  // The hold (#3612) lasts LOCK_SECONDS; an email can take longer. Then another press may take the hold and count a try
+  // of its own while the first email is still on its way. When that first email is confirmed, the inbox has the request:
+  // the record of the newer attempt is marked told, keeping its count (#3533: swapAppeal over the exact bytes, and the
+  // loop in tell()), instead of being left "not told" with Send it again offered for an email that went.
+  const slowEmail = "appeal-slow-hold@example.test";
+  await creator(slowEmail, "appealshopslow");
+  await noteTakedown(slowEmail, PRODUCT);
+  const slowStore = (await storeForEmail(slowEmail))!;
+  const slowKey = decisionsOf(slowStore)[0].key;
+  mailDown = true;
+  await fileAppeal(slowStore, slowKey, { explanation: "My slow request." }, new Date(), "https://marktmorgen.com");
+  mailDown = false;
+  const slowProvider = globalThis.fetch;
+  let slowStarted!: () => void;
+  const slowBegun = new Promise<void>((resolve) => { slowStarted = resolve; });
+  let slowFinish!: () => void;
+  const slowDone = new Promise<void>((resolve) => { slowFinish = resolve; });
+  let slowFirst = true;
+  globalThis.fetch = async (input, init) => {
+    if (slowFirst && new URL(String(input)).hostname === "api.resend.com") {
+      slowFirst = false;
+      const response = await slowProvider(input, init);
+      slowStarted();
+      await slowDone;
+      return response;
+    }
+    return slowProvider(input, init);
+  };
+  const slowSend = sendAgain(slowStore, slowKey, "https://marktmorgen.com");
+  try {
+    await slowBegun;
+    // The hold runs out while the first email is on its way (more than LOCK_SECONDS).
+    for (const k of redis.keys().filter((k) => k.includes(":al:"))) redis.run(["DEL", k]);
+    mailDown = true;
+    is("a newer press takes the hold, counts its try, and cannot send", (await sendAgain(slowStore, slowKey, "https://marktmorgen.com"))?.ok, false);
+    mailDown = false;
+    is("the newer try is counted", (await readAppeals(slowStore)).get(slowKey)?.tries, 3);
+    slowFinish();
+    await slowSend;
+    const current = (await readAppeals(slowStore)).get(slowKey);
+    is("the first email, confirmed, marks the newest attempt told and keeps its count", [current?.told, current?.tries], [true, 3]);
+  } finally {
+    mailDown = false;
+    globalThis.fetch = slowProvider;
+    slowFinish();
+  }
+  const appealsSource = readFileSync("lib/takedown-appeals.ts", "utf8");
+  is("the exact-bytes swap and the told loop of #3533 are there", [/-- marktmorgen:appeal-swap:v1/.test(appealsSource), /async function swapAppeal\(/.test(appealsSource), /function sameAppeal\(/.test(appealsSource), /for \(let i = 0; i < MAX_TELL_TRIES; i\+\+\)/.test(appealsSource)], [true, true, true, true]);
 
   part("A request kept whose next step's answer is lost is never said to be not kept");
   // Claude 3 cloud K, LEVE 1 on 27dded69: the record is written, then the reply to counting the inbox try is lost.
@@ -298,6 +351,7 @@ async function main() {
   let lostCount = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const replies = await realPipeline(commands);
+    // The inbox try is counted by the swap over the exact bytes read (#3533's appeal-swap, kept inside #3612's hold).
     if (!lostCount && commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:appeal-swap:v1")) {
       lostCount = true;
       throw new Error("reply lost");

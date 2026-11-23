@@ -96,11 +96,13 @@ export const IMPORT_MIN_ROWS_PER_UPLOAD = 50;
 export const IMPORT_ROW_BYTES = 2_000;
 // Since 23 November 2026 (#5010 row 150, Claude 6 z5v4's route sweep 2f36): 3,000 until then, below what a products
 // import moves. The job reads its batch back whole once for every CHUNK of the batch's rows, so the fullest batch one
-// upload request may carry (IMPORT_LIMITS.products rows in BATCH_BYTES) is the dearest per row; characters JSON
-// escapes (quotes, backslashes) weigh twice in the request that keeps the batch and once where the upload is counted.
-// Measured 55,814 bytes a counted row at the worst found (500 rows of quotes, titles and descriptions, in one request;
-// Claude 1's MEDIUM on #5259), with about 11% room; tests/import-products-bytes.test.ts holds every shape under it.
-export const IMPORT_WORST_BYTES_PER_ROW = 62_000;
+// upload request may carry (IMPORT_LIMITS.products rows in BATCH_BYTES) is the dearest per row (Claude 1's MEDIUM on
+// #5259). Each answer is counted as the database may write it, every character at its widest (lib/list-download.ts
+// jsonBytes: &, < and > in six bytes; Claude 2 lpgvy's MEDIUM on #5259), while the upload is counted as this client
+// writes it, one byte each. Measured 131,723 bytes a counted row at the worst found (500 rows of ampersands or
+// less-than signs, titles and descriptions, in one request), with about 11% room; tests/import-products-bytes.test.ts
+// holds every shape under it.
+export const IMPORT_WORST_BYTES_PER_ROW = 146_000;
 
 /**
  * How long rows not brought in yet are kept from their upload (lib/imports.ts

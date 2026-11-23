@@ -16,6 +16,7 @@ import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, IMPORT
 import { MAX_ABOUT_LENGTH } from "@/lib/product-about";
 import { MAX_TITLE_LENGTH } from "@/lib/catalog";
 import { paidPeriod } from "./billing-period-fixture";
+import { jsonBytes } from "@/lib/list-download";
 import { store as redis } from "./redis-stub";
 
 type Batch = (string | number)[][];
@@ -66,7 +67,9 @@ async function measure(about: string, titleChar = "T"): Promise<{ counted: numbe
   (redis as { run: typeof plainRun }).run = (command) => { commands += 1; return plainRun(command); };
   redis.pipeline = (async (batch: Batch) => {
     const answer = await plainPipeline(batch);
-    bytes += Buffer.byteLength(JSON.stringify(batch)) + Buffer.byteLength(JSON.stringify(answer ?? null));
+    // The request as this client writes it; the answer as the database may write it, every character at its widest
+    // (lib/list-download.ts jsonBytes: <, > and & in six bytes; Claude 2 lpgvy's MEDIUM on #5259, 7091806924).
+    bytes += Buffer.byteLength(JSON.stringify(batch)) + jsonBytes(answer ?? null);
     return answer;
   }) as typeof redis.pipeline;
   try {
@@ -93,7 +96,9 @@ async function measure(about: string, titleChar = "T"): Promise<{ counted: numbe
 }
 
 for (const [name, about, titleChar] of [
-  ["the fullest upload of quotes, titles and descriptions both (the worst found)", fullestAbout("\"", "\""), "\""],
+  ["the fullest upload of ampersands, titles and descriptions both (the worst found: six bytes each in an answer)", fullestAbout("&", "&"), "&"],
+  ["the fullest upload of less-than signs, titles and descriptions both", fullestAbout("<", "<"), "<"],
+  ["the fullest upload of quotes, titles and descriptions both", fullestAbout("\"", "\""), "\""],
   ["the fullest upload of quote descriptions", fullestAbout("\"", "T"), "T"],
   ["the fullest upload of backslash descriptions", fullestAbout("\\", "T"), "T"],
   ["the fullest upload of ampersand descriptions", fullestAbout("&", "T"), "T"],

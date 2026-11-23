@@ -182,11 +182,13 @@ async function create(
 
 /**
  * The meeting for a scope: made now when there is none, found when there
- * is, with `guest` on its guest list. Never throws for a provider's or a
- * lock's failure: the record says which link to give, and it is written down.
- * One case throws: a record that is there and does not read (CX-123 rule 24;
- * Codex X6's LOW on #2619): its link may already be in people's hands, so no
- * fallback is handed out in its place and the read's error goes to the caller.
+ * is, with `guest` on its guest list. Never throws for a provider's failure:
+ * the record says which link to give, and it is written down. It throws when
+ * the meeting's record cannot be read: one that is there and does not read, or
+ * a database that does not answer (CX-123 rule 24; Codex X6's LOW on #2619;
+ * Claude 5 icEJ's LEVE on #5418). Its link may already be in people's hands, so
+ * no fallback is handed out in its place, and the read's error goes to the
+ * caller.
  */
 export async function meetingFor(ask: MeetingAsk): Promise<MeetRecord> {
   const guest = ask.guest ? ask.guest.trim().toLowerCase() : null;

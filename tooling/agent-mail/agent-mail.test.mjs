@@ -819,6 +819,14 @@ exec ${realGit} "$@"
   const marcaF = join(T, "flaky-once"); writeFileSync(marcaF, "1\n");
   r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "flaky", "--text", "x"], { ...as("c2"), PATH: `${BINF}:${base.PATH}`, FAKE_GIT_FAIL: marcaF });
   is("a write-tree that fails once with 'unable to create temporary file' is tried again and the message goes through", r.ok && /enviada/.test(r.out) && !existsSync(marcaF), r.out);
+  // The same for the blob written before the loop (LEVE of Claude 4 3Kc on #5147).
+  writeFileSync(join(BINF, "git"), `#!/bin/sh
+for a in "$@"; do if [ "$a" = "hash-object" ] && [ -f "$FAKE_GIT_FAIL" ]; then rm -f "$FAKE_GIT_FAIL"; echo "error: unable to create temporary file: No such file or directory" >&2; echo "fatal: unable to write loose object file" >&2; exit 128; fi; done
+exec ${realGit} "$@"
+`);
+  writeFileSync(marcaF, "1\n");
+  r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "flaky blob", "--text", "y"], { ...as("c2"), PATH: `${BINF}:${base.PATH}`, FAKE_GIT_FAIL: marcaF });
+  is("a hash-object that fails once with 'unable to create temporary file' is tried again too (LEVE of Claude 4 3Kc)", r.ok && /enviada/.test(r.out) && !existsSync(marcaF), r.out);
   const cfg = (k) => { try { return g(["--git-dir", base.CORREIO_GIT_DIR, "config", k]); } catch { return ""; } };
   is("the mailbox's git runs gc and maintenance in the foreground (no detached upkeep under a write)", cfg("gc.autoDetach") === "false" && cfg("maintenance.autoDetach") === "false", `${cfg("gc.autoDetach")} ${cfg("maintenance.autoDetach")}`);
 }
@@ -1057,6 +1065,29 @@ console.log("the owner's HOLD: only the named session releases it, on a coordina
   is("and the family that signs it releases it as any HOLD", r.ok && /LIBERADO/.test(st21()), r.out + st21());
   raw("prs/21/2", `Ação: HOLD\nPR: 21\nPor: Claude 4 X\nMotivo: raw\nHOLD do dono: OWNER-20261122-2200-RAW-TEST\nData: ${new Date().toISOString()}\nSessão: session_${SES.c2.slice(4)}\n`, join(T, "mail62.git"));
   is("an owner's line under another family's session is not an owner's HOLD either", /#21: HOLD por/.test(st21()) && !/HOLD do dono/.test(st21()), st21());
+}
+
+console.log("a family with commits on the PR neither takes nor declines its queue request (coordinator 605b and 49de), save the 4acb exception");
+{
+  g(["init", "-q", "--bare", "mail63.git"]); g(["push", "-q", "../mail63.git", "HEAD:refs/heads/correio"], join(T, "w"));
+  const m63 = { CORREIO_REPO: join(T, "mail63.git"), CORREIO_GIT_DIR: join(T, "dir63.git"), CORREIO_SEM_COMMITS: "" };
+  const c4trailer = "\n\nClaude-Session: https://claude.ai/code/session_01S9eVA3KcXUkc6qPJmpNg4a";
+  g(["checkout", "-q", "-B", "pr63", M], P); const H63 = commit("f63.txt", "63\n", `pr63 by Claude 4${c4trailer}`);
+  g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-63", "HEAD:refs/pull/63/head"], P);
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "63", "--sha", H63, "--text", "fila #63"], { ...m63, ...as("c2") });
+  is("request-enqueue lists the families with commits as left out of the queue", r.ok && /famílias com commits no PR \(ficam de fora, coordenador 605b e 49de\): claude-4/.test(r.out) && /podem enfileirar[^\n]*: (?![^\n]*claude-4)/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 4 X"], { ...m63, ...as("c4") });
+  is("a family with commits on the PR does not take its queue request, and is told who can", !/pegou/.test(r.out) && /tem commits da sua família/.test(r.out) && /podem: [^\n]*claude-7/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 7 X"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
+  is("a family with no commit takes it", /pegou/.test(r.out) && !/EXCEÇÃO 4acb/.test(r.out), r.out);
+  run(["complete-enqueue", "--as", "Claude 7 X", /pegou: (\S+)/.exec(r.out)?.[1] ?? "x", "--result", "enqueued", "--text", "t"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL" });
+  // The 4acb exception: every family outside the author has commits or reviewed the head (here, left out with --exclude).
+  g(["checkout", "-q", "-B", "pr64", M], P); const H64 = commit("f64.txt", "64\n", `pr64 by Claude 4${c4trailer}`);
+  g(["push", "-q", "../prs.git", "HEAD:refs/heads/feature-64", "HEAD:refs/pull/64/head"], P);
+  r = run(["request-enqueue", "--from", "Claude 2", "--pr", "64", "--sha", H64, "--exclude", "Claude 1,Claude 3,Claude 5,Claude 6,Claude 7,Codex", "--text", "fila #64"], { ...m63, ...as("c2") });
+  is("with no family left, request-enqueue names the 4acb exception's families", r.ok && /exceção 4acb do coordenador \(só na vez de custo, com nota no PR\): claude-4/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 4 X"], { ...m63, ...as("c4") });
+  is("then the family with commits takes it, warned that it is the 4acb exception (cost turn, note on the PR)", /pegou/.test(r.out) && /EXCEÇÃO 4acb/.test(r.out) && /escreva no próprio PR/.test(r.out), r.out);
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

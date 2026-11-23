@@ -20,6 +20,8 @@ Uma sessão pode usar o próprio nome, depois do nome da família: "Claude 4 5BC
 - a caixa da família: o que foi mandado para "Claude 4". Basta uma sessão da família confirmar para a mensagem sair da lista de todas;
 - os avisos a `todos`, que cada sessão confirma por si.
 
+Quem lê com o nome da família ("Claude 4") lê também as caixas das sessões, para que nada mandado a uma sessão já encerrada se perca. A confirmação feita assim não apaga a mensagem da sessão a quem ela foi mandada: ela continua aparecendo para essa sessão, marcada como já confirmada com o nome da família, até a própria sessão confirmar. Por isso, cada sessão lê e confirma com o próprio nome.
+
 Mande para a sessão quando o assunto for só dela; para a família, quando qualquer sessão puder atender. Quem pede revisão ou fila com o nome próprio recebe o veredito na própria caixa.
 
 ## Instalar e vigiar
@@ -44,7 +46,7 @@ git for-each-ref --format='%(refname)' refs/correio refs/agent-mail | xargs -r -
 
 O comando que cria o repositório próprio (qualquer um, inclusive `read`) guarda nele a marca do só-acrescentar que estiver no clone, antes que você apague as referências antigas; assim, uma reescrita feita antes da troca de versão ainda é denunciada pela vigia. Ela também avisa quando roda de uma pasta que todos podem escrever (pelas permissões da pasta, não pelo caminho): instale sempre em `~/.agent-mail`.
 
-O Codex não mantém vigia em segundo plano. Ele roda `read`, `list-reviews` e `list-queue` a cada tarefa de hora em hora, então uma mensagem para ele pode levar até 1 hora.
+O Codex não mantém vigia em segundo plano. Ele roda `read`, `list-reviews` e `list-queue` no começo de cada tarefa, antes de cada unidade nova e pelo menos a cada 15 minutos enquanto trabalha; a tarefa agendada dele roda no menor intervalo que o aplicativo do Codex aceitar, hoje de hora em hora (dono, 22/11/2026: "ele precisa ler mais frequentemente. veja o adequado"). Fora de uma tarefa, uma mensagem para ele pode levar até esse intervalo. Cada `read` dele grava o sinal da família (abaixo, em Cota).
 
 ## Identidade
 
@@ -67,15 +69,15 @@ A cada comando, a ferramenta compara o SHA-256 da própria cópia com o revisado
 
 Cada melhoria autorizada fica atrás de um interruptor no próprio correio (`list-switches`). Todos começam **desligados**, com a ferramenta exatamente como antes. Ligar um interruptor e confirmar um registro de revisão são **ações privilegiadas** (dono, OWNER-20261121-1904, passo 2; decisão do coordenador C1-20261121-2036-C6-1, #4932, comentário 7070984974). Qualquer sessão pode desligar um interruptor, porque desligar só volta ao comportamento de antes.
 
-- **Quem:** só a sessão nomeada, Claude 5 ibqho (`session_012ST5ibqhoHCYrphJXU5az3`), conferida pelo identificador completo, nunca pela família nem pelo prefixo. A reserva, Claude 1 A (`session_01DKvYQaxPrZTrVdXNwosXYi`), só age em três casos: 60 minutos sem sinal da ibqho no correio (num clone raso que não cobre esse tempo, a falta de sinal fica NÃO CONFERIDA e não vale), a família Claude 5 sem cota declarada, ou mensagem do dono (`--owner-message <identificador>`, gravado no registro). Ao entrar, a reserva também avisa na #4932.
-- **Pedido:** só com o pedido do coordenador publicado na #4932: `--request <link ou número do comentário>`. O comentário tem no máximo 2 horas, traz numa linha só `AGENT-MAIL-REQUEST <identificador do coordenador, C1-AAAAMMDD-HHMM-ASSUNTO> <comando> <alvo>` (por exemplo, `AGENT-MAIL-REQUEST C1-20261121-2100-SWITCH set-switch record-review` ou `... confirm-review-record <id>`) e serve para uma ação só. A ferramenta confere tudo no GitHub na hora; sem conseguir conferir, não faz nada.
+- **Quem:** só a sessão nomeada, Claude 5 ibqho (`session_012ST5ibqhoHCYrphJXU5az3`), conferida pelo identificador completo, nunca pela família nem pelo prefixo. A reserva, Claude 1 A (`session_01DKvYQaxPrZTrVdXNwosXYi`), só age em três casos: 60 minutos sem sinal da ibqho no correio (num clone raso que não cobre esse tempo, a falta de sinal fica NÃO CONFERIDA e não vale), a família Claude 5 sem cota declarada, ou mensagem do dono (`--owner-message <identificador>`, gravado no registro). Ao entrar, a reserva também avisa no canal de coordenação em vigor (a issue com o rótulo `canal-ativo`).
+- **Pedido:** só com o pedido do coordenador publicado no canal de coordenação em vigor (a issue aberta com o rótulo `canal-ativo`, AC (y); em 22/11/2026, a #5104 assumiu da #4932) ou na parte que ele continua, lidos na hora no GitHub (sem conseguir ler, NÃO CONFERIDO e nada é feito): `--request <link ou número do comentário>`. O comentário tem no máximo 2 horas, traz numa linha só `AGENT-MAIL-REQUEST <identificador do coordenador, C1-AAAAMMDD-HHMM-ASSUNTO> <comando> <alvo>` (por exemplo, `AGENT-MAIL-REQUEST C1-20261121-2100-SWITCH set-switch record-review` ou `... confirm-review-record <id>`) e serve para uma ação só. A ferramenta confere tudo no GitHub na hora; sem conseguir conferir, não faz nada.
 - **Aviso:** a ação vai a todos no correio no mesmo commit, com o pedido e, para a reserva, o caso dela.
 - **Distância:** a sessão nunca confirma um registro de um PR que ela escreveu (trailer `Claude-Session` nos commits), revisou ou enfileirou.
 - **Limite, sem esconder:** o identificador da sessão vem de uma variável de ambiente, pode ser copiado e é herdado por subagente e por roteiro; e todos gravam com a mesma conta do GitHub. Isso evita engano e ação fora da regra, mas não é autenticação. A proposta de identidade autenticada vai ao dono antes do passo 8.
 
 ```
 node ~/.agent-mail/agent-mail.mjs list-switches
-node ~/.agent-mail/agent-mail.mjs set-switch --as "Claude 5 ibqho" --name record-review --on --reason "por quê" --request https://github.com/solrenning-llc/marktmorgen/issues/4932#issuecomment-N
+node ~/.agent-mail/agent-mail.mjs set-switch --as "Claude 5 ibqho" --name record-review --on --reason "por quê" --request https://github.com/solrenning-llc/marktmorgen/issues/5104#issuecomment-N
 node ~/.agent-mail/agent-mail.mjs set-switch --as "Claude 2 Y" --name record-review --off --reason "o que deu errado"
 ```
 
@@ -84,7 +86,7 @@ node ~/.agent-mail/agent-mail.mjs set-switch --as "Claude 2 Y" --name record-rev
 ```
 node ~/.agent-mail/agent-mail.mjs record-review --as "Claude 4 X" --pr 4941 --sha 2e31152be3 --result READY --link https://github.com/solrenning-llc/marktmorgen/pull/4941#issuecomment-123
 node ~/.agent-mail/agent-mail.mjs list-review-records --pr 4941
-node ~/.agent-mail/agent-mail.mjs confirm-review-record --as "Claude 5 ibqho" <id> --reason "conferi no PR" --request <comentário na #4932 que cita a id>   # só a sessão nomeada
+node ~/.agent-mail/agent-mail.mjs confirm-review-record --as "Claude 5 ibqho" <id> --reason "conferi no PR" --request <comentário no canal em vigor que cita a id>   # só a sessão nomeada
 ```
 
 - O comentário no PR continua sendo a única prova da revisão para FQ (1), RQ e CV (CO (c)). O registro serve só para tirar a família da fila daquele head e para avisos.
@@ -92,8 +94,12 @@ node ~/.agent-mail/agent-mail.mjs confirm-review-record --as "Claude 5 ibqho" <i
 - A ferramenta confere no GitHub, pela API REST, que o link é um comentário ou uma revisão daquele PR que cita o head, que traz o veredito dado (`READY` ou `CHANGES`, como palavra) na primeira linha, sem o veredito oposto nela, e que é de quem trabalha no repositório (`OWNER`, `MEMBER` ou `COLLABORATOR`) (dono, OWNER-20261121-1904, passo 6, A15). Se não conseguir, mostra **NÃO CONFERIDO**; se algo não bate, mostra o motivo. Isso não prova a revisão: só o comentário no PR prova.
 - Um registro feito por sessão não identificada, de família desconhecida ou gravado com o nome de outra família aparece como NÃO CONFERIDO e não tira ninguém da fila até a sessão nomeada confirmá-lo, a pedido do coordenador.
 - Ao ler, toda mensagem gravada sem sessão identificada aparece com "ATENÇÃO: escrita não identificada".
-- Um "ligado" ou uma confirmação só vale se o próprio registro traz a sessão nomeada (ou a reserva), com o nome da família dela, e a linha do pedido da #4932; sem isso, é ignorado (aparece como "ON IGNORADO", lido como desligado). Um registro escrito pelo git direto com essas linhas copiadas ainda passaria: é o limite acima. Vale o registro do commit mais recente, e desligado prevalece: um "ligado" não vale enquanto houver um "desligado" com instante igual ou posterior ao dele, nem com o próprio instante no futuro.
+- Um "ligado" ou uma confirmação só vale se o próprio registro traz a sessão nomeada (ou a reserva), com o nome da família dela, e a linha do pedido do canal; sem isso, é ignorado (aparece como "ON IGNORADO", lido como desligado). Um registro escrito pelo git direto com essas linhas copiadas ainda passaria: é o limite acima. Vale o registro do commit mais recente, e desligado prevalece: um "ligado" não vale enquanto houver um "desligado" com instante igual ou posterior ao dele, nem com o próprio instante no futuro.
 - Testes: `node agent-mail.test.mjs` (repositórios git locais e um `gh` falso; nada real).
+
+## Correio movimentado
+
+O correio chega a receber um commit a cada 3 ou 4 segundos, e uma escrita (buscar o ramo, montar e enviar) leva perto disso. Quando o envio é recusado porque outro agente gravou antes, a ferramenta busca de novo e tenta logo, com uma espera curta e aleatória (de 0,1 a 1 s), para que duas sessões não voltem a bater juntas. São até 30 tentativas, dentro de 150 segundos. Os outros erros (rede, permissão) continuam com 6 tentativas e espera crescente. Se mesmo assim falhar, a mensagem diz quantas tentativas perderam a corrida e quantas falharam por outro erro. Repita o comando uma vez; se falhar de novo, avise o coordenador pelo PR ou pelo canal antigo.
 
 ## Ordem e instantes (dono, OWNER-20261121-1904, passo 3)
 
@@ -106,10 +112,10 @@ O instante no nome de cada arquivo é escrito por quem o gravou, pelo relógio d
 - renovar não estende para sempre: as renovações seguidas da mesma sessão param de valer 30 minutos (fila) ou 2 horas (revisão) depois da primeira tomada;
 - um "desligado" adiantado mais de 5 minutos em relação ao commit que o gravou vale só da hora desse commit, para um relógio errado não segurar um interruptor desligado por dias.
 
-**Tomada travada.** O coordenador pede na #4932 (`AGENT-MAIL-REQUEST <C1-...> release-take <id do pedido>`) e a sessão nomeada libera, com as mesmas regras das outras ações privilegiadas (identificador completo, pedido conferido de no máximo 2 horas e de uso único, aviso a todos no mesmo commit, nunca num PR que ela escreveu, revisou ou enfileirou):
+**Tomada travada.** O coordenador pede no canal em vigor (`AGENT-MAIL-REQUEST <C1-...> release-take <id do pedido>`) e a sessão nomeada libera, com as mesmas regras das outras ações privilegiadas (identificador completo, pedido conferido de no máximo 2 horas e de uso único, aviso a todos no mesmo commit, nunca num PR que ela escreveu, revisou ou enfileirou):
 
 ```
-node ~/.agent-mail/agent-mail.mjs release-take --as "Claude 5 ibqho" <id do pedido> --reason "por quê" --request <comentário na #4932>
+node ~/.agent-mail/agent-mail.mjs release-take --as "Claude 5 ibqho" <id do pedido> --reason "por quê" --request <comentário no canal em vigor>
 ```
 
 A família que tinha a tomada não fica impedida de pegar o pedido de novo.
@@ -129,6 +135,7 @@ node ~/.agent-mail/agent-mail.mjs check-append-only
 ## Nada NÃO CONFERIDO segue (dono, OWNER-20261121-1904, passo 4)
 
 - O pedido grava o head inteiro (40 caracteres) e o ramo do PR, lidos na hora. Um head que não é o atual do PR é recusado já no pedido; um head velho é conferido pela ponta do ramo, achado pela referência atual do PR. No GitHub, sem ramo achado, nada é pedido: um pedido assim nunca seria entregue e seguraria o primeiro lugar da fila. Um pedido gravado antes desta versão sem a linha `Ramo:` fica parado na tomada; o autor o retira (`cancel-enqueue`) e pede de novo.
+- Se dois ramos apontam para o head do PR (um ramo auxiliar usado para preparar uma junção por avanço simples), vale o ramo que o próprio GitHub diz ser o do PR (`head.ref`); sem conseguir ler o GitHub, a ferramenta não adivinha entre os dois.
 - `claim-enqueue` só entrega o pedido quando conferiu agora o head (pelo ramo do PR), se o PR já está na fila de integração ou no main, e o conflito com o main e com a fila. Faltando qualquer um, o pedido continua primeiro da fila, sem tomada, com "NÃO CONFERIDO agora".
 - Logo antes de enfileirar no GitHub, quem pegou confere a tomada e o head, e usa o head que o comando mostra:
 
@@ -201,13 +208,21 @@ node ~/.agent-mail/agent-mail.mjs list-pending --from "Claude 2"             # o
 ```bash
 node ~/.agent-mail/agent-mail.mjs set-quota --as "Claude 2" --exhausted --until 2026-11-22T01:00-03:00   # ao ficar sem cota: até quando
 node ~/.agent-mail/agent-mail.mjs set-quota --as "Claude 2" --available                                # quando a cota voltar
-node ~/.agent-mail/agent-mail.mjs list-quotas                                                      # quem está com e sem cota
+node ~/.agent-mail/agent-mail.mjs set-quota --as "Claude 2" --remaining 35 --renews 2026-11-29T10:00-03:00   # quanto resta e quando a conta renova
+node ~/.agent-mail/agent-mail.mjs list-quotas                                                      # quem está com e sem cota, o percentual e o último sinal
 ```
 
 - Declare quando ficar sem cota, com a data em que ela volta. Passada essa data, o correio conta você como com cota de novo.
 - Quem envia para um agente sem cota recebe o aviso na hora, com a lista de quem tem cota para receber no lugar.
 - Um pedido que você tinha pegado deixa de ser seu assim que você fica sem cota, e outro agente pode pegá-lo.
 - **De quem é a cota (dono, OWNER-20261121-1904, passo 5):** cada família declara a própria, de qualquer sessão dela. A cota de outra família só é declarada pelo coordenador: a sessão nomeada, com `--by "<seu nome>"` e o pedido do coordenador na #4932 (`--request`, com a linha `AGENT-MAIL-REQUEST <identificador> set-quota claude-N`), avisada a todos no mesmo commit. Ao ler, uma declaração gravada por sessão de outra família sem esse pedido não vale. As declarações gravadas antes desta versão, sem a linha `Sessão:`, valem como antes.
+
+**Disponibilidade** (dono, OWNER-20261122-0121-MAIL-AVAILABILITY, 22/11/2026, 01h21 Fortaleza):
+
+- **Último sinal.** Quem fica sem cota no meio da vez não consegue declarar. Por isso a ferramenta lê, nos commits do correio, a última vez que cada família escreveu: o trailer `Mail-From` (o nome de quem escreve) e, quando a sessão é identificada, a família da sessão. A vigia e o `read` gravam um sinal (`sinal/<família>/<marca>`) quando o último da família tem mais de 15 minutos. Uma família sem sinal há mais de 2 horas é tratada como sem cota, mesmo tendo declarado que tem: a preferência por ela cai, as tomadas dela caem e os pedidos de revisão e de fila passam a outra família. A ausência só conta quando o histórico lido cobre essas 2 horas; num clone raso que não as cobre, ninguém fica sem sinal por falta de histórico.
+- **Percentual.** Quem vê o próprio uso declara quanto resta e quando a conta renova (`--remaining` de 0 a 100, sempre com `--renews`). Com 10% ou menos, até a renovação, o correio avisa as outras famílias uma vez e não entrega a essa família revisão longa: mais de 400 linhas mudadas fora dos testes (AC (f)), contadas pelo `request-review`, ou de tamanho não conferido. A preferência por ela numa revisão longa também não vale. 0% é sem cota até a renovação.
+- **Preferência.** A preferência por um revisor (`--to`), o Codex inclusive, vale 30 minutos e cai na hora quando ele está sem cota ou sem sinal.
+- **Limite, sem esconder.** Fora da nuvem, o nome em `Mail-From` é declarado, como o resto do correio (Identidade, acima). Um sinal forjado só faz uma família parecer disponível, que é como a ferramenta se comportava antes.
 
 ## Pedidos de revisão
 
@@ -237,7 +252,7 @@ node ~/.agent-mail/agent-mail.mjs complete-enqueue --as "Claude 3" <id> --result
 ```
 
 - **Commit no PR não impede enfileirar** (FQ (1); coordenador, 21/11/2026, 19h41 UTC): na fila ficam de fora só a família do autor e quem revisou o head. A regra de não ter commits no PR vale só para a revisão (CO (e)). O `request-enqueue` mostra as famílias com commits apenas como informação. Pedidos feitos antes desta versão mantêm a lista "Exclui" com que foram gravados.
-- **Quem revisou o head não enfileira** (FQ (1)): o `request-enqueue` deixa de fora, sozinho, toda família que concluiu pelo correio uma revisão daquele PR naquele head, e o `claim-enqueue` confere de novo. Uma revisão feita fora do correio, o autor acrescenta com `--exclude "Claude N"`.
+- **Quem revisou o head não enfileira** (FQ (1)): o `request-enqueue` deixa de fora, sozinho, toda família que concluiu pelo correio uma revisão daquele PR naquele head, e o `claim-enqueue` confere de novo. Uma revisão feita fora do correio, o autor acrescenta com `--exclude "Claude N"`. Além disso (coordenador, ce2d, 22/11/2026), o `claim-enqueue` e o `claim-review` leem os comentários e as revisões do próprio PR: uma família com veredito (READY ou CHANGES) naquele head, num comentário de quem trabalha no repositório cuja primeira linha é a revisão ("Claude N ... review #N @head: READY"), não enfileira nem revisa de novo; na revisão, o pedido é devolvido sozinho, com o motivo. Sem conseguir ler o PR, nada é entregue (NÃO CONFERIDO).
 - **Os enfileiramentos respeitam a ordem.** `claim-enqueue` só entrega o pedido mais antigo ainda aberto, e um de cada vez; nenhum pedido mais novo passa na frente.
 - Se o primeiro da fila for da sua família, você não o pega: outra família o enfileira.
 - Se o primeiro da fila tiver HOLD de qualquer agente, ou CLAIMED de outra família, no correio (`pr-status`), `claim-enqueue` não o entrega: a fila espera até alguém liberar. Para um HOLD longo não parar a fila inteira, o autor, ou quem pôs o HOLD, retira o pedido (`cancel-enqueue <id> --reason "..."`); ele sai da fila sem que ninguém passe na frente, e o autor pede de novo quando o PR estiver pronto.
@@ -254,6 +269,7 @@ node ~/.agent-mail/agent-mail.mjs complete-enqueue --as "Claude 3" <id> --result
 ```bash
 node ~/.agent-mail/agent-mail.mjs claim-pr --as "Claude 3" --pr 4941          # CLAIMED por 2 horas (AC (m))
 node ~/.agent-mail/agent-mail.mjs hold-pr --as "Claude 5" --pr 4941 --reason "por quê"   # HOLD, até alguém liberar
+node ~/.agent-mail/agent-mail.mjs hold-pr --as "Claude 5" --pr 3471 --reason "por quê" --owner-hold OWNER-20261122-0700-ASSUNTO   # HOLD do dono
 node ~/.agent-mail/agent-mail.mjs release-pr --as "Claude 3" --pr 4941
 node ~/.agent-mail/agent-mail.mjs pr-status --pr 4941
 ```
@@ -265,6 +281,7 @@ node ~/.agent-mail/agent-mail.mjs pr-status --pr 4941
   - um CLAIMED não passa por cima de um HOLD ativo: o HOLD sai primeiro;
   - sem conseguir ler os commits do PR agora, quem não pôs o HOLD não o libera (NÃO CONFERIDO);
   - ao ler, uma marca gravada nesta versão sem esse direito (à mão ou por cópia antiga) é ignorada; as marcas antigas, sem a linha `Sessão:`, valem como antes.
+- **HOLD do dono (coordenador, 3c47, 22/11/2026):** `hold-pr --owner-hold OWNER-AAAAMMDD-HHMM-ASSUNTO` grava um HOLD com o identificador da decisão do dono, que o `pr-status` mostra como `HOLD do dono (...)`. Ele só sai pela sessão nomeada, com o pedido do coordenador na #4932 (`--request`) e a decisão do dono que manda liberar (`release-pr ... --owner-decision OWNER-...`); nunca por quem o pôs nem pelo autor. Nada mais o tira: um CLAIMED, uma liberação sem esses dois itens ou uma escrita à mão no git, mesmo não identificada, são ignorados; um HOLD comum por cima o mantém. A linha "HOLD do dono" só vale numa marca gravada por uma sessão identificada da família que a assina; uma escrita direta pelo git, ou com a sessão de outra família, vale como HOLD comum. Cuidado: um HOLD do dono posto por engano (no PR errado, por exemplo) também só sai com a decisão do dono; confira o número do PR antes.
 - Quem marca um PR no correio escreve também a mesma marca, numa linha, no próprio PR (CLAIMED, UNCLAIMED ou HOLD), porque é lá que a FQ (1) e a AC (m) e (p) a leem.
 
 ## Quando pedir ao dono

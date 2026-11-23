@@ -57,7 +57,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import * as exactReply from "@/lib/redis-reply";
-import { type Held, LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
+import { type Held, LockBusyError, setIfHeld, setIfHeldExact, withLock } from "@/lib/redis-lock";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { type MeetProvider, MEET_NAMES, isMeetProvider } from "@/lib/call-setup";
 import {
@@ -475,9 +475,11 @@ async function keepConnection(
     brokenAt: 0,
   };
   if (host) {
-    if (!(await setIfHeld(held, connKey(input.statsId, provider, host), JSON.stringify(connection)))) {
-      throw new LockBusyError("the connection changed while it was saved");
-    }
+    const written = await setIfHeldExact(held, connKey(input.statsId, provider, host), JSON.stringify(connection));
+    // An answer that cannot be read may follow a write that landed: unknown, so finishConsent leaves the grant live
+    // rather than revoke what Redis may hold (#5285 row #3173). Only a confirmed lost lock is "busy" and given back.
+    if (written === "unknown") throw new UnknownReplyError("keeping a team host's meeting connection");
+    if (!written) throw new LockBusyError("the connection changed while it was saved");
     // A host's own: nothing else here is keyed by it. A different account
     // connected in its place has its access given back.
     if (before && before.account.id !== traded.account.id) await giveBack(input.statsId, before, host).catch(() => {});

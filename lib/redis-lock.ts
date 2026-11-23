@@ -120,18 +120,35 @@ const FENCED_SET_NEW_ONLY =
 const FENCED_DEL_ONLY =
   '-- marktmorgen:fenced-del:v1\nif redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end\nfor i = 2, #KEYS do redis.call("DEL", KEYS[i]) end\nreturn 1';
 
-async function strictScript(source: string, keys: string[], args: string[]): Promise<boolean> {
+/** One fenced script's answer read exactly: 1 it did it, 0 it ran and did not, "unknown" when the answer cannot be read (it may have run). */
+async function exactScript(source: string, keys: string[], args: string[]): Promise<1 | 0 | "unknown"> {
   try {
     const replies = repliesFor(await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]), 1);
-    return replies?.[0] === 1;
+    if (!replies) return "unknown";
+    return replies[0] === 1 ? 1 : replies[0] === 0 ? 0 : "unknown";
   } catch {
-    return false;
+    return "unknown";
   }
+}
+
+async function strictScript(source: string, keys: string[], args: string[]): Promise<boolean> {
+  return (await exactScript(source, keys, args)) === 1;
 }
 
 /** Sets `key` only while the lock is still ours (and, with `absent`, only when nothing is there), in one script; false otherwise, never a fallback. */
 export async function setIfHeldOnly(held: Held, key: string, value: string, options: { absent?: boolean } = {}): Promise<boolean> {
   return strictScript(options.absent ? FENCED_SET_NEW_ONLY : FENCED_SET_ONLY, [held.key, key], [held.token, value]);
+}
+
+/**
+ * setIfHeldOnly's same one script, its answer said in three (#5285 row #3173): true written; false the script ran and
+ * wrote nothing (the lock is not ours, or with `absent` something is there); "unknown" when its answer cannot be read,
+ * so it may have written. For a caller that undoes something on a lost lock and must not undo it on an unknown
+ * answer (lib/meet-connect.ts keepConnection, which must not give back a grant Redis may hold).
+ */
+export async function setIfHeldExact(held: Held, key: string, value: string, options: { absent?: boolean } = {}): Promise<boolean | "unknown"> {
+  const answer = await exactScript(options.absent ? FENCED_SET_NEW_ONLY : FENCED_SET_ONLY, [held.key, key], [held.token, value]);
+  return answer === "unknown" ? answer : answer === 1;
 }
 
 /** Deletes `keys` only while the lock is still ours, in one script; false otherwise, never a fallback. */

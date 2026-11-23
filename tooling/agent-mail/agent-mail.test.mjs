@@ -1222,6 +1222,15 @@ console.log("queue: only the author's family and the head's reviewers are left o
   is("a PR made only of merges still has an author: the family of its merges", r.ok && /mais commits no PR, num ramo sem prefixo de família \(claude-2\)/.test(r.out), r.out);
   r = run(["claim-enqueue", "--as", "Claude 2 Y"], { ...m63, ...as("c2") });
   is("and that family is refused the queue request", !/pegou/.test(r.out) && /maior parte dos commits da sua família/.test(r.out), r.out);
+  // Claude 4 3Kc's note (da28): the watch applies claim-enqueue's own rule, so it no longer wakes a family every 30 s for
+  // a queue request it can never take (the author family, or a verdict by the family on this head in the PR).
+  const vereditoNoPr = JSON.stringify([`Claude 7 X review #67 @${H67.slice(0, 10)}: READY\n\nbody`, "COLLABORATOR"]) + "\n";
+  r = run(["watch", "--as", "Claude 2 Y", "--also", "enqueue", "--seconds", "1"], { ...m63, ...as("c2"), FAKE_COMMENTS: "" });
+  is("the watch does not wake the author family for its own queue request", !/fila #67/.test(r.out), r.out);
+  r = run(["watch", "--as", "Claude 7 X", "--also", "enqueue", "--seconds", "1"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", FAKE_COMMENTS: vereditoNoPr });
+  is("nor a family with a verdict on this head written only on the PR (ce2d)", !/fila #67/.test(r.out), r.out);
+  r = run(["watch", "--as", "Claude 3 X", "--also", "enqueue", "--seconds", "1"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA", FAKE_COMMENTS: vereditoNoPr });
+  is("but it still wakes a family that can take it", /fila #67/.test(r.out), r.out);
 }
 
 console.log("the watch fetches again before it says 'rewritten': a mark set by another watch on the same repository is not a rewrite");

@@ -1342,6 +1342,46 @@ function revisaoParaMim(p, eu, agora, c) {
 }
 
 /**
+ * Por que a família de `eu` não pega este pedido de fila (o primeiro): a autora (prefixo do ramo, ou a dominante nos
+ * commits num ramo sem prefixo; 0410, 3 (b), dd03) ou quem deu veredito neste head no PR (ce2d). null quando pode. Uma
+ * leitura que não deu certo volta como "NÃO CONFERIDO". O claim-enqueue e a vigia usam a mesma regra (nota do Claude 4
+ * 3Kc, da28: a vigia acordava a cada volta por um pedido que o claim-enqueue recusava).
+ */
+/**
+ * A mesma regra para a vigia, guardada por pedido e head por VEDADA_MIN minutos: ela confere a cada 30 s e não chama o
+ * GitHub a cada volta. Uma leitura NÃO CONFERIDA não é guardada e acorda o agente, que vê o motivo no claim-enqueue.
+ */
+export const VEDADA_MIN = 10;
+const vedadas = new Map();
+export function vedadaNaVigia(p, eu, agora = Date.now()) {
+  const chave = `${p.id}@${p.sha}@${familia(eu)}`;
+  const guardada = vedadas.get(chave);
+  if (guardada && agora - guardada.em < VEDADA_MIN * 60000) return guardada.vedada;
+  let motivo;
+  try { motivo = filaVedadaPara(p, eu); } catch { return false; }
+  if (motivo && /NÃO CONFERIDO/.test(motivo)) return false;
+  vedadas.set(chave, { vedada: Boolean(motivo), em: agora });
+  return Boolean(motivo);
+}
+
+export function filaVedadaPara(alvo, eu) {
+  const ramoAlvo = campoCabecalho(alvo.texto, "Ramo");
+  const doRamo = familiaDoRamo(ramoAlvo);
+  if (doRamo === familia(eu)) return `o primeiro da fila, #${alvo.pr}, é de um ramo da sua família (${ramoAlvo}); outra família o enfileira (0410, 3 (b))`;
+  // Ramo sem prefixo de família (claude/...): a autora é a família dominante nos commits (coordenador, dd03); sem ler
+  // os commits, o pedido não é entregue.
+  if (!doRamo) {
+    const cm = commitsDoPr(alvo.pr, ramoAlvo || null);
+    if (!cm) return `os commits do #${alvo.pr} não puderam ser lidos agora, e o ramo não diz a família do autor (NÃO CONFERIDO); a fila espera; tente de novo`;
+    if (cm.dominantes.includes(familia(eu))) return `o primeiro da fila, #${alvo.pr}, tem a maior parte dos commits da sua família, que conta como autora num ramo sem prefixo de família; outra família o enfileira (0410, 3 (b); dd03)`;
+  }
+  const noPr = revisoresNoPr(alvo.pr, alvo.sha);
+  if (noPr === null) return `as revisões escritas no #${alvo.pr} não puderam ser conferidas agora (NÃO CONFERIDO); a fila espera; tente de novo`;
+  if (noPr.has(familia(eu))) return `o primeiro da fila, #${alvo.pr}, tem veredito da sua família neste head no PR; outra família o enfileira (FQ (1), ce2d)`;
+  return null;
+}
+
+/**
  * Pega o próximo pedido que `eu` pode atender. Revisão: o mais antigo aberto de outra família. Fila: só o mais antigo
  * ainda aberto, de qualquer família, e nenhum enquanto outro estiver tomado; se ele for da família de `eu`, ninguém
  * dessa família o pega e espera outra família, sem que nenhum mais novo passe na frente.
@@ -1366,19 +1406,8 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     // HOLD de qualquer um, ou CLAIMED de outra família, segura o primeiro da fila; os mais novos esperam atrás dele.
     // ce2d: quem deu veredito neste head só no PR também não o enfileira; sem ler o PR, ele não é entregue.
     if (alvo) {
-      const ramoAlvo = campoCabecalho(alvo.texto, "Ramo");
-      const doRamo = familiaDoRamo(ramoAlvo);
-      if (doRamo === familia(eu)) return { espera: `o primeiro da fila, #${alvo.pr}, é de um ramo da sua família (${ramoAlvo}); outra família o enfileira (0410, 3 (b))` };
-      // Ramo sem prefixo de família (claude/...): a autora é a família dominante nos commits (coordenador, dd03); sem ler
-      // os commits, o pedido não é entregue.
-      if (!doRamo) {
-        const cm = commitsDoPr(alvo.pr, ramoAlvo || null);
-        if (!cm) return { espera: `os commits do #${alvo.pr} não puderam ser lidos agora, e o ramo não diz a família do autor (NÃO CONFERIDO); a fila espera; tente de novo` };
-        if (cm.dominantes.includes(familia(eu))) return { espera: `o primeiro da fila, #${alvo.pr}, tem a maior parte dos commits da sua família, que conta como autora num ramo sem prefixo de família; outra família o enfileira (0410, 3 (b); dd03)` };
-      }
-      const noPr = revisoresNoPr(alvo.pr, alvo.sha);
-      if (noPr === null) return { espera: `as revisões escritas no #${alvo.pr} não puderam ser conferidas agora (NÃO CONFERIDO); a fila espera; tente de novo` };
-      if (noPr.has(familia(eu))) return { espera: `o primeiro da fila, #${alvo.pr}, tem veredito da sua família neste head no PR; outra família o enfileira (FQ (1), ce2d)` };
+      const vedado = filaVedadaPara(alvo, eu);
+      if (vedado) return { espera: vedado };
     }
     const marca = alvo ? estadoPr(alvo.pr, agora) : null;
     if (marca?.ativo && (marca.acao === "HOLD" || familia(marca.por) !== familia(eu))) {
@@ -2190,7 +2219,7 @@ async function main(argv) {
           const ps = pedidos(tipo);
           const agora = new Date(), c = cotas(agora);
           const vez = tipo === "fila"
-            ? (ps.some((p) => p.estado === "tomado") ? [] : ps.filter((p) => p.estado === "aberto").slice(0, 1).filter((p) => p.familia !== familia(o.eu) && !p.devolveram.has(familia(o.eu)) && !campo(p.texto, "Exclui").split(", ").includes(familia(o.eu)) && !revisoresDoHead(p.pr, p.sha).has(familia(o.eu)) && !(() => { const m = estadoPr(p.pr); return m.ativo && (m.acao === "HOLD" || familia(m.por) !== familia(o.eu)); })()))
+            ? (ps.some((p) => p.estado === "tomado") ? [] : ps.filter((p) => p.estado === "aberto").slice(0, 1).filter((p) => p.familia !== familia(o.eu) && !p.devolveram.has(familia(o.eu)) && !campo(p.texto, "Exclui").split(", ").includes(familia(o.eu)) && !revisoresDoHead(p.pr, p.sha).has(familia(o.eu)) && !(() => { const m = estadoPr(p.pr); return m.ativo && (m.acao === "HOLD" || familia(m.por) !== familia(o.eu)); })() && !vedadaNaVigia(p, o.eu)))
             : ps.filter((p) => revisaoParaMim(p, o.eu, agora, c));
           abertos.push(...vez.map((p) => `${tipo} #${p.pr}`));
         }

@@ -13,7 +13,7 @@
 import { createHash } from "node:crypto";
 import type { Store } from "@/lib/store";
 import { askBillingAddress } from "@/lib/billing-address";
-import { saleHandles, storeRef } from "@/lib/store";
+import { STORE_ID_PATTERN, ensureStatsId, saleHandles, storeRef } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { canSell } from "@/lib/store-checkout";
@@ -77,6 +77,16 @@ export async function createTipCheckout(
   channel: Record<string, string> = {},
 ): Promise<{ url: string; id: string }> {
   if (!tipsOpen(store) || !store.stripeAccountId) throw new Error("This store takes no support");
+  // A store from before ids is told from its owner's next store only by its statsId (lib/store-live-cache.ts,
+  // storeLiveFence), so one without it could never have its mark written below. It is given one first, and the
+  // record read back is used only while its handle is still this store's: otherwise the checkout is refused before
+  // Stripe is asked (Claude 1's note in the triple audit of #5213).
+  if (!STORE_ID_PATTERN.test(store.sid) && !store.statsId) {
+    const kept = await ensureStatsId(store.email);
+    if (!kept || kept.handle !== store.handle || (!STORE_ID_PATTERN.test(kept.sid) && !kept.statsId)) throw new Error("This store takes no support");
+    store = kept;
+    if (!tipsOpen(store) || !store.stripeAccountId) throw new Error("This store takes no support");
+  }
   // Checked again where the charge is built, whatever the route checked.
   if (!tipInRange(amount, store.currency)) throw new Error("An amount out of range");
   const w = tipsWords(store.language);

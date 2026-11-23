@@ -8,12 +8,15 @@
  * the store's erasure (its erasing mark, lib/store.ts ERASING_KEY) inside the checkout's POST:
  * - the checkout is refused, no URL handed out;
  * - no tip mark is written back;
- * - the control, a live store, still opens its checkout and keeps its mark.
+ * - the control, a live store, still opens its checkout and keeps its mark;
+ * - a store from before ids with no statsId yet (Claude 1's note in the triple audit 7091737647) is given one first,
+ *   so the fence can tell it from its owner's next store, and its checkout opens with the mark kept; one whose handle
+ *   now names another store is refused before Stripe is asked.
  *
  * Synthetic store and replies only; nothing real is called.
  */
 import { createHash } from "node:crypto";
-import { claimHandle, ensureStatsId, erasingField, ERASING_KEY, setStripeAccount, setSubscription, setTips, storeForEmail, storeRef } from "@/lib/store";
+import { claimHandle, ensureStatsId, erasingField, ERASING_KEY, setStripeAccount, setSubscription, setTips, storeForEmail, storeRef, type Store } from "@/lib/store";
 import { createTipCheckout } from "@/lib/store-tip-checkout";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -25,11 +28,13 @@ process.env.STRIPE_SECRET_KEY = "sk_test_tip_erasure_only";
 const OPENED = `cs_test_${"e".repeat(24)}`;
 
 let erase: (() => Promise<void>) | null = null;
+let posts = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   const path = url.pathname.replace(/^\/v1/, "");
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (path === "/checkout/sessions" && (init?.method ?? "GET") === "POST") {
+    posts += 1;
     // The store's erasure begins while Stripe is answering.
     if (erase) await erase();
     return answer({ id: OPENED, url: "https://checkout.stripe.com/c/pay/test" });
@@ -66,6 +71,22 @@ async function main() {
   redis.run(["HDEL", ERASING_KEY, await erasingField(storeRef(store))]);
   is("the checkout opens", await createTipCheckout(store, "https://marktmorgen.com", 500), { url: "https://checkout.stripe.com/c/pay/test", id: OPENED });
   is("and its mark is kept", tipMarks(storeRef(store)), 1);
+
+  part("A store from before ids, with no statsId yet");
+  const LEGACY = "tip-legacy@example.com";
+  await claimHandle(LEGACY, "tiplegacy", "Tip Legacy", "Pots.");
+  await setSubscription(LEGACY, { customerId: "cus_tiplegacy0001", subscriptionId: "sub_tiplegacy0001", active: true, tier: "creator", period: paidPeriod() });
+  await setStripeAccount(LEGACY, "acct_tiplegacy00001", true);
+  await setTips(LEGACY, { on: true, heading: "", line: "", amounts: [] });
+  const legacy: Store = { ...(await storeForEmail(LEGACY))!, sid: "" };
+  delete (legacy as { statsId?: string }).statsId;
+  is("(it has neither an id nor a statsId)", [legacy.sid, legacy.statsId ?? null], ["", null]);
+  is("its checkout opens", await createTipCheckout(legacy, "https://marktmorgen.com", 500).catch((error: Error) => error.message), { url: "https://checkout.stripe.com/c/pay/test", id: OPENED });
+  is("its mark is kept, and the store now has a statsId", [tipMarks(storeRef(legacy)), Boolean((await storeForEmail(LEGACY))?.statsId)], [1, true]);
+  posts = 0;
+  let other = "";
+  await createTipCheckout({ ...legacy, handle: "notthisone" }, "https://marktmorgen.com", 500).catch((error: Error) => { other = error.message; });
+  is("one whose handle now names another store is refused before Stripe is asked", [other !== "", posts], [true, 0]);
   done();
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

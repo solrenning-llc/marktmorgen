@@ -18,6 +18,7 @@
  * write captions it receives. Synthetic data only.
  */
 import { autoCaptionStates, requestAutoCaptions, sweepAutoCaptions, syncAutoCaptions } from "@/lib/auto-captions";
+import { readFileSync } from "node:fs";
 import { streamPath } from "@/lib/stream-rules";
 import type { Store } from "@/lib/store";
 import { store as redis, advance } from "./redis-stub";
@@ -193,7 +194,8 @@ function reset(): void {
 async function ask(at: number): Promise<string> {
   clock = Math.floor(at / 1000);
   const answer = await requestAutoCaptions(store, PATH, "en", ["es"], at);
-  return answer.ok ? "asked" : answer.reason;
+  // An answer the service did not confirm is said as such (Claude 3's LOW 2 on #3427, 6749382893).
+  return answer.ok ? (answer.unconfirmed ? "asked, not confirmed" : "asked") : answer.reason;
 }
 
 async function main(): Promise<void> {
@@ -225,7 +227,9 @@ async function main(): Promise<void> {
     reply = "ok";
     is("nothing is given back on an unknown answer", [refunds.length, keptOnCard()], [0, PRICE]);
     is("the request is kept with its charge, no refund owed, and queued", [record()?.pi, record()?.owed, queued()], [invoices[0]?.payment_intent, undefined, true]);
-    is("the creator is told what the page shows: the captions are being written", [first, (await autoCaptionStates([PATH])).writing[PATH]], ["asked", ["en", "es"]]);
+    // Told the service's answer is not confirmed, never that they are being written (Claude 3's LOW 2 on #3427); the
+    // page still holds the languages, and its words say only what is true either way.
+    is("the creator is told the answer is not confirmed, and the page holds the languages", [first, (await autoCaptionStates([PATH])).writing[PATH]], ["asked, not confirmed", ["en", "es"]]);
     is("a retry charges nothing more and asks for nothing more", [await ask(T + 1_000), paidCount(), invoices.length, transcribes.length], ["busy", 1, 1, 1]);
     delivered = ["en", "es"];
     advance(5 * 60_000);
@@ -309,6 +313,13 @@ async function main(): Promise<void> {
   customerBalance = -50_000;
   reply = "400";
   is("credited at once", [await ask(T), customerBalance, credits(), record()], ["credited", -50_000, 1, null]);
+
+  part("The editor never promises minutes for captions it cannot confirm are being written (Claude 3's LOW 2 on #3427)");
+  {
+    const editor = readFileSync("components/course-editor.tsx", "utf8");
+    is("no 'a few minutes' or 'already being written' promise on the page, its notice or a retry", [/Most lessons take a few minutes/.test(editor), /already being written/.test(editor)], [false, false]);
+    is("an order the service did not confirm has its own notice, with the 48 hours", /could not confirm that the video service started/.test(editor) && /\$\{GIVE_UP_HOURS\} hours/.test(editor), true);
+  }
 
   part("Control: an answer that accepts is used as before");
   reset();

@@ -602,9 +602,15 @@ export async function chooseAccount(statsId: string, id: unknown): Promise<boole
   return true;
 }
 
-async function giveBack(statsId: string, c: Connection): Promise<void> {
+/**
+ * Gives the login's grant back to Meta: true only on Meta's exact answer ({ success: true }); a token that cannot be
+ * opened, or any other answer, is false, so a give-back that did not happen is never told as done (Claude 4 2Wb's
+ * note on #4159 @585ae77e6e). A failed request throws, as call does.
+ */
+async function giveBack(statsId: string, c: Connection): Promise<boolean> {
   const open = unseal(c.token, context(statsId));
-  if (open.ok) await call("DELETE", "/me/permissions", {}, open.value);
+  if (!open.ok) return false;
+  return (await call("DELETE", "/me/permissions", {}, open.value)).success === true;
 }
 
 /**
@@ -615,7 +621,8 @@ async function giveBack(statsId: string, c: Connection): Promise<void> {
  * a consent that ends before anything is written leaves the store's own connection, which may use this very login.
  * Read exactly (CX-123 rule 24): an index or connection that cannot be read counts as still used, so the
  * grant is kept: one store's action never breaks another store's working connection, and a kept grant costs
- * nothing. One pipeline reads at most META_FORGET_PASS stores; with more, the rest count as still used.
+ * nothing. One pipeline reads at most META_FORGET_PASS stores; with more, the use cannot be confirmed ("unknown"),
+ * and the grant is kept all the same.
  */
 async function grantStillUsed(user: string): Promise<GrantUse> {
   if (!user || !isRedisConfigured()) return "free";
@@ -649,10 +656,11 @@ type GrantUse = "used" | "unknown" | "free";
 
 /**
  * What disconnecting did: the account that was read, and whether Meta's permission was given back
- * ("removed"), kept because another store still uses that Meta login ("kept"), or kept because whether one does
- * could not be confirmed ("unconfirmed": the index or a connection did not read).
+ * ("removed"), kept because another store still uses that Meta login ("kept"), kept because whether one does
+ * could not be confirmed ("unconfirmed": the index or a connection did not read), or not given back because the
+ * give-back itself failed ("failed": the token did not open, Meta did not answer, or answered anything but success).
  */
-export type MetaDisconnected = { account: MetaAccount | null; metaAccess: "removed" | "kept" | "unconfirmed" };
+export type MetaDisconnected = { account: MetaAccount | null; metaAccess: "removed" | "kept" | "unconfirmed" | "failed" };
 
 /**
  * Disconnects: forgets the connection and every line read, then gives the permission back to Meta,
@@ -674,8 +682,11 @@ export async function disconnectMeta(statsId: string): Promise<MetaDisconnected 
   const use = await grantStillUsed(c.user);
   if (use === "used") return { account, metaAccess: "kept" };
   if (use === "unknown") return { account, metaAccess: "unconfirmed" };
-  await giveBack(statsId, c).catch((error) => console.error("giving the Meta permission back failed", error));
-  return { account, metaAccess: "removed" };
+  const removed = await giveBack(statsId, c).catch((error) => {
+    console.error("giving the Meta permission back failed", error);
+    return false;
+  });
+  return { account, metaAccess: removed ? "removed" : "failed" };
 }
 
 /** Forgets one store's connection and what was read from it; answers the deletion's own replies. */

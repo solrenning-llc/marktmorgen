@@ -38,6 +38,8 @@ const granted = new Map<string, boolean>();
 const revokedFor: string[] = [];
 /** Set to move the clock a day on once Meta lists the accounts: the flow goes stale while Meta is being read. */
 let staleOnAccounts = false;
+/** What Meta answers to DELETE /me/permissions: "ok" ({ success: true }), "error" (a 500) or "odd" ({ success: false }). */
+let deleteAnswer: "ok" | "error" | "odd" = "ok";
 const realNow = Date.now.bind(Date);
 let skewMs = 0;
 Date.now = () => realNow() + skewMs;
@@ -59,6 +61,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   // A token of a login whose grant was given back no longer works, for any store.
   if (!granted.get(user)) return json({ error: { code: 190, message: "Error validating access token: the user has not authorized application" } }, 400);
   if (path === "/me/permissions" && method === "DELETE") {
+    if (deleteAnswer === "error") return json({ error: { code: 2, message: "Service temporarily unavailable" } }, 500);
+    if (deleteAnswer === "odd") return json({ success: false });
     granted.set(user, false);
     revokedFor.push(user);
     return json({ success: true });
@@ -159,6 +163,20 @@ async function main(): Promise<void> {
   const after = await disconnectMeta(a.statsId!);
   is("disconnecting it afterward still gives the grant back, once", [after && after.metaAccess, granted.get(USER_1), revokedFor], ["removed", false, [USER_1]]);
 
+  part("A give-back that fails is never told as given back (Claude 4 2Wb's note on #4159 @585ae77e6e)");
+  for (const answer of ["error", "odd"] as const) {
+    redis.clear();
+    granted.clear();
+    revokedFor.length = 0;
+    const lone = await makeStore(`lone-${answer}@example.com`, `lone-${answer}`);
+    await connect(lone, USER_1);
+    deleteAnswer = answer;
+    const failed = await disconnectMeta(lone.statsId!);
+    deleteAnswer = "ok";
+    is(`Meta answering ${answer} to the give-back: the store is disconnected and says the permission was not removed`, [failed && failed.metaAccess, granted.get(USER_1), revokedFor], ["failed", true, []]);
+    is(`and the connection is forgotten all the same (${answer})`, await disconnectMeta(lone.statsId!), false);
+  }
+
   part("What the creator is told");
   const keptLine = accountChangeWords({ kind: "metaads-disconnected", kept: true }).line;
   is("the email never says the permission was given back when it was kept", [/given back/i.test(keptLine), /Another store still uses this Meta login/.test(keptLine), /Disconnect that store too/.test(keptLine)], [false, true, true]);
@@ -176,6 +194,13 @@ async function main(): Promise<void> {
   const atUnsure = studio.indexOf('"disconnected-unconfirmed": {');
   const unsureNotice = atUnsure < 0 ? "" : studio.slice(atUnsure, atUnsure + 400);
   is("and that notice says it could not be confirmed and the permission was kept", [/could not confirm/i.test(unsureNotice), unsureNotice.includes("we kept its permission at Meta"), /Another store still uses/.test(unsureNotice), /given back/i.test(unsureNotice)], [true, true, false, false]);
+
+  const failedLine = accountChangeWords({ kind: "metaads-disconnected", failed: true }).line;
+  is("a failed give-back is said as not removed, with the way to remove it, never given back", [/could not remove its permission at Meta/.test(failedLine), /given back/i.test(failedLine), /Facebook settings/.test(failedLine)], [true, false, true]);
+  is("the route sends a failed give-back to its own studio notice", routes.includes('failed ? "disconnected-not-removed" :'), true);
+  const atFailed = studio.indexOf('"disconnected-not-removed": {');
+  const failedNotice = atFailed < 0 ? "" : studio.slice(atFailed, atFailed + 400);
+  is("and that notice says it could not be removed, never given back", [/could not remove its permission at Meta/.test(failedNotice), /given back/i.test(failedNotice), /Facebook settings/.test(failedNotice)], [true, false, true]);
 
   part("What the creator is promised before pressing Disconnect, and what the privacy policy says");
   // Review of #4159 (Claude 1 cloud, MEDIUM): both promised an unconditional give-back, which disconnectMeta now

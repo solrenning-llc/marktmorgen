@@ -376,6 +376,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Meta ads are disconnected",
     body: "What was read from it was deleted. What you typed yourself stays. We could not confirm that no other store uses this Meta login, so we kept its permission at Meta. To remove it now, remove Marktmorgen in your Facebook settings.",
   },
+  // The give-back itself failed (Claude 4 2Wb's note on #4159): never said as given back.
+  "disconnected-not-removed": {
+    title: "Meta ads are disconnected",
+    body: "What was read from it was deleted. What you typed yourself stays. We could not remove its permission at Meta. To remove it now, remove Marktmorgen in your Facebook settings.",
+  },
   declined: {
     title: "Nothing was connected",
     body: "Meta's page was closed or canceled. Connect again when you are ready.",

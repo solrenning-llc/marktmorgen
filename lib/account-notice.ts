@@ -43,7 +43,7 @@ export type AccountChange =
   | { kind: "meeting-broken"; name: string }
   | { kind: "discord-connected"; server: string }
   | { kind: "metaads-connected"; account: string }
-  | { kind: "metaads-disconnected"; byMeta?: boolean; kept?: boolean; unconfirmed?: boolean }
+  | { kind: "metaads-disconnected"; byMeta?: boolean; kept?: boolean; unconfirmed?: boolean; failed?: boolean }
   | { kind: "metaads-broken" };
 
 const SUPPORT = "support@marktmorgen.com";
@@ -133,6 +133,8 @@ export function accountChangeWords(change: AccountChange): { subject: string; li
         subject: "Meta ads were disconnected from your store",
         line: change.byMeta
           ? "Marktmorgen was removed from your Meta account, so your numbers no longer read what your ads spent, and what was read was deleted. What you typed yourself stays."
+          : change.failed
+            ? "Your store's Meta ad account was disconnected, and what was read from it was deleted; what you typed yourself stays. We could not remove its permission at Meta. To remove it now, remove Marktmorgen in your Facebook settings."
           : change.kept && change.unconfirmed
             ? "Your store's Meta ad account was disconnected, and what was read from it was deleted; what you typed yourself stays. We could not confirm that no other store uses this Meta login, so we kept its permission at Meta. To remove it now, remove Marktmorgen in your Facebook settings."
           : change.kept

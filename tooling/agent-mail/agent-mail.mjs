@@ -695,8 +695,9 @@ export function commitsDoPr(pr, ramo = null) {
  * O ramo do PR, achado pelo head no momento do pedido: o único ramo (fora da fila de integração) cuja ponta é aquele
  * commit. Guardado no pedido ("Ramo:"), ele permite ler o head atual direto do ramo, cuja referência não atrasa, ao
  * contrário de refs/pull/N/head (caso do #5040, 21/11/2026: refs/pull/5040/head ficou minutos em 9fdf22aa60 depois do
- * envio de d75b7405f2). Tudo pelo git, sem a API do GitHub (revisão do Claude 4 3rC no repo-id-transfer-test#2).
- * null quando não há exatamente um ramo.
+ * envio de d75b7405f2). Com um ramo só, tudo pelo git, sem a API do GitHub (revisão do Claude 4 3rC no
+ * repo-id-transfer-test#2). Com dois ou mais ramos na mesma ponta, vale o head.ref que o GitHub dá ao PR, se for um
+ * deles; sem ele, null. Sem nenhum ramo, null (NIT do Claude 1 no #5138).
  */
 export function ramoDoHead(sha, pr) {
   if (testeLigado("CORREIO_SEM_COMMITS") || !/^[0-9a-f]{10,40}$/.test(String(sha ?? ""))) return null;
@@ -1021,8 +1022,15 @@ function linhasPrivilegio(p) {
   return [`Pedido: ${p.pedido}`, `Identificador do pedido: ${p.idPedido}`, ...(p.reserva ? [`Reserva: ${p.reserva}`] : [])];
 }
 function avisoPrivilegio({ eu, assunto, p, agora }) {
-  return montarMensagem({ de: eu, para: "todos", assunto, agora,
-    texto: [`${assunto}.`, ...linhasPrivilegio(p), `Sessão que agiu: ${p.s.id}`, "Desligar continua livre para todos (set-switch --off)."].join("\n") }).novos;
+  // Uso único também entre duas ações no mesmo instante (nota 2 do Claude 2 upbeat no #5052): a conferência por git grep
+  // vem antes do envio, e duas ações com o mesmo pedido podiam passar as duas. Cada ação grava, no mesmo commit, um
+  // arquivo com o número do comentário do pedido; o envio recusa um caminho que já existe, então só a primeira entra.
+  const n = /issuecomment-(\d+)$/.exec(String(p.pedido ?? ""))?.[1];
+  return {
+    ...montarMensagem({ de: eu, para: "todos", assunto, agora,
+      texto: [`${assunto}.`, ...linhasPrivilegio(p), `Sessão que agiu: ${p.s.id}`, "Desligar continua livre para todos (set-switch --off)."].join("\n") }).novos,
+    ...(n ? { [`pedidos-usados/${n}`]: [`Pedido: ${p.pedido}`, `Identificador do pedido: ${p.idPedido}`, `Por: ${eu}`, `Data: ${agora.toISOString()}`, `Sessão: ${linhaSessao()}`, ""].join("\n") } : {}),
+  };
 }
 
 /** Um "OFF" vale sempre; um "ON" só vale como registro privilegiado (privilegioValido). */
@@ -1334,6 +1342,46 @@ function revisaoParaMim(p, eu, agora, c) {
 }
 
 /**
+ * A mesma regra para a vigia, guardada por pedido e head por VEDADA_MIN minutos: ela confere a cada 30 s e não chama o
+ * GitHub a cada volta. Uma leitura NÃO CONFERIDA não é guardada e acorda o agente, que vê o motivo no claim-enqueue.
+ */
+export const VEDADA_MIN = 10;
+const vedadas = new Map();
+export function vedadaNaVigia(p, eu, agora = Date.now()) {
+  const chave = `${p.id}@${p.sha}@${familia(eu)}`;
+  const guardada = vedadas.get(chave);
+  if (guardada && agora - guardada.em < VEDADA_MIN * 60000) return guardada.vedada;
+  let motivo;
+  try { motivo = filaVedadaPara(p, eu); } catch { return false; }
+  if (motivo && /NÃO CONFERIDO/.test(motivo)) return false;
+  vedadas.set(chave, { vedada: Boolean(motivo), em: agora });
+  return Boolean(motivo);
+}
+
+/**
+ * Por que a família de `eu` não pega este pedido de fila (o primeiro): a autora (prefixo do ramo, ou a dominante nos
+ * commits num ramo sem prefixo; 0410, 3 (b), dd03) ou quem deu veredito neste head no PR (ce2d). null quando pode. Uma
+ * leitura que não deu certo volta como "NÃO CONFERIDO". O claim-enqueue e a vigia usam a mesma regra (nota do Claude 4
+ * 3Kc, da28: a vigia acordava a cada volta por um pedido que o claim-enqueue recusava).
+ */
+export function filaVedadaPara(alvo, eu) {
+  const ramoAlvo = campoCabecalho(alvo.texto, "Ramo");
+  const doRamo = familiaDoRamo(ramoAlvo);
+  if (doRamo === familia(eu)) return `o primeiro da fila, #${alvo.pr}, é de um ramo da sua família (${ramoAlvo}); outra família o enfileira (0410, 3 (b))`;
+  // Ramo sem prefixo de família (claude/...): a autora é a família dominante nos commits (coordenador, dd03); sem ler
+  // os commits, o pedido não é entregue.
+  if (!doRamo) {
+    const cm = commitsDoPr(alvo.pr, ramoAlvo || null);
+    if (!cm) return `os commits do #${alvo.pr} não puderam ser lidos agora, e o ramo não diz a família do autor (NÃO CONFERIDO); a fila espera; tente de novo`;
+    if (cm.dominantes.includes(familia(eu))) return `o primeiro da fila, #${alvo.pr}, tem a maior parte dos commits da sua família, que conta como autora num ramo sem prefixo de família; outra família o enfileira (0410, 3 (b); dd03)`;
+  }
+  const noPr = revisoresNoPr(alvo.pr, alvo.sha);
+  if (noPr === null) return `as revisões escritas no #${alvo.pr} não puderam ser conferidas agora (NÃO CONFERIDO); a fila espera; tente de novo`;
+  if (noPr.has(familia(eu))) return `o primeiro da fila, #${alvo.pr}, tem veredito da sua família neste head no PR; outra família o enfileira (FQ (1), ce2d)`;
+  return null;
+}
+
+/**
  * Pega o próximo pedido que `eu` pode atender. Revisão: o mais antigo aberto de outra família. Fila: só o mais antigo
  * ainda aberto, de qualquer família, e nenhum enquanto outro estiver tomado; se ele for da família de `eu`, ninguém
  * dessa família o pega e espera outra família, sem que nenhum mais novo passe na frente.
@@ -1358,19 +1406,8 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     // HOLD de qualquer um, ou CLAIMED de outra família, segura o primeiro da fila; os mais novos esperam atrás dele.
     // ce2d: quem deu veredito neste head só no PR também não o enfileira; sem ler o PR, ele não é entregue.
     if (alvo) {
-      const ramoAlvo = campoCabecalho(alvo.texto, "Ramo");
-      const doRamo = familiaDoRamo(ramoAlvo);
-      if (doRamo === familia(eu)) return { espera: `o primeiro da fila, #${alvo.pr}, é de um ramo da sua família (${ramoAlvo}); outra família o enfileira (0410, 3 (b))` };
-      // Ramo sem prefixo de família (claude/...): a autora é a família dominante nos commits (coordenador, dd03); sem ler
-      // os commits, o pedido não é entregue.
-      if (!doRamo) {
-        const cm = commitsDoPr(alvo.pr, ramoAlvo || null);
-        if (!cm) return { espera: `os commits do #${alvo.pr} não puderam ser lidos agora, e o ramo não diz a família do autor (NÃO CONFERIDO); a fila espera; tente de novo` };
-        if (cm.dominantes.includes(familia(eu))) return { espera: `o primeiro da fila, #${alvo.pr}, tem a maior parte dos commits da sua família, que conta como autora num ramo sem prefixo de família; outra família o enfileira (0410, 3 (b); dd03)` };
-      }
-      const noPr = revisoresNoPr(alvo.pr, alvo.sha);
-      if (noPr === null) return { espera: `as revisões escritas no #${alvo.pr} não puderam ser conferidas agora (NÃO CONFERIDO); a fila espera; tente de novo` };
-      if (noPr.has(familia(eu))) return { espera: `o primeiro da fila, #${alvo.pr}, tem veredito da sua família neste head no PR; outra família o enfileira (FQ (1), ce2d)` };
+      const vedado = filaVedadaPara(alvo, eu);
+      if (vedado) return { espera: vedado };
     }
     const marca = alvo ? estadoPr(alvo.pr, agora) : null;
     if (marca?.ativo && (marca.acao === "HOLD" || familia(marca.por) !== familia(eu))) {
@@ -1581,6 +1618,20 @@ function avisarVersao() {
 // ---------------------------------------------------------------------------------------------------------------------
 export const RAIZ_HISTORICA = new Set(["LEIA-ME.md", "agent-mail.mjs", "agent-mail.test.mjs", "correio.mjs"]);
 export const REF_VERIFICADO = "refs/agent-mail/append-only-checked";
+
+/**
+ * A conferência da vigia, com uma busca nova antes de dizer "reescrito" (alarme falso de 23/11/2026, 07h56 UTC): duas
+ * vigias no mesmo repositório buscam o ramo em momentos diferentes, e a marca que uma gravou pode ser mais nova que a
+ * ponta que a outra acabou de ler. Então, quando a última conferência não está no histórico lido, o ramo é buscado de
+ * novo; só se ela continuar fora do histórico novo (uma reescrita, ou um ramo que voltou atrás) é "reescrito".
+ */
+export function conferirDesde(desde, busca = buscar, denovo = () => { esquecerRetrato(); return buscar(); }) {
+  const c = busca();
+  const r = conferirSoAcrescentar(c, desde);
+  if (!r.reescrito || !desde) return { c, r };
+  const c2 = denovo();
+  return { c: c2, r: conferirSoAcrescentar(c2, desde) };
+}
 
 /** { reescrito, problemas }: o que, desde `desde` (ou desde o começo), alterou ou apagou um arquivo de dados. */
 export function conferirSoAcrescentar(commit, desde = null) {
@@ -2168,7 +2219,7 @@ async function main(argv) {
           const ps = pedidos(tipo);
           const agora = new Date(), c = cotas(agora);
           const vez = tipo === "fila"
-            ? (ps.some((p) => p.estado === "tomado") ? [] : ps.filter((p) => p.estado === "aberto").slice(0, 1).filter((p) => p.familia !== familia(o.eu) && !p.devolveram.has(familia(o.eu)) && !campo(p.texto, "Exclui").split(", ").includes(familia(o.eu)) && !revisoresDoHead(p.pr, p.sha).has(familia(o.eu)) && !(() => { const m = estadoPr(p.pr); return m.ativo && (m.acao === "HOLD" || familia(m.por) !== familia(o.eu)); })()))
+            ? (ps.some((p) => p.estado === "tomado") ? [] : ps.filter((p) => p.estado === "aberto").slice(0, 1).filter((p) => p.familia !== familia(o.eu) && !p.devolveram.has(familia(o.eu)) && !campo(p.texto, "Exclui").split(", ").includes(familia(o.eu)) && !revisoresDoHead(p.pr, p.sha).has(familia(o.eu)) && !(() => { const m = estadoPr(p.pr); return m.ativo && (m.acao === "HOLD" || familia(m.por) !== familia(o.eu)); })() && !vedadaNaVigia(p, o.eu)))
             : ps.filter((p) => revisaoParaMim(p, o.eu, agora, c));
           abertos.push(...vez.map((p) => `${tipo} #${p.pr}`));
         }
@@ -2177,15 +2228,17 @@ async function main(argv) {
       // Passo 3: o que chegou ao correio desde a última conferência só acrescentou arquivos? Avisa uma vez por alteração.
       let alarme = "";
       try {
-        const c = buscar();
-        let antes = null;
-        try { antes = gitC(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* primeira conferência */ }
+        let doRef = null, antes = null;
+        try { doRef = gitC(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* primeira conferência */ }
+        antes = doRef;
         // NIT 1 do Claude 1 no #5113: na primeira vez do repositório próprio, vale a marca antiga do clone, se houver;
         // assim uma reescrita feita antes da troca de versão ainda é denunciada.
         if (!antes) { try { antes = /^[0-9a-f]{40}/.exec(readFileSync(ARQUIVO_ANCORA(), "utf8"))?.[0] ?? null; } catch { /* nenhuma guardada */ } }
         if (!antes) { try { antes = git(["rev-parse", "--verify", "-q", REF_VERIFICADO]); } catch { /* o clone não tem marca antiga */ } }
-        const r = conferirSoAcrescentar(c, antes || null);
-        if (c) gitC(["update-ref", REF_VERIFICADO, c]);
+        const { c, r } = conferirDesde(antes || null);
+        // A marca só avança, e só de onde esta volta a leu (compare-and-swap): outra vigia no mesmo repositório que já a
+        // levou mais adiante não é desfeita (alarme falso de 23/11/2026, 07h56 UTC, com duas vigias juntas).
+        if (c) { try { gitC(["update-ref", REF_VERIFICADO, c, doRef ?? "0".repeat(40)]); } catch { /* outra vigia gravou antes */ } }
         if (r.reescrito || r.problemas.length) alarme = [r.reescrito ? "o ramo foi reescrito (a última conferência não está mais no histórico)" : "", ...r.problemas].filter(Boolean).join("; ");
       } catch {}
       if (alarme) { console.log(`ALERTA: o ramo correio não só acrescentou: ${alarme}. Avise o coordenador e o dono pelo correio agora; não apague nem reescreva nada.`); return; }

@@ -126,6 +126,15 @@ r = run(["read", "--as", "Claude 2 Z"], as("c2"));
 is("the privileged action is announced to all in the same minute, with the request and its identifier", /interruptor record-review LIGADO/.test(r.out) && new RegExp(`issuecomment-${q1.id}`).test(r.out) && /C1-20261121-2100-TEST/.test(r.out), r.out);
 r = ligar("Claude 5 ibqho", "ibq", q1);
 is("a request is used once only", !r.ok && /já foi usado/.test(r.out), r.out);
+{
+  // Note 2 of Claude 2 upbeat on #5052: two actions with one request at the same instant could both pass the git grep;
+  // each action also writes pedidos-usados/<comment>, so the second one's append is refused. Here the other action's
+  // marker is already there (written raw, as by the action that won the race), and this one is refused.
+  const q2 = pedidoDe(marca("set-switch", "ready-check"));
+  raw(`pedidos-usados/${q2.id}`, `Pedido: x\n`);
+  r = ligar("Claude 5 ibqho", "ibq", q2, [], "ready-check");
+  is("a second action with the same request at the same instant is refused (its use marker already exists)", !r.ok && new RegExp(`pedidos-usados/${q2.id}`).test(r.out) && /ready-check: DESLIGADO/.test(run(["list-switches"]).out), r.out + run(["list-switches"]).out);
+}
 // A shallow clone whose history does not reach the named session's last write: no sign is NOT CHECKED (review of Claude 4 3Kc).
 run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "a"], as("c2"));
 const W2 = join(T, "w2"); g(["init", "-q", W2]); g(["fetch", "-q", "--depth", "1", `file://${join(T, "mail.git")}`, "+refs/heads/correio:refs/x"], W2);
@@ -1213,6 +1222,38 @@ console.log("queue: only the author's family and the head's reviewers are left o
   is("a PR made only of merges still has an author: the family of its merges", r.ok && /mais commits no PR, num ramo sem prefixo de família \(claude-2\)/.test(r.out), r.out);
   r = run(["claim-enqueue", "--as", "Claude 2 Y"], { ...m63, ...as("c2") });
   is("and that family is refused the queue request", !/pegou/.test(r.out) && /maior parte dos commits da sua família/.test(r.out), r.out);
+  // Claude 4 3Kc's note (da28): the watch applies claim-enqueue's own rule, so it no longer wakes a family every 30 s for
+  // a queue request it can never take (the author family, or a verdict by the family on this head in the PR).
+  const vereditoNoPr = JSON.stringify([`Claude 7 X review #67 @${H67.slice(0, 10)}: READY\n\nbody`, "COLLABORATOR"]) + "\n";
+  r = run(["watch", "--as", "Claude 2 Y", "--also", "enqueue", "--seconds", "1"], { ...m63, ...as("c2"), FAKE_COMMENTS: "" });
+  is("the watch does not wake the author family for its own queue request", !/fila #67/.test(r.out), r.out);
+  r = run(["watch", "--as", "Claude 7 X", "--also", "enqueue", "--seconds", "1"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", FAKE_COMMENTS: vereditoNoPr });
+  is("nor a family with a verdict on this head written only on the PR (ce2d)", !/fila #67/.test(r.out), r.out);
+  r = run(["watch", "--as", "Claude 3 X", "--also", "enqueue", "--seconds", "1"], { ...m63, CLAUDE_CODE_REMOTE_SESSION_ID: "cse_014YNUxAAAAAAAAAAAAAAAAA", FAKE_COMMENTS: vereditoNoPr });
+  is("but it still wakes a family that can take it", /fila #67/.test(r.out), r.out);
+}
+
+console.log("the watch fetches again before it says 'rewritten': a mark set by another watch on the same repository is not a rewrite");
+{
+  // Two commits X1 <- X2 in a mailbox repository of the tool's own: a watch that read X1 while another one already set the
+  // mark at X2 fetches again (here, it then sees X2); only a mark still outside the fresh history is a rewrite.
+  const d = join(T, "dir-conferir.git"); g(["init", "-q", "--bare", d]);
+  const w = join(T, "w-conferir"); g(["init", "-q", w]);
+  const c1 = (() => { writeFileSync(join(w, "a"), "1\n"); g(["add", "a"], w); g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x1"], w); return g(["rev-parse", "HEAD"], w); })();
+  const c2 = (() => { writeFileSync(join(w, "b"), "2\n"); g(["add", "b"], w); g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x2"], w); return g(["rev-parse", "HEAD"], w); })();
+  g(["push", "-q", d, "HEAD:refs/heads/x"], w);
+  const conferir = (primeira, segunda, desde) => spawnSync("node", ["--input-type=module", "-e",
+    // The values go in as arguments, never into the code text (CodeQL js/bad-code-sanitization on the first head).
+    "const [tool, desde, a, b] = process.argv.slice(1); const m = await import(tool); const r = m.conferirDesde(desde, () => a, () => b); console.log(JSON.stringify({ c: r.c, reescrito: r.r.reescrito }));",
+    TOOL, desde, primeira, segunda],
+    { env: { ...base, CORREIO_GIT_DIR: d }, encoding: "utf8" }).stdout.trim().split("\n").pop();
+  const lido = (x) => { try { return JSON.parse(x); } catch { return {}; } };
+  let v = lido(conferir(c1, c2, c2));
+  is("a read older than the mark, fetched again and holding it, is not a rewrite", v.reescrito === false && v.c === c2, JSON.stringify(v));
+  v = lido(conferir(c1, c1, c2));
+  is("a mark still outside the fresh history (the branch went back) is a rewrite", v.reescrito === true, JSON.stringify(v));
+  v = lido(conferir(c2, c2, c1));
+  is("an ordinary forward read is not a rewrite and needs no second fetch", v.reescrito === false && v.c === c2, JSON.stringify(v));
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

@@ -547,6 +547,22 @@ export async function retryStampDrops(limit: number, keep?: string): Promise<num
 }
 
 /**
+ * Deletes one copy just written for a store whose record then turned out gone (its erasure began or finished while
+ * the copy was being made): the erasure's folder walk may already have passed, so nothing else would ever delete it.
+ * Never throws: a copy the file store could not delete puts its folder down in DROP_QUEUE, tried again by the next
+ * removal or new copy, and the log says so when even that cannot be (Claude 4 Z's LOW on #5068).
+ */
+export async function dropWrittenCopy(file: Pick<ProductFile, "pathname" | "name" | "contentType">, pathname: string): Promise<void> {
+  try {
+    await deleteFile([pathname], "site_cleanup");
+  } catch (error) {
+    const folder = copyFolder(file);
+    if (await noteDrop(folder)) console.error("could not delete a copy left for a store being erased; put down to be tried again", error);
+    else console.error(`could not delete a copy left in ${folder}, and nothing will try again: the list could not be written`, error);
+  }
+}
+
+/**
  * Deletes every stamped copy made from a file, once the file itself is gone. It never fails the removal that
  * called it (the file is already off the product): a folder the file store could not list whole or empty is put
  * down in DROP_QUEUE and tried again by the next removal or new copy, and the log says so when even that cannot be.

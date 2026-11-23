@@ -526,8 +526,8 @@ export const SHAPES = {
  * its worst (the session read twice, the store, the two rate limits, the integration unit's take, the settings read,
  * the write fenced on the store (HOST_CONFIG_IF_STORE_LIVE, rows 54 to 56) or the reading kept and its lock, the Google
  * connection where it is read, and the page answered after it), each script billed as one plus every redis.call
- * written in it. With iCal: ics-add 22, check 21, ics-remove 20. With Google connected (Claude 2's LEVE on eb475eee2d):
- * calendars 26, check 25, source 17, disconnect 17. The largest, 26, against the unit's 10 + TAKE_COMMANDS = 14
+ * written in it. With iCal: ics-add 22, check 21, ics-remove 18. With Google connected (Claude 2's LEVE on eb475eee2d):
+ * calendars 26, check 25, source google 17, source none 15, disconnect 17. The largest, 26, against the unit's 10 + TAKE_COMMANDS = 14
  * (tests/host-calendar-erasure-fence.test.ts fails above). Any integration unit may be one of these requests, so every
  * unit is priced with them, as the studio's keep is (coordinator 964c, e931).
  */

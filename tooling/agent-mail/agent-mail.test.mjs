@@ -1372,6 +1372,12 @@ console.log("ZA: what a READY's text may say (owner, 23/11/2026 12h29 Fortaleza:
   for (const t of ["READY, no findings except the NITs on wording", "READY, sem achados; ficaram os NITs de texto", "READY, no findings. The NITs in the comments remain", "READY, no findings; the LOWs in tests are open", "READY, sem achados; os LEVEs do teste continuam", "READY, no findings; the HIGHs are open", "READY, no findings\nNITs: the wording"])
     is(`ZA: wSUb3's plural '${t.replace(/\n/g, " / ")}' is refused`, !aceito(t), za(t).join("; "));
   is("ZA: the plain zero declaration is still accepted", aceito("READY, sem achados."), za("READY, sem achados.").join("; "));
+  // Claude 5 ichw's two LEVE on #5404 (7116035718): a lowercase severity before a finding noun, and the common finding
+  // nouns with a colon, are findings too.
+  for (const t of ["READY, no findings. a minor nit in the test name.", "READY, sem achados. There is a minor issue with the comment wording.", "READY, no findings, but a minor nit in the test name.", "READY, no findings. One small issue: the comment says five-minute job.", "READY, no findings. Cosmetic: typo in the header.", "READY, no findings. Typo in line 3.", "READY, no findings. Suggestion: rename the variable.", "READY, sem achados. Observação: o teste não cobre a linha 304.", "READY, sem achados; um pequeno problema no nome", "READY, sem achados. Problema: o nome"])
+    is(`ZA: ichw's '${t}' is refused`, !aceito(t), za(t).join("; "));
+  for (const t of ["READY, 0 findings; the PR fixes a typo in the header", "READY, 0 findings; issue #3958 reproduced and fixed", "READY, no findings; no minor issues either", "READY, sem achados.\nObservação: não é defeito, o nome segue o padrão"])
+    is(`ZA: ichw's control '${t.replace(/\n/g, " / ")}' is accepted`, aceito(t), za(t).join("; "));
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

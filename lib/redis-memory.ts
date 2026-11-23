@@ -1496,7 +1496,10 @@ export class MemoryRedis {
         // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
         if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, notes, token, json] = args;
+          // Every redis.call the script makes is an inner call Upstash bills (Claude 5 ibqho's note on #5112).
+          this.scriptCalls += 1;
           if (this.run(["GET", lock]) !== token) return 0;
+          this.scriptCalls += 1;
           this.run(json === "" ? ["DEL", notes] : ["SET", notes, json]);
           return 1;
         }

@@ -5,7 +5,8 @@
  * leave the creator's notes under the erased statsId with no expiry. A store with an id and one from before ids
  * (legacy), whose owner may open a new store under the same address meanwhile, and a store with an id whose account
  * moved and began erasing under the new ref (store-claim-live:v1). The live control still saves; a store moved and
- * live under its new ref gets back the room the change took. And the route changes notes only through the fenced
+ * live under its new ref is refused like a gone one, and nothing is given back to its room (Claude 1's LEVE on
+ * #5112). And the route changes notes only through the fenced
  * writers, never the bare ones.
  * Synthetic: the Redis stand-in only.
  */
@@ -130,10 +131,12 @@ async function main(): Promise<void> {
     is(label + " answers that the store is gone (410), not saved", [sent.status, sent.json.ok, sent.json.error], [410, false, "gone"]);
     is(label + " does not write the erased store's notes back", redis.run(["GET", key]), null);
     if (state === "moved-live") {
-      // The live store's room keeps no weight for notes that were never written: it is given back.
+      // Nothing is given back: the script cannot check the erasing mark under the new ref (its field is a hash the
+      // Lua cannot compute), so giving back could write the room's key again after an erasure under that ref began.
+      // The room keeps what the change took, an over-count that only refuses more, never a cost left unbounded.
       const fields = redis.run(["HGETALL", room]) as string[];
       const slot = fields.findIndex((f, i) => i % 2 === 0 && f === "amem");
-      is(label + " gives the notes' room back to the live store", slot === -1 || Number(fields[slot + 1]) === 0, true);
+      is(label + " gives nothing back to the room (keeps what the change took)", slot !== -1 && Number(fields[slot + 1]) > 0, true);
       continue;
     }
     is(label + " nor its data room", redis.run(["EXISTS", room]), 0);
@@ -157,6 +160,19 @@ async function main(): Promise<void> {
     const kept = await run(JSON.stringify({ statsId: "s1" }), "s1");
     is("a live store from before ids writes, with its 4 inner calls (GET, HGET, GET, SET)", [kept.answer, kept.calls, kept.notes], [1, 4, "[1]"]);
     is("a store with an id that moved: 3 inner calls, nothing written", await run("r2", ""), { answer: -5, calls: 3, notes: null });
+    // The plain MEMORY_WRITE twin counts its inner calls too (Claude 5 ibqho's note on #5112): GET, then SET or DEL.
+    const { MEMORY_WRITE } = await import("@/lib/assistant-memory-store");
+    const plain = async (token: string, json: string) => {
+      redis.clear();
+      redis.run(["SET", "t:lock", "tok"]);
+      redis.run(["SET", "t:notes", "[0]"]);
+      const before = redis.scriptCalls;
+      const [answer] = await redis.pipeline([["EVAL", MEMORY_WRITE, 2, "t:lock", "t:notes", token, json]]);
+      return { answer, calls: redis.scriptCalls - before, notes: redis.run(["GET", "t:notes"]) };
+    };
+    is("the plain write with its lock: 2 inner calls (GET, SET)", await plain("tok", "[1]"), { answer: 1, calls: 2, notes: "[1]" });
+    is("the plain write deleting: 2 inner calls (GET, DEL)", await plain("tok", ""), { answer: 1, calls: 2, notes: null });
+    is("the plain write without its lock: 1 inner call (GET), nothing written", await plain("other", "[1]"), { answer: 0, calls: 1, notes: "[0]" });
   }
 
   part("The route changes notes only through the fenced writers");

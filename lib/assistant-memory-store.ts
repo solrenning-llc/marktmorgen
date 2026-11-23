@@ -98,7 +98,8 @@ return 1`;
  * (lib/page-funnel-store.ts): the erasing mark (KEYS[4], field ARGV[3]) absent and, for a store with an id, its id key
  * (KEYS[3]) still holding this store's ref (ARGV[5]); for one from before ids, its owner's record still this store's
  * own (its statsId, ARGV[4]). Answers 1 written, 0 the lock gone, -4 the store gone or being erased, -5 its id key
- * holding another ref with nothing being erased (moved and live), -3 its owner's record unreadable; nothing is
+ * holding another ref (moved; the erasing mark under the new ref is not checked here), -3 its owner's record
+ * unreadable; nothing is
  * written on any answer but 1. Two more commands than MEMORY_WRITE (the HGET and the GET). Modelled by
  * lib/redis-memory.ts.
  */
@@ -144,10 +145,11 @@ export class MemoryWriteUnconfirmed extends Error {
 }
 
 /**
- * The notes' store is gone, being erased or no longer the store this change read: nothing was written. On -4 (gone
- * or being erased) nothing is given back to its room, since giving back would write its room's key again; on -5 (moved
- * and live under its new ref) what the change took is given back, because the room, keyed by the sid the move keeps,
- * is still the live store's.
+ * The notes' store is gone, being erased or no longer the store this change read: nothing was written, and nothing
+ * is given back to its room. On -4 (gone or being erased) giving back would write its room's key again; on -5 (its id
+ * key moved to another ref) the script cannot check the erasing mark under the new ref (its field is a hash the Lua
+ * cannot compute), so giving back could do the same after an erasure under that ref began (Claude 1 on #5112). The
+ * room keeps what the change took: an over-count that only refuses more.
  */
 export class MemoryStoreGoneError extends Error {
   constructor() {
@@ -208,11 +210,11 @@ async function writeMemory(held: Held, statsId: string, notes: MemoryNote[], was
     if (grown < 0) await giveData(room, [{ slot: MEMORY_SLOT, bytes: -grown }]);
     return;
   }
-  // A store known gone or being erased has no room left to give back to: giving it back would write its room's key again.
-  if (live && answer === -4) throw new MemoryStoreGoneError();
-  if (answer === 0 || (live && (answer === -5 || answer === -3))) {
+  // A store known gone or being erased (-4), or moved to a ref whose erasing mark the script cannot check (-5): giving
+  // the room back could write its room's key again after the erasure removed it, so nothing is given back.
+  if (live && (answer === -4 || answer === -5)) throw new MemoryStoreGoneError();
+  if (answer === 0 || (live && answer === -3)) {
     if (grown > 0) await giveData(room, [{ slot: MEMORY_SLOT, bytes: grown }]);
-    if (answer === -5) throw new MemoryStoreGoneError();
     if (answer === -3) throw new MemoryWriteUnconfirmed();
     throw new LockBusyError();
   }

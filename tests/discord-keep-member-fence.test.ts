@@ -102,6 +102,45 @@ async function main(): Promise<void> {
   is("the late keep is refused", await keepMember(room, sid, BEN_ID, member), false);
   is("no row, no address link, no due entry with nobody to forget them", await ben(), { link: null, row: false, due: false });
 
+  // Claude 3 yUZf's LEVE on #5419 (7108818559): a keep landing between the Disconnect's people's step (FORGET_PEOPLE)
+  // and its server's step found the server key still there. The server's step now deletes only while nobody is on the
+  // list (DROP_SERVER_IF_EMPTY, #5380), so that keep stays with its server, the Disconnect says not finished, and the
+  // next press forgets it with its address link and due entry.
+  part("A keep between the Disconnect's people's step and its server's step: kept with the server, forgotten next press");
+  const plain = redis.pipeline.bind(redis);
+  for (const people of [true, false]) {
+    await redis.pipeline([["SET", keys.server, JSON.stringify({ id: SERVER, name: "Server", at: 1, kick: false })]]);
+    const ANA_ID = "123456789012345692";
+    if (people) await keepMember(room, sid, ANA_ID, { ...member, e: "ana@discord-keep-fence.example" });
+    let landed: boolean | null = null;
+    // Right before the server's step (the first pipeline after the people's step, or the first one with nobody kept),
+    // Ben's join lands.
+    let peopleDone = !people;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const first = commands[0];
+      // The server's step: DROP_SERVER_IF_EMPTY now; before #5380, the plain DEL of the server's keys.
+      const isServerStep = (first?.[0] === "EVAL" && String(first[1]).startsWith("-- marktmorgen:discord-drop-server-if-empty:v1")) || (first?.[0] === "DEL" && String(first[1]).startsWith("nl:dc:srv:"));
+      if (peopleDone && landed === null && isServerStep) {
+        redis.pipeline = plain;
+        landed = await keepMember(room, sid, BEN_ID, member);
+      }
+      const answer = await plain(commands);
+      if (first?.[0] === "EVAL" && String(first[1]).startsWith("-- marktmorgen:discord-forget-people:v1")) peopleDone = true;
+      return answer;
+    }) as typeof redis.pipeline;
+    let said: string | number;
+    try {
+      said = await forgetServer(room, sid);
+    } catch (error) {
+      said = `rejected: ${error instanceof Error ? error.message : "?"}`;
+    }
+    redis.pipeline = plain;
+    const label = people ? "with a person kept before" : "with nobody kept before";
+    is(`${label}: the late keep lands, and the Disconnect says it did not forget everyone`, [landed, typeof said === "string" && said.startsWith("rejected")], [true, true]);
+    is(`${label}: Ben stays with his server, link and due entry, so nothing is left without a server`, [await ben(), (await redis.pipeline([["EXISTS", keys.server]]))[0]], [{ link: BEN_ID, row: true, due: true }, 1]);
+    is(`${label}: the next press forgets Ben with his link and due entry, and the server`, [await forgetServer(room, sid), await ben(), (await redis.pipeline([["EXISTS", keys.server]]))[0]], [1, { link: null, row: false, due: false }, 0]);
+  }
+
   part("A join whose server is disconnected while it waits on Discord answers off and keeps nothing");
   process.env.STRIPE_SECRET_KEY = "sk_test_discord_keep_fence_stand_in";
   process.env.DISCORD_CLIENT_ID = "400000000000000091";

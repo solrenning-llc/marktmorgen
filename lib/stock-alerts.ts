@@ -357,13 +357,28 @@ export async function confirmStockAlert(token: string, store: DataStore, now = D
       // confirmed place ends a year from now; one kept from before ends were kept stays as it is written (no `x`).
       const ends = nowSeconds(now) + WAIT_SECONDS;
       const next: AlertEntry = entry.x !== undefined ? { ...entry, ok: nowSeconds(now), x: ends } : { ...entry, ok: nowSeconds(now) };
+      // The confirmed entry is longer than the one asked for (`ok` from 0 to a time): what it grows by is counted
+      // before it is written, so every give-back (leave, clear, an ended place) returns what was counted, never more
+      // (Claude 5 iYwjc's MEDIUM on #5124; as countEntryGrowth on the waitlist, Claude 6's MEDIUM on #2576). A room
+      // that is full or not known confirms nothing; the page says it could not be done, never that the link expired.
+      const leave: Grant = { s: grant.s, p: grant.p, e: grant.e, k: "leave" };
+      const grown = placeBytes(grant.e, next, leave) - placeBytes(grant.e, entry, leave);
+      if (grown > 0) {
+        const taken = await takeData(store, [{ slot: slotOf(grant.p), bytes: grown }], now);
+        if (!taken.ok) throw new Error(`a back-in-stock confirmation's room could not be counted (${taken.reason})`);
+      }
       const wrote = repliesFor(
         await redisPipeline([["EVAL", CONFIRM_PLACE, 2, key, endsKey(grant.s, grant.p), grant.e, String(read[0]), JSON.stringify(next), entry.x !== undefined ? ends : "", WAIT_SECONDS]]),
         1,
       );
       const done = wrote ? countOf(wrote[0]) : null;
+      // Not exactly answered: it may have landed, so what was counted for it stays, the safe way to be wrong.
       if (done === null || done > 1) throw new UnknownReplyError("a back-in-stock confirmation");
-      if (done === 0) continue;
+      if (done === 0) {
+        // Not written (the place changed since it was read): what was counted for it comes back, and it is read again.
+        if (grown > 0) await giveData(store, [{ slot: slotOf(grant.p), bytes: grown }], now).catch((error) => console.error("giving back a back-in-stock confirmation's room failed", error));
+        continue;
+      }
     }
     const added = repliesFor(await redisPipeline([due]), 1);
     if (!added || countOf(added[0]) === null) throw new UnknownReplyError("a back-in-stock confirmation");

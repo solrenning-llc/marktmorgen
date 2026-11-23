@@ -223,7 +223,7 @@ async function main(): Promise<void> {
   is("a refusal for the VAT gives back the held units", /error instanceof CartShippingRefused \|\| error instanceof EuVatCollectRefused\);/.test(route), true);
   is("and the hold count, and goes back to the cart with abroad", [/if \(charged && \([^)]*error instanceof EuVatCollectRefused\)\) await giveBackHold\(/.test(route), /if \(error instanceof EuVatCollectRefused\) return away\(`\/@\$\{store\.handle\}\?cart=abroad#cart`\);/.test(route)], [true, true]);
   const checkout = readFileSync("lib/cart-checkout.ts", "utf8");
-  is("createCartCheckout touches the body for VAT only when handed euVat, after the currency is set", (checkout.match(/applyEuCollectCart\(/g) ?? []).length === 1 && /inTheCurrencyShown\(body\);\n[^\n]*\n[^\n]*\n  if \(extras\.euVat\) applyEuCollectCart\(body,/.test(checkout), true);
+  is("createCartCheckout touches the body for VAT only when handed euVat, after the currency is set", (checkout.match(/applyEuCollectCart\(/g) ?? []).length === 1 && /inTheCurrencyShown\(body\);\n(?:  (?:\/\/|const vat)[^\n]*\n){2,6}  if \(extras\.euVat\) applyEuCollectCart\(body,/.test(checkout), true);
 
   const store = (await storeForEmail(owner))!;
   const products = await Promise.all(ids.map(async (id) => (await readProduct(store, id))!));

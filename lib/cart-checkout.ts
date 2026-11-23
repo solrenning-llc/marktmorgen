@@ -39,7 +39,7 @@ import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-shar
 import { codesMayTakeOff, livePromotionId } from "@/lib/discount";
 import { CONSENT_META, type DigitalConsent, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
 import { applyCartShipping, cartItemOf, cartShipping, shippedFirst, shipsWithOnline } from "@/lib/cart-shipping";
-import { applyEuCollectCart } from "@/lib/eu-vat-collect";
+import { EuVatCollectRefused, applyEuCollectCart, closesInsideWindow, vatWindowSeconds } from "@/lib/eu-vat-collect";
 import type { EuVatRate } from "@/lib/eu-vat-amount";
 import { BUYER_CURRENCY_LIVE } from "@/lib/buyer-currency";
 
@@ -254,7 +254,10 @@ export async function createCartCheckout(
   inTheCurrencyShown(body);
   // 789 [IV1] step 3, unit 3: the VAT on top, after the creator's own tax settings and the currency are set, so it is
   // worked out on what the buyer pays and the creator's automatic tax is off for this sale (lib/eu-vat-collect.ts).
-  if (extras.euVat) applyEuCollectCart(body, { ...extras.euVat, buyerCurrencyLive: BUYER_CURRENCY_LIVE });
+  // The sterling month is checked for the window the cart can be paid in (B1), as on one product's checkout.
+  const vatCheckedAt = Math.floor(Date.now() / 1000);
+  const vatWindow = vatWindowSeconds(extras.held === true);
+  if (extras.euVat) applyEuCollectCart(body, { ...extras.euVat, buyerCurrencyLive: BUYER_CURRENCY_LIVE, closesWithinSeconds: vatWindow });
   // A store with reminders on (lib/checkout-recovery.ts): Stripe asks for
   // consent where it offers to, and the way back leads to a page that offers
   // one reminder of the whole cart, which the buyer asks for themselves.
@@ -276,6 +279,7 @@ export async function createCartCheckout(
       // A held unit's shorter time wins over a reminder's hour, as on one product's checkout (lib/store-checkout.ts).
       if (extras.held) body.set("expires_at", String(checkoutClosesAt()));
       else if (extras.remind && !body.has("expires_at")) body.set("expires_at", String(Math.floor(Date.now() / 1000) + RECOVERY_OPEN_SECONDS));
+      if (!closesInsideWindow(body, vatCheckedAt, vatWindow)) throw new EuVatCollectRefused("the cart would stay open past the window its UK VAT was checked for");
       const session = await onAccount("POST", store.stripeAccountId, "/checkout/sessions", body);
       if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") throw new Error("Stripe did not return a checkout URL");
       // Our record that this cart's checkout holds its place, so the sweep can give it back if it closes unpaid (#3970).

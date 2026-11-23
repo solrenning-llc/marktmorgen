@@ -129,6 +129,28 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
     run(["EXPIRE", month, seconds]);
     return [1, done];
   },
+  // lib/stats-report.ts WEEKLY_TEAM_SET_IF_LIVE: who gets the weekly email, replaced only while the store is live (the
+  // identity rule of store-cache-live:v3); 1 kept, 0 gone or erasing, -1 unreadable.
+  "weekly-team-live:v1": (run, [live, erasing, team], [field, statsId, ref, ...emails]) => {
+    if (run(["HGET", erasing, field]) !== null) return 0;
+    if (statsId === "") {
+      if (run(["GET", live]) !== ref) return 0;
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return 0;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -1;
+      }
+      if (!record || typeof record !== "object") return -1;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+    }
+    run(["DEL", team]);
+    if (emails.length) run(["SADD", team, ...emails]);
+    return 1;
+  },
   "zset-take-count:v1": (run, [zset]) => {
     const n = Number(run(["ZCARD", zset])) || 0;
     run(["DEL", zset]);

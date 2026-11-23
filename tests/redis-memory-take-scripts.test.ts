@@ -101,6 +101,15 @@ const CASES: Record<string, Case[]> = {
     { what: "a store still in line", setup: [["HSET", "k:q", "st|s1", "{}"], ["HSET", "k:month", "done", "2"]], keys: ["k:q", "k:month"], argv: ["st|s1", 3600] },
     { what: "a store no longer in line", setup: [["HSET", "k:q", "st|s2", "{}"]], keys: ["k:q", "k:month"], argv: ["st|s1", 3600] },
   ],
+  "weekly-team-live:v1": [
+    { what: "a live store with an id: the list replaced", setup: [["SET", "k:id", "ref"], ["SADD", "k:to", "old@x.test"]], keys: ["k:id", "k:erasing", "k:to"], argv: ["f", "", "ref", "a@x.test", "b@x.test"] },
+    { what: "a live store with an id: nobody chosen", setup: [["SET", "k:id", "ref"], ["SADD", "k:to", "old@x.test"]], keys: ["k:id", "k:erasing", "k:to"], argv: ["f", "", "ref"] },
+    { what: "an erasing store", setup: [["SET", "k:id", "ref"], ["HSET", "k:erasing", "f", "1"], ["SADD", "k:to", "old@x.test"]], keys: ["k:id", "k:erasing", "k:to"], argv: ["f", "", "ref", "a@x.test"] },
+    { what: "an id key that is no longer its own", setup: [["SET", "k:id", "other"]], keys: ["k:id", "k:erasing", "k:to"], argv: ["f", "", "ref", "a@x.test"] },
+    { what: "a store from before ids, its own record", setup: [["SET", "k:rec", record("s1")]], keys: ["k:rec", "k:erasing", "k:to"], argv: ["f", "s1", "ref", "a@x.test"] },
+    { what: "a store from before ids, another store's record", setup: [["SET", "k:rec", record("s2")]], keys: ["k:rec", "k:erasing", "k:to"], argv: ["f", "s1", "ref", "a@x.test"] },
+    { what: "a store from before ids, a record that does not parse", setup: [["SET", "k:rec", "not json"]], keys: ["k:rec", "k:erasing", "k:to"], argv: ["f", "s1", "ref", "a@x.test"] },
+  ],
   "zset-take-count:v1": [
     { what: "a sorted set", setup: [["ZADD", "k:z", 1, "a", 2, "b"]], keys: ["k:z"], argv: [] },
     { what: "no sorted set", setup: [], keys: ["k:z"], argv: [] },

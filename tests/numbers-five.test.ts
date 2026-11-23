@@ -25,7 +25,7 @@ import { countSearchMiss, readSales, readStats, studioStats, type StatsData } fr
 import { countDepth, depthField, readDepth } from "@/lib/page-depth";
 import { insightsFrom } from "@/lib/insights";
 import { leaveWeeklyTeam, setWeeklyTeam, weeklyMemberToken, weeklyMemberTokenOk, weeklyTeam, weeklyToken } from "@/lib/stats-report";
-import { claimHandle, ensureStatsId, setAdsServer, setPixels, setStripeAccount, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureStatsId, ensureStoreId, setAdsServer, setPixels, setStripeAccount, storeForEmail } from "@/lib/store";
 import { NO_PIXELS } from "@/lib/pixels";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -215,7 +215,7 @@ async function main(): Promise<void> {
   is("never more than asked for", insightsFrom(busy, "d7", [], 2).length, 2);
 
   part("The weekly email to the team");
-  await setWeeklyTeam("harbor", ["Ana@Example.com", "ben@example.com"]);
+  await setWeeklyTeam((await ensureStoreId(OWNER))!, ["Ana@Example.com", "ben@example.com"]);
   is("kept as addresses", await weeklyTeam("harbor"), ["ana@example.com", "ben@example.com"]);
   const anaToken = weeklyMemberToken("harbor", "ana@example.com");
   is("a member's link is theirs alone", [

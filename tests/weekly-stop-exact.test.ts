@@ -9,12 +9,19 @@
 import { NextRequest } from "next/server";
 import { POST as weeklyRoute } from "@/app/api/store/weekly/route";
 import { setWeeklyOff, setWeeklyTeam, weeklyMemberToken, weeklyOff, weeklyTeam, weeklyToken } from "@/lib/stats-report";
+import { claimHandle, ensureStoreId, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 
 const HANDLE = "harbor";
+const OWNER = "harbor-owner@example.com";
+/** The store whose team list is changed: live, with its id (setWeeklyTeam keeps the list only while it is). */
+async function harbor() {
+  if (!(await storeForEmail(OWNER))) await claimHandle(OWNER, HANDLE, "Harbor", "");
+  return (await ensureStoreId(OWNER))!;
+}
 const MEMBER = "ana@example.com";
 const real = redis.pipeline.bind(redis);
 
@@ -91,13 +98,13 @@ async function main() {
 
   part("a team member's own stop: an unknown answer is never said as Stopped");
   redis.pipeline = real;
-  await setWeeklyTeam(HANDLE, [MEMBER]);
+  await setWeeklyTeam(await harbor(), [MEMBER]);
   pressed = await press(memberUrl());
   is("healthy member stop: 200 and Stopped", [pressed.status, saysStopped(pressed.page)], [200, true]);
   is("healthy member stop: off the list", await weeklyTeam(HANDLE), []);
   for (const [name, whole] of UNKNOWN) {
     redis.pipeline = real;
-    await setWeeklyTeam(HANDLE, [MEMBER]);
+    await setWeeklyTeam(await harbor(), [MEMBER]);
     answer("SREM", whole);
     pressed = await press(memberUrl());
     redis.pipeline = real;
@@ -107,29 +114,30 @@ async function main() {
 
   part("who on the team gets it: an unknown answer to the change is never taken as kept");
   redis.pipeline = real;
-  await setWeeklyTeam(HANDLE, [MEMBER]);
+  await setWeeklyTeam(await harbor(), [MEMBER]);
   is("healthy set: kept", await weeklyTeam(HANDLE), [MEMBER]);
-  await setWeeklyTeam(HANDLE, []);
+  await setWeeklyTeam(await harbor(), []);
   is("healthy empty set (DEL alone): nobody", await weeklyTeam(HANDLE), []);
+  // Since Codex L-20261121-0144 the change is one fenced EVAL (lib/stats-report.ts WEEKLY_TEAM_SET_IF_LIVE): its
+  // answer is 1 kept or 0 gone; any other is unknown, never kept.
   const TEAM_UNKNOWN: [string, unknown][] = [
     ["no reply at all", []],
-    ["one reply for two commands", [1]],
-    ["three replies for two commands", [1, 1, 1]],
-    ["DEL answered null", [null, 1]],
-    ["DEL answered a string", ["1", 1]],
-    ["DEL answered two for one key", [2, 1]],
-    ["SADD answered undefined", [1, undefined]],
-    ["SADD answered an object", [1, {}]],
-    ["SADD answered minus one", [1, -1]],
-    ["SADD answered two for one member", [1, 2]],
+    ["two replies for one command", [1, 1]],
+    ["null", [null]],
+    ["undefined", [undefined]],
+    ["a string", ["1"]],
+    ["an object", [{}]],
+    ["minus one (a record that does not parse)", [-1]],
+    ["two", [2]],
+    ["a fraction", [0.5]],
   ];
   for (const [name, whole] of TEAM_UNKNOWN) {
     redis.pipeline = real;
-    await setWeeklyTeam(HANDLE, [MEMBER]);
-    answer("DEL", whole);
+    await setWeeklyTeam(await harbor(), [MEMBER]);
+    answer("EVAL", whole);
     let refused = false;
     try {
-      await setWeeklyTeam(HANDLE, ["ben@example.com"]);
+      await setWeeklyTeam(await harbor(), ["ben@example.com"]);
     } catch {
       refused = true;
     }

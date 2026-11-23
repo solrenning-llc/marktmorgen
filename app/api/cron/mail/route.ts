@@ -30,6 +30,7 @@ import { sendReviewRequests } from "@/lib/review-requests";
 import { syncDue } from "@/lib/email-sync";
 import { syncMeetings } from "@/lib/call-meetings";
 import { withCutoff } from "@/lib/fetch-timeout";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 export const maxDuration = 60;
 
@@ -90,6 +91,11 @@ export const maxDuration = 60;
  * events still get their phone notification, in the same place.
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   // Every request below is given up by 57 s (lib/fetch-timeout.ts). A run
   // that reaches it leaves its lock to run out by itself (90 s), long
   // before the next run.

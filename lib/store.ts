@@ -51,6 +51,7 @@ import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type FencedChange, type Held, LockBusyError, applyIfHeld, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
+import { storeLockWaitMs } from "@/lib/store-lock-wait";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
 import {
@@ -1979,6 +1980,11 @@ export async function storesAfter(cursor: string): Promise<{ stores: Store[]; ne
  * by a request that died is gone after LOCK_SECONDS.
  */
 const LOCK_SECONDS = 15;
+/**
+ * The longest a write of a store waits for another one: a scheduled job's (lib/store-lock-wait.ts). A write made for a
+ * person waits less (storeLockWaitMs, STUDIO_STORE_LOCK_WAIT_MS: #5010 row 182); the closing of a record
+ * (closeStoreRecord), which only a job does, waits this. lib/read-ceilings.ts STORE_LOCK_TRIES counts its tries.
+ */
 const LOCK_WAIT_MS = 8_000;
 
 /**
@@ -2189,7 +2195,7 @@ async function withStore<T>(email: string, work: (store: Store, save: Save, held
   const owner = await ownerKey(email);
   let held: Held;
   try {
-    held = await takeLock(lockKeyOf(owner), LOCK_SECONDS, LOCK_WAIT_MS);
+    held = await takeLock(lockKeyOf(owner), LOCK_SECONDS, storeLockWaitMs(LOCK_WAIT_MS));
   } catch (error) {
     if (error instanceof LockBusyError) throw new StoreBusyError();
     throw error;

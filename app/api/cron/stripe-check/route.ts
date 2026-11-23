@@ -9,6 +9,7 @@ import { type Check, verifyCartShipping, verifyPackages, verifyTaxDocuments, ver
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { SITE_URL } from "@/lib/site-url";
 import { STATUS_CHECKS, statusRunCommands } from "@/lib/status-page";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 // A run takes about half a minute, most of it Stripe charging and updating
 // test subscriptions; room is left so a slow day at Stripe is not cut off.
@@ -24,6 +25,11 @@ const LAST = "nl:stripe-check:last";
  * can start it: only Vercel's scheduled call carries the secret.
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   if (!(await cronAllowed(request))) {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }

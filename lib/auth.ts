@@ -56,6 +56,7 @@ import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { takeOnce } from "@/lib/redis-take-once";
 import { deleteIfHeldOnly } from "@/lib/redis-lock";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isHouseAddress } from "@/lib/house-store";
@@ -437,12 +438,17 @@ export async function isMoving(email: string): Promise<boolean> {
  */
 export async function sessionMark(id: string | undefined, email: string): Promise<string | null> {
   if (!id || !isRedisConfigured() || !/^[0-9a-f]{64}$/.test(id)) return null;
-  const [owner, mark] = await redisPipeline([
+  // Exactly the two replies asked, each a text or nothing (CX-123 rule 24; #4058): a mark read from an answer of any
+  // other shape (one reply more or less, a reply of another kind) is not a second step, nor "none", which would read
+  // as an emailed link's session: it throws, and every gate on it refuses (lib/second-step-gate.ts, lib/team.ts).
+  const replies = repliesFor(await redisPipeline([
     ["GET", await sessionKey(id)],
     ["GET", await secondKey(id)],
-  ]);
-  if (typeof owner !== "string" || !owner || owner !== normaliseEmail(email)) return null;
-  return typeof mark === "string" && mark ? mark : null;
+  ]), 2);
+  if (!replies || replies.some((reply) => reply !== null && typeof reply !== "string")) throw new UnknownReplyError("a session's second step");
+  const [owner, mark] = replies as (string | null)[];
+  if (!owner || owner !== normaliseEmail(email)) return null;
+  return mark ? mark : null;
 }
 
 /** The step a mark names: "passkey:<id>" is a passkey. */
@@ -610,15 +616,8 @@ export async function spendMoveLink(
   if (!isRedisConfigured()) return null;
   if (!/^[0-9a-f]{64}$/.test(token)) return null;
 
-  const key = await moveKey(token);
-  let raw: unknown;
-  try {
-    [raw] = await redisPipeline([["GETDEL", key]]);
-  } catch {
-    const [read] = await redisPipeline([["GET", key]]);
-    const [removed] = await redisPipeline([["DEL", key]]);
-    raw = countOf(removed) === 1 ? read : null;
-  }
+  // Read in its exact shape, once (lib/redis-take-once.ts; #4055): an answer of another shape moves nothing.
+  const raw = await takeOnce(await moveKey(token));
   if (typeof raw !== "string" || !raw) return null;
 
   try {
@@ -916,15 +915,8 @@ export async function keepGoogleState(state: string, value: string): Promise<voi
 /** Spends it, once: two answers that arrive together cannot both read it. */
 export async function takeGoogleState(state: string): Promise<string | null> {
   if (!isRedisConfigured()) return null;
-  const key = await googleKey(state);
-  let value: unknown;
-  try {
-    [value] = await redisPipeline([["GETDEL", key]]);
-  } catch {
-    const [read] = await redisPipeline([["GET", key]]);
-    const [removed] = await redisPipeline([["DEL", key]]);
-    value = countOf(removed) === 1 ? read : null;
-  }
+  // Read in its exact shape, once (lib/redis-take-once.ts; #4055): an answer of another shape opens nothing.
+  const value = await takeOnce(await googleKey(state));
   return typeof value === "string" && value ? value : null;
 }
 

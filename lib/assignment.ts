@@ -50,6 +50,13 @@ const bytesKey = (room: string) => `nl:tasks:bytes:${room}`;
 const takenKey = (path: string) => `nl:tasks:taken:${createHash("sha256").update(path).digest("hex").slice(0, 40)}`;
 /** How long a file's mark of the room it took is kept: long enough for the route to give it back at once. */
 const TAKEN_SECONDS = 60 * 60;
+/**
+ * A replaced file whose delete failed (app/api/store/course/task/route.ts): the room its bytes still take, kept by its
+ * hashed path only, for the daily sweep to give back once it deleted the file (giveOwedBack; Claude 1's NIT on #5350).
+ */
+const owedKey = (path: string) => `nl:tasks:owed:${createHash("sha256").update(path).digest("hex").slice(0, 40)}`;
+/** How long that mark is kept: the sweep runs daily, so a week covers several of its runs failing in a row. */
+export const OWED_SECONDS = 7 * 24 * 60 * 60;
 const DOORS_KEY = "nl:tasks:doors";
 /** Names a hand-in took, by when: swept a day on unless the student's work keeps the file (takeTaskUpload). */
 const HELD_KEY = "nl:tasks:held";
@@ -641,6 +648,61 @@ export async function noteTaskUpload(path: string, now = Date.now()): Promise<vo
 }
 
 /**
+ * Keeps, for a replaced file whose delete failed, the room its bytes still take (`bytes` in `room`), so the daily sweep
+ * that deletes it gives them back (giveOwedBack). Written before the file is handed to the sweep, so the sweep always
+ * finds it. Read exactly: anything but OK throws UnknownReplyError, and the bytes only stay counted, which refuses sooner.
+ */
+export async function noteOwedBytes(path: string, room: string, bytes: number): Promise<void> {
+  if (!isRedisConfigured() || !path || !room || !Number.isSafeInteger(bytes) || bytes <= 0) return;
+  const set = repliesFor(await redisPipeline([["SET", owedKey(path), `${bytes}|${room}`, "EX", OWED_SECONDS]]), 1)?.[0];
+  if (set !== "OK") throw new UnknownReplyError("the room a replaced assignment file still takes");
+}
+
+/**
+ * The room a swept file was still taking, given back once (OWED_GIVE_BACK): only while the mark is the one read, which the
+ * script deletes in the same step, so two sweeps never give it twice; and only while the store's counter is there, so a
+ * store closed meanwhile never has its counter written again.
+ */
+export const OWED_GIVE_BACK = `-- marktmorgen:task-owed-give-back:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return -1 end
+redis.call('DEL', KEYS[1])
+if redis.call('EXISTS', KEYS[2]) ~= 1 then return -2 end
+local left = redis.call('DECRBY', KEYS[2], ARGV[2])
+if left < 0 then redis.call('SET', KEYS[2], 0) return 0 end
+return left`;
+const OWED_VALUE = /^([1-9][0-9]{0,15})\|([0-9a-f]{16,64})$/;
+
+/**
+ * Gives back the room of the files this sweep run deleted that a hand-in could not delete (noteOwedBytes): one MGET
+ * for the run's deleted paths, and one OWED_GIVE_BACK for each that has a mark. A reply in any other shape gives nothing
+ * back, which only refuses sooner, never leaves too much room; it is said in the log, and it never undoes a delete.
+ */
+async function giveOwedBack(paths: string[]): Promise<void> {
+  if (!paths.length) return;
+  try {
+    const found = repliesFor(await redisPipeline([["MGET", ...paths.map(owedKey)]]), 1)?.[0];
+    const marks = Array.isArray(found) && found.length === paths.length ? found : null;
+    if (!marks) {
+      console.error(`reading what ${paths.length} swept assignment files still took of their room: unknown reply, nothing given back`);
+      return;
+    }
+    for (let i = 0; i < paths.length; i += 1) {
+      const mark = marks[i];
+      if (mark === null) continue;
+      const read = typeof mark === "string" ? OWED_VALUE.exec(mark) : null;
+      if (!read) {
+        console.error("a swept assignment file's room mark does not read; nothing given back");
+        continue;
+      }
+      const given = repliesFor(await redisPipeline([["EVAL", OWED_GIVE_BACK, 2, owedKey(paths[i]), bytesKey(read[2]), mark, read[1]]]), 1)?.[0];
+      if (signedOf(given) === null) console.error("giving back a swept assignment file's room: unknown reply, not counted as given back");
+    }
+  } catch (error) {
+    console.error("giving back the room of swept assignment files failed; it stays counted", error);
+  }
+}
+
+/**
  * Lists a name a door is about to open for, before the file store is asked about it (app/api/store/course/task/upload):
  * true when this call listed it anew, false when it was listed already (another door for it still open; it keeps the
  * time it was first listed at, so the sweep still deletes it a day after that first door). Read exactly (CX-123 rule 24): any other answer throws UnknownReplyError, and no
@@ -782,6 +844,8 @@ async function sweepList(key: string, remove: (paths: string[]) => Promise<void>
       failed.push(p);
     }
   }
+  // A deleted file a hand-in could not delete still took room: given back now that it is gone (noteOwedBytes).
+  await giveOwedBack(deleted);
   if (failed.length) {
     const back = repliesFor(await redisPipeline([["ZADD", key, ...failed.flatMap((p) => [before, p])]]), 1)?.[0];
     if (countOf(back) === null) console.error(`putting back ${failed.length} unused assignment uploads: unknown reply, they may be left`);

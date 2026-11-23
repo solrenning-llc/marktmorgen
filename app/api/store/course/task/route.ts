@@ -9,7 +9,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { HandInChangedError, HandInClosedError, handIn, noteTaskUpload, oneHandInAtATime, releaseBytes, releaseTaskHold, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
+import { HandInChangedError, HandInClosedError, handIn, noteOwedBytes, noteTaskUpload, oneHandInAtATime, releaseBytes, releaseTaskHold, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { LockBusyError } from "@/lib/redis-lock";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
@@ -160,6 +160,13 @@ export async function POST(request: NextRequest) {
           () => true,
           async (error: unknown) => {
             console.error("could not delete a replaced assignment file: it goes to the daily job; its room stays counted", error);
+            // Its room is given back by that job once the file is gone (Claude 1's NIT on #5350): kept first, so the job
+            // always finds it; a mark that is not kept only leaves the bytes counted, which refuses sooner.
+            if (done.freedBytes) {
+              await noteOwedBytes(replaced, room, done.freedBytes).catch((owedError: unknown) =>
+                console.error("could not keep a replaced assignment file's room for the daily job; it stays counted", owedError),
+              );
+            }
             await noteTaskUpload(replaced, 0).catch((noteError: unknown) =>
               console.error("could not hand a replaced assignment file to the daily job; it is kept until the store closes", noteError),
             );

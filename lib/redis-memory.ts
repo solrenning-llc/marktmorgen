@@ -1919,6 +1919,19 @@ export class MemoryRedis {
           this.run(["SET", receipt, to, "EX", seconds]);
           return 1;
         }
+        // lib/assignment.ts OWED_GIVE_BACK: a swept file's room given back once, only while its mark and its store's counter are there.
+        if (key.startsWith("-- marktmorgen:task-owed-give-back:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, owed, bytes, expected, amount] = args;
+          if (this.run(["GET", owed]) !== expected) return -1;
+          this.run(["DEL", owed]);
+          if (this.run(["EXISTS", bytes]) !== 1) return -2;
+          const left = this.run(["DECRBY", bytes, amount]) as number;
+          if (left < 0) {
+            this.run(["SET", bytes, "0"]);
+            return 0;
+          }
+          return left;
+        }
         // lib/team.ts KEEP_LOG_IF_LIVE: the reference and erasing fence are checked at the personal write.
         if (key.startsWith("-- marktmorgen:team-log-live:v1\n") && args[0] === "3" && args.length === 8) {
           const [, identity, erasing, log, ref, field, entry, limit] = args;

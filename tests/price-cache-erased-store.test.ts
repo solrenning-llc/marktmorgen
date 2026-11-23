@@ -103,12 +103,12 @@ async function main(): Promise<void> {
   redis.clear();
   const oldGone = await shop("price-cache-old-gone@example.com", "price-cache-old-gone");
   const legacyGone: Store = { ...oldGone, sid: "", extra: false };
-  for (const [, make] of makers) {
+  for (const [label, make] of makers) {
     duringPost = () => erase(legacyGone, "gone");
-    // The yearly price says the store is gone (#5010 row 85); the others hand Stripe's id back.
-    await make(legacyGone).catch((error: unknown) => {
-      if (!(error instanceof YearlyStoreGoneError)) throw error;
-    });
+    // The yearly price says the store is gone (#5010 row 85); the others hand Stripe's id back. Each outcome is held
+    // exactly, so a maker that stopped throwing, or started to, fails here (Claude 1 coord's LEVE 3 on #5157).
+    const outcome = await make(legacyGone).then((id) => (/^price_/.test(id) ? "id" : `odd ${id}`), (error: unknown) => (error instanceof YearlyStoreGoneError ? "gone" : `threw ${String(error)}`));
+    is(`its record gone: ${label} ${label === "the yearly price" ? "says the store is gone" : "hands Stripe's id back"}`, outcome, label === "the yearly price" ? "gone" : "id");
   }
   duringPost = async () => {};
   for (const family of FAMILIES) is(`its record gone: nothing kept under ${family}`, cached(family), []);

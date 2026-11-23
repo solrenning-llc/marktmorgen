@@ -35,6 +35,13 @@ for (const [name, text] of Object.entries(sources)) {
   is(`${name}: a deleted lesson video is refunded without waiting for the hours`, /video\s+is\s+deleted[^.]{0,120}without\s+waiting/.test(text), true);
 }
 
+part("A charged request that never reached the provider is refunded without the wait too (Claude 5 ia5d's LEVE on #5456)");
+is("the code refunds a charged order whose record was never confirmed, from the queue after ORDER_SETTLE_MS",
+  /export const ORDER_SETTLE_MS = 15 \* 60_000;/.test(readFileSync("lib/auto-captions.ts", "utf8")), true);
+for (const [name, text] of Object.entries(sources)) {
+  is(`${name}: a request that never reaches the provider is refunded without waiting`, /never\s+reaches\s+(our|the)\s+video\s+provider[^.]{0,160}without\s+waiting/.test(text), true);
+}
+
 part("The Terms and the help say what happens when the provider never confirms");
 is("the Terms name the extra days and the studio page that says whom to write to", /\{DELIVERY_LOOK_DAYS\}\s+(more\s+)?days/.test(sources.terms) && /says\s+so\s+and\s+gives\s+the\s+address\s+to\s+write\s+to/.test(sources.terms), true);
 is("the help says so in a sentence", /\$\{DELIVERY_LOOK_DAYS\}\s+(more\s+)?days/.test(sources.help), true);

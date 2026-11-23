@@ -1243,7 +1243,9 @@ console.log("the watch fetches again before it says 'rewritten': a mark set by a
   const c2 = (() => { writeFileSync(join(w, "b"), "2\n"); g(["add", "b"], w); g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x2"], w); return g(["rev-parse", "HEAD"], w); })();
   g(["push", "-q", d, "HEAD:refs/heads/x"], w);
   const conferir = (primeira, segunda, desde) => spawnSync("node", ["--input-type=module", "-e",
-    `const m = await import(${JSON.stringify(TOOL)}); const r = m.conferirDesde(${JSON.stringify(desde)}, () => ${JSON.stringify(primeira)}, () => ${JSON.stringify(segunda)}); console.log(JSON.stringify({ c: r.c, reescrito: r.r.reescrito }));`],
+    // The values go in as arguments, never into the code text (CodeQL js/bad-code-sanitization on the first head).
+    "const [tool, desde, a, b] = process.argv.slice(1); const m = await import(tool); const r = m.conferirDesde(desde, () => a, () => b); console.log(JSON.stringify({ c: r.c, reescrito: r.r.reescrito }));",
+    TOOL, desde, primeira, segunda],
     { env: { ...base, CORREIO_GIT_DIR: d }, encoding: "utf8" }).stdout.trim().split("\n").pop();
   const lido = (x) => { try { return JSON.parse(x); } catch { return {}; } };
   let v = lido(conferir(c1, c2, c2));

@@ -30,7 +30,7 @@ const slow = () => {
   return { stopAt: 1, now: () => clock++ };
 };
 
-async function walk(keys: string[]): Promise<{ handed: string[]; calls: number; last: { complete: boolean; reason: string } | null; error: string }> {
+async function walk(keys: string[], timing: () => { stopAt: number; now: () => number } = slow): Promise<{ handed: string[]; calls: number; last: { complete: boolean; reason: string } | null; error: string }> {
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async () => new Response(listing(keys), { status: 200 })) as typeof fetch;
   const handed: string[] = [];
@@ -40,7 +40,7 @@ async function walk(keys: string[]): Promise<{ handed: string[]; calls: number; 
   try {
     do {
       calls += 1;
-      const page = await backupFilesPage({ source: "r2", store: STORE, cursor }, slow());
+      const page = await backupFilesPage({ source: "r2", store: STORE, cursor }, timing());
       handed.push(...page.entries.map((entry) => entry.key));
       last = { complete: page.complete, reason: page.reason };
       cursor = page.cursor;
@@ -65,6 +65,16 @@ async function main(): Promise<void> {
     } finally {
       globalThis.fetch = realFetch;
     }
+  }
+  // Codex X6's re-check on #3313 @72990de7a2 (Board #5285, row #3313): the first line of backupFilesPage answered an
+  // empty "cutoff" page with the cursor it was given whenever the request was already past its cutoff before the
+  // listing (its count or the store's read slow), so a Worker repeating that request never moved. The loop's own rule
+  // now holds there too: one object is looked at before a cutoff.
+  part("a request already past its cutoff before the listing still moves the walk on");
+  {
+    const late = await walk([`${PREFIX}a.pdf`, `${PREFIX}b.pdf`, `${PREFIX}c.pdf`], () => ({ stopAt: 0, now: () => 1 }));
+    is("repeated, the walk ends with every object handed out once, in order", [late.error, late.handed, late.last], ["", [`${PREFIX}a.pdf`, `${PREFIX}b.pdf`, `${PREFIX}c.pdf`], { complete: true, reason: "done" }]);
+    is("in no more calls than objects", late.calls <= 3, true);
   }
   const plain = await walk([`${PREFIX}a.pdf`, `${PREFIX}b.pdf`, `${PREFIX}c.pdf`]);
   is("repeated, the walk ends with every object handed out once, in order", [plain.error, plain.handed, plain.last], ["", [`${PREFIX}a.pdf`, `${PREFIX}b.pdf`, `${PREFIX}c.pdf`], { complete: true, reason: "done" }]);

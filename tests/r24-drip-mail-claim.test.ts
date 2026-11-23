@@ -12,7 +12,7 @@
  * Synthetic only: the in-memory Redis (tests/redis-stub.ts) and the synthetic SES (tests/ses-mail-fixture.ts); nothing leaves.
  */
 import { claimHandle, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { emailKey, recordEnrollment, sendDripEmails } from "@/lib/learn";
+import { emailKey, recordEnrollment, sendDripEmails, touchStudent } from "@/lib/learn";
 import { KIND } from "@/lib/catalog";
 import type { Course } from "@/lib/course";
 import { paidPeriod } from "./billing-period-fixture";
@@ -77,12 +77,14 @@ async function main(): Promise<void> {
   /**
    * A new student, a day and a half in, whose second week opened half a day ago. Bought on that day, written down on
    * the thanks page: the job announces only what the course page opens, from the same start (courseLedger, #3369).
+   * Their row written as the course page writes one (touchStudent with the outline), so their pair is in the store's
+   * drip index (docs/drip-due-index.md).
    */
   const student = async (): Promise<string> => {
     n += 1;
     const email = `drip-student-${n}@example.com`;
     await recordEnrollment(store, email, product.id, NOW - 36 * 3600);
-    await original([["HSET", `nl:course:${course.id}:students`, emailKey(email), JSON.stringify({ e: email, s: NOW - 36 * 3600, l: NOW })]]);
+    await touchStudent(course.id, email, NOW - 36 * 3600, store, undefined, { course, productId: product.id });
     return email;
   };
   const run = () => sendDripEmails(async (handle) => (handle === store.handle ? store : null), async (id) => (id === course.id ? course : null), "https://marktmorgen.com", NOW);

@@ -86,7 +86,8 @@ async function main(): Promise<void> {
   let writes = 0;
   const pipeline = redis.pipeline.bind(redis);
   (redis as unknown as { pipeline: typeof pipeline }).pipeline = (cmds) => {
-    if (cmds.some((c) => String(c[0]).toUpperCase() === "SET" && String(c[1]).includes(courseId) && !String(c[1]).endsWith(":lock"))) writes += 1;
+    // The course's own record: its drip card (lib/learn.ts, registerDrip; docs/drip-due-index.md) is another key.
+    if (cmds.some((c) => String(c[0]).toUpperCase() === "SET" && String(c[1]).includes(courseId) && !String(c[1]).endsWith(":lock") && !String(c[1]).startsWith("nl:drip:card:"))) writes += 1;
     return pipeline(cmds);
   };
 
@@ -103,8 +104,12 @@ async function main(): Promise<void> {
   is("the product counts its lessons", (await listing()).course?.lessons, lessonCount(kept!));
   is("every title is still an example, and said", exampleTitlesLeft(kept!), 16);
   is("the product is taken off the store, so no buyer sees an example title", [(await listing()).hidden, weekly.body.hidden], [true, true]);
-  const [drips] = await redis.pipeline([["SMEMBERS", DRIP_SET]]);
-  is("the module-opening emails know the course now that modules open later (registerDrip)", (drips as string[]).includes(`${courseId}|breadmaker|${id}`), true);
+  // Since the drip index (docs/drip-due-index.md): the course has its card, and waits in its store's pending set for
+  // its students to be walked into the store's index; the old global set is no longer written.
+  const [indexed] = await redis.pipeline([["SMEMBERS", "nl:drip:stores"]]);
+  const statsId = ((indexed as string[]).find((m) => m.endsWith("|breadmaker")) ?? "").split("|")[0];
+  const [card, pending, drips] = await redis.pipeline([["GET", `nl:drip:card:${courseId}`], ["SISMEMBER", `nl:drip:pending:${statsId}`, `${courseId}|breadmaker|${id}`], ["SMEMBERS", DRIP_SET]]);
+  is("the module-opening emails know the course now that modules open later (registerDrip)", [typeof card, pending, (drips as string[]).length], ["string", 1, 0]);
 
   part("Published only once every example title is replaced");
   const publish = async (productId: string) => {

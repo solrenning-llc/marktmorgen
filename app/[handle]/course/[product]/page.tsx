@@ -120,7 +120,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   if (open && !access.learner.owner) {
     const { email } = access.learner;
     const stamp = access.stamp; // the purchase's end (24 [E7]), so drip emails stop with access
-    after(() => touchStudent(course.id, email, access.start, store, stamp, course));
+    // The page's start stands (#3369) and the student's pairs go into the store's drip index (#3344).
+    after(() => touchStudent(course.id, email, access.start, store, stamp, { course, productId: product.id, stands: true }));
     // Once the whole month's visits are used, a course rests too (lib/traffic-rules.ts).
     if (await isResting(store, undefined, "buyer")) redirect(`/@${store.handle}/resting`);
     // A student's day in a course is a visit to the store (lib/day-visit.ts).

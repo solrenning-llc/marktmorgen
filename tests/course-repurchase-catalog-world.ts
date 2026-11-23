@@ -13,3 +13,7 @@ export async function readKind(_store: Store, kind: string): Promise<Listing[]> 
 export function idsOfKind(_store: Store, kind: string): string[] {
   return kind === "course" ? catalog.listings.filter((l) => l.course).map((l) => l.id) : [];
 }
+/** The drip job's listings read over its index (lib/learn.ts sendDue, #3344): the same fixed list, null for one not in it. */
+export async function readListingsExactly(_store: Store, ids: string[]): Promise<Map<string, Listing | null | "unknown">> {
+  return new Map(ids.map((id) => [id, catalog.listings.find((l) => l.id === id) ?? null]));
+}

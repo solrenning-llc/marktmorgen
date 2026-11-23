@@ -84,7 +84,7 @@ const BUILT = [
   "Payment plans: two to twelve weekly or monthly payments on your own Stripe account, the product delivered after the first, and the plan given its end so no buyer is charged after the last payment",
   "Sales tax and VAT worked out by Stripe Tax on your own account and added at checkout, switched on once Stripe says your tax setup is complete",
   "Limited quantities: the page shows how many are left, counted from real payments, and a unit someone is paying for is held so the last one is never sold twice",
-  "Courses: modules of lessons with video, text, downloads and a link, free preview lessons, modules that open a set number of days after each student joins, with an email to the student the day each one opens, and each student's progress in your studio — students open them with their email, no password",
+  "Courses: modules of lessons with video, text, downloads and a link, free preview lessons, modules that open a set number of days after each student joins, with an email to the student when each one opens, or up to seven days later when many open at once, and each student's progress in your studio — students open them with their email, no password",
   "Paid calls with a calendar: your weekly hours in your time zone, the free times shown to each buyer in theirs, the time held while they pay, and an email about each booking to the buyer and to you",
   "Group calls of up to 50 people, and live sessions on dates you set with up to 500 seats each, held on the meeting service whose link you give or in a video room made for them",
   "A private Jitsi Meet video room made for each booking if you choose it, in every email, reminder and calendar file, and a buyer's booked calls on their list of purchases",

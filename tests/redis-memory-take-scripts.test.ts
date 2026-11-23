@@ -66,6 +66,16 @@ const CASES: Record<string, Case[]> = {
     { what: "an erasing store", setup: [["SET", "k:id", "s1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:id", "k:erasing", "k:report"], argv: ["f1", "{}", 300] },
     { what: "no store", setup: [], keys: ["k:id", "k:erasing", "k:report"], argv: ["f1", "{}", 300] },
   ],
+  "reminder-requeue-live:v1": [
+    { what: "a live store, its yes still there", setup: [["SET", "k:id", "ref1"], ["SET", "k:yes", "old"]], keys: ["k:id", "k:erasing", "k:yes", "k:q"], argv: ["f1", "", "ref1", "new", 600, 1700000000, "m1"] },
+    { what: "the yes deleted meanwhile", setup: [["SET", "k:id", "ref1"]], keys: ["k:id", "k:erasing", "k:yes", "k:q"], argv: ["f1", "", "ref1", "new", 600, 1700000000, "m1"] },
+    { what: "an id key holding another ref", setup: [["SET", "k:id", "ref2"], ["SET", "k:yes", "old"]], keys: ["k:id", "k:erasing", "k:yes", "k:q"], argv: ["f1", "", "ref1", "new", 600, 1700000000, "m1"] },
+    { what: "an erasing store", setup: [["SET", "k:id", "ref1"], ["SET", "k:yes", "old"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:id", "k:erasing", "k:yes", "k:q"], argv: ["f1", "", "ref1", "new", 600, 1700000000, "m1"] },
+    { what: "no store", setup: [["SET", "k:yes", "old"]], keys: ["k:id", "k:erasing", "k:yes", "k:q"], argv: ["f1", "", "ref1", "new", 600, 1700000000, "m1"] },
+    { what: "a store from before ids, its own record", setup: [["SET", "k:id", record("st1")], ["SET", "k:yes", "old"]], keys: ["k:id", "k:erasing", "k:yes", "k:q"], argv: ["f1", "st1", "", "new", 600, 1700000000, "m1"] },
+    { what: "a store from before ids, another store's record", setup: [["SET", "k:id", record("st2")], ["SET", "k:yes", "old"]], keys: ["k:id", "k:erasing", "k:yes", "k:q"], argv: ["f1", "st1", "", "new", 600, 1700000000, "m1"] },
+    { what: "a store from before ids, a record that does not parse", setup: [["SET", "k:id", "{"], ["SET", "k:yes", "old"]], keys: ["k:id", "k:erasing", "k:yes", "k:q"], argv: ["f1", "st1", "", "new", 600, 1700000000, "m1"] },
+  ],
   "sales-goal-live:v1": [
     { what: "a live store, a goal", setup: [["SET", "k:live", "x"]], keys: ["k:live", "k:erasing", "k:goal"], argv: ["f1", "500"] },
     { what: "a live store, the goal cleared", setup: [["SET", "k:live", "x"], ["SET", "k:goal", "500"]], keys: ["k:live", "k:erasing", "k:goal"], argv: ["f1", ""] },

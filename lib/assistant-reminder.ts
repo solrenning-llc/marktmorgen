@@ -39,6 +39,7 @@ import { type RemindOutcome, remindAssisted } from "@/lib/checkout-recovery";
 import { REMINDER_RETRIES, reminderRetryAfter, retriesOf } from "@/lib/reminder-retry";
 import type { SessionRecord } from "@/lib/purchase-email";
 import type { Listing, Store } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { LANGUAGES } from "@/lib/store-language";
 import { assistReminderWords } from "@/lib/buyer-words/assistant-reminder";
 import {
@@ -316,6 +317,36 @@ const dayWords = (store: Store, ms: number) =>
   new Intl.DateTimeFormat(LANGUAGES[store.language]?.locale ?? "en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(ms));
 
 /**
+ * A checkout still open when its reminder came due, put back in the queue in one step only while its store is live
+ * (#5010 row 86, Codex L-20261119-1255, HIGH). remindFromConsent reads the consent, then waits on the creator's Stripe
+ * account; the store's erasure can begin or end in that wait, and two plain commands after it (SET of the consent,
+ * ZADD of the queue member) wrote the buyer's address and the queue entry back under a store that no longer exists.
+ * The fence is the rule of lib/live-fence.ts (store-cache-live:v3): the store's erasing field absent, and its id key
+ * still holding this very store's ref (ARGV[2] ""), or, for a store from before ids, its owner's record still carrying
+ * its statsId (ARGV[2]). The consent is written over only while it is still there (SET XX): the person's own erasure
+ * (forgetAssistReminderPerson) deleting it in the same wait is not undone either. KEYS: the live key, the erasing hash,
+ * the consent, the queue. 1: written; 0: gone, moved, erasing or the consent deleted, nothing written; -1: the owner's
+ * record does not parse (unknown). Billed as the EVAL and its calls: HGET, GET, SET, ZADD (five; two plain before).
+ */
+const REQUEUE_IF_STORE_LIVE = `-- marktmorgen:reminder-requeue-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[2] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[3] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[2] then return 0 end
+end
+if not redis.call("SET", KEYS[3], ARGV[4], "EX", ARGV[5], "XX") then return 0 end
+redis.call("ZADD", KEYS[4], ARGV[6], ARGV[7])
+return 1`;
+
+/** Commands one requeue is billed for at its worst: the EVAL and its HGET, GET, SET and ZADD. */
+export const REQUEUE_IF_STORE_LIVE_COMMANDS = 5;
+
+/**
  * The reminder for one checkout whose consent is kept, when its hour has
  * come. Skips without a word for each thing that stands in front of it: no
  * consent kept (erased, or gone with its week), switched off or no postal
@@ -353,10 +384,19 @@ export async function remindFromConsent(store: Store, session: string, now = Dat
     // Still open (Stripe kept it longer than asked): once more, an hour after it closes, while the consent is kept.
     const due = closes + ASSIST_REMIND_AFTER_SECONDS;
     if (!consent.r && closes > seconds && due - seconds < Number(ttl)) {
-      await redisPipeline([
-        ["SET", key, JSON.stringify({ ...consent, r: 1 }), "EX", Math.max(1, Number(ttl))],
-        ["ZADD", QUEUE, due, JSON.stringify([consent.s, store.handle, session, due])],
-      ]);
+      // One step, fenced on the store being live at the moment of writing (REQUEUE_IF_STORE_LIVE): its erasure may
+      // have begun or ended while Stripe was read. Gone, moved, erasing or the consent deleted: nothing is written and
+      // nothing is sent. An answer that does not read is unknown (rule 24): thrown, so the job tries it again later.
+      const fence = await storeLiveFence(store);
+      if (fence.statsId === null) return "skip";
+      const replies = repliesFor(await redisPipeline([[
+        "EVAL", REQUEUE_IF_STORE_LIVE, 4, fence.live, fence.erasing, key, QUEUE,
+        fence.field, fence.statsId, fence.ref, JSON.stringify({ ...consent, r: 1 }), Math.max(1, Number(ttl)),
+        due, JSON.stringify([consent.s, store.handle, session, due]),
+      ]]), 1);
+      const answer = replies?.[0];
+      if (answer === 0) return "skip";
+      if (answer !== 1) throw new UnknownReplyError("an open checkout's reminder, put back while its store is live");
     }
     return "open";
   }

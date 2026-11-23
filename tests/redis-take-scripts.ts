@@ -146,6 +146,28 @@ const SCRIPTS: Record<string, Script> = {
     run(["SET", report, value, "EX", seconds]);
     return 1;
   },
+  // lib/assistant-reminder.ts REQUEUE_IF_STORE_LIVE: an open checkout's reminder put back (its consent rewritten only
+  // while it is still there, then the queue member) only while the store is live, by the rule of store-cache-live:v3.
+  "reminder-requeue-live:v1": (run, [live, erasing, consent, queue], [field, statsId, ref, value, seconds, due, member]) => {
+    if (run(["HGET", erasing, field]) !== null) return 0;
+    if (statsId === "") {
+      if (run(["GET", live]) !== ref) return 0;
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return 0;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -1;
+      }
+      if (!record || typeof record !== "object") return -1;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+    }
+    if (run(["SET", consent, value, "EX", seconds, "XX"]) === null) return 0;
+    run(["ZADD", queue, due, member]);
+    return 1;
+  },
   "set-and-values-take:v1": (run, [set, ...plain]) => {
     const members = Number(run(["SCARD", set])) > 0 ? (run(["SMEMBERS", set]) as string[]) : [];
     const values = plain.map((k) => run(["GET", k]) ?? null);

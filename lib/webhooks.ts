@@ -2217,7 +2217,11 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     const total = paidCents(object.amount_refunded, "a refund's amount");
     const charged = paidCents(object.amount, "a refunded charge's amount");
     const currency = paidMoney(object.currency, "a refund's money");
-    const before = num(previous.amount_refunded);
+    // The previous refunded total, when Stripe gives one, is whole cents from 0 and never above the new total; anything
+    // else waits, never sent as a wrong amount. Absent is the first refund, 0 (Codex G-20261119-0604).
+    const previousRefunded = previous.amount_refunded;
+    const before = previousRefunded === undefined ? 0 : paidCents(previousRefunded, "a refund's previous amount");
+    if (before > total) throw new StripeShapeError("Stripe gave a refund's previous amount above its new total");
     const billing = (object.billing_details ?? {}) as { email?: unknown; name?: unknown };
     await emitEvent(store, "refund.issued", `${charge}|${total}`, {
       charge,

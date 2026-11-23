@@ -2174,8 +2174,9 @@ export async function refundsOnIntent(paymentIntent: string): Promise<{ returned
     // prove its rows are distinct, so it is unreadable, never a doubled sum
     // that would close a debt only partly returned (issue #4452).
     const seen = new Set<string>();
+    // A refund's id is re_ for cards and pyr_ for some other methods (#5285 row #4458, Claude 3's LEVE): both are refunds.
     for (const row of listed.data as Record<string, unknown>[]) {
-      if (!row || row.object !== "refund" || typeof row.id !== "string" || !/^re_[A-Za-z0-9]{8,64}$/.test(row.id) || seen.has(row.id)) return null;
+      if (!row || row.object !== "refund" || typeof row.id !== "string" || !/^(re|pyr)_[A-Za-z0-9]{8,64}$/.test(row.id) || seen.has(row.id)) return null;
       seen.add(row.id);
       const intent = typeof row.payment_intent === "string" ? row.payment_intent : (row.payment_intent as { id?: unknown } | null | undefined)?.id;
       if (intent !== paymentIntent) return null;

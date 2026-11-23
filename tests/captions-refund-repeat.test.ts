@@ -48,6 +48,14 @@ async function main(): Promise<void> {
   rows = [refund("ch_NotARefund0001", 4000)];
   is("a charge id is unreadable", await refundsOnIntent(PI), null);
 
+  // #5285 row #4458 (Claude 3's LEVE on the merged head 447c337c6a): a refund of some non-card methods has the pyr_
+  // prefix. The debt stayed open on it (the safe side), but a real refund was never counted: it is now read as one.
+  part("A refund with the pyr_ prefix is a refund");
+  rows = [refund("pyr_NonCardRefund01", 4000), refund("re_SameRefund0001", 4000)];
+  is("RED: a pyr_ refund and a re_ refund return $80.00", await refundsOnIntent(PI), { returned: 8000, inFlight: 0, failed: 0, paid: 8000 });
+  rows = [refund("pyr_NonCardRefund01", 4000), refund("pyr_NonCardRefund01", 4000)];
+  is("a pyr_ refund listed twice is unreadable too", await refundsOnIntent(PI), null);
+
   done();
 }
 

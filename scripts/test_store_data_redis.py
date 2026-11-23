@@ -48,6 +48,9 @@ def main():
     room = "marktmorgen:integration:data:" + uuid.uuid4().hex
     numbers = "marktmorgen:integration:rcpt:n:" + uuid.uuid4().hex
     counter = "marktmorgen:integration:rcpt:seq:" + uuid.uuid4().hex
+    store_id = "marktmorgen:integration:rcpt:store:" + uuid.uuid4().hex
+    erasing = "marktmorgen:integration:rcpt:erasing:" + uuid.uuid4().hex
+    erasing_field = uuid.uuid4().hex
     redis = Redis()
 
     def take(client, limit, *triples, always=False, give=False, month="2026-10"):
@@ -59,6 +62,7 @@ def main():
 
     try:
         assert redis.command("PING") == "PONG"
+        redis.command("SET", store_id, "synthetic-store")
         # A slot's own field counts 64 bytes while it is there.
         assert take(redis, 1_000, ("s", "p:one", 400)) == [1, 464]
         assert take(redis, 1_000, ("a", "p:one", 100)) == [1, 564]
@@ -214,7 +218,7 @@ def main():
             return sum(int(n) for n in re.findall(r"^cmdstat_[^:]+:calls=(\d+)", stats, re.M))
 
         def number(reference, limit=10**9):
-            return redis.command("EVAL", receipt_number, 3, room, numbers, counter, limit, "2026-11", reference, 352, 368)
+            return redis.command("EVAL", receipt_number, 5, room, numbers, counter, store_id, erasing, limit, "2026-11", reference, 352, 368, erasing_field)
 
         def billed(reference, limit=10**9):
             before = calls()
@@ -235,8 +239,20 @@ def main():
             redis.command("HSET", room, "#", "999999999999", "~", ",".join(months) or "2026-12")
             reply, used = billed("cs_test_full", 10)
             assert reply == [0, 999999999999] and used <= ceiling, (idle, reply, used, ceiling)
-        assert most == 13, most
+        assert most == 15, most
         print("PASS: one receipt number bills at most RECEIPT_NUMBER_COMMANDS (%d; %d measured), however long the store sat idle" % (ceiling, most))
+
+        # The same Lua that numbers a receipt refuses before any room or number can return after erasure.
+        redis.command("DEL", room, numbers, counter)
+        redis.command("HSET", erasing, erasing_field, "1")
+        assert number("cs_test_erasing") == [-2, 0]
+        assert redis.command("EXISTS", room, numbers, counter) == 0
+        redis.command("HDEL", erasing, erasing_field)
+        redis.command("DEL", store_id)
+        assert number("cs_test_gone") == [-2, 0]
+        assert redis.command("EXISTS", room, numbers, counter) == 0
+        redis.command("SET", store_id, "synthetic-store")
+        print("PASS: closing and erased stores recreate neither receipt numbers nor their room")
 
         # A count Redis cannot add to takes no room and gives no number (review of #3001, L1, comment 6704251804).
         for bad in ("abc", "1.5", "007", "-3", "999999999999", "9999999999999"):
@@ -258,7 +274,7 @@ def main():
         assert number("cs_test_bad") == [3, 8]
         print("PASS: a receipt count that is not a whole number takes no room and gives no number")
     finally:
-        redis.command("DEL", room, numbers, counter)
+        redis.command("DEL", room, numbers, counter, store_id, erasing)
         redis.close()
 
 

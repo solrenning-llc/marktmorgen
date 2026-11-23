@@ -30,6 +30,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DATA_EXPIRED_COMMANDS, type DataStore, TAKE_DATA, dataKey, dataTakenOf, monthOf } from "@/lib/store-data";
 import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 import { RECEIPT_REFERENCE } from "@/lib/receipt-pdf";
+import { ERASING_KEY, erasingField, storeIdCommand, storeRef, type Store } from "@/lib/store";
 
 /** The slot of the store's data room the numbers are counted in. */
 export const RECEIPT_SLOT = "rcpt";
@@ -52,12 +53,13 @@ export const RECEIPT_KEYS_BYTES = dataBytes([`nl:rcpt:n:${"x".repeat(32)}`, `nl:
  * sale's field, the count's GET, the room's steps (its total, its list of
  * expiring months, DATA_EXPIRED_COMMANDS for the months over it takes off
  * however long the store sat idle, the list written back, the slot read and
- * written, the total written), the INCR and the HSET, with one to spare: 10
- * with no month over and 13 with any number of them, measured with INFO
- * commandstats on a real Redis (review of #3001). Held inside
+ * written, the total written), the INCR and the HSET, with one to spare.
+ * The live-id EXISTS and erasing HEXISTS add two to the former measured
+ * 10/13 commands (review of #3001); the native script test includes both.
+ * Held inside
  * RECEIPT_PDF_UNITS studio requests by tests/kb22-receipt-number.test.ts.
  */
-export const RECEIPT_NUMBER_COMMANDS = 12 + DATA_EXPIRED_COMMANDS;
+export const RECEIPT_NUMBER_COMMANDS = 14 + DATA_EXPIRED_COMMANDS;
 
 const STORE_ID = /^[A-Za-z0-9_-]{6,80}$/;
 
@@ -77,7 +79,8 @@ export type ReceiptNumbered =
 const UNKNOWN: ReceiptNumbered = { ok: false, reason: "unknown" };
 
 /**
- * KEYS[1] the store's room, KEYS[2] its numbers, KEYS[3] its count. ARGV[1]
+ * KEYS[1] the store's room, KEYS[2] its numbers, KEYS[3] its count,
+ * KEYS[4] its live id, KEYS[5] the erasing marks; ARGV[6] its erasing field. ARGV[1]
  * how far the room may grow, ARGV[2] this month, ARGV[3] the sale's
  * reference, ARGV[4] what a number takes, ARGV[5] what the keys take with
  * the first. Answers {2, n} for a number already given, {3, n} for one given
@@ -88,6 +91,7 @@ const UNKNOWN: ReceiptNumbered = { ok: false, reason: "unknown" };
  * Modelled by lib/redis-memory.ts.
  */
 export const RECEIPT_NUMBER = `-- marktmorgen:receipt-number:v1
+if redis.call('EXISTS', KEYS[4]) ~= 1 or redis.call('HEXISTS', KEYS[5], ARGV[6]) == 1 then return {-2, 0} end
 local function receiptRoom(limit, month, size)
   local KEYS = {KEYS[1]}
   local ARGV = {limit, '0', month, 'a', '${RECEIPT_SLOT}', size}
@@ -131,14 +135,14 @@ export function receiptNumberFrom(store: DataStore, reply: unknown, nowSeconds =
 }
 
 /** The sale's number: read when it has one, given when not. Never throws. */
-export async function assignReceiptNumber(store: DataStore & { sid: string }, reference: string, now = Date.now()): Promise<ReceiptNumbered> {
+export async function assignReceiptNumber(store: DataStore & Pick<Store, "sid" | "email" | "extra">, reference: string, now = Date.now()): Promise<ReceiptNumbered> {
   if (!STORE_ID.test(store.sid) || !RECEIPT_REFERENCE.test(reference) || !isRedisConfigured()) return UNKNOWN;
   const room = dataKey(store);
   if (!room) return UNKNOWN;
   try {
     const replies: unknown = await redisPipeline([[
-      "EVAL", RECEIPT_NUMBER, 3, room, receiptNumbersKey(store.sid), receiptCounterKey(store.sid),
-      contentRoomFor(store, now / 1000), monthOf(now), reference, dataBytes([reference, LONGEST_NUMBER], 1), RECEIPT_KEYS_BYTES,
+      "EVAL", RECEIPT_NUMBER, 5, room, receiptNumbersKey(store.sid), receiptCounterKey(store.sid), storeIdCommand(store.sid)[1], ERASING_KEY,
+      contentRoomFor(store, now / 1000), monthOf(now), reference, dataBytes([reference, LONGEST_NUMBER], 1), RECEIPT_KEYS_BYTES, await erasingField(storeRef(store)),
     ]]);
     if (!Array.isArray(replies) || replies.length !== 1) return UNKNOWN;
     return receiptNumberFrom(store, replies[0], now / 1000);

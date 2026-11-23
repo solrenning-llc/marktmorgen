@@ -144,6 +144,13 @@ end
 return {gone, links, redis.call("HLEN", KEYS[1])}`;
 
 /**
+ * What each person kept adds to a Disconnect (forgetServer), in billed commands: the calls FORGET_PEOPLE makes for them
+ * inside its script (GET and DEL of their address link, HGET and HDEL of their row, ZREM of their due entry). Measured
+ * through the whole route by tests/discord-disconnect-route-envelope.test.ts; priced in NOT_A_COST (tests/plan-cost-registry.ts).
+ */
+export const DISCONNECT_COMMANDS_PER_PERSON = 5;
+
+/**
  * The server, its products' roles and its people's list, deleted in one step only while nobody is on the list (Board
  * #5285, row #3017: the LOW Claude 4 disclosed on #3017 at 5b7a26d4). Before, the people left were counted in one
  * command (FORGET_PEOPLE's HLEN, or a plain HLEN) and the three keys deleted in another: a join already under way
@@ -151,13 +158,6 @@ return {gone, links, redis.call("HLEN", KEYS[1])}`;
  * address link with nobody to forget it. KEYS[1] the server, KEYS[2] the products' roles, KEYS[3] the people. Answers -1,
  * deleting nothing, when anybody is on the list; otherwise the keys deleted. lib/redis-memory.ts runs it the same way.
  */
-/**
- * What each person kept adds to a Disconnect (forgetServer), in billed commands: the calls FORGET_PEOPLE makes for them
- * inside its script (GET and DEL of their address link, HGET and HDEL of their row, ZREM of their due entry). Measured
- * through the whole route by tests/discord-disconnect-route-envelope.test.ts; priced in NOT_A_COST (tests/plan-cost-registry.ts).
- */
-export const DISCONNECT_COMMANDS_PER_PERSON = 5;
-
 export const DROP_SERVER_IF_EMPTY = `-- marktmorgen:discord-drop-server-if-empty:v1
 if redis.call("HLEN", KEYS[3]) ~= 0 then return -1 end
 return redis.call("DEL", KEYS[1], KEYS[2], KEYS[3])`;

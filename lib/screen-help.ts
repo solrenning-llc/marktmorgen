@@ -66,6 +66,7 @@ export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   invite: ["Are creator invitations available?"],
   invoices: ["What will it cost?", "Can I switch between monthly and yearly, or between the plans?", "What about refunds on the Marktmorgen subscription itself?"],
   labels: ["Can I keep my own details about people, and track deals?"],
+  "learning-paths": ["Can I sell a course?"],
   meetings: ["Can I sell paid calls?", "Can I run a community or a webinar?"],
   memberships: ["Can I sell a membership?"],
   notifications: ["How do I choose which alert emails I get?"],

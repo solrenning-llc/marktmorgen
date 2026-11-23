@@ -26,7 +26,8 @@ is("the card shows once the store has a call product, for the owner and Admins",
 is("no account and no password, only busy times kept, as the card says", card.includes("No account to connect and no password: the address gives us a read-only copy, and only the busy times are kept, never a title or a guest."), true);
 is("a full card says to remove one to add another", card.includes("Remove one to add another."), true);
 is("team hosts read their own calendar, under Your calendar", flat(read("app/studio/page.tsx")).includes('title: "Your calendar", text: "Your own busy times, kept out of the team calls you host."'), true);
-is("the server reads with the same limits, again every few minutes, and the last good reading stands while a calendar stops answering", [read("lib/calendar-sync.ts").includes('import { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS } from "@/lib/calendar-limits";'), /"EX", CACHE_SECONDS/.test(read("lib/calendar-sync.ts")), /STALE_SECONDS/.test(read("lib/calendar-sync.ts").replace(/^.*export \{.*$/m, ""))], [true, true, true]);
+// Since #4983 the readings are written by scripts that take CACHE_SECONDS (and STALE_SECONDS) as their expiries.
+is("the server reads with the same limits, again every few minutes, and the last good reading stands while a calendar stops answering", [read("lib/calendar-sync.ts").includes('import { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS } from "@/lib/calendar-limits";'), /"EX", CACHE_SECONDS|, CACHE_SECONDS, STALE_SECONDS\]/.test(read("lib/calendar-sync.ts")), /STALE_SECONDS/.test(read("lib/calendar-sync.ts").replace(/^.*export \{.*$/m, ""))], [true, true, true]);
 
 part("The answers");
 const now = calendarBeginnerQuestions(false);

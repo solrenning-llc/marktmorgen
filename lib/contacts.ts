@@ -39,6 +39,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, leadsKey, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
+import { NO_COMPANY_MARK, companyGoneKey } from "@/lib/crm-companies";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, countData, dataKey, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, fieldReleaseBytes, orderWriteIfSame, releaseOrderData } from "@/lib/order-data";
@@ -431,7 +432,9 @@ export async function upsertContact(
     // Where its room is counted, set once when it is first written (Contact.r, #2576).
     const placedNext = placed(next, before, Boolean(room && isOrderRoom(room)));
     await needContacts(room, [{ before, next: placedNext }]);
-    const counts = { agreed: agreed && !before?.agreed, left: resubscribe ? -1 : 0 } as const;
+    // The count of those who left holds only people who had agreed (unsubscribe, stopWriting, imports): a contact
+    // brought in already unsubscribed was never in it, so their yes takes nothing from it.
+    const counts = { agreed: agreed && !before?.agreed, left: resubscribe && before?.agreed ? -1 : 0 } as const;
     const joined = input.sid ? joinedCommands(input.sid, email) : [];
     // An order's write to a row counted in the contacts' slot is not charged to the order (writeContactIf, inContacts):
     // the slot is counted at what it changed once written.
@@ -455,11 +458,11 @@ const CONTACT_WRITE_TRIES = 3;
 
 /**
  * The most redis.call one run of CONTACT_WRITE_IF makes: the row's read, the mark's read, the row, the lifted mark,
- * the agreed count, the left count (INCR or DECR, one of them) and the stores joined (SADD, EXPIREAT). Upstash bills
- * a script as one command plus every call inside it (lib/capped-count.ts), so a script is 1 + this. Held against
- * the script's text in tests/contacts-write-cost.test.ts.
+ * the companies' lifted mark (since #4026), the agreed count, the left count (INCR or DECR, one of them) and the
+ * stores joined (SADD, EXPIREAT). Upstash bills a script as one command plus every call inside it
+ * (lib/capped-count.ts), so a script is 1 + this. Held against the script's text in tests/contacts-write-cost.test.ts.
  */
-export const CONTACT_WRITE_CALLS = 8;
+export const CONTACT_WRITE_CALLS = 9;
 
 /**
  * The most redis.call one run of CONTACT_FENCED_WRITE_IF makes: CONTACT_WRITE_CALLS, and the fence's PTTL and, to
@@ -498,8 +501,12 @@ export const CONTACT_COMMANDS_MOST = {
   noteProduct: CONTACT_WRITE_TRIES * (1 + 1 + 2) + 1,
   takeBackRound: 1 + 1 + 2,
   takeBack: CONTACT_WRITE_TRIES * (1 + 1 + 2) + 1,
-  /** tokensFor for `n` addresses: both reads, and for each a token's record, its checked write (1 + 2 calls) and, lost, the record taken back. */
-  tokens: (n: number): number => CONTACT_WRITE_TRIES * (2 + n * (1 + 3 + 1)),
+  /**
+   * tokensFor for `n` addresses: both reads, and one script (TOKEN_CAS_HSET) whose calls for each are its row, its
+   * print, the record and the row written (Codex V on #3925); nothing is taken back, since a record is made only with
+   * its row. No more than before for any n: 3 + 4n against 2 + 5n.
+   */
+  tokens: (n: number): number => CONTACT_WRITE_TRIES * (2 + 1 + n * 4),
 } as const;
 
 /**
@@ -518,16 +525,19 @@ function afterDeletion(mark: string | null, at: string | undefined): boolean {
 /**
  * A contact's row written only while it and the address's deleted mark hold what was read, with the counts that go
  * with it, in one step: KEYS[1] the list, KEYS[2] the store's deleted marks (lib/suppression.ts), KEYS[3] the
- * list's count of those who agreed, KEYS[4] of those who left; ARGV[1] the address, ARGV[2] the SHA-1 of its row as
- * read ("" for none), ARGV[3] the row to write, ARGV[4] the address's mark ("" when the mark is not looked at),
- * ARGV[5] the SHA-1 of the mark's value as read ("" for none), ARGV[6] "1" to lift it with the write (their own
- * yes, given after the deletion), ARGV[7] "1" to count one more who agreed, ARGV[8] "1" or "-1" for one more or
- * one fewer who left; with KEYS[5] (the person's set of stores joined, lib/joined-stores.ts) ARGV[9] the store's id
- * to add to it and ARGV[10] the day it ends. Answers 1 written, 0 changed (nothing written).
+ * list's count of those who agreed, KEYS[4] of those who left, KEYS[5] the address's companies' deletion mark
+ * (lib/crm-companies.ts companyGoneKey; NO_COMPANY_MARK when there is none to lift); ARGV[1] the address, ARGV[2]
+ * the SHA-1 of its row as read ("" for none), ARGV[3] the row to write, ARGV[4] the address's mark ("" when the mark
+ * is not looked at), ARGV[5] the SHA-1 of the mark's value as read ("" for none), ARGV[6] "1" to lift it with the
+ * write (their own yes, given after the deletion), and the companies' mark with it, in the same step (#4026: a lift
+ * sent in a write of its own could be lost, and the next yes no longer finds them deleted), ARGV[7] "1" to count one
+ * more who agreed, ARGV[8] "1" or "-1" for one more or one fewer who left; with KEYS[6] (the person's set of stores
+ * joined, lib/joined-stores.ts) ARGV[9] the store's id to add to it and ARGV[10] the day it ends. Answers 1
+ * written, 0 changed (nothing written).
  */
 export const CONTACT_WRITE_IF = [
   // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
-  "-- marktmorgen:contact-write-if:v1",
+  "-- marktmorgen:contact-write-if:v2",
   'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
   'local seen = ""',
   "if cur then seen = redis.sha1hex(cur) end",
@@ -539,13 +549,16 @@ export const CONTACT_WRITE_IF = [
   "  if markSeen ~= ARGV[5] then return 0 end",
   "end",
   'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
-  'if ARGV[6] == "1" and ARGV[4] ~= "" then redis.call("HDEL", KEYS[2], ARGV[4]) end',
+  'if ARGV[6] == "1" and ARGV[4] ~= "" then',
+  '  redis.call("HDEL", KEYS[2], ARGV[4])',
+  '  redis.call("DEL", KEYS[5])',
+  "end",
   'if ARGV[7] == "1" then redis.call("INCR", KEYS[3]) end',
   'if ARGV[8] == "1" then redis.call("INCR", KEYS[4]) elseif ARGV[8] == "-1" then redis.call("DECR", KEYS[4]) end',
   // The stores the address joined, with the row and only after the checks held: a deletion that won leaves no index.
   "if #ARGV >= 10 then",
-  '  redis.call("SADD", KEYS[5], ARGV[9])',
-  '  redis.call("EXPIREAT", KEYS[5], ARGV[10])',
+  '  redis.call("SADD", KEYS[6], ARGV[9])',
+  '  redis.call("EXPIREAT", KEYS[6], ARGV[10])',
   "end",
   "return 1",
 ].join("\n");
@@ -554,7 +567,8 @@ export const CONTACT_WRITE_IF = [
  * CONTACT_WRITE_IF fenced by a link that the person's erasure deletes (#4268: a waitlist confirmation read before an
  * erasure that completed meanwhile put the address back and lifted the print), all in one step. KEYS[1]..KEYS[4] and
  * ARGV[1]..ARGV[8] as CONTACT_WRITE_IF; KEYS[5] the fence, ARGV[9] its whole lifetime in ms (it was set with that EX);
- * with KEYS[6] (the person's set of stores joined) ARGV[10] the store's id and ARGV[11] the day it ends. Answers:
+ * KEYS[6] the address's companies' deletion mark, deleted with the lifted print (CONTACT_WRITE_IF's KEYS[5], #4026);
+ * with KEYS[7] (the person's set of stores joined) ARGV[10] the store's id and ARGV[11] the day it ends. Answers:
  *   - 2 refused by the fence, nothing written, never to be retried: the fence is gone (an erasure that finished
  *     deleted it), or a mark to lift was written in or after the second the fence was issued (PTTL against its
  *     lifetime, on Redis's clock, as the mark's second is: lib/suppression.ts ERASED_PRINT); a fence with no expiry,
@@ -565,7 +579,7 @@ export const CONTACT_WRITE_IF = [
  * Billed as one EVAL and its calls, at most CONTACT_FENCED_WRITE_CALLS; lib/redis-memory.ts runs the same steps.
  */
 export const CONTACT_FENCED_WRITE_IF = [
-  "-- marktmorgen:contact-fenced-write-if:v3",
+  "-- marktmorgen:contact-fenced-write-if:v4",
   'local left = redis.call("PTTL", KEYS[5])',
   "if left == -2 then return 2 end",
   'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
@@ -588,12 +602,15 @@ export const CONTACT_FENCED_WRITE_IF = [
   "  if (at + 1) * 1000 > issued then return 2 end",
   "end",
   'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
-  'if lift then redis.call("HDEL", KEYS[2], ARGV[4]) end',
+  "if lift then",
+  '  redis.call("HDEL", KEYS[2], ARGV[4])',
+  '  redis.call("DEL", KEYS[6])',
+  "end",
   'if ARGV[7] == "1" then redis.call("INCR", KEYS[3]) end',
   'if ARGV[8] == "1" then redis.call("INCR", KEYS[4]) elseif ARGV[8] == "-1" then redis.call("DECR", KEYS[4]) end',
   "if #ARGV >= 11 then",
-  '  redis.call("SADD", KEYS[6], ARGV[10])',
-  '  redis.call("EXPIREAT", KEYS[6], ARGV[11])',
+  '  redis.call("SADD", KEYS[7], ARGV[10])',
+  '  redis.call("EXPIREAT", KEYS[7], ARGV[11])',
   "end",
   "return 1",
 ].join("\n");
@@ -632,18 +649,24 @@ async function writeContactIf(
   const value = JSON.stringify(next);
   const was = typeof raw === "string" ? sha1(raw) : "";
   const markWas = mark === null ? "" : sha1(mark);
+  // Their own yes also lifts the companies' mark of the deletion (lib/crm-companies.ts), in the same step as the
+  // suppression and the row: a company never takes them while the store still holds them as deleted, and the two never
+  // part (#4026; a lift sent in a write of its own could be lost, and the next yes no longer finds them deleted).
+  const statsId = room && isOrderRoom(room) ? room.order.statsId : room?.statsId;
+  const company = lift && statsId ? companyGoneKey(statsId, email) : null;
   if (room && isOrderRoom(room) && dataKey(room.order) && !inContacts) {
     const commands: (string | number)[][] = [
       ...joined,
       ["HSET", key, email, value],
       ...(lift ? [liftCommand(listId, email)] : []),
+      ...(company ? [["DEL", company]] : []),
       ...(counts.agreed ? [["INCR", agreedKey(listId)]] : []),
       ...(counts.left === 1 ? [["INCR", unsubKey(listId)]] : counts.left === -1 ? [["DECR", unsubKey(listId)]] : []),
     ];
     return (await orderWriteIfSame(room.order, [{ key, field: email, sha1: was }, { key: marks, field: print, sha1: markWas }], commands)) !== null;
   }
   // A room that is an order's but has no key of its own (dataKey) gets them here as well, in the same script.
-  return writeRowIf(listId, email, was, value, { print, markWas, mark, lift }, counts, false, joined, fence);
+  return writeRowIf(listId, email, was, value, { print, markWas, mark, lift }, counts, false, joined, company, fence);
 }
 
 /**
@@ -661,6 +684,8 @@ async function writeRowIf(
   strict = false,
   /** joinedCommands: the person's set of stores joined, added to in the script after its checks. */
   joined: (string | number)[][] = [],
+  /** The companies' deletion mark lifted with the suppression (companyGoneKey), or null for none. */
+  company: string | null = null,
   /** A fence (upsertContact's): CONTACT_FENCED_WRITE_IF in place of CONTACT_WRITE_IF, its 2 answered as "gone". */
   fence?: { key: string; seconds: number },
 ): Promise<boolean | "gone"> {
@@ -671,9 +696,11 @@ async function writeRowIf(
   const [add, expire] = joined;
   const index = add?.[0] === "SADD" && expire?.[0] === "EXPIREAT" && joined.length === 2 && add[1] === expire[1];
   const keys = [key, marks, agreedKey(listId), unsubKey(listId)];
+  // The companies' deletion mark, lifted in the same step as the suppression by either script (#4026).
+  const companyMark = company ?? NO_COMPANY_MARK;
   const command: (string | number)[] = fence
-    ? ["EVAL", CONTACT_FENCED_WRITE_IF, index ? 6 : 5, ...keys, fence.key, ...(index ? [String(add[1])] : []), ...args, fence.seconds * 1000, ...(index ? [String(add[2]), String(expire[2])] : [])]
-    : ["EVAL", CONTACT_WRITE_IF, index ? 5 : 4, ...keys, ...(index ? [String(add[1])] : []), ...args, ...(index ? [String(add[2]), String(expire[2])] : [])];
+    ? ["EVAL", CONTACT_FENCED_WRITE_IF, index ? 7 : 6, ...keys, fence.key, companyMark, ...(index ? [String(add[1])] : []), ...args, fence.seconds * 1000, ...(index ? [String(add[2]), String(expire[2])] : [])]
+    : ["EVAL", CONTACT_WRITE_IF, index ? 6 : 5, ...keys, companyMark, ...(index ? [String(add[1])] : []), ...args, ...(index ? [String(add[2]), String(expire[2])] : [])];
   let result: unknown;
   try {
     result = repliesFor(await redisPipeline([command]), 1)?.[0];
@@ -1220,6 +1247,66 @@ async function casWrite(key: string, writes: { email: string; value: string; was
   }
 }
 
+/**
+ * For each address of tokensFor, in one step: when its erasure print is not in the store's prints (KEYS[2],
+ * lib/suppression.ts) and its contact still holds what was read (by its SHA-1, as CAS_HSET), the unsubscribe link's
+ * record (KEYS[2 + n]) and then the contact with its token; otherwise nothing, for that address. ARGV, five an address:
+ * the address, its print, the SHA-1 read, the contact to write and the record's text. Answers 1 (written) or 0 each.
+ */
+const TOKEN_CAS_HSET = [
+  // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
+  "-- marktmorgen:contact-token-cas-hset:v1",
+  "local out = {}",
+  "for i = 1, #ARGV, 5 do",
+  "  local n = (i - 1) / 5 + 3",
+  '  local cur = redis.call("HGET", KEYS[1], ARGV[i])',
+  '  local seen = ""',
+  "  if cur then seen = redis.sha1hex(cur) end",
+  '  if redis.call("HEXISTS", KEYS[2], ARGV[i + 1]) == 0 and seen == ARGV[i + 2] then',
+  '    redis.call("SET", KEYS[n], ARGV[i + 4])',
+  '    redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 3])',
+  "    out[#out + 1] = 1",
+  "  else",
+  "    out[#out + 1] = 0",
+  "  end",
+  "end",
+  "return out",
+].join("\n");
+
+/**
+ * Writes each link that its address may still have (TOKEN_CAS_HSET); says which were written. Each answer exactly 1 or
+ * 0; anything else, a failed call included, is read back once, as casWrite does: when every contact holds exactly the
+ * row that was to be written (its new token is random, so only this step can have put it there, and the step writes
+ * the record before the row), the step ran and only its answer was lost: written. Any other read-back is unknown and
+ * throws UnknownReplyError, never "written" and never "not written" (rule 24): the send stops for a retry, which reads
+ * again and finds any record and token that landed on a row nobody deleted.
+ */
+async function tokenCasWrite(listId: string, key: string, handle: string, writes: { email: string; value: string; was: string; token: string }[]): Promise<boolean[]> {
+  let sent: unknown;
+  try {
+    sent = await redisPipeline([
+      [
+        "EVAL",
+        TOKEN_CAS_HSET,
+        2 + writes.length,
+        key,
+        suppressedKey(listId),
+        ...writes.map((w) => tokenKey(w.token)),
+        ...writes.flatMap((w) => [w.email, suppressionPrint(listId, w.email), w.was, w.value, `${listId}|${w.email}|${handle}`]),
+      ],
+    ]);
+  } catch {
+    // Whether the step ran is not known: read back below, never "not written".
+    sent = undefined;
+  }
+  const each = repliesFor(repliesFor(sent, 1)?.[0], writes.length);
+  if (each && each.every((v) => v === 0 || v === 1)) return each.map((v) => v === 1);
+  // Read back only in its exact shape (CX-123 rule 24): one text or nothing for each; any other shape throws.
+  const read = fieldsOf((await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]))[0], writes.length, "an unsubscribe link's read-back");
+  if (writes.every((w, i) => read[i] === w.value)) return writes.map(() => true);
+  throw new UnknownReplyError("an unsubscribe link's write");
+}
+
 /** An HMGET's answer for `count` fields, each its text or nothing; any other shape throws UnknownReplyError. */
 function fieldsOf(reply: unknown, count: number, what: string): (string | null)[] {
   const each = repliesFor(reply, count);
@@ -1369,25 +1456,15 @@ export async function tokensFor(
       writes.push({ email, value: JSON.stringify({ ...contact, t: token }), was: sha1(raw), token });
     });
     if (!writes.length) break;
-    // The token's own record first, so a link is never sent that leads
-    // nowhere; then each contact only if it is still as it was read, so an
-    // unsubscribe made meanwhile is never written over, and two sends at
-    // once keep one token between them.
-    // Each record answered exactly "OK", or no token is handed out nor kept on a contact: a token whose record may not
-    // exist would put a link and a one-click header leading nowhere into this email and every later one (rule 24).
-    const records = await redisPipeline(writes.map((w) => ["SET", tokenKey(w.token), `${listId}|${w.email}|${handle}`]));
-    const set = repliesFor(records, writes.length);
-    if (!set || set.some((reply) => reply !== "OK")) {
-      await redisPipeline(writes.map((w) => ["DEL", tokenKey(w.token)])).catch(() => null);
-      throw new UnknownReplyError("an unsubscribe link's record");
-    }
-    const done = await casWrite(key, writes);
+    // The token's record and the token on the contact are written in one step (TOKEN_CAS_HSET), and only where the
+    // address's erasure print is still not there and the contact still holds what was read: an erasure that wrote its
+    // print since the read above gets no link, no token on its row and no record naming it, and an unsubscribe made
+    // meanwhile is never written over; two sends at once keep one token between them (Codex V on #3925, MÉDIO 1).
+    const done = await tokenCasWrite(listId, key, handle, writes);
     writes.forEach((w, i) => {
       if (done[i]) out.set(w.email, w.token);
     });
-    const lost = writes.filter((_, i) => !done[i]);
-    if (lost.length) await redisPipeline(lost.map((w) => ["DEL", tokenKey(w.token)]));
-    pending = lost.map((w) => w.email);
+    pending = writes.filter((_, i) => !done[i]).map((w) => w.email);
   }
   return out;
 }
@@ -1565,6 +1642,9 @@ export async function forEachContact(
 ): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = leadsKey(listId);
+  // HSCAN may answer one field more than once while it walks (redis.io, SCAN guarantees): each address is passed on
+  // once, so an email's audience never holds anybody twice (counted twice, a batch refused for good, or sent twice).
+  const seen = new Set<string>();
   let cursor = "0";
   for (let page = 0; page < MAX_LEADS / 500 + 10; page += 1) {
     // HSCAN answers [cursor, [field, value, ...]]: any other shape is unknown (CX-123 rule 24), never the end of the
@@ -1576,6 +1656,8 @@ export async function forEachContact(
     if (!reply || nextCursor === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a store's list");
     cursor = nextCursor;
     for (let i = 0; i + 1 < flat.length; i += 2) {
+      if (seen.has(flat[i])) continue;
+      seen.add(flat[i]);
       const contact = parseContact(flat[i + 1]);
       if (contact) each(flat[i], contact);
     }

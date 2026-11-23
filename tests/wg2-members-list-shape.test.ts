@@ -5,6 +5,7 @@
  * never shows 0 members and a recurring revenue of 0 for minutes afterwards.
  */
 import { membershipCacheKey, membershipNumbers } from "@/lib/membership-numbers";
+import { ownerKey } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -16,10 +17,13 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   return new Response(JSON.stringify(body), { status: 200 });
 }) as typeof fetch;
 
-const store = { handle: "club", statsId: "st_club000001", sid: "sid_club0001", stripeAccountId: "acct_1TestClub0001", currency: "usd", listId: "", products: [], previousHandles: [] } as never;
+// A live store, as a real one always is: its owner's email and record, so the copy kept behind the store-live fence
+// (lib/store-live-copy.ts, #4942) is written for the control below and never for a page that does not read.
+const store = { handle: "club", email: "club@example.com", extra: false, statsId: "st_club000001", sid: "sid_club0001", stripeAccountId: "acct_1TestClub0001", currency: "usd", listId: "", products: [], previousHandles: [] } as never;
 
 async function attempt(answer: unknown): Promise<{ result: string; cached: boolean }> {
   redis.clear();
+  await redis.pipeline([["SET", await ownerKey("club@example.com"), JSON.stringify({ handle: "club", statsId: "st_club000001" })]]);
   page = answer;
   let result: string;
   try {

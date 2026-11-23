@@ -47,6 +47,8 @@ async function main(): Promise<void> {
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
   sessions.push({ id: SESSION, status: "complete", payment_status: "paid", payment_intent: "pi_1", metadata: { store: store.handle, product: "prod000001", gift: GIFT_BOUGHT, group: GROUP } });
+  // Their call package is found through its own checkout (#5125 (1)), never through the store's set of packages.
+  sessions.push({ id: "cs_test_" + "p".repeat(24), status: "complete", payment_status: "paid", payment_intent: "pi_2", metadata: { store: store.handle, product: "call000001", kind: "package" } });
   sessions.push({ id: "cs_test_" + "o".repeat(24), status: "complete", payment_status: "paid", metadata: { store: "another-store", gift: "gft_" + "f".repeat(24) } });
   redis.run(["SET", `nl:gift:${GIFT_BOUGHT}`, JSON.stringify({ id: GIFT_BOUGHT, s: statsId, p: "prod000001", to: "friend@example.com", from: "Mia", message: "Enjoy", at: 1_790_000_000 })]);
   redis.run(["SET", `nl:gift:${GIFT_GOT}`, JSON.stringify({ id: GIFT_GOT, s: statsId, p: "prod000002", to: PERSON, from: "Sam", message: "For you", at: 1_790_000_000 })]);

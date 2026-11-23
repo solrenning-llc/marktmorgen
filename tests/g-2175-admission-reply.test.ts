@@ -5,7 +5,9 @@ import {runBackup,type BackupCostReview} from "@/lib/backup-run";
 import type {BackupBucket} from "@/lib/backup-roundtrip";
 import {store as redis} from "./redis-stub";
 const now=Date.parse("2026-11-02T03:00:00Z");
-const review:BackupCostReview={maxRows:1000,maxCommands:10000,maxBytes:1000000,retentionDays:9,maxStoredBytes:11*1131232,reviewedAt:"2026-10-31",source:"G synthetic admission only"};
+// The ceiling: the 9-day retention (the shortest since 9 November 2026), two more sets and the 3 months' copies
+// (inbox C1-20261108-2021-C4-37): 14 set bounds.
+const review:BackupCostReview={maxRows:1000,maxCommands:10000,maxBytes:1000000,retentionDays:9,maxStoredBytes:14*1131232,reviewedAt:"2026-10-31",source:"G synthetic admission only"};
 function fixture(){
  redis.clear();redis.now=()=>now;redis.run(["SET","nl:store:one","one"]);
  const objects=new Map<string,Uint8Array>();let writes=0,lists=0;

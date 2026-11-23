@@ -48,7 +48,9 @@
  *                                       store they host on uses the one connection,
  *                                       whatever `statsId` the caller passes.
  *   nl:meet:state:<hash>                one consent in progress, ten minutes
- *   nl:meet:user:<provider>:<hash>      the stores a Zoom user connected, for Zoom's uninstall notice
+ *   nl:meet:user:<provider>:<hash>      the stores (statsId) and team hosts (h:<host>) connected with one provider
+ *                                       account: whether a disconnect may give the grant back (#4011), and the
+ *                                       stores the provider's removal notice forgets (forgetUser)
  *   nl:meet:gone:<provider>:<hash>      when Zoom last told us a user removed the app, a day: a consent
  *                                       flow begun before it keeps nothing (KEEP_UNLESS_GONE)
  *   nl:meet:log:<statsId>               the store's last problems, newest first
@@ -748,8 +750,12 @@ export async function forgetUser(
     2,
   );
   if (!read || read[0] !== "OK") throw new UnknownReplyError("the mark of a meeting account's deletion");
-  const stores = stringList(read[1]);
-  if (!stores) throw new UnknownReplyError("the stores a meeting account connected");
+  const members = stringList(read[1]);
+  if (!members) throw new UnknownReplyError("the stores a meeting account connected");
+  // A team host's own calendar is listed as h:<host> (memberOf, #4011), which is no store's id: left alone here, never
+  // dropped as a store with no connection, so a store's later disconnect still sees the grant the host uses (Claude 5
+  // iYwjc's MEDIUM on #5476). The host's calendar is the person's own, ended by its own disconnect.
+  const stores = members.filter((m) => !m.startsWith("h:"));
   const forgot: { statsId: string; owner: { email: string; handle: string }; account: string }[] = [];
   const pass = stores.slice(0, FORGET_PASS);
   // Stores connected again after the removal (a notice sent again by the provider after a first try failed, while

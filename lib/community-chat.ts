@@ -388,12 +388,18 @@ export async function forgetChatPerson(id: string, who: string): Promise<number>
   const what = "a member's room messages forgotten";
   const rows = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", roomKey(id), "-inf", "+inf"]]), 1)?.[0]);
   if (!rows) throw new UnknownReplyError(what);
+  // A kept row that does not read as an object with a text author is never taken for another person's (#5010 row
+  // 107, Codex L-20261119-1042): a truncated row can still hold this member's id and private text. The scope is then
+  // unknown: nothing is deleted, the cooldown included, and the erasure stays pending to be retried.
   const theirs = rows.filter((row) => {
+    let kept: unknown;
     try {
-      return (JSON.parse(row) as Partial<ChatMessage>).a === who;
+      kept = JSON.parse(row);
     } catch {
-      return false;
+      throw new UnknownReplyError(what);
     }
+    if (!kept || typeof kept !== "object" || Array.isArray(kept) || typeof (kept as Partial<ChatMessage>).a !== "string") throw new UnknownReplyError(what);
+    return (kept as Partial<ChatMessage>).a === who;
   });
   const commands: (string | number)[][] = [["DEL", spokeKey(id, who)], ...(theirs.length ? [["ZREM", roomKey(id), ...theirs]] : [])];
   // Each deletion answered with its count, or the erasure is not said done.

@@ -47,7 +47,8 @@ import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { storeForId } from "@/lib/store";
+import { type Store, storeForId, storeForIdExact } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { costsPaused } from "@/lib/plan-standing";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
@@ -337,9 +338,26 @@ return 1`;
  * Redis does not undo a script that stops half-way, so a SADD failing on a key of another kind after the SET would
  * keep the connection, sealed token and all, outside the person's index (Claude 2 on #3322); such a key is Redis's
  * own WRONGTYPE error with nothing written. Mirrored for tests in lib/redis-memory.ts.
+ *
+ * Since v2 (#5010 row 117, Codex L-20261119-2124), the store's own fence first, as lib/live-fence.ts SET_IF_STORE_LIVE
+ * reads it: KEYS[6] the store's live key (its id key, or its record for a store from before ids), KEYS[7] the erasing
+ * hash; ARGV[4] the store's field in it, ARGV[5] the statsId its record must carry ("" for a store with an id, whose id
+ * key must hold ARGV[6], the store's ref). The OAuth answer can come back after the store's erasure began or ended;
+ * a store erasing, gone or moved is 2, and nothing is written: the erased store's sealed token, its Meta user and its
+ * owner's addresses never come back. -2 when the record of a store from before ids does not read.
  */
-const FINISH_UNLESS_GONE = `-- marktmorgen:meta-finish:v1
-if #KEYS ~= 5 or #ARGV ~= 3 or #ARGV[2] > 16 or not string.match(ARGV[2], "^[1-9]%d*$") or ARGV[3] == "" then return -1 end
+const FINISH_UNLESS_GONE = `-- marktmorgen:meta-finish:v2
+if #KEYS ~= 7 or #ARGV ~= 6 or #ARGV[2] > 16 or not string.match(ARGV[2], "^[1-9]%d*$") or ARGV[3] == "" or ARGV[4] == "" or ARGV[6] == "" then return -1 end
+if redis.call("HGET", KEYS[7], ARGV[4]) then return 2 end
+if ARGV[5] == "" then
+  if redis.call("GET", KEYS[6]) ~= ARGV[6] then return 2 end
+else
+  local raw = redis.call("GET", KEYS[6])
+  if not raw then return 2 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -2 end
+  if record["statsId"] ~= ARGV[5] then return 2 end
+end
 local gone = redis.call("GET", KEYS[5])
 if gone and (#gone > 16 or not string.match(gone, "^%d+$") or tonumber(gone) >= tonumber(ARGV[2])) then return 0 end
 for i = 3, 4 do
@@ -466,7 +484,7 @@ export function accountToUse(accounts: (MetaAccount & { active?: boolean })[], c
 
 export type MetaConnectResult =
   | { ok: true; view: MetaAdsView; account: MetaAccount | null }
-  | { ok: false; error: "seal" | "refused" | "permission" | "accounts" | "expired" | "removed" };
+  | { ok: false; error: "seal" | "refused" | "permission" | "accounts" | "expired" | "removed" | "closed" };
 
 /** Whether a flow begun at `startedAt` (milliseconds) is still young enough to keep its connection (FLOW_MS). */
 const flowFresh = (startedAt: number): boolean => {
@@ -496,6 +514,11 @@ export async function finishMeta(input: {
   currency: string;
   /** When the consent flow began (beginMeta), in milliseconds. */
   startedAt: number;
+  /**
+   * The store as the callback just read it, whose fence (lib/store-live-cache.ts storeLiveFence) is checked in the same
+   * step as the connection is kept; without it, the store is read by its id now (gone: nothing kept).
+   */
+  store?: Pick<Store, "email" | "sid" | "extra" | "statsId">;
 }): Promise<MetaConnectResult> {
   if (!canSeal()) return { ok: false, error: "seal" };
   if (!flowFresh(input.startedAt)) return { ok: false, error: "expired" };
@@ -549,10 +572,18 @@ export async function finishMeta(input: {
     await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
     return { ok: false, error: "expired" };
   }
-  const keys = [connKey(input.statsId), readKey(input.statsId), STORES_KEY, userKey(user), goneKey(user)];
-  const replies = repliesFor(await redisPipeline([["EVAL", FINISH_UNLESS_GONE, keys.length, ...keys, JSON.stringify(connection), input.startedAt - GONE_MARGIN_MS, input.statsId]]), 1);
+  // A store from before ids with no statsId cannot be told from its owner's next store: nothing is kept (unknown).
+  const owner = input.store ?? (await storeForIdExact(input.sid));
+  if (!owner) return { ok: false, error: "closed" };
+  const fence = await storeLiveFence(owner);
+  if (fence.statsId === null) throw new UnknownReplyError("keeping a Meta connection only while its store is live");
+  const keys = [connKey(input.statsId), readKey(input.statsId), STORES_KEY, userKey(user), goneKey(user), fence.live, fence.erasing];
+  const replies = repliesFor(await redisPipeline([["EVAL", FINISH_UNLESS_GONE, keys.length, ...keys, JSON.stringify(connection), input.startedAt - GONE_MARGIN_MS, input.statsId, fence.field, fence.statsId, fence.ref]]), 1);
   const kept = replies ? countOf(replies[0]) : null;
-  if (kept !== 0 && kept !== 1) throw new UnknownReplyError("keeping a Meta connection only while its user was not deleted since");
+  // The store's erasure began, or it is gone or moved, while Meta answered: nothing is kept. Its Meta permission is not
+  // given back here: the same login may still serve another store (#4159 owns that), and nothing of it was kept.
+  if (kept === 2) return { ok: false, error: "closed" };
+  if (kept !== 0 && kept !== 1) throw new UnknownReplyError("keeping a Meta connection only while its store is live and its user was not deleted since");
   if (kept === 0) {
     // Deleted since the flow began: nothing is kept, and the permission this flow was holding goes back to Meta.
     await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));

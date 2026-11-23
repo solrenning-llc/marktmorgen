@@ -4089,25 +4089,46 @@ export class MemoryRedis {
           for (const drop of keys.slice(2)) this.run(["DEL", drop]);
           return 1;
         }
-        // lib/meta-ads.ts FINISH_UNLESS_GONE: a new connection kept only while no deletion of its Meta user is at or
-        // after the cutoff; -1 for a call of any other shape, as the script answers.
-        if (key.startsWith("-- marktmorgen:meta-finish:v1\n")) {
+        // lib/meta-ads.ts FINISH_UNLESS_GONE: a new connection kept only while its store is live and not erasing (2
+        // otherwise, -2 for a record from before ids that does not read, as SET_IF_STORE_LIVE reads them) and no deletion
+        // of its Meta user is at or after the cutoff; -1 for a call of any other shape, as the script answers. Every call
+        // inside it is counted as Upstash bills a script (scriptCalls).
+        if (key.startsWith("-- marktmorgen:meta-finish:v2\n")) {
           const { keys, argv } = evalShape(args);
-          if (keys.length !== 5 || argv.length !== 3 || !/^[1-9][0-9]{0,15}$/.test(argv[1]) || argv[2] === "") return -1;
-          const [conn, read, stores, user, goneMark] = keys;
-          const [connection, cutoff, statsId] = argv;
-          const gone = this.run(["GET", goneMark]);
+          if (keys.length !== 7 || argv.length !== 6 || !/^[1-9][0-9]{0,15}$/.test(argv[1]) || argv[2] === "" || argv[3] === "" || argv[5] === "") return -1;
+          const [conn, read, stores, user, goneMark, live, erasing] = keys;
+          const [connection, cutoff, statsId, field, fenceStatsId, ref] = argv;
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["HGET", erasing, field]) !== null) return 2;
+          if (fenceStatsId === "") {
+            if (call(["GET", live]) !== ref) return 2;
+          } else {
+            const raw = call(["GET", live]);
+            if (raw === null) return 2;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -2;
+            }
+            if (!record || typeof record !== "object" || Array.isArray(record)) return -2;
+            if ((record as { statsId?: unknown }).statsId !== fenceStatsId) return 2;
+          }
+          const gone = call(["GET", goneMark]);
           if (typeof gone === "string" && (!/^[0-9]{1,16}$/.test(gone) || Number(gone) >= Number(cutoff))) return 0;
           // Both sets checked before anything is written, as the script does: this stand-in's SADD would replace a key
           // of another kind, where Redis refuses it.
           for (const set of [stores, user]) {
-            const kind = this.run(["TYPE", set]);
+            const kind = call(["TYPE", set]);
             if (kind !== "set" && kind !== "none") throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
           }
-          this.run(["SET", conn, connection]);
-          this.run(["DEL", read]);
-          this.run(["SADD", stores, statsId]);
-          this.run(["SADD", user, statsId]);
+          call(["SET", conn, connection]);
+          call(["DEL", read]);
+          call(["SADD", stores, statsId]);
+          call(["SADD", user, statsId]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:capped-count:v3\n")) return this.cappedCount(args);

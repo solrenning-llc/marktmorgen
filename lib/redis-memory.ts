@@ -1663,8 +1663,38 @@ export class MemoryRedis {
         // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
         if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, notes, token, json] = args;
+          // Every redis.call the script makes is an inner call Upstash bills (Claude 5 ibqho's note on #5112).
+          this.scriptCalls += 1;
           if (this.run(["GET", lock]) !== token) return 0;
+          this.scriptCalls += 1;
           this.run(json === "" ? ["DEL", notes] : ["SET", notes, json]);
+          return 1;
+        }
+        // lib/assistant-memory-store.ts MEMORY_WRITE_LIVE: MEMORY_WRITE, only while the notes' store is still live.
+        if (key.startsWith("-- marktmorgen:amem-write-live:v1\n") && args[0] === "4" && args.length === 10) {
+          const [, lock, notes, live, erasing, token, json, field, statsId, ref] = args;
+          // Every redis.call the script makes is an inner call Upstash bills.
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["GET", lock]) !== token) return 0;
+          if (call(["HGET", erasing, field]) !== null) return -4;
+          if (statsId === "") {
+            const held = call(["GET", live]);
+            if (held === null) return -4;
+            if (held !== ref) return -5;
+          } else {
+            const raw = call(["GET", live]);
+            if (raw === null) return -4;
+            if (typeof raw !== "string") throw new Error("WRONGTYPE amem-write-live: the store's record");
+            let record: unknown;
+            try { record = JSON.parse(raw); } catch { return -3; }
+            // cjson decodes a JSON array to a table too: only a value that is no table is unreadable (Claude 6 on #5112).
+            if (!record || typeof record !== "object") return -3;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return -4;
+          }
+          call(json === "" ? ["DEL", notes] : ["SET", notes, json]);
           return 1;
         }
         // lib/assistant-memory-store.ts MEMORY_FORGET: the lock made the forgetting's own and the notes deleted in one step.

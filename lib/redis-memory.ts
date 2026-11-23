@@ -2045,6 +2045,24 @@ export class MemoryRedis {
           for (const target of targets) this.run(["DEL", target]);
           return 1;
         }
+        // lib/paypal-sales.ts PAYPAL_WATCH_FIRST: a capture try counted and, only when admitted, the order's record renewed and the order put in pending, in one step.
+        if (key.startsWith("-- marktmorgen:paypal-watch-first:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, tries, pending, record, until, bound, score, order] = args;
+          const held = this.run(["GET", tries]);
+          if (held !== null && !/^-?[0-9]+$/.test(String(held))) throw new Error("ERR value is not an integer or out of range");
+          // Each redis.call the script runs is counted beside its EVAL, as Upstash bills it (scriptCalls).
+          const counted = Number(this.run(["INCR", tries]));
+          this.scriptCalls += 1;
+          if (counted === 1) {
+            this.run(["EXPIREAT", tries, until]);
+            this.scriptCalls += 1;
+          }
+          if (counted > Number(bound)) return ["spent", counted];
+          this.scriptCalls += 1;
+          if (this.run(["EXPIREAT", record, until]) === 0) return ["gone", counted];
+          this.scriptCalls += 1;
+          return [this.run(["ZADD", pending, score, order]) === 1 ? "added" : "there", counted];
+        }
         // lib/paypal-sales.ts PAYPAL_WATCH_IF_LIVE: an order put back on a store's refund watch only while the store is live.
         if (key.startsWith("-- marktmorgen:paypal-watch-if-live:v1\n") && args[0] === "3" && args.length === 7) {
           const [, storeId, erasing, watch, field, score, order] = args;

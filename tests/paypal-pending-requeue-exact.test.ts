@@ -82,7 +82,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 type Commands = (string | number)[][];
 const settleOf = (commands: Commands, order: string) =>
   commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:paypal-settle") && c.map(String).includes(order));
-const pendingWrite = (commands: Commands) => commands.some((c) => c[0] === "ZADD" && String(c[1]).startsWith("nl:ppsell:pending:"));
+/** The step that puts an order in pending before its capture (PAYPAL_WATCH_FIRST), or a ZADD of pending sent on its own. */
+const pendingWrite = (commands: Commands) =>
+  commands.some((c) => (c[0] === "ZADD" && String(c[1]).startsWith("nl:ppsell:pending:")) || (c[0] === "EVAL" && String(c[1]).includes("marktmorgen:paypal-watch-first")));
 
 /** Runs `body` with every Redis pipeline passed through `fault` first (null: sent as it is). */
 async function withRedis<T>(fault: (commands: Commands) => unknown[] | Promise<unknown[]> | null, body: () => Promise<T>): Promise<T> {
@@ -307,7 +309,7 @@ async function main(): Promise<void> {
 
   part("A declined try's letting go stays inside the order's own work");
   {
-    const perOrder = PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * (PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked + PAYPAL_CAPTURE_WATCH.letGoCommandsPerDeclinedTry);
+    const perOrder = PAYPAL_CAPTURE_WATCH.watchCommandsPerOrderAtMost + PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.letGoCommandsPerDeclinedTry;
     is("every admitted try declined: the watch and the letting go together inside a fifth of ORDER_COMPUTE", perOrder * COMMAND < ORDER_COMPUTE / 5, true);
   }
 

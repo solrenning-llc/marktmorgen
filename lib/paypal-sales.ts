@@ -1206,6 +1206,10 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
     return { ok: false, reason: "unknown" };
   }
   if (already) return { ok: true, paid: already, fresh: false };
+  // An order opened before the creator added tax on top of the prices, approved after: PayPal would take the price
+  // alone, without the tax (Claude 7's LEVE on #5243). Nothing is asked of PayPal and nothing is written; the buyer is
+  // told it did not go through. One a capture was already asked for stays with the sweep, which reads PayPal's order.
+  if (taxOnTop(store)) return { ok: false, reason: "unknown" };
   const { opened, tries } = await readOpenedAndTries(order);
   if (!opened || opened === "unknown" || opened.s !== store.statsId || tries === "unknown") return { ok: false, reason: "unknown" };
   // Asked for as many times as an order may be (CAPTURE_TRIES_PER_ORDER; Claude 7's cost MEDIUM on #3411): PayPal is not

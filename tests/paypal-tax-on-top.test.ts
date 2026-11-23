@@ -11,8 +11,10 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { paypalReady, sellsThroughPayPal } from "@/lib/paypal-sales";
-import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Listing } from "@/lib/store";
+import { captureOrder, openOrder, paypalReady, sellsThroughPayPal } from "@/lib/paypal-sales";
+import { readListing } from "@/lib/catalog";
+import { addProduct, claimHandle, ensureStatsId, setPayPalSeller, setProductLink, setSubscription, setTax, storeForEmail, type Listing } from "@/lib/store";
+import { TEST_CONSENT } from "./digital-consent-fixture";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -21,6 +23,30 @@ process.env.PAYPAL_PARTNER_CLIENT_ID = "synthetic-client";
 process.env.PAYPAL_PARTNER_SECRET = "synthetic-secret";
 process.env.PAYPAL_PARTNER_MERCHANT_ID = "SYNTHETICPART1";
 process.env.PAYPAL_BN_CODE = "SYNTHETIC_BN";
+
+// A stand-in PayPal: an order it opens, and a capture it counts (Claude 7's LEVE on #5243).
+const SELLER = "7KNGBPH2U58GQ";
+let made = 0;
+let captures = 0;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
+  if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
+  const method = init?.method ?? "GET";
+  if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AApartner", token_type: "Bearer", expires_in: 32400 });
+  if (url.pathname === "/v2/checkout/orders" && method === "POST") {
+    made += 1;
+    const id = `7P190127TN36471${String(made).padStart(2, "0")}`;
+    return json({ id, status: "PAYER_ACTION_REQUIRED", links: [{ href: `https://www.paypal.com/checkoutnow?token=${id}`, rel: "payer-action" }] });
+  }
+  const capture = /^\/v2\/checkout\/orders\/([A-Z0-9]+)\/capture$/.exec(url.pathname)?.[1];
+  if (capture && method === "POST") {
+    captures += 1;
+    const cap = `4D679366HH9087${capture.slice(-2)}`;
+    return json({ id: capture, status: "COMPLETED", payer: { email_address: "buyer@example.com" }, purchase_units: [{ payee: { merchant_id: SELLER }, payments: { captures: [{ id: cap, status: "COMPLETED", amount: { currency_code: "USD", value: "49.00" } }] } }] }, 201);
+  }
+  return json({ name: "RESOURCE_NOT_FOUND" }, 404);
+}) as typeof fetch;
 
 async function main(): Promise<void> {
   redis.clear();
@@ -48,6 +74,33 @@ async function main(): Promise<void> {
   is("the sentence only where PayPal would otherwise be offered", /sellsThroughPayPal\(store\) && taxOnTop\(store\)/.test(page), true);
   is("\"by card\" only where the store sells by card", /canSell\(store\) \? " Buyers pay by card through Stripe\." : " Buyers cannot pay until you connect Stripe or turn off tax on top\."/.test(page), true);
   is("the PayPal checkout route asks paypalReady", readFileSync(join(process.cwd(), "app/api/store/paypal/checkout/route.ts"), "utf8").includes("paypalReady(store, product)"), true);
+
+  part("An order opened before tax went on top and approved after is not taken without its tax (Claude 7's LEVE on #5243)");
+  const seller = "paypal-tax-late@example.com";
+  await claimHandle(seller, "paypaltaxlate", "PayPal Tax Late", "");
+  await ensureStatsId(seller);
+  await setSubscription(seller, { customerId: "cus_PayPalTax02", subscriptionId: "sub_PayPalTax02", active: true, tier: "creator", period: paidPeriod() });
+  const added = await addProduct(seller, "Rye Guide", "", "49", null);
+  if (!added.ok) throw new Error("no product");
+  await setProductLink(seller, added.product.id, "https://example.com/rye");
+  await setPayPalSeller(seller, SELLER);
+  const onTop = { ...(await storeForEmail(seller))!.tax, enabled: true, included: false };
+  let late = (await storeForEmail(seller))!;
+  const sold = await openOrder(late, (await readListing(late, added.product.id))!, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+  if (!sold.ok) throw new Error("no order");
+  const control = await openOrder(late, (await readListing(late, added.product.id))!, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+  if (!control.ok) throw new Error("no control order");
+  const paidBefore = await captureOrder(late, control.order);
+  is("control: with no tax, the approved order is taken", paidBefore.ok, true);
+  const asked = captures;
+  await setTax(seller, onTop);
+  late = (await storeForEmail(seller))!;
+  is("the store now adds tax on top", late.tax.enabled && !late.tax.included, true);
+  const after = await captureOrder(late, sold.order);
+  is("the order approved after tax went on top is not taken", after, { ok: false, reason: "unknown" });
+  is("PayPal is not asked to take it", captures, asked);
+  const again = await captureOrder(late, control.order);
+  is("one already paid is still shown as paid", again.ok && !again.fresh, true);
 
   done();
 }

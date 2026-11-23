@@ -21,7 +21,7 @@
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
-import { MEET_ACCESS_UNCONFIRMED, type MeetProvider, meetAccessRemoveWords } from "@/lib/call-setup";
+import { MEET_ACCESS_SHARED, MEET_ACCESS_UNCONFIRMED, type MeetProvider, meetAccessRemoveWords } from "@/lib/call-setup";
 
 export type AccountChange =
   | { kind: "stripe-connected" }
@@ -39,7 +39,7 @@ export type AccountChange =
   | { kind: "email-platform-removed"; name: string }
   | { kind: "phone-added"; label: string }
   | { kind: "meeting-connected"; name: string; account: string }
-  | { kind: "meeting-disconnected"; name: string; account: string; byProvider?: boolean; provider?: MeetProvider; providerAccessRemoved?: false }
+  | { kind: "meeting-disconnected"; name: string; account: string; byProvider?: boolean; provider?: MeetProvider; providerAccessRemoved?: false; sharedGrantKept?: true }
   | { kind: "meeting-broken"; name: string }
   | { kind: "discord-connected"; server: string }
   | { kind: "metaads-connected"; account: string }
@@ -150,6 +150,8 @@ export function accountChangeWords(change: AccountChange): { subject: string; li
         subject: `${change.name} was disconnected from your store`,
         line: change.byProvider
           ? `The app was removed from the ${change.name} account ${change.account}, so your store no longer makes meetings on it. Calls set to use it now give buyers your own link, or a private video room. Meetings already made stay where they are.`
+          : change.sharedGrantKept && change.provider
+            ? `The ${change.name} account ${change.account} was disconnected from your store. ${MEET_ACCESS_SHARED[change.provider].rest} Calls set to use it now give buyers your own link, or a private video room. Meetings already made stay where they are.`
           : change.providerAccessRemoved === false && change.provider
             ? `The ${change.name} account ${change.account} was disconnected from your store, but ${MEET_ACCESS_UNCONFIRMED[change.provider].company} did not confirm that it removed our access. ${meetAccessRemoveWords(change.provider)} Calls set to use it now give buyers your own link, or a private video room. Meetings already made stay where they are.`
             : `The ${change.name} account ${change.account} was disconnected from your store and its access was given back. Calls set to use it now give buyers your own link, or a private video room. Meetings already made stay where they are.`,

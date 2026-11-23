@@ -572,13 +572,21 @@ export async function removeHostIcs(store: Pick<Store, "statsId">, email: string
  * retry also finishes it.
  */
 export async function disconnectHostGoogle(store: Pick<Store, "statsId">, email: string): Promise<boolean> {
-  if (!store.statsId) return true;
+  return (await disconnectHostGoogleFor(store, email)).providerAccessRemoved;
+}
+
+/**
+ * As disconnectHostGoogle, and whether the grant was kept at Google because a store or another team calendar here
+ * still uses the same Google account (issue #4011, `sharedGrantKept`), for the page to say so.
+ */
+export async function disconnectHostGoogleFor(store: Pick<Store, "statsId">, email: string): Promise<{ providerAccessRemoved: boolean; sharedGrantKept: boolean }> {
+  if (!store.statsId) return { providerAccessRemoved: true, sharedGrantKept: false };
   const host = hostId(email);
-  const { providerAccessRemoved } = await disconnectFor(store.statsId, "google", host);
+  const { providerAccessRemoved, sharedGrantKept } = await disconnectFor(store.statsId, "google", host);
   const config = await readConfig(host);
   if (config) await writeConfig(host, { ...config, read: [], write: "", source: config.source === "google" ? "none" : config.source });
   await forgetReadings(host);
-  return providerAccessRemoved;
+  return { providerAccessRemoved, sharedGrantKept: sharedGrantKept === true };
 }
 
 /** Where a host's team bookings are written, when they connected Google Calendar for it: the calendar id ("" is primary). */

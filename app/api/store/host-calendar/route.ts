@@ -5,7 +5,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import {
   MAX_ICS_URL,
   addHostIcs,
-  disconnectHostGoogle,
+  disconnectHostGoogleFor,
   hostCalendarView,
   checkHostCalendar,
   removeHostIcs,
@@ -75,8 +75,14 @@ export async function POST(request: NextRequest) {
         return Response.json({ ok: true, view: await view() });
       case "disconnect": {
         // False when Google did not confirm it took the access back: the page says so, and how to remove it there.
-        const removed = await disconnectHostGoogle(store, email);
-        return Response.json({ ok: true, view: await view(), ...(removed === false ? { providerAccessRemoved: false } : {}) });
+        // A grant kept for a store or another team calendar on the same Google account (issue #4011) is said as that.
+        const { providerAccessRemoved, sharedGrantKept } = await disconnectHostGoogleFor(store, email);
+        return Response.json({
+          ok: true,
+          view: await view(),
+          ...(providerAccessRemoved === false ? { providerAccessRemoved: false } : {}),
+          ...(sharedGrantKept ? { sharedGrantKept: true } : {}),
+        });
       }
       case "check":
         if (!(await checkHostCalendar(store, email, tz))) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });

@@ -190,6 +190,13 @@ void (async () => {
   rule = { when: counter("nl:rl:address:"), reply: [99, 1] };
   is("address move, past the limit: limited", await move(), "limited");
   rule = null;
+  // #2674, Claude 7's LEVE (6889801109) and Codex X6 item 3: the account's own count of move asks (move-ask) has its
+  // own behavior test, past the address's count: unknown is an error, past the limit is limited.
+  rule = { when: counter("nl:rl:move-ask:"), reply: [null, 1] };
+  is("address move, the account's move-ask count unknown: error, not limited", await move(), "error");
+  rule = { when: counter("nl:rl:move-ask:"), reply: [99, 1] };
+  is("address move, the account's move-ask count past the limit: limited", await move(), "limited");
+  rule = null;
 
   part("isFreshSession: only EXISTS's whole 1 is a fresh login");
   const sessionId = "b".repeat(64);

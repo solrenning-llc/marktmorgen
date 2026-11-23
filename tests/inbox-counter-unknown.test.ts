@@ -9,7 +9,7 @@
  * message (inbox-tell, withinEssentialLimit) has its own cases: sent with room, not sent on an unreadable count,
  * while the visitor's message is still kept.
  */
-import { readInbox, replyTo, startChat } from "@/lib/inbox";
+import { readInbox, replyTo, startChat, writeToAffiliate } from "@/lib/inbox";
 import { claimHandle, ensureStatsId, setInboxSetting, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -49,6 +49,17 @@ async function main(): Promise<void> {
   is("an unreadable count is an error, never 'too many'", await chat("10.0.0.2"), { ok: false, reason: "error" });
   mode = { scope: "inbox-new", how: "full" };
   is("past the day's new conversations it is limited, as before", await chat("10.0.0.3"), { ok: false, reason: "limited" });
+  mode = null;
+  await real([["DEL", ...filled]]);
+  filled.clear();
+
+  part("A message the store writes to one of its affiliates (inbox-new, writeToAffiliate)");
+  // #2674, Claude 7's LEVE (6889801109) and Codex X6 item 3: its own behavior test for the same count.
+  const toAffiliate = () => writeToAffiliate(store, { email: "partner@example.org", name: "Partner" }, "A new banner is ready for you to share this month.", OWNER);
+  mode = { scope: "inbox-new", how: "unknown" };
+  is("an affiliate message on an unreadable count is an error, never 'too many'", await toAffiliate(), { ok: false, reason: "error" });
+  mode = { scope: "inbox-new", how: "full" };
+  is("an affiliate message past the day's count is limited, as before", await toAffiliate(), { ok: false, reason: "limited" });
   mode = null;
   await real([["DEL", ...filled]]);
   filled.clear();

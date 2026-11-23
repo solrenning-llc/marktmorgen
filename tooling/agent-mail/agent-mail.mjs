@@ -1704,7 +1704,10 @@ export function motivosContraReady(texto) {
   const notas = /n[ãa]o [ée] defeito|not a defect|not a finding|n[ãa]o [ée] achado/i;
   // ZA (d): o READY de um head novo diz que cada achado antigo foi corrigido ou retirado; essa linha não é achado aberto.
   // Claude 3 yUZf's LEVE on #5404: "closed", "addressed" and "resolved" (and the Portuguese words) say the same as "fixed".
-  const resolvido = (l) => /corrigid|\bfixe[ds]\b|retirad|withdrawn|\bclosed\b|fechad|\baddressed\b|atendid|\bresolved\b|resolvid/i.test(l)
+  // Claude 5 icFoe's LEVE on #5404: a line that describes a finding ("LEVE: the stream is never closed") is a finding, even
+  // with one of these words in it; only a line that says them of the finding ("my LEVE closed") is resolved.
+  const descreveAchado = (l) => /\b(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b\s*(\d+\s*)?(\([^)]*\)\s*)?[:—–]|\b(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b\s+-\s/.test(l);
+  const resolvido = (l) => !descreveAchado(l) && /corrigid|\bfixe[ds]\b|retirad|withdrawn|\bclosed\b|fechad|\baddressed\b|atendid|\bresolved\b|resolvid/i.test(l)
     && !/n[ãa]o (foi |est[áa] |foram |est[ãa]o )?(corrigid|retirad|fechad|atendid|resolvid)|not (been |yet )?(fixed|withdrawn|closed|addressed|resolved)|unfixed|unresolved|unaddressed|sem corre[çc][ãa]o/i.test(l);
   const linhas = todo.split("\n").filter((l) => !notas.test(l) && !resolvido(l)).join("\n")
     .replace(/\b(0|zero|nenhum|sem|no)\s+(achados?\s+)?(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b/gi, " ");

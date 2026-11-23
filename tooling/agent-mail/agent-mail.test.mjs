@@ -4,7 +4,7 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdtempSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -36,6 +36,8 @@ esac
 for a in "$@"; do case "$a" in
   repos/*/issues/[0-9]*/comments) [ "$FAKE_COMMENTS_DOWN" = 1 ] && { echo "gh: 502" >&2; exit 1; }; printf '%s' "\${FAKE_COMMENTS:-}"; exit 0 ;;
   repos/*/pulls/[0-9]*/reviews) exit 0 ;;
+  repos/*/issues?labels=canal-ativo*) [ "$FAKE_CANAL_DOWN" = 1 ] && { echo "gh: 502" >&2; exit 1; }
+    printf '%s\\n' "\${FAKE_CANAL:-[5104,\\"Agent coordination — part 8 (continues #4932)\\"]}"; exit 0 ;;
 esac; done
 case "$FAKE_GH" in
   req) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/issues/'"\${FAKE_ISSUE:-4932}"'#issuecomment-'"$FAKE_ID"'","'"$FAKE_BODY"'","'"\${FAKE_CREATED:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"'"]' ;;
@@ -90,7 +92,7 @@ is("another Claude 5 session (not the named one) cannot turn a switch on", !r.ok
 r = ligar("Claude 5 ibqho", "ibq");
 is("the named session needs --request (condition 4)", !r.ok && /--request é obrigatório/.test(r.out), r.out);
 r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review"), { FAKE_ISSUE: "4933" }));
-is("a request comment that is not on #4932 is refused", !r.ok && /não é da #4932/.test(r.out), r.out);
+is("a request comment that is not on the coordination channel in force is refused", !r.ok && /não é do canal em vigor \(#5104 ou da #4932/.test(r.out), r.out);
 r = ligar("Claude 5 ibqho", "ibq", pedidoDe("please turn record-review on"));
 is("a comment that only mentions the switch, without the marker line, is refused (review of Claude 4 3Kc)", !r.ok && /não traz a linha "AGENT-MAIL-REQUEST/.test(r.out), r.out);
 r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "ready-check")));
@@ -101,9 +103,21 @@ r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review")
 is("an old request is refused (at most 2 hours)", !r.ok && /não é um pedido recente/.test(r.out), r.out);
 r = ligar("Claude 5 ibqho", "ibq", { args: ["--request", "77"], env: { FAKE_GH: "down" } });
 is("a request that cannot be checked now is refused (nothing NOT CHECKED goes on)", !r.ok && /NÃO FOI CONFERIDO/.test(r.out), r.out);
+// The channel changes part at 2,250 comments (AC (p)); on 22/11/2026 #5104 took over from #4932 (channel-ativo label).
+r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review"), { FAKE_CANAL_DOWN: "1" }));
+is("with the channel in force unreadable, the request is not used (NOT CHECKED)", !r.ok && /canal em vigor .*NÃO FOI CONFERIDO/.test(r.out), r.out);
+r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review"), { FAKE_CANAL: '[5104,"part 8 (continues #4932)"]\n[5200,"part 9 (continues #5104)"]' }));
+is("with two open issues labeled canal-ativo, the channel is NOT CHECKED and nothing is done", !r.ok && /canal em vigor .*NÃO FOI CONFERIDO/.test(r.out), r.out);
+r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review"), { FAKE_CANAL: '[5200,"Agent coordination — part 9 (continues #5104)"]' }));
+is("two parts later, a request on #4932 is refused: only the part in force and the one it continues count", !r.ok && /não é do canal em vigor \(#5200 ou da #5104/.test(r.out), r.out);
 is("nothing was turned on by the refused attempts", /record-review: DESLIGADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
-r = ligar("Claude 1 A", "c1a", pedidoDe(marca("set-switch", "ready-check")), [], "ready-check");
+{
+  // A request written on the part in force (#5104), given by its bare id: accepted (it was refused while only #4932 counted).
+  const q5104 = pedidoDe(marca("set-switch", "ready-check"), { FAKE_ISSUE: "5104" });
+  r = ligar("Claude 1 A", "c1a", { args: ["--request", String(q5104.id)], env: q5104.env }, [], "ready-check");
+}
 is("with no sign from the named session in 60 minutes, the backup acts, and the record says why", r.ok && /ready-check: LIGADO/.test(run(["list-switches"]).out), r.out);
+is("a request on #5104, the channel in force, is accepted and recorded with its own address", r.ok && /Pedido: https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/5104#issuecomment-/.test(run(["list-switches"]).out + run(["read", "--as", "Claude 2 Z"], as("c2")).out), r.out);
 run(["set-switch", "--as", "Claude 2 X", "--name", "ready-check", "--off", "--reason", "fim do teste"], as("c2"));
 const q1 = pedidoDe(`Coordinator decision.\\n${marca("set-switch", "record-review")}`);
 r = ligar("Claude 5 ibqho", "ibq", q1);
@@ -791,6 +805,22 @@ exit 0
   r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "race 2", "--text", "x"], { ...as("c2"), CORREIO_REPO: M3 });
   is("a race that never ends stops after 30 tries and says why", !r.ok && /30 por o correio ter andado no meio/.test(r.out), r.out);
   writeFileSync(join(M3, "race-left"), "0\n");
+}
+
+console.log("a passing git failure while building a write is tried again, and git's upkeep runs in the foreground (CI, 22/11/2026)");
+{
+  // A git that fails write-tree once, as when a detached gc removed an empty objects/ folder in the middle of the write.
+  const BINF = join(T, "bin-flaky"); mkdirSync(BINF);
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  writeFileSync(join(BINF, "git"), `#!/bin/sh
+for a in "$@"; do if [ "$a" = "write-tree" ] && [ -f "$FAKE_GIT_FAIL" ]; then rm -f "$FAKE_GIT_FAIL"; echo "error: unable to create temporary file: No such file or directory" >&2; echo "fatal: git-write-tree: error building trees" >&2; exit 128; fi; done
+exec ${realGit} "$@"
+`); chmodSync(join(BINF, "git"), 0o755);
+  const marcaF = join(T, "flaky-once"); writeFileSync(marcaF, "1\n");
+  r = run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "flaky", "--text", "x"], { ...as("c2"), PATH: `${BINF}:${base.PATH}`, FAKE_GIT_FAIL: marcaF });
+  is("a write-tree that fails once with 'unable to create temporary file' is tried again and the message goes through", r.ok && /enviada/.test(r.out) && !existsSync(marcaF), r.out);
+  const cfg = (k) => { try { return g(["--git-dir", base.CORREIO_GIT_DIR, "config", k]); } catch { return ""; } };
+  is("the mailbox's git runs gc and maintenance in the foreground (no detached upkeep under a write)", cfg("gc.autoDetach") === "false" && cfg("maintenance.autoDetach") === "false", `${cfg("gc.autoDetach")} ${cfg("maintenance.autoDetach")}`);
 }
 
 console.log("outside a git clone: the version check says to run from inside one (22/11/2026)");

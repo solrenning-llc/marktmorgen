@@ -2176,12 +2176,12 @@ export class MemoryRedis {
           return overflow;
         }
         // lib/funnel-share-store.ts CREATE_STORE_SHARE: CREATE_SHARE only while the store's erasing mark is absent and its id
-        // key exists (-4 otherwise, nothing written).
-        if (key.startsWith("-- marktmorgen:funnel-share-live:v1\n") && args[0] === "4" && args.length === 13) {
-          const [, list, lookup, idKey, erasing, id, meta, rec, sum, bundle, limit, ttl, field] = args;
+        // key still names the admitted owner ref (-4 otherwise, nothing written).
+        if (key.startsWith("-- marktmorgen:funnel-share-live:v2\n") && args[0] === "4" && args.length === 14) {
+          const [, list, lookup, idKey, erasing, id, meta, rec, sum, bundle, limit, ttl, field, ref] = args;
           this.live(idKey);
           if (this.run(["HGET", erasing, field]) !== null) return -4;
-          if (!this.data.has(idKey)) return -4;
+          if (this.run(["GET", idKey]) !== ref) return -4;
           this.live(list);
           this.live(lookup);
           const held = this.data.get(list);

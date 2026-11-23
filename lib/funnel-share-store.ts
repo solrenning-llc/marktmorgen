@@ -117,7 +117,7 @@ async function makeShare(
   statsId: string,
   input: { name: string; funnelId: string; days: number; from: string; bundle: FunnelBundle; outline: BundleOutline; limit: number },
   nowSeconds: number,
-  fence: { idKey: string; field: string } | null,
+  fence: { idKey: string; field: string; ref: string } | null,
 ): Promise<{ ok: true; code: string; entry: ShareEntry } | { ok: false; error: "full" }> {
   const days = Math.min(Math.max(1, Math.floor(input.days)), MAX_SHARE_DAYS);
   const code = `mmf_${randomBytes(16).toString("hex")}`;
@@ -135,7 +135,7 @@ async function makeShare(
   const args = [entry.id, JSON.stringify(entry), JSON.stringify(record), JSON.stringify(input.outline), JSON.stringify(input.bundle), input.limit, days * 86_400];
   const replies = await redisPipeline([
     fence
-      ? ["EVAL", CREATE_STORE_SHARE, 4, listKey(statsId), lookupKey(hash), fence.idKey, ERASING_KEY, ...args, fence.field]
+      ? ["EVAL", CREATE_STORE_SHARE, 4, listKey(statsId), lookupKey(hash), fence.idKey, ERASING_KEY, ...args, fence.field, fence.ref]
       : ["EVAL", CREATE_SHARE, 2, listKey(statsId), lookupKey(hash), ...args],
   ]);
   // Gone or erasing is an exact -4, read before countOf (which takes only counts): nothing was written.
@@ -152,17 +152,22 @@ async function makeShare(
  * after the closing walk passed the store's (empty) share list; a plain CREATE_SHARE would then put back the list and a
  * snapshot that opens with the erased store's name as its sender, for up to MAX_SHARE_DAYS. The fence is
  * lib/store-live-cache.ts's: the erasing mark (lib/store.ts ERASING_KEY) must be absent and the store's id key must
- * exist (closeStoreRecord deletes it in the same fenced step as the mark). -4 when either fails, nothing written.
- * KEYS as CREATE_SHARE's, then the store's id key and ERASING_KEY; ARGV as CREATE_SHARE's, then the store's erasing
- * field. Inner commands: HGET and EXISTS more than CREATE_SHARE's (SHARE_FENCE_EXTRA_COMMANDS).
+ * still name the owner ref the request was admitted under (closeStoreRecord deletes it in the same fenced step as the
+ * mark). An account move (moveAccount) keeps the sid and statsId but changes that value, and the erasure then marks
+ * the NEW ref: a request admitted under the old ref is refused, so it cannot pass the new owner's erasing mark (Codex
+ * L, L-20261121-0043). -4 when either check fails, nothing written. KEYS as CREATE_SHARE's, then the store's id key
+ * and ERASING_KEY; ARGV as CREATE_SHARE's, then the store's erasing field and the admitted ref. Inner commands: HGET
+ * and GET more than CREATE_SHARE's (SHARE_FENCE_EXTRA_COMMANDS).
  */
-export const CREATE_STORE_SHARE = `-- marktmorgen:funnel-share-live:v1
+export const CREATE_STORE_SHARE = `-- marktmorgen:funnel-share-live:v2
 if redis.call("HGET", KEYS[4], ARGV[8]) then return -4 end
-if redis.call("EXISTS", KEYS[3]) ~= 1 then return -4 end
+if redis.call("GET", KEYS[3]) ~= ARGV[9] then return -4 end
 ${CREATE_SHARE.split("\n").slice(1).join("\n")}`;
 
-/** What the fence adds to a share's creation, as Upstash bills a script's inner commands: its HGET and EXISTS. */
+/** What the fence adds to a share's creation, as Upstash bills a script's inner commands: its HGET and GET. */
 export const SHARE_FENCE_EXTRA_COMMANDS = 2;
+/** The bytes the fence adds to a share's request: the admitted owner ref (a full UTF-8 address) and its framing. */
+export const SHARE_FENCE_EXTRA_BYTES = 2_048;
 
 /** A share refused because the store is gone or its erasure has begun: no list, snapshot or code was made. */
 export class ShareStoreGoneError extends Error {
@@ -187,7 +192,8 @@ export async function createStoreShare(
   if (!statsId) throw new Error("a share link needs the store's statsId");
   const named = STORE_ID_PATTERN.test(store.sid) ? store : await ensureStoreId(storeRef(store));
   if (!named || !STORE_ID_PATTERN.test(named.sid) || named.statsId !== statsId) throw new ShareStoreGoneError();
-  return makeShare(statsId, input, nowSeconds, { idKey: storeIdCommand(named.sid)[1], field: await erasingField(storeRef(named)) });
+  const ref = storeRef(named);
+  return makeShare(statsId, input, nowSeconds, { idKey: storeIdCommand(named.sid)[1], field: await erasingField(ref), ref });
 }
 
 /** Revokes a link at once: its snapshot first, then its line in the list. Throws when a reply is in another shape: "not there" only on a confirmed absence. */

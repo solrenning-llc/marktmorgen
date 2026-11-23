@@ -1,6 +1,6 @@
 /**
  * 273 [BK1] (inbox C1-20261108-2017-C4-36 items 2 and 3): the backup key's fingerprint, its id in every sealed
- * object's header, reading with the previous key for 60 days after a rotation, and the lost-copy path that never
+ * object's header, reading with the previous key for 120 days (BACKUP_MAX_COPY_DAYS) after a rotation, and the lost-copy path that never
  * deletes a manifest that only failed to open under another key. Synthetic keys and data only; no real key is read or
  * printed. The backup stays off: BACKUP_COST_REVIEW is null.
  *
@@ -9,7 +9,7 @@
  *   - a part or a manifest sealed without its key id in the header, or a header id that is not the fingerprint;
  *   - an object sealed under the previous key that a keyring holding it cannot open, or one a keyring without it opens;
  *   - an object in the older format (no key id) that no longer opens;
- *   - the previous key read before its rotation day, after 60 days, malformed, or equal to the current one;
+ *   - the previous key read before its rotation day, after 120 days, malformed, or equal to the current one;
  *   - the lost-copy path deleting a manifest sealed under a key it does not hold, or any part such a manifest names;
  *   - a run with the previous key that does not keep the set sealed under it.
  */
@@ -17,7 +17,7 @@ import { createCipheriv, createHmac, randomBytes } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { backupKeyFingerprint as fingerprint, openBackup, sealBackup, type BackupSnapshot } from "@/lib/backup-codec";
 import { openManifest, sealManifest, type BackupManifest } from "@/lib/backup-parts";
-import { BACKUP_KEY_PREVIOUS_DAYS as PREVIOUS_DAYS, backupKeyring as keyring, runBackup, type BackupCostReview } from "@/lib/backup-run";
+import { BACKUP_KEY_PREVIOUS_DAYS as PREVIOUS_DAYS, BACKUP_MAX_COPY_DAYS, backupKeyring as keyring, runBackup, type BackupCostReview } from "@/lib/backup-run";
 import type { BackupBucket } from "@/lib/backup-roundtrip";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -71,17 +71,19 @@ async function main(): Promise<void> {
     is("an object in the older format still opens", fails(() => openBackup(v1, newKey)), false);
   }
 
-  part("The previous key is read for 60 days after the rotation day, never before it, never malformed");
-  is("60 days", PREVIOUS_DAYS, 60);
+  part("The previous key is read for the 120-day cap after the rotation day, never before it, never malformed (C1-20261109-0025-C4-47 item 1)");
+  is("the 120-day cap, the same constant", [PREVIOUS_DAYS, PREVIOUS_DAYS === BACKUP_MAX_COPY_DAYS], [120, true]);
   {
     const env = process.env as Record<string, string | undefined>;
     env.BACKUP_ENCRYPTION_KEY = newKey.toString("base64");
     env.BACKUP_ENCRYPTION_KEY_PREVIOUS = oldKey.toString("base64");
     env.BACKUP_ENCRYPTION_KEY_ROTATED_AT = "2026-11-01";
     const rotated = Date.parse("2026-11-01T00:00:00Z");
-    is("within 60 days: current, then previous", keyring(rotated + 10 * DAY)?.readers.map(fingerprint), [fingerprint(newKey), fingerprint(oldKey)]);
+    is("within 120 days: current, then previous", keyring(rotated + 10 * DAY)?.readers.map(fingerprint), [fingerprint(newKey), fingerprint(oldKey)]);
     is("the current key writes", keyring(rotated + 10 * DAY)?.current && fingerprint(keyring(rotated + 10 * DAY)!.current), fingerprint(newKey));
-    is("after 60 days: the previous key is no longer read", keyring(rotated + 60 * DAY + 1)?.readers.length, 1);
+    is("100 days after: still read (a copy the bucket keeps up to 120 days)", keyring(rotated + 100 * DAY)?.readers.length, 2);
+    is("on day 120: still read", keyring(rotated + 120 * DAY)?.readers.length, 2);
+    is("after 120 days: the previous key is no longer read", keyring(rotated + 120 * DAY + 1)?.readers.length, 1);
     is("before the rotation day: not read", keyring(rotated - 1)?.readers.length, 1);
     env.BACKUP_ENCRYPTION_KEY_ROTATED_AT = "2026-02-30";
     is("a rotation day that is not one: not read", keyring(rotated + DAY)?.readers.length, 1);
@@ -97,7 +99,7 @@ async function main(): Promise<void> {
   }
 
   part("The lost-copy path never deletes a manifest that only failed to open under another key (C4-36 item 3)");
-  const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxStoredBytes: 36_199_424, reviewedAt: "2026-10-31", source: "synthetic test review, not a real one" };
+  const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxStoredBytes: 39_593_120, reviewedAt: "2026-10-31", source: "synthetic test review, not a real one" };
   const objects = new Map<string, Uint8Array>();
   const writtenAt = new Map<string, number>();
   const deleted: string[] = [];
@@ -124,12 +126,16 @@ async function main(): Promise<void> {
     redis.now = () => clock;
     redis.run(["SET", "nl:store:one", "a shop"]);
     bucketClock = clock;
+    // The month's copy already marked (inbox C4-37 item 4), so the good set below is a daily copy, kept only as a
+    // verified set the keyring opens.
+    objects.set(`monthly/${new Date(clock).toISOString().slice(0, 7)}/99999999-9999-4999-8999-999999999999/verified`, new Uint8Array(0));
+    writtenAt.set(`monthly/${new Date(clock).toISOString().slice(0, 7)}/99999999-9999-4999-8999-999999999999/verified`, clock - 1_000);
     // A good set sealed under the old key, before the rotation.
     const good = await runBackup({ now: clock, review, store, key: oldKey });
     const goodIds = good.ok ? [good.id, ...openManifest(objects.get(good.id)!, oldKey).parts.map((p) => p.id)] : [];
     // The mark then names a manifest the bucket's rule took, and the bucket fills with old leftovers.
     redis.run(["SET", "nl:backup:last-ok", JSON.stringify({ at: clock, set: "dddddddd-dddd-4ddd-8ddd-000000000000", base: { keys: 0, bytes: 0 } })]);
-    for (let i = 0; i < 31; i += 1) {
+    for (let i = 0; i < 34; i += 1) {
       const id = `eeeeeeee-eeee-4eee-8eee-${String(i).padStart(12, "0")}`;
       objects.set(id, new Uint8Array(1_131_232));
       writtenAt.set(id, clock + 1_000 + i);

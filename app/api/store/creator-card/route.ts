@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
-import { CARD_REFUSALS, CardSaveUnconfirmed, CardUnreadable, MAX_CARD_EMAIL, MAX_CARD_NAME, MAX_CARD_NOTE, MAX_CARD_TITLE, dropCreatorCard, readCreatorCardForEditing, readCreatorCardHeld, saveCreatorCard } from "@/lib/creator-card";
+import { CARD_REFUSALS, CardSaveUnconfirmed, CardStoreGone, CardUnreadable, MAX_CARD_EMAIL, MAX_CARD_NAME, MAX_CARD_NOTE, MAX_CARD_TITLE, dropCreatorCard, readCreatorCardForEditing, readCreatorCardHeld, saveCreatorCard } from "@/lib/creator-card";
 import { StoreFullError } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { guardStoreWrite } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
 
@@ -39,19 +40,20 @@ export async function POST(request: NextRequest) {
   if (!statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   try {
     if (body.action === "save") {
-      const result = await saveCreatorCard(statsId, body, store);
+      const result = await saveCreatorCard(statsId, body, store, await storeLiveFence(store));
       return result.ok
         ? Response.json({ ok: true, card: result.card }, { headers: NO_STORE })
         : Response.json({ ok: false, error: result.error, message: CARD_REFUSALS[result.error] }, { status: 400 });
     }
     if (body.action === "remove") {
-      await dropCreatorCard(statsId, store);
+      await dropCreatorCard(statsId, store, await storeLiveFence(store));
       // Removed only when no card is kept now; a card saved meanwhile is kept and said so (`removed: false`).
       const after = await readCreatorCardHeld(statsId);
       return Response.json({ ok: true, removed: !after.held, card: after.card }, { headers: NO_STORE });
     }
     return Response.json({ ok: false, error: "unknown" }, { status: 400 });
   } catch (error) {
+    if (error instanceof CardStoreGone) return Response.json({ ok: false, error: "gone", message: error.message }, { status: 410, headers: NO_STORE });
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "data_full" }, { status: 409 });
     if (error instanceof CardUnreadable) return Response.json({ ok: false, error: "unreadable", message: error.message }, { status: 503, headers: NO_STORE });
     if (error instanceof CardSaveUnconfirmed) return Response.json({ ok: false, error: "unconfirmed", message: error.message }, { status: 503 });

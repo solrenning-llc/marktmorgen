@@ -17,6 +17,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const OWNER = "students-unread@example.com";
+/** The keys a request reads before its own work: the API key, the team, the rate limit, the store, its allowance; then the outline. */
+const ALLOWED = ["nl:api:", "nl:team:", "nl:rl:api:", "nl:store:", "nl:allow:api:", "nl:course:"];
 
 async function main(): Promise<void> {
   redis.clear();
@@ -36,6 +38,23 @@ async function main(): Promise<void> {
   if (!key.ok) throw new Error("no key");
   const courseKey = `nl:course:${made.id}`;
   const saved = redis.run(["GET", courseKey]) as string;
+  // Every command one answer sends, by name and key: an unreadable course's 502 must send no more than a confirmed
+  // absence's 404, so no student-page or progress read and no API allowance past the request itself (Claude 6's NIT on
+  // #5422, the issue's third expectation).
+  const pipeline = redis.pipeline.bind(redis);
+  let log: string[] | null = null;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (log) for (const c of commands) log.push(`${String(c[0]).toUpperCase()} ${String(c[1] ?? "")}`);
+    return pipeline(commands);
+  }) as typeof redis.pipeline;
+  const logged = async (run: () => Promise<unknown>): Promise<[unknown, string[]]> => {
+    log = [];
+    try {
+      return [await run(), log];
+    } finally {
+      log = null;
+    }
+  };
   const ask = async () => {
     const res = await studentsRead(new Request(`https://marktmorgen.com/api/v1/students?product=${product.product.id}`, { headers: { Authorization: `Bearer ${key.key}` } }));
     const body = (await res.json()) as { error?: { code?: string } | string; data?: unknown[] };
@@ -46,6 +65,12 @@ async function main(): Promise<void> {
   part("Control: a course that reads is answered");
   is("200, no error", await ask(), [200, null]);
 
+  part("A course confirmed absent is still not a course");
+  redis.run(["DEL", courseKey]);
+  const [absent, absentSent] = await logged(ask);
+  is("404 not_a_course", absent, [404, "not_a_course"]);
+  is("(set-up) the 404 reads the course once and takes the request's allowance once", [absentSent.filter((c) => c === `GET ${courseKey}`).length, absentSent.filter((c) => c.startsWith("INCRBY nl:allow:api:")).length], [1, 1]);
+
   part("A course whose stored value does not read is unavailable, never 'not a course'");
   const otherId = JSON.stringify({ ...JSON.parse(saved), id: "c_someoneelse01" });
   for (const [label, value] of [
@@ -54,12 +79,17 @@ async function main(): Promise<void> {
     ["a well-formed course under another id", otherId],
   ] as [string, string][]) {
     redis.run(["SET", courseKey, value]);
-    is(`${label}: 502 unavailable`, await ask(), [502, "unavailable"]);
+    const [answer, sent] = await logged(ask);
+    is(`${label}: 502 unavailable`, answer, [502, "unavailable"]);
+    is(`${label}: the same commands as a confirmed absence's 404`, sent, absentSent);
+    // Read whole, not only against the 404 (a read added before the outline would be in both): only the key, the team,
+    // the rate limit, the store, the request's own allowance once, and the outline last. No student page, no progress.
+    is(
+      `${label}: nothing but the request's own reads and the outline, last; one allowance taken`,
+      [sent.every((c) => ALLOWED.some((prefix) => c.split(" ")[1].startsWith(prefix))), sent.filter((c) => c.startsWith("INCRBY nl:allow:api:")).length, sent.at(-1)],
+      [true, 1, `GET ${courseKey}`],
+    );
   }
-
-  part("A course confirmed absent is still not a course");
-  redis.run(["DEL", courseKey]);
-  is("404 not_a_course", await ask(), [404, "not_a_course"]);
 
   done();
 }

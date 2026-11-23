@@ -1229,16 +1229,19 @@ export function marcasDaSessao(eu, sessao = sessaoAtual()) {
 /**
  * O comentário é da própria sessão de `eu`? É quando a primeira linha com texto (onde o revisor se nomeia) traz, no
  * rótulo de um "Claude N" da família de `eu` (o pedaço logo depois dele, ou o que está entre os parênteses logo depois
- * dele), um pedaço igual a uma marca do nome; ou quando o texto traz os 10 primeiros caracteres da sessão. Fora do
- * rótulo a palavra não conta: "merge of main" no cabeçalho de uma irmã não é do Claude 2 main, e "main" aparece em
- * "origin/main" no corpo de qualquer revisão (LEVE do Claude 5 icEJ no #5408 @51f5c361af).
+ * dele), um pedaço igual a uma marca do nome; ou quando essa mesma primeira linha traz os 10 primeiros caracteres da
+ * sessão. Fora do rótulo a palavra não conta: "merge of main" no cabeçalho de uma irmã não é do Claude 2 main, e "main"
+ * aparece em "origin/main" no corpo de qualquer revisão (LEVE do Claude 5 icEJ no #5408 @51f5c361af); o id no corpo
+ * também não, porque uma irmã o cita (LEVE do Claude 3 yaQt no #5408 @1139d5d034).
  */
 export function comentarioDaSessao(corpo, eu, sessao = sessaoAtual()) {
   const { palavras, id } = marcasDaSessao(eu, sessao);
-  if (id !== "" && String(corpo ?? "").includes(id)) return true;
+  const cabecalho = (String(corpo ?? "").split(/\r?\n/).find((l) => l.trim()) ?? "").replace(/[*`]/g, "");
+  // O id da sessão só conta na primeira linha, onde o revisor se nomeia; no corpo, uma irmã o cita ao conferir o achado
+  // ou a correção desta sessão (LEVE do Claude 3 yaQt no #5408 @1139d5d034).
+  if (id !== "" && cabecalho.includes(id)) return true;
   const m = /^\s*(claude|codex)(?:\s*(\d+))?/i.exec(String(eu ?? ""));
   if (!m || !palavras.length) return false;
-  const cabecalho = (String(corpo ?? "").split(/\r?\n/).find((l) => l.trim()) ?? "").replace(/[*`]/g, "");
   const nome = m[2] ? `${m[1]}\\s*${m[2]}` : m[1];
   const rotulos = [...cabecalho.matchAll(new RegExp(`(?:^|[^A-Za-z0-9])${nome}(?![0-9])(?:\\s*\\(([^)\\n]*)\\)|\\s+([^\\s:,()]+))?`, "gi"))]
     .flatMap((x) => pedacosDoNome(x[1] ?? x[2] ?? "")).map((t) => t.toLowerCase());

@@ -1357,6 +1357,13 @@ console.log("e0bc: complete-review knows its own verdict on the PR, also for a n
     mod.comentarioDaSessao("**Claude 1 (nuvem c1-revisoes-f, cse_01DKvYQbspYs) review #977 @abc: READY**", C1, null) === true);
   is("e0bc: 'Claude 6 review ... by Claude 6 UoHAG' names the session in its second label",
     mod.comentarioDaSessao("Claude 6 review #978 @abc: READY, by Claude 6 UoHAG", "Claude 6 UoHAG", null) === true);
+  // LEVE of Claude 3 yaQt on #5408 @1139d5d034: the session id counts only in the reviewer's own first line, never in
+  // a sister's body that cites this session (whose finding or fix it checks).
+  const S2 = { id: "session_01FR6Z1MtkLEMTRT4AviXXzK" };
+  is("e0bc: a sister's verdict that cites this session's id below its header is a sister's",
+    mod.comentarioDaSessao("Claude 2 lpgvy review #980 @abc1234567: READY, 0 findings\n\nFocal on the fix of the LEVE that Claude 2 main (session `01FR6Z1MtkLE`) raised in 7100000000.", "Claude 2 (main, 01FR6Z1)", S2) === false);
+  is("e0bc: the session's id in its own first line is still its own",
+    mod.comentarioDaSessao("Claude 2 review #981 @abc1234567: READY (session `01FR6Z1MtkLE`)\n\nbody", "Claude 2 (main, 01FR6Z1)", S2) === true);
   is("e0bc: a name word in a Claude 2 sibling's label only as part of a longer word is not the session's",
     mod.comentarioDaSessao("Claude 2 mainline review #979 @abc: READY", "Claude 2 (main, 01FR6Z1)", null) === false);
 }

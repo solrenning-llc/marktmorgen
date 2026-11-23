@@ -522,14 +522,16 @@ export const SHAPES = {
 
 /**
  * The commands a team host's calendar change or check takes beyond one integration unit (#5010 row 150 (b), Claude 6
- * z5v4's sweep): POST /api/store/host-calendar ics-add and check, measured whole through the route on a paying store at
- * their worst (the session read twice, the store, the two rate limits, the integration unit's take, the settings read,
- * the write fenced on the store (HOST_CONFIG_IF_STORE_LIVE, rows 54 to 56) or the reading kept and its lock, and the
- * page answered after it), each script billed as one plus every redis.call written in it: ics-add 22, check 21, against
- * the unit's 10 + TAKE_COMMANDS = 14 (tests/host-calendar-erasure-fence.test.ts fails above). Any integration unit may
- * be one of these requests, so every unit is priced with them, as the studio's keep is (coordinator 964c, e931).
+ * z5v4's sweep): every action of POST /api/store/host-calendar, measured whole through the route on a paying store at
+ * its worst (the session read twice, the store, the two rate limits, the integration unit's take, the settings read,
+ * the write fenced on the store (HOST_CONFIG_IF_STORE_LIVE, rows 54 to 56) or the reading kept and its lock, the Google
+ * connection where it is read, and the page answered after it), each script billed as one plus every redis.call
+ * written in it. With iCal: ics-add 22, check 21, ics-remove 20. With Google connected (Claude 2's LEVE on eb475eee2d):
+ * calendars 26, check 25, source 17, disconnect 17. The largest, 26, against the unit's 10 + TAKE_COMMANDS = 14
+ * (tests/host-calendar-erasure-fence.test.ts fails above). Any integration unit may be one of these requests, so every
+ * unit is priced with them, as the studio's keep is (coordinator 964c, e931).
  */
-export const HOST_CALENDAR_ROUTE_EXTRA_COMMANDS = 8;
+export const HOST_CALENDAR_ROUTE_EXTRA_COMMANDS = 12;
 
 /** How often a day the page that says the studio is paused is drawn at the most (app/studio/paused/page.tsx, SHOWN_PER_DAY). */
 export const PAUSED_PER_DAY = 20;

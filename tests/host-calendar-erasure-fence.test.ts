@@ -56,6 +56,8 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     await duringList();
     return answer({ items: [{ id: OWNER, summary: "Mine", primary: true, accessRole: "owner" }, { id: "team@group.calendar.google.com", summary: "Team", accessRole: "writer" }] });
   }
+  // Google's free/busy for a check with Google as the source (row 150 (b), Claude 2's LEVE on eb475eee2d): nothing busy.
+  if (url.pathname === "/google/calendar/v3/freeBusy") return answer({ calendars: { [OWNER]: { busy: [] }, "team@group.calendar.google.com": { busy: [] } } });
   throw new Error(`Unexpected external request in a synthetic test: ${url.href}`);
 }) as typeof fetch;
 
@@ -211,7 +213,7 @@ const billed = (command: (string | number)[]): number =>
 /** One integration unit as tests/plan-cost-registry.ts prices it, with the host calendar route's measured extra. */
 const UNIT = 10 + TAKE_COMMANDS + HOST_CALENDAR_ROUTE_EXTRA_COMMANDS;
 
-test("row 150 (b): ics-add and check, the whole route, measured against one integration unit", async () => {
+test("row 150 (b): every action of the route, iCal and Google, measured against one integration unit", async () => {
   await shopWithHost();
   // A paying store, the plan whose worst month the registry prices. Its period is not funded: a funded one also reserves
   // the paid resource window (lib/contract-resource-window.ts), which refuses while the commercial review is absent.
@@ -246,4 +248,24 @@ test("row 150 (b): ics-add and check, the whole route, measured against one inte
   console.log(`MEASURED ics-add=${add.commands} check=${check.commands} unit=${UNIT}`);
   assert.ok(add.commands > 0 && add.commands <= UNIT, `ics-add bills ${add.commands}, over one priced integration unit's ${UNIT}`);
   assert.ok(check.commands > 0 && check.commands <= UNIT, `check bills ${check.commands}, over one priced integration unit's ${UNIT}`);
+  // The Google paths (Claude 2's LEVE on eb475eee2d): with Google connected, choosing calendars reads Google's list and the
+  // connection, and a check with Google as the source reads the connection and free/busy; every other action too.
+  const remove = await measured({ action: "ics-remove" });
+  assert.equal(remove.status, 200);
+  await connectGoogle(shop);
+  const google: [string, Record<string, unknown>][] = [
+    ["source google", { action: "source", source: "google" }],
+    ["calendars", { action: "calendars", read: ["team@group.calendar.google.com"], write: "team@group.calendar.google.com" }],
+    ["check (Google)", { action: "check" }],
+    ["source none", { action: "source", source: "none" }],
+    ["disconnect", { action: "disconnect" }],
+  ];
+  for (const [words, body] of google) {
+    const run = await measured(body);
+    console.log(`MEASURED ${words}=${run.commands} unit=${UNIT}`);
+    assert.equal(run.status, 200, `${words} answered ${run.status}`);
+    assert.ok(run.commands > 0 && run.commands <= UNIT, `${words} bills ${run.commands}, over one priced integration unit's ${UNIT}`);
+  }
+  console.log(`MEASURED ics-remove=${remove.commands} unit=${UNIT}`);
+  assert.ok(remove.commands > 0 && remove.commands <= UNIT, `ics-remove bills ${remove.commands}, over one priced integration unit's ${UNIT}`);
 });

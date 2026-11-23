@@ -5,7 +5,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
 import { hostSyncOn } from "@/lib/meet-providers";
 import { hostSync } from "@/lib/host-calendar";
-import { possibleHosts, readTeams, teamOrder, writeTeam } from "@/lib/team-booking";
+import { TeamWriteUnavailableError, possibleHosts, readTeams, teamOrder, writeTeam } from "@/lib/team-booking";
 import { type TeamSetup, parseTeamSetup, readTeamSetup, teamLimitsFor } from "@/lib/team-scheduling-rules";
 import type { Store } from "@/lib/store";
 
@@ -101,6 +101,7 @@ export async function POST(request: NextRequest) {
     await writeTeam(store, id, team);
     return Response.json({ ok: true, ...(await teamView(store, id)) });
   } catch (error) {
+    if (error instanceof TeamWriteUnavailableError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     console.error("saving a call's team failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

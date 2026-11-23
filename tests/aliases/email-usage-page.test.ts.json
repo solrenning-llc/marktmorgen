@@ -25,6 +25,8 @@
   "@/lib/redis": "email-usage-page-world.tsx",
   "@/lib/mail-health": "email-usage-page-world.tsx",
   "@/lib/mail-health-levels": "email-usage-page-world.tsx",
+  "@/lib/list-health-read": "email-usage-page-world.tsx",
+  "@/components/list-health-table": "email-usage-page-world.tsx",
   "@/lib/plan": "email-usage-page-world.tsx",
   "@/components/email-studio": "email-usage-page-world.tsx",
   "@/lib/email-equivalence": "email-usage-page-world.tsx",

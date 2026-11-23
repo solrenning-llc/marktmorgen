@@ -72,8 +72,12 @@ export const COPY_MIN_UNITS = 4;
 export const COPY_COMMANDS = {
   /** A step's own: its lock taken and let go, the progress record read and written, the data room for it, and its studio requests taken. */
   step: 16,
-  /** A product: its two records, its long description (read, room, write) and its page (read, room, three reads, write, sections). */
-  product: 14,
+  /**
+   * A product: its two records, its long description (read, room, and its write fenced by the store's erasure: an EVAL
+   * with HGET, EXISTS and SET inside, lib/product-about-live.ts ABOUT_FENCE_EXTRA_COMMANDS more than a plain SET) and its
+   * page (read, room, three reads, write, sections).
+   */
+  product: 17,
   /** The products' one write: the store's lock, record, head and data room. */
   productWrite: 12,
   /** A form: its capacity check and its write. */

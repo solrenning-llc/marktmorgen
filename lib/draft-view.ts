@@ -1,14 +1,17 @@
 import { emailForSession } from "@/lib/auth";
 import type { Store } from "@/lib/store";
 import { roleIn, teamTwoStepBlocks } from "@/lib/team";
+import { can } from "@/lib/team-roles";
 
 /**
  * Whether the person whose session this is may see a store's drafts
  * (lib/catalog.ts, `hidden`) at a public address: the store's owner, or
- * someone on its team, signed in, as the studio would let them into this
- * store (lib/studio-route.ts, resolveAccess with the store pinned: their
- * role in it, and the team's two-step rule read from this session). The
- * store already read is the one asked about, so it is not read again.
+ * someone on its team whose role may work on products (admin, editor), signed
+ * in, as the studio would let them into this store's products (lib/studio-route.ts,
+ * resolveAccess with the store pinned and "products": their role in it, and
+ * the team's two-step rule read from this session). A support member, who has
+ * no products screen, is told what a stranger is (#3964). The store already
+ * read is the one asked about, so it is not read again.
  *
  * A draft is left off the store, its own page and its checkout, so its
  * title, price, outline, preview lessons and sample certificate are never
@@ -24,7 +27,7 @@ export async function seesDrafts(store: Store, session: string | undefined): Pro
     const email = await emailForSession(session);
     if (!email) return false;
     const role = await roleIn(store, email);
-    if (!role) return false;
+    if (!role || !can(role, "products")) return false;
     return !(await teamTwoStepBlocks(store, email, role, session));
   } catch (error) {
     console.error("reading who may see a draft failed", error);

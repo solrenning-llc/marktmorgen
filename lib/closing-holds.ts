@@ -331,7 +331,9 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
   // Its paid period read before any write too: an invoice whose money does not read throws here (membershipLineOf),
   // so nothing is voided, kept or held on it, and the member is tried again the next day (f:).
   const email = memberEmail(sub);
-  const period = plan ? null : (paid.map((invoice) => paidPeriodOf(invoice, email)).find((p): p is PaidPeriod => p !== null) ?? null);
+  let period: PaidPeriod | null = null;
+  // Newest first, stopping at the first paid period: an older invoice is never read once a newer one answered.
+  if (!plan) for (const invoice of paid) if ((period = paidPeriodOf(invoice, email))) break;
   // A void each; a draft kept now and let go again on a release.
   if (!(await takeCalls(folder, open.length + 2 * drafts.length))) return "over";
   for (const invoice of open) {

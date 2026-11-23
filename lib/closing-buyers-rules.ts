@@ -258,9 +258,17 @@ export function membershipLineOf(invoice: { lines?: { data?: InvoiceLine[] } | n
   const own = lines.find((line) => {
     const proration = line.proration === true || line.parent?.subscription_item_details?.proration === true;
     const subscription = line.type === "subscription" || line.parent?.type === "subscription_item_details";
-    return subscription && !proration && typeof line.amount === "number" && line.amount > 0 && typeof line.period?.end === "number";
+    return subscription && !proration;
   });
   if (!own) return null;
+  // The own line is picked by what it is, never by whether its figures read (Codex/coordinator 7405): a line whose
+  // amount or period is text, NaN, past a safe integer or missing, or whose end is not after its start, is a membership
+  // that could not be read, so it throws (the member is tried again, f:) and an older invoice's period is never taken
+  // for it. A read amount at or below zero is no paid membership: null.
+  if (!Number.isSafeInteger(own.amount)) throw new Error("a paid invoice's membership amount could not be read");
+  const ps = own.period?.start, pe = own.period?.end;
+  if (!Number.isSafeInteger(ps) || !Number.isSafeInteger(pe) || (pe as number) <= (ps as number)) throw new Error("a paid invoice's membership period could not be read");
+  if ((own.amount as number) <= 0) return null;
   // Every line's money is read as whole smallest units (rule 24): an amount or a discount that is text, a fraction,
   // past a safe integer, or a negative discount, is money that could not be read, never zero, so the share is not
   // made up; it throws, and the closing tries the member again (lib/closing-holds.ts, f:). The same for what the
@@ -278,9 +286,8 @@ export function membershipLineOf(invoice: { lines?: { data?: InvoiceLine[] } | n
   const paid = invoice.amount_paid;
   if (!Number.isSafeInteger(paid) || (paid as number) < 0) throw new Error("what a paid invoice took could not be read");
   const amt = Math.round(nets > 0 && (paid as number) > 0 ? (net(own) * (paid as number)) / nets : net(own));
-  const ps = Number(own.period?.start), pe = Number(own.period?.end);
-  if (!(amt > 0) || !Number.isFinite(ps) || !(pe > ps)) return null;
-  return { amt, ps, pe };
+  if (!(amt > 0)) return null;
+  return { amt, ps: ps as number, pe: pe as number };
 }
 
 /** Totals by currency, for a creator to read. */

@@ -8,6 +8,7 @@ import { POST } from "@/app/api/store/pipeline-access/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { putMember, readTeam, removeMember } from "@/lib/team";
+import { dataKey } from "@/lib/store-data";
 import { store as redis, advance } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -69,6 +70,9 @@ async function main(): Promise<void> {
       }
       return real(commands);
     }) as typeof redis.pipeline;
+    // The access slot of the store's data room (lib/pipeline-access.ts ACCESS_SLOT) before the request.
+    const slot = async () => Number((await real([["HGET", dataKey(store)!, "crm:pacc"]]))[0] ?? 0);
+    const slotBefore = await slot();
     let answer: Awaited<ReturnType<typeof post>>;
     try { answer = await post(); }
     finally { redis.pipeline = real; }
@@ -78,6 +82,8 @@ async function main(): Promise<void> {
     is("the stale request never reports success", [answer.status, answer.body.ok, answer.body.error], [503, false, "unavailable"]);
     is("an earlier release never deletes a successor's team lease", (await real([["GET", lock]]))[0],
       replacement ? "successor-team-lease" : null);
+    // Claude 3's LEVE on #5111: the lease lost means nothing was written, for certain, so the room the write took back.
+    is("the data room taken for the field that was never written is given back", await slot(), slotBefore);
   }
 }
 

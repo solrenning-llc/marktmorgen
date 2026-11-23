@@ -116,6 +116,12 @@ export function gitC(args, input) {
         if (/^[0-9a-f]{40}$/.test(velha)) writeFileSync(ARQUIVO_ANCORA(), `${velha}\n`);
       } catch { /* o clone não tem marca antiga */ }
     }
+    // A manutenção automática do git (gc e maintenance, disparadas por cada fetch) roda em primeiro plano neste repositório:
+    // destacada, ela apagava as pastas vazias de objects/ no meio da escrita seguinte, e o write-tree ou o commit-tree caía
+    // com "unable to create temporary file" (teste "a race that never ends" no CI, 22/11/2026).
+    for (const chave of ["gc.autoDetach", "maintenance.autoDetach"]) {
+      try { execFileSync("git", ["--git-dir", DIR_CORREIO, "config", chave, "false"], { stdio: ["ignore", "pipe", "pipe"] }); } catch { /* segue; a nova tentativa abaixo cobre */ }
+    }
     dirPronto = true;
   }
   return git(args, input, GIT_PRAZO_MS, DIR_CORREIO);
@@ -261,6 +267,8 @@ export function definirEscritor(nome) { ESCRITOR = nome && nome !== true ? Strin
 export const ENVIO_TENTATIVAS = 30;
 export const ENVIO_FALHAS_OUTRAS = 6;
 export const ENVIO_PRAZO_MS = 150000;
+/** Uma falha passageira ao gravar um objeto (a manutenção do git de outro processo apagou a pasta no meio): tenta de novo. */
+export const falhaPassageira = (erro) => /unable to create temporary file|unable to write (?:loose )?object|insufficient permission for adding an object/i.test(String(erro?.stderr ?? erro?.message ?? erro));
 /** Um envio recusado porque o ramo andou no meio (outro agente gravou antes), e não por outro motivo. */
 export const perdeuCorrida = (erro) => /\(fetch first\)|non-fast-forward|failed to update ref|cannot lock ref|incorrect old value|but expected/i.test(String(erro?.stderr ?? erro?.message ?? erro));
 const esperar = (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, Math.round(ms))); };
@@ -274,7 +282,16 @@ function acrescentar(novos, mensagem) {
   const blobs = Object.entries(novos).map(([caminho, texto]) => {
     // A sessão de quem escreve vai no fim de cada mensagem ou registro .md (os outros arquivos têm formato fixo).
     const gravado = caminho.endsWith(".md") ? `${String(texto).replace(/\n*$/, "\n")}Sessão: ${linhaSessao()}\n` : texto;
-    return [caminho, gitC(["hash-object", "-w", "--stdin"], gravado)];
+    // A gravação do blob também tenta de novo uma falha passageira, poucas vezes e com espera curta (LEVE do Claude 4
+    // 3Kc no #5147: ela fica fora do laço de tentativas abaixo).
+    for (let vez = 1; ; vez += 1) {
+      try {
+        return [caminho, gitC(["hash-object", "-w", "--stdin"], gravado)];
+      } catch (erro) {
+        if (!falhaPassageira(erro) || vez >= ENVIO_FALHAS_OUTRAS) throw erro;
+        esperar(200 + Math.random() * 800);
+      }
+    }
   });
   const inicio = Date.now();
   let corridas = 0, outras = 0;
@@ -302,6 +319,15 @@ function acrescentar(novos, mensagem) {
       // Mail-From: o nome de quem escreve, para o último sinal de cada família (dono, OWNER-20261122-0121-MAIL-AVAILABILITY).
       const de = ESCRITOR ? `\nMail-From: ${String(ESCRITOR).replace(/\s+/g, " ").trim()}` : "";
       commit = gitC(["commit-tree", arvore, ...(base ? ["-p", base] : []), "-m", `${mensagem}\n\nMail-Session: ${linhaSessao()}${de}`]);
+    } catch (erro) {
+      // A montagem que cai por uma falha passageira do git conta como "outro erro" e é tentada de novo; as outras sobem.
+      if (!falhaPassageira(erro)) throw erro;
+      outras += 1;
+      if (outras >= ENVIO_FALHAS_OUTRAS || Date.now() - inicio > ENVIO_PRAZO_MS) {
+        throw new Error(`envio falhou depois de ${corridas + outras} tentativas (${corridas} por o correio ter andado no meio, ${outras} por outro erro) em ${Math.round((Date.now() - inicio) / 1000)} s: ${String(erro?.message ?? erro).slice(0, 300)}`);
+      }
+      esperar(200 + Math.random() * 800);
+      continue;
     } finally {
       try { execFileSync("rm", ["-f", indice]); } catch { /* sem índice */ }
     }
@@ -809,7 +835,9 @@ export const CHAVES = ["record-review", "ready-check", "on-call"];
 //  1. só a sessão nomeada (Claude 5 ibqho) age; a reserva (Claude 1 A) só em três casos: 60 minutos sem sinal da
 //     nomeada no correio, a família Claude 5 declarada sem cota, ou mensagem do dono (--owner-message, gravada);
 //  3. nunca num PR que a sessão escreveu (trailer Claude-Session nos commits), revisou ou enfileirou (no correio);
-//  4. só com o pedido do coordenador publicado na #4932, conferido na hora pelo gh (--request): um comentário com a linha
+//  4. só com o pedido do coordenador publicado no canal de coordenação em vigor (a issue aberta com o rótulo canal-ativo,
+//     AC (y); em 22/11/2026, a #5104 assumiu da #4932) ou na parte que ele continua, conferido na hora pelo gh (--request):
+//     um comentário com a linha
 //     "AGENT-MAIL-REQUEST <identificador C1-...> <comando> <alvo>", de no máximo PEDIDO_MAX_H horas, usado uma vez só
 //     (revisão do Claude 4 3Kc no #5052); a ação é avisada a todos no mesmo commit, com o pedido. Desligar continua livre.
 // O sinal da sessão nomeada é lido do histórico local do correio; num clone raso que não cobre os 60 minutos, a falta de
@@ -821,12 +849,33 @@ export const CHAVES = ["record-review", "ready-check", "on-call"];
 // ---------------------------------------------------------------------------------------------------------------------
 export const SESSAO_NOMEADA = "session_012ST5ibqhoHCYrphJXU5az3"; // Claude 5 ibqho
 export const SESSAO_RESERVA = "session_01DKvYQaxPrZTrVdXNwosXYi"; // Claude 1 A
-export const CANAL_PEDIDOS = 4932;
+export const CANAL_PEDIDOS = 4932; // a parte do canal em que a regra nasceu; o canal em vigor é lido em canaisDePedido()
 export const SINAL_MIN = 60;
 export const PEDIDO_MAX_H = 2;
 export const PREFIXO_COORDENADOR = "C1"; // o coordenador é o Claude 1 (C1-20261121-2036-C6-1, condição 5)
-const LINK_PEDIDO = /^(?:https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/4932#issuecomment-)?(\d+)$/;
-const LINHA_PEDIDO = /^Pedido: https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/4932#issuecomment-\d+$/m;
+const LINK_PEDIDO = /^(?:https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/(\d+)#issuecomment-)?(\d+)$/;
+const LINHA_PEDIDO = /^Pedido: https:\/\/github\.com\/solrenning-llc\/marktmorgen\/issues\/\d+#issuecomment-\d+$/m;
+
+/**
+ * As issues em que um pedido do coordenador vale agora: a única issue aberta com o rótulo canal-ativo (AC (y)) e a parte
+ * que ela continua ("continues #N" no título), lidas na hora no GitHub. O canal troca de parte aos 2.250 comentários
+ * (AC (p)): em 22/11/2026 a #5104 assumiu da #4932, e um pedido escrito nela era recusado. null = NÃO CONFERIDO (o gh
+ * não respondeu, nenhuma ou mais de uma issue com o rótulo): quem chama não faz nada (passo 4).
+ */
+export function canaisDePedido() {
+  try {
+    if (testeLigado("CORREIO_SEM_GH")) throw new Error("sem gh");
+    const saida = execFileSync("gh", ["api", "repos/solrenning-llc/marktmorgen/issues?labels=canal-ativo&state=open&per_page=100", "--jq", ".[] | [.number, (.title // \"\")] | @json"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
+    const abertas = saida.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+    if (abertas.length !== 1 || !Number.isInteger(abertas[0][0])) return null;
+    const [ativo, titulo] = abertas[0];
+    const anterior = Number(/\(continues #(\d+)\)/i.exec(String(titulo))?.[1]);
+    return { ativo, anterior: Number.isInteger(anterior) && anterior !== ativo ? anterior : null };
+  } catch {
+    return null;
+  }
+}
 const sessaoInteira = (s) => String(s?.texto ?? "").split(" ")[0];
 
 /** Um registro privilegiado só vale com a sessão nomeada ou a reserva, o nome da família dela e a linha do pedido. */
@@ -853,13 +902,19 @@ export function ultimoSinal(sessao, commit = buscar(), agora = new Date()) {
 }
 
 /**
- * Confere no GitHub, agora, que o pedido é um comentário da #4932, de no máximo PEDIDO_MAX_H horas, com a linha
+ * Confere no GitHub, agora, que o pedido é um comentário do canal em vigor ou da parte que ele continua (canaisDePedido),
+ * de no máximo PEDIDO_MAX_H horas, com a linha
  * "AGENT-MAIL-REQUEST <identificador do coordenador> <comando> <alvo>", ainda não usado; devolve o endereço e o identificador.
  */
 export function conferirPedido(pedido, comando, alvo, commit = buscar(), agora = new Date()) {
-  const m = LINK_PEDIDO.exec(String(pedido === true ? "" : pedido ?? "").trim());
-  if (!m) throw new Error(`--request é obrigatório: o comentário do coordenador na #${CANAL_PEDIDOS} que pede esta ação (https://github.com/solrenning-llc/marktmorgen/issues/${CANAL_PEDIDOS}#issuecomment-N), C1-20261121-2036-C6-1, condição 4`);
-  const esperado = `https://github.com/solrenning-llc/marktmorgen/issues/${CANAL_PEDIDOS}#issuecomment-${m[1]}`;
+  const lido = LINK_PEDIDO.exec(String(pedido === true ? "" : pedido ?? "").trim());
+  if (!lido) throw new Error("--request é obrigatório: o comentário do coordenador no canal em vigor (a issue com o rótulo canal-ativo) que pede esta ação (https://github.com/solrenning-llc/marktmorgen/issues/<canal>#issuecomment-N), C1-20261121-2036-C6-1, condição 4");
+  const m = [lido[0], lido[2]];
+  const canais = canaisDePedido();
+  if (!canais) throw new Error(`o canal em vigor (a issue aberta com o rótulo canal-ativo) NÃO FOI CONFERIDO no GitHub agora; o pedido ${m[1]} não foi usado e nada foi feito (passo 4)`);
+  const validos = [canais.ativo, canais.anterior].filter(Boolean);
+  const nomeCanais = `#${canais.ativo}${canais.anterior ? ` ou da #${canais.anterior}, a parte que ele continua` : ""}`;
+  if (lido[1] && !validos.includes(Number(lido[1]))) throw new Error(`o comentário ${m[1]} não é do canal em vigor (${nomeCanais}): #${lido[1]}`);
   let url, corpo, criado;
   try {
     if (testeLigado("CORREIO_SEM_GH")) throw new Error("sem gh");
@@ -868,7 +923,8 @@ export function conferirPedido(pedido, comando, alvo, commit = buscar(), agora =
   } catch {
     throw new Error(`o pedido ${m[1]} NÃO FOI CONFERIDO no GitHub agora; nada foi feito (passo 4: nada NÃO CONFERIDO segue)`);
   }
-  if (url !== esperado) throw new Error(`o comentário ${m[1]} não é da #${CANAL_PEDIDOS}: ${url}`);
+  const esperado = validos.map((n) => `https://github.com/solrenning-llc/marktmorgen/issues/${n}#issuecomment-${m[1]}`).find((u) => u === url);
+  if (!esperado) throw new Error(`o comentário ${m[1]} não é do canal em vigor (${nomeCanais}): ${url}`);
   const quando = new Date(criado);
   if (Number.isNaN(quando.getTime()) || agora - quando > PEDIDO_MAX_H * 3600000 || quando - agora > 5 * 60000) {
     throw new Error(`o comentário ${m[1]} não é um pedido recente (de no máximo ${PEDIDO_MAX_H} horas): ${criado || "sem data"}`);
@@ -1213,7 +1269,7 @@ function revisaoParaMim(p, eu, agora, c) {
  */
 export function pegar({ tipo, eu, agora = new Date() }) {
   const lista = pedidos(tipo, agora);
-  let alvo;
+  let alvo, excecao4acb = false;
   if (tipo === "fila") {
     if (lista.some((p) => p.estado === "tomado")) {
       const t = lista.find((p) => p.estado === "tomado");
@@ -1223,14 +1279,26 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     if (alvo && alvo.familia === familia(eu)) return { espera: `o primeiro da fila, #${alvo.pr}, é da sua família; outra família o enfileira` };
     // Quem devolveu o primeiro da fila, ou foi excluído no pedido, não o pega de volta; ele continua primeiro (achado do Claude 4 3rC).
     if (alvo && (alvo.devolveram.has(familia(eu)) || campo(alvo.texto, "Exclui").split(", ").includes(familia(eu)) || revisoresDoHead(alvo.pr, alvo.sha).has(familia(eu)))) return { espera: `o primeiro da fila, #${alvo.pr}, foi devolvido ou excluído para a sua família; outra família o enfileira` };
-    // Commits no PR não impedem enfileirar: a FQ (1) exclui só a família do autor e quem revisou o head; a regra de não ter
-    // commits é da revisão (CO (e)). Correção do coordenador, 21/11/2026, 19h41 UTC (antes, achado do Claude 4 3rC).
+    // Família com commit no PR não enfileira nem recusa o pedido de fila dele, como na revisão (CO (e)): decisão do
+    // coordenador 605b, confirmada em 22/11/2026 08:13 UTC (49de) e na ordem de custo v3 (7ea5), que substitui a correção
+    // de 21/11/2026 19h41 UTC. Exceção estreita 4acb: quando todas as famílias de fora do autor têm commit no PR ou
+    // revisaram o head, uma família com commit que não seja a do autor nem revisora pode enfileirar, só na vez de custo do
+    // PR, conferindo tudo e escrevendo no PR que enfileira pela exceção.
     // HOLD de qualquer um, ou CLAIMED de outra família, segura o primeiro da fila; os mais novos esperam atrás dele.
     // ce2d: quem deu veredito neste head só no PR também não o enfileira; sem ler o PR, ele não é entregue.
     if (alvo) {
       const noPr = revisoresNoPr(alvo.pr, alvo.sha);
       if (noPr === null) return { espera: `as revisões escritas no #${alvo.pr} não puderam ser conferidas agora (NÃO CONFERIDO); a fila espera; tente de novo` };
       if (noPr.has(familia(eu))) return { espera: `o primeiro da fila, #${alvo.pr}, tem veredito da sua família neste head no PR; outra família o enfileira (FQ (1), ce2d)` };
+      const cm = commitsDoPr(alvo.pr, campoCabecalho(alvo.texto, "Ramo") || null);
+      if (!cm) return { espera: `os commits do #${alvo.pr} não puderam ser lidos agora (NÃO CONFERIDO); a fila espera; tente de novo` };
+      if (cm.familias.has(familia(eu))) {
+        const fora = new Set([alvo.familia, ...cm.familias, ...revisoresDoHead(alvo.pr, alvo.sha), ...noPr, ...alvo.devolveram,
+          ...campo(alvo.texto, "Exclui").split(", ").filter(Boolean)]);
+        const outras = FAMILIAS.filter((f) => !fora.has(f));
+        if (outras.length) return { espera: `o primeiro da fila, #${alvo.pr}, tem commits da sua família; família com commit no PR não enfileira nem recusa o pedido dele (coordenador, 605b e 49de); podem: ${outras.join(", ")}` };
+        excecao4acb = true;
+      }
     }
     const marca = alvo ? estadoPr(alvo.pr, agora) : null;
     if (marca?.ativo && (marca.acao === "HOLD" || familia(marca.por) !== familia(eu))) {
@@ -1327,7 +1395,7 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     }
     if (!cf) naoConferido.push("o conflito com o main e com a fila de integração");
     const feito = [atual && !diferente && fonte !== "ref" ? `head ${atual.slice(0, 10)} igual ao do pedido (${fonte === "ramo" ? `pelo ramo ${ramoPedido}` : "pela referência"})` : null, cf ? `sem conflito com o main e com os ${cf.grupos} grupo(s) da fila de integração` : null].filter(Boolean);
-    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta não confere as 9 verificações, as revisões, os achados, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1))` };
+    return { pedido: alvo, aviso: `${excecao4acb ? `EXCEÇÃO 4acb do coordenador: sua família tem commits no #${alvo.pr}, mas todas as famílias de fora do autor têm commit nele ou revisaram este head. Enfileire só se for a vez de custo dele, conferindo FQ (1), AC (l) e AC (s), e escreva no próprio PR que enfileira pela exceção 4acb; senão, devolva com release-take. ` : ""}${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta não confere as 9 verificações, as revisões, os achados, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1))` };
   }
   return { pedido: alvo };
 }
@@ -2091,12 +2159,17 @@ async function main(argv) {
       if (!commits) console.log("ATENÇÃO: não consegui ler os commits do PR; diga com --exclude as famílias que têm commits nele.");
       else {
         // Na fila, quem revisou este head pelo correio também fica de fora (o pedido já o grava em Exclui).
-        const fora = new Set([...(tipo === "revisao" ? commits.familias : [...revisoresDoHead(o.pr, o.sha)]), familia(o.de),
-          ...String(o.exclui === true ? "" : o.exclui ?? "").split(",").map((n) => n.trim()).filter(Boolean).map(familia)]);
-        console.log(tipo === "revisao" ? `famílias com commits no PR (ficam de fora): ${[...commits.familias].sort().join(", ") || "nenhuma além do autor"}`
-          : `famílias com commits no PR (podem enfileirar, FQ (1)): ${[...commits.familias].sort().join(", ") || "nenhuma além do autor"}`);
+        // Na fila, as famílias com commit também ficam de fora (coordenador, 605b e 49de), salvo a exceção 4acb.
+        const excluidas = String(o.exclui === true ? "" : o.exclui ?? "").split(",").map((n) => n.trim()).filter(Boolean).map(familia);
+        const revisoresFila = tipo === "fila" ? [...revisoresDoHead(o.pr, o.sha)] : [];
+        const fora = new Set([...commits.familias, ...revisoresFila, familia(o.de), ...excluidas]);
+        console.log(`famílias com commits no PR (ficam de fora${tipo === "fila" ? ", coordenador 605b e 49de" : ""}): ${[...commits.familias].sort().join(", ") || "nenhuma além do autor"}`);
         const podem = [...FAMILIAS].filter((f) => !fora.has(f));
-        console.log(`${tipo === "fila" ? "podem enfileirar (sem o autor, quem revisou este head pelo correio e os excluídos; confira revisões feitas fora do correio)" : "podem revisar"}: ${podem.join(", ") || "NENHUMA família; peça ao coordenador"}`);
+        console.log(`${tipo === "fila" ? "podem enfileirar (sem o autor, as famílias com commits, quem revisou este head pelo correio e os excluídos; confira revisões feitas fora do correio)" : "podem revisar"}: ${podem.join(", ") || "NENHUMA família; peça ao coordenador"}`);
+        if (tipo === "fila" && !podem.length) {
+          const excecao = [...commits.familias].filter((f) => f !== familia(o.de) && !revisoresFila.includes(f) && !excluidas.includes(f)).sort();
+          console.log(`exceção 4acb do coordenador (só na vez de custo, com nota no PR): ${excecao.join(", ") || "nenhuma família; peça ao coordenador"}`);
+        }
         if (commits.desconhecidas.size) console.log(`sem família conhecida (confira à mão e use --exclude): ${[...commits.desconhecidas].join(", ")}`);
       }
     }

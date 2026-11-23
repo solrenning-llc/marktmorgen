@@ -2873,8 +2873,11 @@ export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ cs
     const details = (row.customer_details ?? {}) as { email?: unknown; name?: unknown; address?: { country?: unknown } | null };
     const totals = (row.total_details ?? {}) as { amount_discount?: unknown; amount_tax?: unknown };
     const text = (v: unknown) => (typeof v === "string" ? v : "");
-    // An amount Stripe's record does not give as whole cents is left blank, never written as 0.00 (601 [KB22] U4).
-    const amount = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) ? plainAmount(v, sale.currency) : "");
+    // An amount Stripe's record does not give as whole cents is left blank, never written as 0.00 (601 [KB22] U4). A
+    // sale whose currency Stripe does not name ("", CX-123 rule 24) has every amount blank too: its decimals are not
+    // known, so any figure would be a guess (#5285 row #3074).
+    const known = sale.currency !== "";
+    const amount = (v: unknown) => (known && typeof v === "number" && Number.isSafeInteger(v) ? plainAmount(v, sale.currency) : "");
     const product = await find(sale.product);
     const option = product?.options.find((o) => o.id === meta.option)?.label ?? meta.option ?? "";
     const kind = sale.upsell
@@ -2897,10 +2900,10 @@ export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ cs
         option,
         (await Promise.all(bumpsFromMeta(meta).map((added) => title(added.id, "")))).filter(Boolean).join(" + "),
         kind,
-        plainAmount(sale.cents, sale.currency),
+        amount(sale.cents),
         // A one-click extra is a bare payment: no coupon and no tax calculation (lib/upsell.ts), so both are a known zero.
-        sale.upsell ? plainAmount(0, sale.currency) : amount(totals.amount_discount),
-        sale.upsell ? plainAmount(0, sale.currency) : amount(totals.amount_tax),
+        sale.upsell ? amount(0) : amount(totals.amount_discount),
+        sale.upsell ? amount(0) : amount(totals.amount_tax),
         sale.currency.toUpperCase(),
         text(details.email) || text(row.customer_email) || text(row.receipt_email),
         text(details.name),

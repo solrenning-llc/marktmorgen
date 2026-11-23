@@ -535,6 +535,15 @@ export const CART_NOTE_COMMANDS = 2;
  */
 export const RECOVERY_ADMIT_EXTRA_COMMANDS = 5;
 /**
+ * What three API writes send beyond the one unit they take (UNIT_COST.api, 20 commands and TAKE_COMMANDS), at the
+ * most, as Upstash bills them (#5010 row 150, sweep 2f36; coordinator cca1): POST /api/v1/hooks (the webhook
+ * settings' compare-and-set script, the endpoint read back), DELETE /api/v1/hooks (the endpoints read, then removed)
+ * and DELETE /api/v1/access (the gift read, taken back). They keep taking one unit, as the terms, the pricing page and
+ * the developers' page say; this extra is priced on every API request of each plan ("api-hook-access-writes"),
+ * measured through the real routes in tests/api-hook-access-writes-cost.test.ts.
+ */
+export const API_HOOK_ACCESS_EXTRA_COMMANDS = 8;
+/**
  * What reading back one delivery line adds at the most (lib/webhooks.ts, writeLines and countNotKept; Claude 7 on
  * #3446, 6889869993): a SET answered in a shape it cannot read, or a call that failed, is followed by one GET of the
  * line, at most DELIVERY_WRITE_MAX_BYTES, and a message not kept whose line is not there gives its day's count back
@@ -3228,6 +3237,17 @@ export const COST_LINES: CostLine[] = [
     basis: "In addition to the existing studio request, every studio unit funds six internal commands (EXISTS and HEXISTS on each of three compare-and-swap attempts) and 4096 wire bytes. No extra round trip. The trial uses the same per-unit surcharge in nonPayingWorst; free-share carries its share. Prices and visible allowances do not change.",
   },
   {
+    id: "api-hook-access-writes",
+    feature: "Adding and removing a webhook endpoint and taking back a product through the API, beyond the one API request each takes (#5010 row 150)",
+    // Every API request of the month as the dearest of the three (the most it can be).
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].api * API_HOOK_ACCESS_EXTRA_COMMANDS * COMMAND,
+    sources: [
+      { file: "app/api/v1/hooks/route.ts", names: ["addEndpoint(writer.store", "removeEndpoint(writer.store, id, false)", "webhooksView(writer.store, { log: false })"] },
+      { file: "app/api/v1/access/route.ts", names: ["takeAccess(writer.store, body)"] },
+    ],
+    basis: "Each of the three takes one unit of the store's API figure, as every API request does, and sends more commands than the unit's 20 and TAKE_COMMANDS: the webhook settings are written by a compare-and-set script and read back, and a gift is read before it is taken back, each script billed as Upstash bills it (one, and every redis.call written in it). The excess of the dearest, API_HOOK_ACCESS_EXTRA_COMMANDS, measured through the real routes at their dearest (the last of MAX_ENDPOINTS endpoints added, one removed from a full list, a gift taken back) in tests/api-hook-access-writes-cost.test.ts, is priced on every API request of the plan's month, the most it can be. Nothing the customer reads changes: the terms, the pricing page and the developers' page still say only a contact added or a product given counts as API_WRITE_UNITS.",
+  },
+  {
     id: "rest-api",
     feature: "The REST API: every request with one of the store's keys, a contact added or a product given as API_WRITE_UNITS of them (17 October 2026)",
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "api"),
@@ -3777,6 +3797,8 @@ export function nonPayingWorst(): number {
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
     // Each integration unit may be a vault open refused for storage, priced on top of its call (VAULT_REFUSED_PASS).
     + allowances.integration * VAULT_REFUSED_PASS
+    // Each API request may be one of the three API writes that send more than their unit (line api-hook-access-writes).
+    + allowances.api * API_HOOK_ACCESS_EXTRA_COMMANDS * COMMAND
     + campaignLandingFenceCost(allowances)
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS

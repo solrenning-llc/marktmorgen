@@ -142,6 +142,31 @@ async function main(): Promise<void> {
   is("and no price is kept", kept(), []);
   await endErasure(store);
 
+  // Claude 5 ibuF's LOW on #5157 @158d190139 (7088187266), closed under the owner's zero-open-finding rule: the fence
+  // can also answer "unknown" (the owner's record not readable, or any other reply). Then whether the store is still
+  // live is not known, so the price is not handed on either: no preview is asked and nothing reaches the member's
+  // subscription; the member is told to try again (reason "error"), never moved on a store that may be erasing.
+  part("yearlyPrice: the store's live check answers neither kept nor gone");
+  {
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (batch: (string | number)[][]) => {
+      if (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).includes("marktmorgen:store-cache-live")) return [-2];
+      return real(batch);
+    }) as typeof redis.pipeline;
+    duringPrice = async () => {};
+    const unknown = await yearlyPrice(store, added.product, 20000).then((id) => `returned ${id}`, (error: unknown) => ((error as Error)?.name === "YearlyStoreUnknownError" ? "unknown" : `threw: ${String(error)}`));
+    is("it never hands the price on when liveness is unknown", unknown, "unknown");
+    from = calls.length;
+    const previewUnknown = await previewYearly(store, token, "sub_Gone00000001");
+    is("the preview answers error (try again)", previewUnknown.ok ? "ok" : previewUnknown.reason, "error");
+    is("Stripe is asked for no invoice preview", touched(from), []);
+    from = calls.length;
+    is("the move answers error", await switchYearly(store, token, "sub_Gone00000001", Math.floor(Date.now() / 1000), TEST_CONSENT), { ok: false, reason: "error" });
+    is("nothing sent to the member's subscription", touched(from), []);
+    is("and no price is kept", kept(), []);
+    redis.pipeline = real;
+  }
+
   part("A live store still previews and moves");
   duringPrice = async () => {};
   const live = await previewYearly(store, token, "sub_Gone00000001");

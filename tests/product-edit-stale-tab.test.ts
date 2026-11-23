@@ -143,6 +143,12 @@ async function main(): Promise<void> {
   const keepsPrice = await saveClub({ ...member({ ...at20, title: "Sketching club" }, { yearly: { price: "200.00" } }), base: openedYear });
   is("a tab that leaves the price as it opened it still saves its title beside the yearly price", keepsPrice.ok, true);
 
+  part("A base that does not read is no base, for the check as for the save (Claude 5 iYzLs's LEVE on #5468)");
+  const unreadBase = { ...member({ ...at20, title: "Sketching club", price: "15" }, { yearly: { price: "200.00" } }), title: "" };
+  const noBase = await saveClub({ ...member({ ...at20, title: "Sketching club", price: "15" }, { yearly: { price: "200.00" } }), base: unreadBase });
+  is("an edit whose base has no title writes the typed $15, so its yearly price is checked against $15 and refused", [noBase.ok, noBase.error], [false, "yearly_price"]);
+  is("and nothing was saved: still $20 with its $200 yearly price", [(await readClub()).priceCents, (await readClub()).yearly?.cents ?? null], [2000, 20000]);
+
   done();
 }
 

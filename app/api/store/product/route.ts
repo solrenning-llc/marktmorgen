@@ -17,6 +17,7 @@ import {
   MAX_TITLE_LENGTH,
   StoreFullError,
   addProduct,
+  afterEdit,
   editProduct,
   filesOnProduct,
   moveProduct,
@@ -293,16 +294,17 @@ export async function POST(request: NextRequest) {
     }
     // Checked on every save, not only one that changed them (Claude 3 K9t's MEDIUM on #5468): a tab that lowers the
     // price under a saved introductory price, or under a saved yearly one, is refused as before, never saved with an
-    // offer that then silently stops. Each field is the one this save leaves, by editProduct's rule (lib/store.ts):
-    // one this tab sent exactly as it opened it keeps what is saved now.
-    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-    const typedCents = readMoney(price, store.currency) ?? 0;
+    // offer that then silently stops. Each field is the one this save leaves, by afterEdit (lib/store.ts), the very
+    // rule editProduct applies under the lock (Claude 5 iYzLs's LEVE on #5468). A typed title, price or suggested price
+    // that does not read is refused by editProduct; the check then reads the typed values as they are.
+    const left = action === "edit" && current ? afterEdit(current, { title, summary, price, recurring, suggested }, base, store.currency) : null;
+    const leftOk = left && typeof left !== "string" && left.pwywCents !== "bad" ? left : null;
     const after = {
       id: current?.id ?? "",
-      priceCents: base && current && readMoney(base.price, store.currency) === typedCents ? current.priceCents : typedCents,
-      recurring: base && current && same(recurring, base.recurring) ? (current.recurring ?? null) : recurring,
+      priceCents: leftOk ? leftOk.priceCents : (readMoney(price, store.currency) ?? 0),
+      recurring: leftOk ? leftOk.recurring : recurring,
       options: current?.options ?? [],
-      pwyw: base && current && suggested === base.suggested ? (current.pwyw ?? null) : suggested,
+      pwyw: leftOk ? (leftOk.pwywCents === null ? null : { suggestedCents: leftOk.pwywCents }) : suggested,
       intro: intro === undefined ? (current?.intro ?? null) : intro,
       yearly: yearly === undefined ? (current?.yearly ?? null) : yearly,
     };

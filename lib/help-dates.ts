@@ -85,7 +85,7 @@ export const HELP_DATES: Readonly<Record<string, HelpDates>> = {
   "how-do-i-choose-a-growth-goal-and-see-what-to-do-next": { created: "2026-11-12", updated: "2026-11-12", digest: "b55912ab0705" },
   "can-i-add-my-meta-google-tiktok-or-pinterest-pixel": { created: "2026-09-22", updated: "2026-10-18", digest: "3ef098ba033a" },
   "can-sales-be-sent-to-my-ad-platforms-from-the-server": { created: "2026-10-12", updated: "2026-10-12", digest: "b56a1a252060" },
-  "can-i-sell-a-course": { created: "2026-09-22", updated: "2026-11-01", digest: "69569bfc06c7" },
+  "can-i-sell-a-course": { created: "2026-09-22", updated: "2026-11-23", digest: "d59d7a8f9d80" },
   "i-bought-from-several-creators-here-is-there-one-place-with-all-of-it": { created: "2026-10-11", updated: "2026-10-11", digest: "98aedd72fd7e" },
   "can-my-store-have-pages-besides-its-products-like-an-about-page": { created: "2026-10-11", updated: "2026-10-11", digest: "6a8660aa2d9c" },
   "how-do-i-make-a-business-card-to-share": { created: "2026-11-12", updated: "2026-11-12", digest: "6a03141821b3" },

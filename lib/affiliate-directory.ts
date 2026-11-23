@@ -39,6 +39,12 @@
  *   nl:dir:build  the build mark (lib/directory-index.ts, DIRECTORY_BUILD):
  *                 one build at a time, and none for 10 minutes after one
  *                 that could not finish
+ *   nl:dir:builds the builds counted in the window's 10 minutes, at most
+ *                 DIRECTORY_BUILDS_PER_TEN_MINUTES (DIRECTORY_BUILDS)
+ *   nl:dir:last   the last good build's rows with the sid of each, kept
+ *                 LAST_KEEP_SECONDS and never dropped by a save: past the
+ *                 ceiling, a visit is shown them without every store no
+ *                 longer listed (DIRECTORY_LAST)
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -51,11 +57,11 @@ import { canSell } from "@/lib/store-checkout";
 import { isHouseStore } from "@/lib/house-store";
 import { imageUrl } from "@/lib/product-image";
 import { sellableOptions } from "@/lib/product-option";
-import { DIRECTORY_BUILD, DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index";
-import type { LanguageCode } from "@/lib/store-language";
+import { DIRECTORY_BUILD, DIRECTORY_BUILDS, DIRECTORY_CACHE, DIRECTORY_LAST, listedStores, numbersShown, stillListed, wouldList } from "@/lib/directory-index";
+import { isLanguage, type LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
 import { MIN_CLICKS_FOR_RATES } from "@/lib/affiliate-directory-rules";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
 export { MIN_CLICKS_FOR_RATES };
 
@@ -87,6 +93,35 @@ const BUILD_WAIT_MS = 250;
  * that row shows no numbers, never $0, until a build reads them.
  */
 const PARTIAL_KEEP_SECONDS = KEEP_SECONDS;
+
+/**
+ * The most builds of the directory in a window of BUILD_WINDOW_SECONDS, for the whole site (MR: a ceiling before
+ * every spend). #2921's mark lets one build run at a time, but a save of a listed program drops the kept page and the
+ * next visit builds at once, so without a count one creator saving in a loop built the whole directory once a save.
+ * Each build reserves its place (DIRECTORY_BUILDS, INCR) once it holds the mark and before it reads anything; past
+ * the ceiling, or with a count whose reply is unknown, nothing is built and the visit is shown the last good build,
+ * filtered (lastDirectory). 10 in ten minutes: at most 43,200 builds in 30 days, priced in tests/plan-cost-registry.ts
+ * (NOT_A_COST.DIRECTORY_BUILDS_PER_TEN_MINUTES).
+ */
+export const DIRECTORY_BUILDS_PER_TEN_MINUTES = 10;
+
+/** The window the builds are counted in: the kept page's own ten minutes, set once on a count that has no end. */
+const BUILD_WINDOW_SECONDS = 600;
+
+/**
+ * How long the last good build is kept (nl:dir:last): the kept page's ten minutes and one more window, so a visit
+ * past the ceiling has it whenever in the window the ceiling was reached. Older than that, the visit is told the
+ * list is unavailable rather than shown rows from longer ago.
+ */
+const LAST_KEEP_SECONDS = KEEP_SECONDS + BUILD_WINDOW_SECONDS;
+
+/** Past the window's ceiling with no last good build kept: the page says the list is unavailable just now. */
+export class DirectoryBusyError extends Error {
+  constructor() {
+    super("The affiliate directory was built as often as a window allows and no last build is kept: unavailable just now");
+    this.name = "DirectoryBusyError";
+  }
+}
 
 /**
  * The directory as the page shows it: the rows read, and how many listed
@@ -294,6 +329,48 @@ export function sortRows(rows: DirectoryRow[]): DirectoryRow[] {
   return [...rows].sort((a, b) => b.topRate - a.topRate || b.earning - a.earning || a.name.localeCompare(b.name, "en"));
 }
 
+const isRecord = (raw: unknown): raw is Record<string, unknown> => typeof raw === "object" && raw !== null && !Array.isArray(raw);
+const isWhole = (raw: unknown): raw is number => typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0;
+const isNonNegative = (raw: unknown): raw is number => typeof raw === "number" && Number.isFinite(raw) && raw >= 0;
+const isShare = (raw: unknown): raw is number => isNonNegative(raw) && raw <= 100;
+const isText = (raw: unknown): raw is string => typeof raw === "string";
+const INTERVALS: readonly unknown[] = ["day", "week", "month", "year"];
+
+function isDirectoryProduct(raw: unknown): raw is DirectoryProduct {
+  if (!isRecord(raw)) return false;
+  if (!isText(raw.id) || !isText(raw.title) || !isWhole(raw.priceCents) || !isShare(raw.rate) || !isWhole(raw.earnCents)) return false;
+  if (raw.image !== null && !isText(raw.image)) return false;
+  if (raw.months !== undefined && !isWhole(raw.months)) return false;
+  if (raw.interval !== undefined && !INTERVALS.includes(raw.interval)) return false;
+  if (raw.trialDays !== undefined && !isWhole(raw.trialDays)) return false;
+  if (raw.intro !== undefined && typeof raw.intro !== "boolean") return false;
+  return raw.paidInFull === undefined || typeof raw.paidInFull === "boolean";
+}
+
+function isDirectoryNumbers(raw: unknown): raw is DirectoryNumbers {
+  if (!isRecord(raw)) return false;
+  return (
+    isWhole(raw.affiliates) && isWhole(raw.since) && isWhole(raw.clicks) && isWhole(raw.clickSales) &&
+    // More than one checkout may be credited to one visitor's deduplicated click, so conversion can exceed 100%.
+    (raw.conversion === null || isNonNegative(raw.conversion)) && (raw.per100Cents === null || isWhole(raw.per100Cents)) &&
+    isWhole(raw.sales) && isWhole(raw.earnedCents) && isWhole(raw.paidCents)
+  );
+}
+
+/**
+ * One kept row, in the exact shape a build writes (Codex CX1 on #3062): a row read back from Redis that is not one is
+ * never shown, since the page draws every field of it (components/affiliate-directory.tsx).
+ */
+export function isDirectoryRow(raw: unknown): raw is DirectoryRow {
+  if (!isRecord(raw)) return false;
+  if (!isText(raw.handle) || !raw.handle || !isText(raw.name) || !isLanguage(raw.language) || !isText(raw.currency) || !raw.currency) return false;
+  if (!isShare(raw.percent) || !isShare(raw.topRate) || !isWhole(raw.topEarnCents)) return false;
+  if (!isWhole(raw.days) || (raw.rule !== "first" && raw.rule !== "last") || typeof raw.lifetime !== "boolean") return false;
+  if (!isWhole(raw.payday) || !isWhole(raw.hold) || typeof raw.buyers !== "boolean" || !isWhole(raw.earning)) return false;
+  if (!Array.isArray(raw.products) || !raw.products.every(isDirectoryProduct)) return false;
+  return raw.numbers === null || isDirectoryNumbers(raw.numbers);
+}
+
 /**
  * Every listed program, read from the stores themselves, kept a few minutes.
  *
@@ -311,6 +388,13 @@ export function sortRows(rows: DirectoryRow[]): DirectoryRow[] {
  * the mark as failed, as above; a reply that arrived off its exact shape (a bad
  * record, which lasts) keeps that page PARTIAL_KEEP_SECONDS, so one store's bad
  * record never hides every other program.
+ *
+ * Once the mark is taken, the build reserves its place in the window's count
+ * (reserveBuild). Past DIRECTORY_BUILDS_PER_TEN_MINUTES, or when the count's
+ * reply is unknown (rule 24: never room to build), nothing is built: the mark is
+ * dropped in the same pipeline as the last good build is read, and the visit is
+ * shown that build without every store no longer listed (lastDirectory). A
+ * finished build keeps that last build too, with the sid of each row.
  */
 export async function readDirectory(): Promise<DirectoryRow[]> {
   return (await readDirectoryPage()).rows;
@@ -330,7 +414,8 @@ export async function readDirectoryPage(): Promise<DirectoryPage> {
   const [kept] = await redisPipeline([["GET", DIRECTORY_CACHE]]);
   if (typeof kept === "string") {
     const page = keptPage(kept);
-    if (page) return page;
+    // A kept page with any row out of shape is read again below, never shown (Codex CX1 on #3062).
+    if (page && page.rows.every(isDirectoryRow)) return page;
     // Read again below.
   }
   // Each build holds its own mark (Codex N1 on #2921): it publishes its page and lets the mark go, or marks it failed, only
@@ -343,6 +428,8 @@ export async function readDirectoryPage(): Promise<DirectoryPage> {
     if (other) return other;
   }
   if (claim !== "OK") throw new UnknownReplyError(claim === null ? "the directory's build mark, held," : "the directory's build mark");
+  const room = await reserveBuild().catch(() => "unknown" as const);
+  if (room !== "build") return lastDirectory(room, token);
   let built: Awaited<ReturnType<typeof buildDirectory>>;
   try {
     built = await buildDirectory();
@@ -362,11 +449,106 @@ export async function readDirectoryPage(): Promise<DirectoryPage> {
     // The page is kept, with that row's numbers null (never $0), for PARTIAL_KEEP_SECONDS,
     // at no more builds than a healthy page. A store that could not be read is the same
     // (Codex N1, MEDIUM on #2921): left out, counted on the page, read again next build.
-    await publishIfOwner(token, page, PARTIAL_KEEP_SECONDS);
-    return page;
+    // It is also the last build a visit past the ceiling is shown (lastDirectory), with its count left out.
+    return keepBuilt(token, page, built, PARTIAL_KEEP_SECONDS);
   }
-  await publishIfOwner(token, page, KEEP_SECONDS);
-  return page;
+  return keepBuilt(token, page, built, KEEP_SECONDS);
+}
+
+/**
+ * Keeps a finished build: its page, with the mark let go, by one script that acts only while the mark is still this
+ * build's own (PUBLISH_IF_OWNER, Codex N1 on #2921); then, only when that script kept it, the last good build a visit
+ * past the ceiling is shown (lastDirectory). A late build, whose mark the next one took, keeps neither. The numbers'
+ * consent is checked once either way (keptWithConsent): its DEL of the kept page only ever costs a rebuild.
+ */
+async function keepBuilt(token: string, page: DirectoryPage, built: { sids: string[]; rows: DirectoryRow[]; omitted: number }, seconds: number): Promise<DirectoryPage> {
+  if (await publishIfOwner(token, page, seconds)) {
+    await redisPipeline([["SET", DIRECTORY_LAST, JSON.stringify({ sids: built.sids, rows: built.rows, omitted: built.omitted }), "EX", LAST_KEEP_SECONDS]]).catch(() => null);
+  }
+  return keptWithConsent(page, built.sids);
+}
+
+/**
+ * The rows, each with its numbers only while its store's creator still lets the directory show them (nl:dir:numbers,
+ * kept by the save alone; Claude 5's MEDIUM on #3062 and #3118): one SMISMEMBER of the sids of the rows that carry
+ * numbers, none when no row does. A store not in the set, or a reply that cannot be read, is shown with no numbers
+ * (null, never $0). `sids` is the sid of each row, in the same order.
+ */
+async function numbersChecked(page: DirectoryPage, sids: string[]): Promise<{ page: DirectoryPage; hidden: boolean }> {
+  const carrying = page.rows.flatMap((row, at) => (row.numbers !== null ? [at] : []));
+  if (!carrying.length) return { page, hidden: false };
+  const shown = await numbersShown(carrying.map((at) => sids[at] ?? ""));
+  const hide = new Set(carrying.filter((_, k) => !shown[k]));
+  if (!hide.size) return { page, hidden: false };
+  return { page: { ...page, rows: page.rows.map((row, at) => (hide.has(at) ? { ...row, numbers: null } : row)) }, hidden: true };
+}
+
+/**
+ * A page just kept, checked once against the numbers' consent after its SET: a creator who took the numbers back
+ * while this build ran (it read them before the save's SREM and DEL) drops the kept page, so no visit is shown them
+ * from it, and this answer shows that row without them. Against the save's SREM-then-DEL this is linearizable: an SREM
+ * before this check is seen here; one after it is followed by the save's own DEL.
+ */
+async function keptWithConsent(page: DirectoryPage, sids: string[]): Promise<DirectoryPage> {
+  const checked = await numbersChecked(page, sids);
+  if (checked.hidden) await redisPipeline([["DEL", DIRECTORY_CACHE]]).catch(() => null);
+  return checked.page;
+}
+
+/**
+ * This build's place in the window's count: "build" inside DIRECTORY_BUILDS_PER_TEN_MINUTES, "full" past it,
+ * "unknown" for any reply not in the exact shape asked for (a count that is a positive whole number, a TTL that is a
+ * whole number of -1 or more; -2, the count gone, is unknown). A count with no end (TTL -1: just made, or left so by
+ * a write cut short) gets the window's seconds, and an EXPIRE that does not answer 1 is unknown.
+ */
+async function reserveBuild(): Promise<"build" | "full" | "unknown"> {
+  const counted = repliesFor(await redisPipeline([["INCR", DIRECTORY_BUILDS], ["TTL", DIRECTORY_BUILDS]]), 2);
+  if (!counted) return "unknown";
+  const [count, left] = counted;
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) return "unknown";
+  if (typeof left !== "number" || !Number.isSafeInteger(left) || left < -1) return "unknown";
+  if (left === -1) {
+    const ended = repliesFor(await redisPipeline([["EXPIRE", DIRECTORY_BUILDS, BUILD_WINDOW_SECONDS]]), 1);
+    if (!ended || ended[0] !== 1) return "unknown";
+  }
+  return count <= DIRECTORY_BUILDS_PER_TEN_MINUTES ? "build" : "full";
+}
+
+/**
+ * The last good build, without every store no longer in the listed set, for a visit that may not build: nothing is
+ * kept from it. The build mark is let go in the same pipeline, so the next visit is not held by a build that never
+ * ran, and only while it is still this visit's own (RELEASE_IF_OWNER, Codex N1 on #3062): a visit whose mark ended
+ * during its count never drops the mark a later build took. The release's own reply changes nothing: a mark it did
+ * not drop ends by its BUILD_HOLD_SECONDS. No last build is
+ * DirectoryBusyError past the ceiling and UnknownReplyError after an unknown count; a reply in any other shape, or
+ * rows that do not match their sids, is UnknownReplyError, never the rows unfiltered or an empty list.
+ */
+async function lastDirectory(room: "full" | "unknown", token: string): Promise<DirectoryPage> {
+  const replies = repliesFor(await redisPipeline([["EVAL", RELEASE_IF_OWNER, 1, DIRECTORY_BUILD, token], ["GET", DIRECTORY_LAST]]), 2);
+  if (!replies) throw new UnknownReplyError("the directory's last build (GET)");
+  const reply = replies[1];
+  if (reply === null) {
+    if (room === "full") throw new DirectoryBusyError();
+    throw new UnknownReplyError("the directory's build count");
+  }
+  let last: unknown = null;
+  try {
+    last = typeof reply === "string" ? JSON.parse(reply) : null;
+  } catch {
+    last = null;
+  }
+  const { sids, rows, omitted = 0 } = (last ?? {}) as { sids?: unknown; rows?: unknown; omitted?: unknown };
+  if (
+    !Array.isArray(sids) || !Array.isArray(rows) || sids.length !== rows.length || sids.some((sid) => typeof sid !== "string" || !sid) ||
+    !rows.every(isDirectoryRow) || typeof omitted !== "number" || !Number.isSafeInteger(omitted) || omitted < 0
+  ) {
+    throw new UnknownReplyError("the directory's last build (GET)");
+  }
+  const listed = await stillListed(sids as string[]);
+  // The stores that build left out, still counted: the page says the list is not whole (Codex N1 on #2921). Each row's
+  // numbers only while its creator still lets them be shown (Claude 5's MEDIUM on #3062).
+  const kept = (rows as DirectoryRow[]).flatMap((row, at) => (listed[at] ? [{ row, sid: (sids as string[])[at] }] : []));
+  return (await numbersChecked({ rows: kept.map((k) => k.row), omitted }, kept.map((k) => k.sid))).page;
 }
 
 /** What a build's own mark starts with; the rest is its token. */
@@ -383,9 +565,17 @@ if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
 redis.call("SET", KEYS[1], "failed", "EX", ARGV[2])
 return 1`;
 
-/** A late build (its mark taken by the next one) answers its page but keeps nothing over the next build's. */
-async function publishIfOwner(token: string, page: DirectoryPage, seconds: number): Promise<void> {
-  await redisPipeline([["EVAL", PUBLISH_IF_OWNER, 2, DIRECTORY_BUILD, DIRECTORY_CACHE, token, pageToKeep(page), seconds]]).catch(() => null);
+/** Lets the mark go, only while it is the visit's own: a visit past the ceiling whose mark ended leaves the next one's (Codex N1 on #3062). */
+const RELEASE_IF_OWNER = `-- marktmorgen:directory-build-release:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("DEL", KEYS[1])
+return 1`;
+
+/** A late build (its mark taken by the next one) answers its page but keeps nothing over the next build's; true when this build kept it. */
+async function publishIfOwner(token: string, page: DirectoryPage, seconds: number): Promise<boolean> {
+  const replies = await redisPipeline([["EVAL", PUBLISH_IF_OWNER, 2, DIRECTORY_BUILD, DIRECTORY_CACHE, token, pageToKeep(page), seconds]]).catch(() => null);
+  // Kept only on exactly 1 (rule 24): 0 is a late build, and any other reply is not known to have kept anything.
+  return Array.isArray(replies) && replies.length === 1 && replies[0] === 1;
 }
 
 /**
@@ -401,7 +591,9 @@ async function otherBuildsPage(): Promise<DirectoryPage | null> {
     if (!Array.isArray(replies) || replies.length !== 2) return null;
     const [kept, mark] = replies;
     const page = typeof kept === "string" ? keptPage(kept) : null;
-    if (page) return page;
+    // The same exact row check as the first read (Codex CX1 on #3062): a kept page with any row out of shape is never
+    // shown, so the wait ends and the visit is told the list could not be checked.
+    if (page) return page.rows.every(isDirectoryRow) ? page : null;
     if (typeof mark !== "string" || !mark.startsWith(BUILDING)) return null;
   }
   return null;
@@ -416,13 +608,13 @@ async function markFailed(token: string): Promise<void> {
 }
 
 /**
- * One build of the rows from the listed set and the stores. `partial` is
+ * One build of the rows from the listed set and the stores, with each row's sid. `partial` is
  * "failed" when a numbers read did not arrive, else "unknown" when one arrived
  * off its exact shape (UnknownReplyError), else false. `omitted` counts the
  * listed stores whose read failed, left out of the rows; when it is not zero
  * and no row was read, the build throws the first of those failures.
  */
-async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: false | "unknown" | "failed"; omitted: number }> {
+async function buildDirectory(): Promise<{ rows: DirectoryRow[]; sids: string[]; partial: false | "unknown" | "failed"; omitted: number }> {
   // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
   const sids = new Set<string>();
   let cursor = "0";
@@ -452,19 +644,27 @@ async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: false 
   // A failed numbers read still shows the row without numbers, but that page is
   // not kept for the next visitors.
   let partial: false | "unknown" | "failed" = false;
+  // Each row's sid, kept with the last good build so a visit past the ceiling can drop a store taken out.
+  const sidOf = new Map<DirectoryRow, string>();
   const rows = sortRows(
     (
       await Promise.all(
         stores.map(async (store) => {
           const row = store ? directoryRow(store) : null;
-          if (!row || !store || !store.affiliates.numbers) return row;
+          if (!row || !store) return row;
+          if (!store.affiliates.numbers) {
+            sidOf.set(row, store.sid);
+            return row;
+          }
           const numbers = await programNumbers(store).catch((error: unknown) => {
             if (error instanceof UnknownReplyError) {
               if (partial === false) partial = "unknown";
             } else partial = "failed";
             return null;
           });
-          return { ...row, numbers: directoryNumbers(numbers) };
+          const counted = { ...row, numbers: directoryNumbers(numbers) };
+          sidOf.set(counted, store.sid);
+          return counted;
         }),
       )
     ).filter((row): row is DirectoryRow => row !== null),
@@ -474,5 +674,5 @@ async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: false 
     if (!rows.length) throw failures[0];
     console.warn(`affiliate directory: ${failures.length} listed store(s) could not be read and are left out of this build`);
   }
-  return { rows, partial, omitted: failures.length };
+  return { rows, sids: rows.map((row) => sidOf.get(row) ?? ""), partial, omitted: failures.length };
 }

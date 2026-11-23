@@ -26,6 +26,9 @@
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail, addProduct } from "@/lib/store";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { readDirectory } from "@/lib/affiliate-directory";
+// #3062 (lib/affiliate-directory.ts): a build that could not finish holds the build mark (nl:dir:build) as "failed"
+// for ten minutes. Each step below drops it with the kept page, as those ten minutes passing would, so every read
+// builds again from the records it changed; no expectation about the rows is loosened.
 import { programNumbers } from "@/lib/affiliates";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { redisPipeline } from "@/lib/redis";

@@ -56,7 +56,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:coursegone:", "nl:courses:drip", "nl:courses:lock", "nl:crefund:told:",
   "nl:creators:responses", "nl:crm:co:lock:", "nl:crm:erased:", "nl:crm:fields:", "nl:crm:gen:", "nl:crm:pacc:lock:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:", "nl:dsched:tell",
   "nl:crm:co:gone:",
-  "nl:dc:srv:", "nl:dc:state:", "nl:dir:build", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dripstart:", "nl:dun:", "nl:dun:card:",
+  "nl:dc:srv:", "nl:dc:state:", "nl:dir:build", "nl:dir:builds", "nl:dir:last", "nl:dir:listed", "nl:dir:numbers", "nl:dir:page", "nl:domain:", "nl:dripstart:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:files:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:fly:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
   "nl:exposure:v1:", "nl:exposure:v1:YYYY-MM", "nl:fair:c:", "nl:firstsale:", "nl:flow-rotate:", "nl:forms:", "nl:free:claim:",
@@ -278,7 +278,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:depth:": E,
   // Discount codes waiting for their start (511 [CK3], lib/discount-schedule.ts): go with the store; the due list and the list to tell lose their members.
   "nl:dsched:": E, "nl:dsched:due": I, "nl:dsched:lock:": E, "nl:dsched:tell": I,
-  "nl:dir:build": Cr(1), "nl:dir:listed": I, "nl:dir:page": Cr(1),
+  "nl:dir:build": Cr(1), "nl:dir:builds": Cr(1), "nl:dir:last": Cr(1), "nl:dir:listed": I, "nl:dir:numbers": I, "nl:dir:page": Cr(1),
   "nl:domain:": T("prepare"),
   // The drip job's start reads in the store's window (lib/drip-start.ts), named by the store's own id: go with the store.
   "nl:dripstart:": E,

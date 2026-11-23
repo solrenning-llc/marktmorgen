@@ -304,9 +304,9 @@ async function main(): Promise<void> {
   is("a store read failing every time: 5 visits walk the listed set once", seen.SSCAN, 1);
   // Codex N1 on #2921 (MEDIUM): the one store is left out and counted; the other two programs stay on the page.
   is("all ten reads answer, none is \"unavailable\"", outcomes.every((o) => o === "answered"), true);
-  // The build's SET NX, then its page kept by one script that also lets its own mark go (Codex N1 on #2921); the nine
-  // reads after it are the kept page's GET alone.
-  is("one build: its SET NX and the page it keeps, nothing more", [seen.SET, seen.EVAL], [1, 1]);
+  // The build's SET NX, then its page kept by one script that also lets its own mark go (Codex N1 on #2921), and
+  // (#3062) the last good build kept for a visit past the ceiling; the nine reads after it are the kept page's GET alone.
+  is("one build: its SET NX, the page it keeps by one script and its last good build, nothing more", [seen.SET, seen.EVAL], [2, 1]);
   is("the build drops its mark, no \"failed\" hold", await mark(), [null, -2]);
   is("the page kept lists the two it read and says one could not be", keptPage(await kept()), { rows: 2, omitted: 1 });
   advance(300_000);

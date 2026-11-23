@@ -407,11 +407,14 @@ export default async function StudioCoursePage({
             </>
             )}
             {certificates.unlisted > 0 ? (
-              // Said as it is (Claude 5 iYnra's LEVE 4 on #5481): added while the room allows, a few each visit.
+              // Said as it is (#5481): stopped (its place does not read), failed on this visit and tried again on the next,
+              // held by a full room, or added a few each visit.
               <p className="mt-3 text-sm text-ink-soft" role="status">
                 {`${certificates.unlisted} older ${certificates.unlisted === 1 ? "certificate is" : "certificates are"} not in this list yet. `}
-                {certificates.walkUnread
-                  ? "They could not be added just now."
+                {certificates.walkProblem === "place"
+                  ? "They can't be added for now. Your students' certificates stay valid."
+                  : certificates.walkProblem === "step"
+                  ? "They could not be added on this visit. Opening this page again tries again."
                   : certificates.roomFull
                     ? "Your store's data room is full, so none could be added now. Free some room and open this page again."
                     : "Up to 25 more are added each time this page opens."}

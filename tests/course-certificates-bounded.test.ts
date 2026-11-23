@@ -149,17 +149,31 @@ async function main(): Promise<void> {
   for (let draw = 0; draw < 4; draw += 1) noPlace = await certificatesFor(NOPLACE, { room: small });
   is("after five draws: the one waiting said as waiting, the room said full, no place written", [noPlace?.unlisted, noPlace?.roomFull, redis.run(["GET", cursorKey(NOPLACE)])], [1, true, null]);
 
-  part("A walk whose place does not read is said as such, never as more being added (Claude 3 wSUb3's LEVE on #5481)");
+  part("A walk that cannot go on is said as such, never as more being added (Claude 3 wSUb3's and Claude 5 ichw's LEVE on #5481)");
   const UNREAD = "4".repeat(12);
   seedOlder(UNREAD, 50_000, 30);
+  // A place that does not read. Production never writes one (every first write is SET NX EX), and this one has no expiry.
   redis.run(["SET", cursorKey(UNREAD), "not-a-walk"]);
   const unread1 = await certificatesFor(UNREAD, { room: ROOM });
   const unread2 = await certificatesFor(UNREAD, { room: ROOM });
-  is("two draws: all 30 said as waiting, none added, the walk said as unable to go on, never the room", [unread1?.unlisted, unread2?.unlisted, redis.run(["ZCARD", atKey(UNREAD)]), unread2?.walkUnread, unread2?.roomFull], [30, 30, 0, true, false]);
+  is("two draws: all 30 said as waiting, none added, the walk said as stopped on both, never the room", [unread1?.unlisted, unread2?.unlisted, redis.run(["ZCARD", atKey(UNREAD)]), unread1?.walkProblem, unread2?.walkProblem, unread2?.roomFull], [30, 30, 0, "place", "place", false]);
   is("and the place is left as it was, never started again on a guess", redis.run(["GET", cursorKey(UNREAD)]), "not-a-walk");
-  is("a walk that reads is not said as unread", (await certificatesFor(OLD, { room: ROOM }))?.walkUnread, false);
+  const MID = "3".repeat(12);
+  seedOlder(MID, 60_000, 30);
+  const mid1 = await certificatesFor(MID, { room: ROOM });
+  is("control: a walk mid-way with room is said as going, its place valid and not done", [mid1?.walkProblem, mid1?.unlisted, mid1?.roomFull, redis.run(["GET", cursorKey(MID)]) !== "done"], [null, 30 - CERT_BACKFILL_PER_DRAW, false, true]);
+  is("and a full room is said as the room, never as a stopped walk", [full?.walkProblem, noPlace?.walkProblem], [null, null]);
+  const AFTER = "2".repeat(12);
+  seedOlder(AFTER, 70_000, 3);
+  // The step's ZADD lands, then the walk's first place SET answers in a shape that does not read.
+  before = (batch) => (batch.length === 1 && batch[0][0] === "SET" && batch[0][1] === cursorKey(AFTER) && batch[0].includes("NX") ? ["weird"] : null);
+  const after = await certificatesFor(AFTER, { room: ROOM });
+  before = null;
+  is("a step that adds and then fails: the three are listed, none said as waiting, the step said as failed", [after?.list.length, redis.run(["ZCARD", atKey(AFTER)]), after?.unlisted, after?.walkProblem], [3, 3, 0, "step"]);
   const studioPage = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
-  is("the page says it before the room or the walk's progress", studioPage.indexOf("certificates.walkUnread") > 0 && studioPage.indexOf("certificates.walkUnread") < studioPage.indexOf("Up to 25 more are added"), true);
+  const note = studioPage.slice(studioPage.indexOf("{certificates.unlisted > 0 ? ("), studioPage.indexOf("Up to 25 more are added") + 40);
+  const order = ['certificates.walkProblem === "place"', "They can't be added for now.", 'certificates.walkProblem === "step"', "Opening this page again tries again.", "certificates.roomFull", "Up to 25 more are added"].map((text) => note.indexOf(text));
+  is("the page's note, inside the waiting block, says a stopped walk, then a failed step, then a full room, then progress", order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), true);
 
   part("A walk that does not read is left for the next draw and never hides the page (Claude 5 iYnra's NIT 8)");
   const ODD = "b".repeat(12);
@@ -178,7 +192,7 @@ async function main(): Promise<void> {
   redis.run(["DEL", cursorKey(ODD)]);
   before = (batch) => (batch.length === 1 && batch[0][0] === "ZMSCORE" ? ["not a list"] : null);
   const oddScores = await certificatesFor(ODD, { room: ROOM });
-  is("a ZMSCORE that does not read: no ZADD, the page still listed, and the walk said as unable to go on", [oddScores?.list.length, redis.run(["ZCARD", atKey(ODD)]), oddScores?.walkUnread], [1, 1, true]);
+  is("a ZMSCORE that does not read: no ZADD, the page still listed, and the step said as failed", [oddScores?.list.length, redis.run(["ZCARD", atKey(ODD)]), oddScores?.walkProblem], [1, 1, "step"]);
   const beforeOdd = await used(ROOM);
   before = (batch) => (batch.length === 1 && batch[0][0] === "ZADD" ? ["three"] : null);
   const oddCount = await certificatesFor(ODD, { room: ROOM });

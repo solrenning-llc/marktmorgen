@@ -544,10 +544,12 @@ export type CertificatePage = {
   /** The store's data room was full on this draw, so none of them could be added now. */
   roomFull: boolean;
   /**
-   * The walk could not go on this draw: its place does not read, or a reply on the way did not (rule 24). Said as such,
-   * never as more being added (Claude 3 wSUb3's LEVE on #5481).
+   * Why the walk did not go on this draw, said as such and never as more being added (rule 24; Claude 3 wSUb3's and
+   * Claude 5 ichw's LEVE on #5481): "place", its place does not read, so the walk is left alone until that key expires;
+   * "step", this draw's step failed on a reply or a room that did not read, and the next draw tries again (what it
+   * added before failing is counted, `unlisted` is read again); null otherwise.
    */
-  walkUnread: boolean;
+  walkProblem: "place" | "step" | null;
   /** Whether an older page follows this one. */
   more: boolean;
 };
@@ -567,7 +569,7 @@ export type CertificatePage = {
  * `page` is 0 for the newest.
  */
 export async function certificatesFor(courseId: string, options: { room?: DataStore; page?: number } = {}): Promise<CertificatePage | null> {
-  const empty: CertificatePage = { list: [], total: 0, standing: 0, unlisted: 0, roomFull: false, walkUnread: false, more: false };
+  const empty: CertificatePage = { list: [], total: 0, standing: 0, unlisted: 0, roomFull: false, walkProblem: null, more: false };
   if (!isRedisConfigured()) return empty;
   const page = Number.isSafeInteger(options.page) && (options.page as number) > 0 ? (options.page as number) : 0;
   const counted = plainList(await redisPipeline([["SCARD", allKey(courseId)], ["ZCARD", atKey(courseId)], ["HLEN", indexKey(courseId)], ["GET", atCursorKey(courseId)]]));
@@ -578,8 +580,12 @@ export async function certificatesFor(courseId: string, options: { room?: DataSt
   let listed = listedBefore;
   let roomFull = false;
   let done = state === "done" || listed >= total;
-  // A place that does not read is left alone, never started again on a guess, and the page says the walk cannot go on.
-  let walkUnread = !done && state === null;
+  let walkProblem: CertificatePage["walkProblem"] = null;
+  if (!done && state === null) {
+    // A place that does not read is left alone, never started again on a guess; logged, and said on the page.
+    walkProblem = "place";
+    console.error("the studio's walk of a course's older certificates stopped: its place does not read", courseId);
+  }
   if (!done && options.room && state !== null && state !== "done") {
     const walked = await addOlder(courseId, options.room, state).catch((error: unknown) => {
       console.error("the studio's walk of a course's older certificates failed; the next draw tries again", courseId, error);
@@ -589,7 +595,14 @@ export async function certificatesFor(courseId: string, options: { room?: DataSt
       listed += walked.added;
       roomFull = walked.roomFull;
       done = walked.done;
-    } else walkUnread = true;
+    } else {
+      walkProblem = "step";
+      // The step may have added some before it failed (its ZADD landed, a later reply did not read): the list is counted
+      // again, so those are never said as waiting (Claude 5 ichw's LEVE 1 on #5481). A count that does not read is unknown.
+      const recount = plainList(await redisPipeline([["ZCARD", atKey(courseId)]]).catch(() => null));
+      if (!recount || recount.length !== 1 || typeof recount[0] !== "number" || !Number.isSafeInteger(recount[0]) || recount[0] < 0) return null;
+      listed = recount[0];
+    }
   }
   const unlisted = done ? 0 : Math.max(0, total - listed);
   const from = page * MAX_LISTED_CERTS;
@@ -599,7 +612,7 @@ export async function certificatesFor(courseId: string, options: { room?: DataSt
   if (!ids || ids.some((id) => typeof id !== "string")) return null;
   const more = ids.length > MAX_LISTED_CERTS;
   const valid = (ids as string[]).slice(0, MAX_LISTED_CERTS).filter((id) => CERT_ID_PATTERN.test(id));
-  if (valid.length === 0) return { list: [], total, standing, unlisted, roomFull, walkUnread, more };
+  if (valid.length === 0) return { list: [], total, standing, unlisted, roomFull, walkProblem, more };
   const fetched = plainList(await redisPipeline([["MGET", ...valid.map(certKey)]]));
   if (!fetched || fetched.length !== 1) return null;
   const rows = plainList(fetched[0]);
@@ -608,7 +621,7 @@ export async function certificatesFor(courseId: string, options: { room?: DataSt
     .map(parseCertificate)
     .filter((c): c is Certificate => c !== null && c.courseId === courseId)
     .sort((a, b) => b.issuedAt - a.issuedAt);
-  return { list, total, standing, unlisted, roomFull, walkUnread, more };
+  return { list, total, standing, unlisted, roomFull, walkProblem, more };
 }
 
 /** How long the walk's place is kept: past it, the walk starts again at the start, which only reads again. */

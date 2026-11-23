@@ -3,6 +3,10 @@ import { changeKeyReading, changeReading, commands, reset, store } from "./stats
 import { done, is, part } from "./check";
 
 const stats = "a".repeat(32);
+// A note is written through the store's fence (Codex L-20261119-1516, #5010 row 128), which reads the store's id key:
+// a store with an id whose key live() writes after each reset is live.
+const noteStore = { statsId: stats, sid: "b".repeat(32), email: "notes@example.test", extra: false };
+const live = () => store.run(["SET", `nl:store:id:${noteStore.sid}`, noteStore.email]);
 const key = `nl:stats:${stats}:notes`;
 const now = Date.UTC(2026, 10, 5, 12);
 const value = JSON.stringify({ day: "2026-11-04", text: "Published the course" });
@@ -16,18 +20,18 @@ async function refusesRead(): Promise<boolean> {
 
 async function main() {
   part("A note written at the text boundary never poisons its history");
-  reset();
+  reset(); live();
   await store.pipeline([["HSET", key, "00000001", value, "00000002", value, "00000003", value]]);
   const boundary = "a".repeat(79) + " launch";
   let added = null;
   let addFailed = false;
-  try { added = await addNote(stats, "2026-11-04", boundary, now); } catch { addFailed = true; }
+  try { added = await addNote(noteStore, "2026-11-04", boundary, now); } catch { addFailed = true; }
   is("the real writer accepts a cut immediately after a space", [addFailed, added?.length], [false, 4]);
   let history = null;
   try { history = await readNotes(stats); } catch { /* Recorded by the assertion below. */ }
   is("the original three notes and the boundary note stay readable", history?.length, 4);
   is("new boundary notes are canonical on every normalization", [noteText(boundary), noteText(noteText(boundary))], ["a".repeat(79), "a".repeat(79)]);
-  reset();
+  reset(); live();
   const legacy = "a".repeat(79) + " ";
   await store.pipeline([["HSET", key, "00000001", value, "00000002", JSON.stringify({ day: "2026-11-04", text: legacy })]]);
   let legacyHistory = null;
@@ -73,15 +77,15 @@ async function main() {
 
   part("The actual reader requires one complete response, including an empty hash");
   for (const reply of [[], [null], [[] , []], [["00000001"]]]) {
-    reset();
+    reset(); live();
     changeReading(() => reply);
     is("unknown pipeline is refused: " + JSON.stringify(reply), await refusesRead(), true);
   }
-  reset();
+  reset(); live();
   is("actual confirmed missing hash remains empty", await readNotes(stats), []);
   is("no statistics id performs no read", await readNotes(null), []);
   is("only the configured read ran", commands.length, 1);
-  reset();
+  reset(); live();
   let envelopeTraps = 0;
   let transportThenReads = 0;
   changeReading(() => new Proxy([[]], {
@@ -106,13 +110,13 @@ async function main() {
     (reply: unknown[]) => [reply[0], []],
   ];
   for (let variant = 0; variant < corruptions.length; variant++) {
-    reset();
+    reset(); live();
     const original: (string | number)[] = ["HSET", key];
     for (let i = 0; i <= MAX_NOTES; i++) original.push(i.toString(16).padStart(8, "0"), value);
     await store.pipeline([original]);
     changeReading(corruptions[variant]);
     let refused = false;
-    try { await addNote(stats, "2026-11-05", "Added during the reading", now); } catch { refused = true; }
+    try { await addNote(noteStore, "2026-11-05", "Added during the reading", now); } catch { refused = true; }
     is(`variant ${variant}: incomplete history refuses success`, refused, true);
     is(`variant ${variant}: no cleanup is authorized`, commands.filter(c => c[0] === "HDEL").length, 0);
     const [after] = await store.pipeline([["HGETALL", key]]);
@@ -131,23 +135,23 @@ async function main() {
     (reply: unknown[]) => { const keys = [...reply[0] as string[]]; keys[0] = "ffffffff"; return [keys]; },
   ];
   for (let variant = 0; variant < keyCorruptions.length; variant++) {
-    reset();
+    reset(); live();
     const seed: (string | number)[] = ["HSET", key];
     for (let i = 0; i <= MAX_NOTES; i++) seed.push(i.toString(16).padStart(8, "0"), value);
     await store.pipeline([seed]);
     changeKeyReading(keyCorruptions[variant]);
     let refused = false;
-    try { await addNote(stats, "2026-11-05", "Keep the history", now); } catch { refused = true; }
+    try { await addNote(noteStore, "2026-11-05", "Keep the history", now); } catch { refused = true; }
     is(`key variant ${variant}: unknown cleanup refuses success`, refused, true);
     is(`key variant ${variant}: no note is deleted`, commands.filter(c => c[0] === "HDEL").length, 0);
     is(`key variant ${variant}: original oldest note remains`, await store.pipeline([["HGET", key, "00000000"]]), [value]);
   }
 
-  reset();
+  reset(); live();
   const seed: (string | number)[] = ["HSET", key];
   for (let i = 0; i < MAX_NOTES; i++) seed.push(i.toString(16).padStart(8, "0"), value);
   await store.pipeline([seed]);
-  const notes = await addNote(stats, "2026-11-05", "A confirmed new note", now);
+  const notes = await addNote(noteStore, "2026-11-05", "A confirmed new note", now);
   is("confirmed overflow keeps the existing count", notes?.length, MAX_NOTES);
   is("confirmed overflow keeps the requested new note", notes?.some(n => n.text === "A confirmed new note"), true);
   is("confirmed overflow removes exactly the oldest note", await store.pipeline([["HLEN", key], ["HGET", key, "00000000"]]), [MAX_NOTES, null]);

@@ -240,8 +240,8 @@ async function main(): Promise<void> {
   const notesStats = store.statsId!;
   const today = new Date(NOW).toISOString().slice(0, 10);
   is("a day that is real and not ahead", [noteDay(today, NOW), noteDay("2026-02-30", NOW), noteDay("2999-01-01", NOW), noteDay("1999-01-01", NOW)], [today, "", "", ""]);
-  await addNote(notesStats, today, "  Posted   the October reel ");
-  is("words are not a note's without a day", await addNote(notesStats, "", "x"), null);
+  await addNote(store, today, "  Posted   the October reel ");
+  is("words are not a note's without a day", await addNote(store, "", "x"), null);
   let notes = await readNotes(notesStats);
   is("kept as one line", notes.map((n) => [n.day, n.text]), [[today, "Posted the October reel"]]);
   notes = await removeNote(notesStats, notes[0].id);

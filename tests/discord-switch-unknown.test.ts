@@ -104,11 +104,15 @@ async function scenario(read: Read) {
     }) as typeof redis.pipeline;
   }
   if (read === "forget-lost" || read === "forget-lost-unread") {
-    // forgetServer's last pipeline (DEL of the server, roles, members and address links) runs in Redis, then its reply
-    // is lost. With "forget-lost-unread", every later read of the kept server fails too.
+    // forgetServer's last pipeline (the server, its roles and its emptied list deleted in one step, DROP_SERVER_IF_EMPTY
+    // since Board #5285 row #3017; a plain DEL before) runs in Redis, then its reply is lost. With "forget-lost-unread",
+    // every later read of the kept server fails too.
     let deleted = false;
+    const dropsServer = (command: Commands[number] | undefined) =>
+      Boolean(command) &&
+      ((command![0] === "DEL" && String(command![1]).startsWith("nl:dc:srv:")) || (command![0] === "EVAL" && String(command![1]).startsWith("-- marktmorgen:discord-drop-server-if-empty:v1\n")));
     redis.pipeline = (async (commands: Commands) => {
-      if (!deleted && commands[0]?.[0] === "DEL" && String(commands[0][1]).startsWith("nl:dc:srv:")) {
+      if (!deleted && dropsServer(commands[0])) {
         deleted = true;
         await real(commands);
         throw new Error("synthetic lost reply");

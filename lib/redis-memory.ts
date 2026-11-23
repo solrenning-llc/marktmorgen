@@ -2518,6 +2518,15 @@ export class MemoryRedis {
           this.run(["SET", settings, value]);
           return 1;
         }
+        // lib/discord-store.ts DROP_SERVER_IF_EMPTY: the server, its products' roles and its people's list deleted only
+        // while nobody is on the list; -1, nothing deleted, when anybody is.
+        if (key.startsWith("-- marktmorgen:discord-drop-server-if-empty:v1\n") && args[0] === "3" && args.length === 4) {
+          const [, server, products, members] = args;
+          this.scriptCalls += 1;
+          if (this.run(["HLEN", members]) !== 0) return -1;
+          this.scriptCalls += 1;
+          return this.run(["DEL", server, products, members]);
+        }
         // lib/discord-store.ts FORGET_PEOPLE: a server's people read, each deleted only while their row is the one read,
         // each address link only while it points at them; the people and links deleted and the people left.
         if (key.startsWith("-- marktmorgen:discord-forget-people:v1\n") && Number(args[0]) >= 2 && args.length === 1 + Number(args[0]) + 1 + 2 * (Number(args[0]) - 2)) {

@@ -76,6 +76,7 @@ function world(overrides: Partial<DoorSteps> = {}) {
 const ask = (who = ANA, bytes = 50 * MiB, nowSeconds = NOW) => ({
   store: SHOP,
   data: SHOP as DataStore,
+  listId: "list_submission_store",
   folder: FOLDER,
   courseId: COURSE,
   lessonId: LESSON,
@@ -91,7 +92,10 @@ const where = (who = ANA) => ({ store: SHOP, folder: FOLDER, courseId: COURSE, l
 async function commandsOf<T>(work: () => Promise<T>): Promise<{ value: T; commands: number }> {
   const original = redis.pipeline.bind(redis);
   let commands = 0;
-  redis.pipeline = (async (list: (string | number)[][]) => ((commands += list.length), original(list))) as typeof redis.pipeline;
+  // As Upstash bills: a script is one command plus one for every redis.call it runs (lib/capped-count.ts), counted
+  // here at every call the script's text has, its most.
+  const billed = (command: (string | number)[]) => (command[0] === "EVAL" ? 1 + (String(command[1]).match(/redis\.call\(/g)?.length ?? 0) : 1);
+  redis.pipeline = (async (list: (string | number)[][]) => ((commands += list.reduce((n, command) => n + billed(command), 0)), original(list))) as typeof redis.pipeline;
   try {
     return { value: await work(), commands };
   } finally {
@@ -101,9 +105,13 @@ async function commandsOf<T>(work: () => Promise<T>): Promise<{ value: T; comman
 /** Answers one pipeline whose first command is `name` with nothing, as a reply out of shape. */
 /** A pipeline whose first command is `name`, or the close's one-step record write (lib/submission-store.ts, SUBMISSION_CLOSE_WRITE). */
 const CLOSE_WRITE = "close-write";
+/** The door's first write (SUBMISSION_DOOR_OPEN_WRITE), one EVAL where it was three commands (Codex L-20261120-2049). */
+const OPEN_WRITE = "open-write";
 const firstIs = (list: (string | number)[][], name: string) =>
   name === CLOSE_WRITE
     ? String(list[0]?.[0]) === "EVAL" && String(list[0]?.[1]).startsWith("-- marktmorgen:submission-close-write:v1")
+    : name === OPEN_WRITE
+    ? String(list[0]?.[0]) === "EVAL" && String(list[0]?.[1]).startsWith("-- marktmorgen:submission-door-open-write:v1")
     : String(list[0]?.[0]) === name.split(" ")[0] && (!name.split(" ")[1] || String(list[0]?.[2]) === name.split(" ")[1]);
 function breakNext(name: string) {
   const original = redis.pipeline.bind(redis);
@@ -182,7 +190,7 @@ async function main(): Promise<void> {
     is("in the store's own vault folder", parts?.folder, FOLDER);
     is("under an owner id no product or lesson has", parts?.ownerId.startsWith("sub_") && parts.ownerId.length === 36, true);
     is("one place held", await liveCount(FOLDER, COURSE, LESSON, ANA, NOW), 1);
-    is("the count and the open stay inside their commands", counted.commands <= SUBMISSION_STEP_COMMANDS.open, true);
+    is(`the count and the open stay inside their commands (${counted.commands} billed)`, counted.commands <= SUBMISSION_STEP_COMMANDS.open, true);
     is("another buyer's places are their own", await liveCount(FOLDER, COURSE, LESSON, BOB, NOW), 0);
     is("an open place lapses with its upload, a day on", await liveCount(FOLDER, COURSE, LESSON, ANA, NOW + 86_401), 0);
     is("an owner id is never a lesson's", submissionOwnerId("0".repeat(32)), "sub_" + "0".repeat(32));
@@ -209,7 +217,7 @@ async function main(): Promise<void> {
     is("storage that could not be measured is unknown, never room", await threw(() => openSubmissionDoor(ask(BOB), unknown.steps)), "Error: storage_unknown");
     is("and gives its place back", await liveCount(FOLDER, COURSE, LESSON, BOB, NOW), 0);
     const lost = world();
-    breakNext("SET");
+    breakNext(OPEN_WRITE);
     is("a door that could not be written is unknown", await threw(() => openSubmissionDoor(ask(BOB), lost.steps)), "unknown");
     is("its upload is given up before the browser hears of it", lost.calls, ["budget", "vault:open", "vault:abort"]);
     is("and its place comes back", await liveCount(FOLDER, COURSE, LESSON, BOB, NOW), 0);
@@ -244,7 +252,7 @@ async function main(): Promise<void> {
     const signed = await commandsOf(() => signSubmissionDoor(at, path, [1], steps));
     is("the buyer signs their own", signed.value.ok, true);
     is("from the month's control requests", calls, ["control", "sign"]);
-    is("inside its commands", signed.commands <= SUBMISSION_STEP_COMMANDS.sign, true);
+    is(`inside its commands (${signed.commands} billed)`, signed.commands <= SUBMISSION_STEP_COMMANDS.sign, true);
     const noControl = world({ reserveUploadControl: async () => false });
     is("no control requests left", await signSubmissionDoor(at, path, [1], noControl.steps), { ok: false, reason: "budget" });
 
@@ -267,7 +275,7 @@ async function main(): Promise<void> {
       closedAt: 0,
     });
     is("kept for the creator's days", kept?.keepUntil, NOW + 60 + 30 * 86_400);
-    is("inside its commands", closed.commands <= SUBMISSION_STEP_COMMANDS.done, true);
+    is(`inside its commands (${closed.commands} billed)`, closed.commands <= SUBMISSION_STEP_COMMANDS.done, true);
     is("it reads back", (await readSubmission(FOLDER, kept?.id ?? ""))?.path, path);
     const ttl = await redis.pipeline([["TTL", `nl:sub:rec:${FOLDER}:${kept?.id}`]]);
     is("its time to live is the keeping time and a week", ttl[0], 30 * 86_400 + SUBMISSION_SWEEP_GRACE_SECONDS);
@@ -493,7 +501,7 @@ async function main(): Promise<void> {
     }
     const given = await commandsOf(() => abortSubmissionDoor(at, path, w.steps));
     is("the buyer gives it up", given.value, "done");
-    is("inside its commands", given.commands <= SUBMISSION_STEP_COMMANDS.abort, true);
+    is(`inside its commands (${given.commands} billed)`, given.commands <= SUBMISSION_STEP_COMMANDS.abort, true);
     is("its place comes back", await liveCount(FOLDER, COURSE, lesson, ANA, NOW), 0);
     is("and its room: the buyer's slot holds nothing", Number((await redis.pipeline([["HGET", dataKey(SHOP) ?? "", buyerSlotFor(FOLDER, COURSE, lesson, ANA) ?? ""]]))[0] ?? 0), 0);
     is("and its door is gone", await signSubmissionDoor(at, path, [1], w.steps), { ok: false, reason: "unknown" });
@@ -574,7 +582,7 @@ async function main(): Promise<void> {
     const later = NOW + UPLOAD_SECONDS + 1;
     const swept = await commandsOf(() => settleSubmissionSlots(later));
     is("once the door's day is over, the sweep sets the slot back to what is held: nothing", [swept.value.settled, await slotOf()], [1, 0]);
-    is("inside the commands each open pays for its sweep", swept.commands <= SUBMISSION_SLOT_SWEEP_COMMANDS, true);
+    is(`inside the commands each open pays for its sweep (${swept.commands} billed)`, swept.commands <= SUBMISSION_SLOT_SWEEP_COMMANDS, true);
     is("an open's commands hold its turn's write and its sweep, still inside the hundred a buyer action is priced at", SUBMISSION_STEP_COMMANDS.open >= 7 + 2 + SUBMISSION_SLOT_SWEEP_COMMANDS && SUBMISSION_STEP_COMMANDS.open <= 100, true);
     is("and nothing is left on the list for it", await redis.pipeline([["ZCARD", `nl:sub:slots:${FOLDER}`], ["ZSCORE", "nl:sub:slotdue", `${dataKey(SHOP)?.slice(8)}|${FOLDER}`]]), [0, null]);
     const again = await commandsOf(() => settleSubmissionSlots(later + 60));

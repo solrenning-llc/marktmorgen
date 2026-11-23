@@ -1943,6 +1943,16 @@ export class MemoryRedis {
           this.run(["SET", target, value]);
           return 1;
         }
+        // A submission door's first write (lib/submission-store.ts, SUBMISSION_DOOR_OPEN_WRITE): only while the lesson's live
+        // entry and the buyer's bare entry are still there, then SET NX, and the entry takes the file's path.
+        if (key.startsWith("-- marktmorgen:submission-door-open-write:v1\n") && args[0] === "3" && args.length === 10) {
+          const [, door, who, live, id, entry, pathEntry, json, seconds, until] = args;
+          if (this.run(["ZSCORE", live, id]) === null || this.run(["ZSCORE", who, entry]) === null) return 0;
+          if (this.run(["SET", door, json, "EX", seconds, "NX"]) !== "OK") return 0;
+          this.run(["ZADD", who, until, pathEntry]);
+          this.run(["ZREM", who, entry]);
+          return 1;
+        }
         // A submission door put back after a refused vault step (lib/submission-store.ts, SUBMISSION_DOOR_PUT_BACK): only
         // while the buyer's index entry and the lesson's live entry are still there, then SET NX.
         if (key.startsWith("-- marktmorgen:submission-door-put-back:v1\n") && args[0] === "3" && args.length === 8) {

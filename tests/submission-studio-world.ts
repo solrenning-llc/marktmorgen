@@ -56,6 +56,8 @@ export function findLesson(_course: unknown, lessonId: string) {
 }
 // lib/store.ts
 export const storeFolder = async () => FOLDER;
+/** lib/auth.ts normaliseEmail, which lib/suppression.ts (the open's ask whether the buyer was deleted) reads. */
+export const normaliseEmail = (email: string) => email.trim().toLowerCase();
 export const storeRef = () => "owner@example.test";
 // lib/store-allowance.ts
 export async function takeAllowance(_store: unknown, kind: string, n = 1) {

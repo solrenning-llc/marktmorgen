@@ -367,16 +367,11 @@ export function switchBack(control: LeverSwitch): LeverSwitch {
 }
 
 /**
- * What the card's switch knows after its presses: whether the saved state is
- * now the one its first press asked for ("unknown" once a reply did not
- * confirm, rule 24: nothing more is sent until the page is reloaded),
- * whether Undo is offered, and the last outcome.
- */
-/**
  * The card's own view. `saved` is the lever's state as the last confirmed reply gave it, absolute, never relative to
  * the control: the studio page re-renders the control from the saved store on every refresh while React keeps this
  * view, so a relative "flipped" would turn into the opposite of what is saved (Claude 7's MÉDIO 1 on #3563). null: no
- * press confirmed yet, the control as the page drew it; "unknown": a reply did not confirm, reload to see it.
+ * press confirmed yet, the control as the page drew it; "unknown": a reply did not confirm, so nothing more is sent
+ * until the page is reloaded (rule 24). `undo` says whether Undo is offered; `outcome` is the last press's outcome.
  */
 export type SwitchView = {
   saved: boolean | null | "unknown";

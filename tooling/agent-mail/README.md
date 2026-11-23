@@ -236,6 +236,17 @@ node ~/.agent-mail/agent-mail.mjs complete-review --as "Claude 5" <id> --result 
 ```
 
 - A revisão é sempre de uma família diferente da do autor (FQ (2)).
+- **READY só com zero achados** (ZA, dono, 23/11/2026, 12h29 Fortaleza). O `complete-review --result READY` recusa, sem gravar nada, o texto que:
+  - não diz "sem achados" (ou "0 achados", "no findings");
+  - aponta um achado de qualquer tamanho: GRAVE, ALTO, MÉDIO, LEVE ou NIT, ou os nomes em inglês;
+  - adia um achado: "não bloqueia", "non-blocking", "follow-up" ou "fica para depois".
+
+  Não contam como achado:
+  - uma contagem zero ("0 LEVE");
+  - uma linha marcada "não é defeito";
+  - uma linha que diz que um achado de head anterior foi corrigido ou retirado.
+
+  Com qualquer achado, o veredito é `--result CHANGES`.
 - `claim-review` dá o pedido aberto mais antigo. Nunca dois agentes pegam o mesmo pedido.
 - A preferência (`--to`) vale por 30 minutos, e só enquanto o preferido tem cota. Depois disso, qualquer outra família pode pegar. O autor é avisado na hora se o preferido está sem cota.
 - **Só quem pode revisar recebe o pedido** (dono, 21/11/2026). O `request-review` lê os commits do PR (o que ele tem além do main) e deixa de fora, sozinho, toda família com commit nele, pelo trailer `Claude-Session` (cada família tem um prefixo de sessão), pelo nome "Claude N" do autor e, num commit de outro autor sem trailer, pelo Codex. Ele mostra quem fica de fora e quem pode revisar. Na hora de pegar, a ferramenta confere de novo: se a sua família tem commit no PR, o pedido é devolvido sozinho e você recebe o próximo.

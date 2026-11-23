@@ -1690,6 +1690,29 @@ export function conferirTomada({ eu, id, agora = new Date() }) {
   return { p, head: sha };
 }
 
+/**
+ * ZA (dono, 23/11/2026, 12h29 Fortaleza): READY só com zero achados. Devolve os motivos pelos quais o texto de um READY
+ * não pode ser aceito: falta a declaração de zero achados ("sem achados", "0 achados", "no findings"), ou o texto aponta
+ * um achado de qualquer tamanho (GRAVE, ALTO, MÉDIO, LEVE, NIT e os nomes em inglês) ou o adia ("não bloqueia",
+ * "non-blocking", "follow-up", "fica para depois"). Uma contagem zero ("0 LEVE", "zero NIT") não é achado; uma linha que
+ * diz "não é defeito" ou "not a defect" é nota, não achado (ZA (c)). Vazio quando o READY pode ser gravado.
+ */
+export function motivosContraReady(texto) {
+  const motivos = [];
+  const todo = String(texto ?? "");
+  if (!/\b(sem achados?|0 achados?|zero achados?|nenhum achado|no findings?|0 findings?|zero findings?)\b/i.test(todo)) motivos.push('falta dizer "sem achados" (ou "0 achados", "no findings")');
+  const notas = /n[ãa]o [ée] defeito|not a defect|not a finding|n[ãa]o [ée] achado/i;
+  // ZA (d): o READY de um head novo diz que cada achado antigo foi corrigido ou retirado; essa linha não é achado aberto.
+  const resolvido = (l) => /corrigid|\bfixed\b|retirad|withdrawn/i.test(l) && !/n[ãa]o (foi |est[áa] )?(corrigid|retirad)|not (been |yet )?(fixed|withdrawn)|unfixed|sem corre[çc][ãa]o/i.test(l);
+  const linhas = todo.split("\n").filter((l) => !notas.test(l) && !resolvido(l)).join("\n")
+    .replace(/\b(0|zero|nenhum|sem|no)\s+(achados?\s+)?(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b/gi, " ");
+  const tamanho = /\b(GRAVE|ALTO|M[ÉE]DIO|LEVE|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE)S?\b/.exec(linhas);
+  if (tamanho) motivos.push(`o texto aponta um achado (${tamanho[0]})`);
+  const adiado = /n[ãa]o bloque(ia|ante)|non-?blocking|follow-?up|fica para depois|fica pra depois/i.exec(linhas);
+  if (adiado) motivos.push(`o texto adia um achado ("${adiado[0]}")`);
+  return motivos;
+}
+
 /** Conclui um pedido tomado: grava o resultado e manda ao autor. */
 export function concluir({ tipo, eu, id, resultado, texto = "", agora = new Date(), conferir = true }) {
   const p = pedidos(tipo, agora).find((x) => x.id === id);
@@ -1701,6 +1724,10 @@ export function concluir({ tipo, eu, id, resultado, texto = "", agora = new Date
   if (familia(p.ultimaTomadaPor) !== familia(eu)) throw new Error(`o pedido ${id} foi pegado por ${p.ultimaTomadaPor}; só quem pegou conclui`);
   const permitidos = tipo === "fila" ? ["enfileirado", "recusado"] : ["READY", "CHANGES"];
   if (!permitidos.includes(resultado)) throw new Error(`--result deve ser ${permitidos.join(" ou ")}`);
+  if (tipo === "revisao" && resultado === "READY") {
+    const motivos = motivosContraReady(texto);
+    if (motivos.length) throw new Error(`READY recusado (ZA: só com zero achados, de qualquer tamanho): ${motivos.join("; ")}. Com qualquer achado, conclua com --result CHANGES; uma nota que não é defeito vem escrita "não é defeito".`);
+  }
   // Passo 4: "enfileirado" só com a tomada desta sessão e o head conferido agora; o registro grava o head enfileirado.
   const enfileirado = tipo === "fila" && resultado === "enfileirado" && conferir ? conferirTomada({ eu, id, agora }).head : null;
   const corpo = [`Resultado: ${resultado}`, `PR: ${p.pr}`, `Head: ${p.sha}`, ...(enfileirado ? [`Head enfileirado: ${enfileirado}`] : []), `Por: ${eu}`, `Data (UTC): ${agora.toISOString().slice(0, 16).replace("T", " ")}`, "",

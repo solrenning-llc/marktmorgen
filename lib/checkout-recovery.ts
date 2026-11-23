@@ -192,6 +192,18 @@ async function stopLink(store: Store, email: string): Promise<{ token: string; p
 type StopGrant = { k: string; e: string; n?: unknown; h?: unknown; w?: unknown };
 
 /**
+ * The stop link's grant, written only while its erasure note is still there (#5010 row 103; Codex G,
+ * G-20261119-0934): an erasure of the address that finished between the note and this write took the note away,
+ * and a plain SET here would put the grant, with the address, back for LINK_SECONDS with nothing left to find it.
+ * KEYS: the address's scored notes, the link. ARGV: the link's key as noted, the grant, its seconds. 1: written;
+ * 0: the note is gone (the address was erased), nothing written. Billed as the EVAL, its ZSCORE and its SET.
+ */
+const MOVE_STOP_LINK_IF_NOTED = `-- marktmorgen:move-stop-link-if-noted:v1
+if not redis.call("ZSCORE", KEYS[1], ARGV[1]) then return 0 end
+redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+return 1`;
+
+/**
  * The stop link of an email to a member moved from another platform
  * (lib/imports.ts, lib/move-members.ts): the same door, page and one-click
  * address as a checkout reminder's, and the same mark, so pressing it stops
@@ -209,18 +221,6 @@ type StopGrant = { k: string; e: string; n?: unknown; h?: unknown; w?: unknown }
  * still there (MOVE_STOP_LINK_IF_NOTED). Throws when either is not confirmed
  * written, or when there is no key to sign with: nothing is sent then.
  */
-/**
- * The stop link's grant, written only while its erasure note is still there (#5010 row 103; Codex G,
- * G-20261119-0934): an erasure of the address that finished between the note and this write took the note away,
- * and a plain SET here would put the grant, with the address, back for LINK_SECONDS with nothing left to find it.
- * KEYS: the address's scored notes, the link. ARGV: the link's key as noted, the grant, its seconds. 1: written;
- * 0: the note is gone (the address was erased), nothing written. Billed as the EVAL, its ZSCORE and its SET.
- */
-const MOVE_STOP_LINK_IF_NOTED = `-- marktmorgen:move-stop-link-if-noted:v1
-if not redis.call("ZSCORE", KEYS[1], ARGV[1]) then return 0 end
-redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
-return 1`;
-
 export async function moveStopLink(store: Store, email: string): Promise<{ page: string; oneClick: string }> {
   const key = deriveKey("move-stop");
   if (!key || !store.statsId) throw new Error("no key to sign a moved member's stop link with");

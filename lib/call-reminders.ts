@@ -302,7 +302,9 @@ export async function sendCallReminders(
     // call, and the reminder carries only the booking's own details (its time, its place or room, its calendar file
     // and the buyer's page to move it), nothing of the store's switched-off pages. Held in tests/suspended-store-updates-calls.test.ts.
     const done: string[] = [];
-    // Timed reminders whose one paid call could not be read: put off together with the group's ZREM (retryLater).
+    // Timed reminders kept for a later run (their one paid call could not be read, or their send failed): put off
+    // together with the group's ZREM (retryLater), never left at the head of the next run (Claude 1 E's and Claude 4
+    // AC's LEVEs on #5103).
     const unread: string[] = [];
     if (!store || store.callsId !== callsId) {
       await redisPipeline([["ZREM", REMINDER_QUEUE, ...members.map((m) => m.member)]]);
@@ -417,11 +419,15 @@ export async function sendCallReminders(
             again = true;
           } else if (creator === "uncertain") console.error("a call reminder to the creator may have gone; its mark is kept", store.handle, call.session, item.mark);
         }
-        if (again) done.pop();
+        if (again) {
+          done.pop();
+          unread.push(member);
+        }
       } catch (error) {
         console.error("sending a call reminder failed", error);
-        // Kept in the queue for the next run; stillUseful lets it go once it is too late.
+        // Kept in the queue, put off RETRY_MS; stillUseful lets it go once it is too late.
         done.pop();
+        unread.push(member);
       }
     }
     const later = retryLater(unread, now);

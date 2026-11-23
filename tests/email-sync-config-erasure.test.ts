@@ -155,6 +155,7 @@ test("the whole email-platform route, at its worst, stays inside the studio and 
   const { setSubscription } = await import("@/lib/store");
   const { paidPeriod } = await import("./billing-period-fixture");
   const { afterTasks } = await import("./next-server-after-world");
+  const { allowanceUsed } = await import("@/lib/store-allowance");
   const { LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS, UNIT_COST, request } = await import("./plan-cost-registry");
   const { PERSISTENT_FENCE_EXTRA_COMMANDS } = await import("@/lib/store-live-cache");
   // The commands UNIT_COST prices in its studio and integration units, tied to it so they cannot drift apart.
@@ -191,9 +192,15 @@ test("the whole email-platform route, at its worst, stays inside the studio and 
     ] as const) {
       unreadable = status === 400;
       afterTasks.length = 0;
-      answerWith([...replies]);
+      // Claude 1 coord's rule (e931): the two units count only when both are taken before the provider is called, so
+      // they are read at the platform's first request (not billed here).
+      const units = async () => { const store = (await storeForEmail(OWNER))!; return [await allowanceUsed(store, "studio"), await allowanceUsed(store, "integration")]; };
+      const before = await units();
+      let atCall: number[] = [];
+      answerWith([...replies], 0, async () => { const held = billed; atCall = await units(); billed = held; });
       billed = 0;
       assert.equal((await post(body)).status, status, name);
+      assert.deepEqual(atCall, [before[0] + 1, before[1] + 1], `${name} took one studio and one integration unit before the platform was called`);
       // The creator's notice after a new connection is an inbox message, priced by UNIT_COST.inbox, not here.
       assert.ok(billed <= studio + integration, `${name} bills ${billed}, over the ${studio + integration} of its two units`);
     }

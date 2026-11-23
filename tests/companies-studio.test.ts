@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CompaniesEditor } from "@/components/companies-editor";
-import { type Company, MAX_COMPANIES } from "@/lib/crm-companies-rules";
+import { type Company, MAX_COMPANIES, restoredSentence } from "@/lib/crm-companies-rules";
 import { done, is, part } from "./check";
 
 const ann = "a".repeat(32);
@@ -51,7 +51,8 @@ is("MEDIUM 3: correcting the field at fault takes its refusal away", ["name", "w
 is("LIGHT 4: at the most a store can keep, a submit says why, shown once beside the button", screen.includes("if (full) return refuse(COMPANY_REFUSALS.full, null);") && screen.includes("(full && error === COMPANY_REFUSALS.full)"), true);
 is("LIGHT 5: a reading of Stripe cut short is said beside someone not found", [draw([{ ...north, addresses: {} }], true, true).includes("A person we could not find among your Stripe buyers (the oldest buyers are not read)"), html.includes("oldest")], [true, false]);
 is("the alert region is there before any refusal, its message drawn as a new node each time", html.includes('role="alert"><span></span></p>'), true);
-is("a delete keeps the people, and is undone in one change with them, saying who had moved and stays", screen.includes("Its people are still in your store.") && screen.includes('send({ action: "restore", name: gone.name, website: gone.website, note: gone.note, people: gone.people }') && screen.includes("moved to another company since") && !screen.includes('action: "link", id: added.id'), true);
+// The sentence moved to lib/crm-companies-rules.ts restoredSentence (Claude 7's MÉDIO 2 on #4026), so a deleted person is counted apart.
+is("a delete keeps the people, and is undone in one change with them, saying who had moved and stays", screen.includes("Its people are still in your store.") && screen.includes('send({ action: "restore", name: gone.name, website: gone.website, note: gone.note, people: gone.people }') && screen.includes("setPutBack(restoredSentence(gone.name, gone.people.length, back.skipped?.length ?? 0, back.erased ?? 0));") && restoredSentence("North", 2, 1, 0).includes("moved to another company since") && !screen.includes('action: "link", id: added.id'), true);
 is("Change takes the focus to the form it opens, and the website field has its limit (review A6)", screen.includes('focusAfterDrawing({ to: "name", scroll: true })') && screen.includes("shown?.focus();") && screen.includes("maxLength={MAX_COMPANY_WEBSITE}"), true);
 
 part("The page");

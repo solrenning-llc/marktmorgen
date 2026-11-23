@@ -42,9 +42,19 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
     run(listed === "1" ? ["ZADD", dir, at, member] : ["ZREM", dir, member]);
     return 1;
   },
-  "recent-feed-live:v1": (run, [live, erasing, feed], [field, json, seconds]) => {
-    if (Number(run(["EXISTS", live])) !== 1 || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
+  "recent-feed-live:v2": (run, [live, erasing, feed], [field, json, seconds, ref]) => {
+    if (run(["GET", live]) !== ref || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
     run(["SET", feed, json, "EX", seconds]);
+    return 1;
+  },
+  // lib/recent-sales.ts KEEP_SALE_IF_LIVE: a purchase written down only while the store's id key holds its ref and its
+  // erasure has not begun; "gone", nothing written (#4965).
+  "recent-sale-live:v2": (run, [live, erasing, list, feed], [field, json, last, seconds, ref]) => {
+    if (run(["GET", live]) !== ref || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
+    run(["LPUSH", list, json]);
+    run(["LTRIM", list, 0, last]);
+    run(["EXPIRE", list, seconds]);
+    run(["DEL", feed]);
     return 1;
   },
   "recovery-report-live:v1": (run, [storeId, erasing, report], [field, value, seconds]) => {
@@ -91,6 +101,29 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
     run(["SET", key, value, "EX", seconds]);
     return 1;
   },
+  // lib/live-fence.ts PUSH_IF_STORE_LIVE: a line pushed onto a bounded, renewed list only while the store is not
+  // erasing and its key is still its own, by the same identity rule (Codex L-20261120-2338).
+  "store-push-live:v1": (run, [live, erasing, key], [field, value, seconds, statsId, ref, most]) => {
+    if (run(["HGET", erasing, field]) !== null) return 0;
+    if (statsId === "") {
+      if (run(["GET", live]) !== ref) return 0;
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return 0;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -1;
+      }
+      if (!record || typeof record !== "object") return -1;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+    }
+    run(["LPUSH", key, value]);
+    run(["LTRIM", key, "0", String(Number(most) - 1)]);
+    run(["EXPIRE", key, seconds]);
+    return 1;
+  },
   // lib/store-live-cache.ts CLAIM_IF_STORE_LIVE: a mark taken once (SET NX) only while the store is its own and not
   // erasing, by the same identity rule; -1 gone or erasing, -2 an owner's record that does not parse, 1 ours, 0 taken.
   "store-claim-live:v1": (run, [live, erasing, key], [field, value, seconds, statsId, ref]) => {
@@ -110,6 +143,14 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
       if ((record as { statsId?: unknown }).statsId !== statsId) return -1;
     }
     return run(["SET", key, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
+  },
+  // lib/store-forget-retry.ts COMPLETE_FORGET: a deleted store's forgetting leaves the daily line and is counted done
+  // for its month, only while it is still in line: {1, done} taken out, {0, 0} not there (#4348).
+  "store-forget-complete:v1": (run, [queue, month], [field, seconds]) => {
+    if (run(["HDEL", queue, field]) !== 1) return [0, 0];
+    const done = run(["HINCRBY", month, "done", 1]);
+    run(["EXPIRE", month, seconds]);
+    return [1, done];
   },
   "zset-take-count:v1": (run, [zset]) => {
     const n = Number(run(["ZCARD", zset])) || 0;

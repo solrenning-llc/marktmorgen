@@ -7,6 +7,10 @@ import { BlobNotFoundError } from "@vercel/blob";
 /** Each file with when it was stored (ms); one with no time was stored long ago. */
 export const files = new Map<string, { bytes: Uint8Array; contentType: string; at?: number }>();
 export const deleted: string[] = [];
+/** How many times each name was asked about with head (tests/encanto-thumb-leves.test.ts counts the cleanup's). */
+export const heads = new Map<string, number>();
+/** Names whose read fails as an outage of the file store would (a 503), not as "not there". */
+export const unreadable = new Set<string>();
 /** Every call the code under test made to the file store, by kind (tests/page-picture-check-cost.test.ts counts them). */
 export const calls = { head: 0, get: 0, put: 0, del: 0, list: 0 };
 
@@ -34,12 +38,14 @@ function failing(kind: "head" | "get", pathname: string): boolean {
 
 export async function head(pathname: string) {
   calls.head += 1;
+  heads.set(pathname, (heads.get(pathname) ?? 0) + 1);
   if (failing("head", pathname)) throw new Error("fetch failed: ETIMEDOUT");
   return stat(pathname);
 }
 
 export async function get(pathname: string) {
   calls.get += 1;
+  if (unreadable.has(pathname)) throw new Error("Vercel Blob: 503 (synthetic outage)");
   if (failing("get", pathname)) throw new Error("fetch failed: ECONNRESET");
   const file = files.get(pathname);
   if (!file) return null;

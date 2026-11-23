@@ -79,3 +79,4 @@ export async function takeBuyerAction() {
 export async function takeBuyerRead() {
   return true;
 }
+export const takeBuyerReadExact = takeBuyerRead;

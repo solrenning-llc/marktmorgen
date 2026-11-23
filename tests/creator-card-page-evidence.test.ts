@@ -1,3 +1,4 @@
+import { storeLiveFence } from "@/lib/store-live-cache";
 // Codex G2's proof on #1962 (codex/g2-review-1962-card-admission-red, 3ca400bd5), kept as permanent tests:
 // the creator card's public reads (the Save contact file, the contact page and its title) are paid
 // for before the card is read, and never given while the store's admission is refused.
@@ -18,7 +19,7 @@ async function fixture(){
  redis.clear();await claimHandle(owner,handle,'Synthetic creator','');await ensureStatsId(owner);await ensureStoreId(owner);
  assert.ok(await setSubscription(owner,{customerId:'cus_G2CardAdmission',subscriptionId:'sub_G2CardAdmission',active:true,tier:'creator',period:paidPeriod()}));
  const store=(await storeForEmail(owner))!;
- assert.equal((await saveCreatorCard(store.statsId!,{on:true,name:'Synthetic public card',email:'public@example.com'},store)).ok,true);
+ assert.equal((await saveCreatorCard(store.statsId!,{on:true,name:'Synthetic public card',email:'public@example.com'},store,await storeLiveFence(store))).ok,true);
  return store;
 }
 test('control: a deliberately published synthetic card downloads with no-store',async()=>{

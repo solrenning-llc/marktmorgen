@@ -10,7 +10,8 @@
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { emailKey, storeKey } from "@/lib/learn";
-import { accountOf, forgetServer, keepMember, membersOf, readServer, saveServer } from "@/lib/discord-store";
+import { accountOf, forgetServer, keepMember, membersOf, readServer } from "@/lib/discord-store";
+import { seedDiscordServer as saveServer } from "./discord-server-fixture";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";

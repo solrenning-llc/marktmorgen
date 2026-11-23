@@ -411,12 +411,14 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
 /**
  * Takes ids out of a person's team index only where the same Redis step reads the store's team exactly as the read
  * past read it and accepted it without them (Codex U's MEDIUM on #3660; Codex L-20261119-0634 on #5010 row 133): still
- * gone, or the very record parseTeam read, by its SHA-1. The script never reads the JSON again by a rule of its own:
+ * gone, or byte for byte the very record parseTeam read, sent back with the call (no digest: redis.sha1hex is not
+ * confirmed on Upstash, Claude 5 ibuF's MEDIUM on #5175). The script never reads the JSON again by a rule of its own:
  * cjson turns a JSON object and an array alike into a table, so the v1 script took a team whose members or invites were
  * objects, which parseTeam refuses, for a team without them and dropped a live store's id. A join that lands before this
  * step changes the record and keeps its id; one that lands after it adds the id itself with its own SADD. A record that
  * changed in any way keeps the id: unknown is never "not on the team". The read past (memberStoresExact) calls it for
- * the ids it read off their team; one command, the same GET and SREM a store as v1 (redis.sha1hex is no command).
+ * the ids it read off their team; one command, the same GET and SREM a store as v1, with each record read sent back
+ * (at most the team's capped size; tests/plan-cost-registry.ts, STALE_ID_WIRE_BYTES).
  */
 export const TEAM_INDEX_OFF_TEAM = `-- marktmorgen:team-index-off-team:v2
 local removed = 0
@@ -424,18 +426,18 @@ for i = 2, #KEYS do
   local raw = redis.call('GET', KEYS[i])
   local seen = ARGV[(i - 2) * 2 + 2]
   local same
-  if seen == '' then same = not raw else same = raw and redis.sha1hex(raw) == seen end
+  if seen == '' then same = not raw else same = raw == seen end
   if same then removed = removed + redis.call('SREM', KEYS[1], ARGV[(i - 2) * 2 + 1]) end
 end
 return removed`;
 
-/** What the read past read of a team it found without the person: the record exactly, or null when it was gone. */
+/** What the read past read of a team it found without the person: the record exactly, or null when it was gone (sent as "", which no record is: parseTeam refuses it). */
 type ReadOffTeam = { sid: string; raw: string | null };
 
 /** Runs TEAM_INDEX_OFF_TEAM for `teams`; throws on a reply that is not a count of at most that many (rule 24). */
 async function dropOffTeam(address: string, teams: ReadOffTeam[]): Promise<void> {
   if (!teams.length) return;
-  const seen = teams.flatMap(({ sid, raw }) => [sid, raw === null ? "" : createHash("sha1").update(raw, "utf8").digest("hex")]);
+  const seen = teams.flatMap(({ sid, raw }) => [sid, raw ?? ""]);
   const replies = repliesFor(await redisPipeline([["EVAL", TEAM_INDEX_OFF_TEAM, 1 + teams.length, indexKey(address), ...teams.map(({ sid }) => teamKey(sid)), ...seen]]), 1);
   const removed = replies ? countOf(replies[0]) : null;
   if (removed === null || removed > teams.length) throw new UnknownReplyError("ids taken out of a teammate's store index");

@@ -3989,7 +3989,7 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
         // lib/team.ts TEAM_INDEX_OFF_TEAM: an id leaves a person's team index only when its team, read in the same step,
-        // is still exactly the record the read past accepted without them (its SHA-1), or still gone (an empty digest):
+        // is still byte for byte the record the read past accepted without them, or still gone (sent as ""):
         // never a second reading of the JSON (Codex L-20261119-0634 on #5010 row 133; before it, Codex U on #3660).
         if (key.startsWith("-- marktmorgen:team-index-off-team:v2\n")) {
           const count = Number(args[0]);
@@ -4002,7 +4002,7 @@ export class MemoryRedis {
             this.scriptCalls += 1;
             const raw = this.run(["GET", team]);
             const seen = argv[2 * i + 1];
-            const same = seen === "" ? raw === null : typeof raw === "string" && createHash("sha1").update(raw, "utf8").digest("hex") === seen;
+            const same = seen === "" ? raw === null : raw === seen;
             if (same) {
               this.scriptCalls += 1;
               removed += Number(this.run(["SREM", index, argv[2 * i]]));

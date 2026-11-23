@@ -28,7 +28,9 @@ import { claimsKey, hostId } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
 import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
-import { DECIDE_CALENDARS_COMMANDS, PREPARE_COMMANDS, STALE_ID_COMMANDS, decideCalendarRuns } from "./plan-cost-registry";
+import { DECIDE_CALENDARS_COMMANDS, PREPARE_COMMANDS, STALE_ID_COMMANDS, STALE_ID_WIRE_BYTES, decideCalendarRuns } from "./plan-cost-registry";
+import { FAMILIES } from "./store-data-registry";
+import { TIERS } from "@/lib/plan";
 import { MAX_TEAM, MEMBER_STORES_READ, memberStoresExact, readTeam } from "@/lib/team";
 
 globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
@@ -663,6 +665,13 @@ async function main(): Promise<void> {
   part("Its cost: each run that reads an undecided host again is counted (tests/plan-cost-registry.ts)");
   is("a run deciding the hosts again costs less than one preparation", DECIDE_CALENDARS_COMMANDS > 0 && DECIDE_CALENDARS_COMMANDS < PREPARE_COMMANDS, true);
   is("each read past drops at least all it read but the closing store, so an index is decided in a bounded number of reads", [decideCalendarRuns(MEMBER_STORES_READ), decideCalendarRuns(MEMBER_STORES_READ + 1), decideCalendarRuns(2 * MEMBER_STORES_READ - 1), decideCalendarRuns(2 * MEMBER_STORES_READ)], [1, 2, 2, 3]);
+  {
+    // #5010 row 133: the read past sends back each team record it read, so the wire bytes a stale id adds are its team
+    // record at its largest, the registry's cap for nl:team:, never less.
+    const parts = FAMILIES["nl:team:@lib/team.ts"].parts ?? [];
+    const cap = Math.max(...TIERS.flatMap((tier) => parts.map((part) => ("capped" in part ? part.capped(tier) : 0))));
+    is("a stale id's wire bytes are its team record at the registry's cap", [cap > 0, STALE_ID_WIRE_BYTES >= cap], [true, true]);
+  }
   is("a stale id's share of a read past is counted, for each of a closing store's team places", STALE_ID_COMMANDS > 0 && STALE_ID_COMMANDS * (MEMBER_STORES_READ - 1) >= DECIDE_CALENDARS_COMMANDS / (1 + MAX_TEAM), true);
 
   done();

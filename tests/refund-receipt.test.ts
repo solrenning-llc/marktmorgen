@@ -30,6 +30,8 @@ async function main(): Promise<void> {
   }
   receipt = { ...valid(), payment_intent: { id: INTENT } };
   is("expanded matching intent is accepted", await refundCharge(INTENT, 3500, KEY), true);
+  receipt = { ...valid(), id: "pyr_RefundReceipt0001" };
+  is("a pyr_ receipt (a refund on some non-card methods) is a refund too", await refundCharge(INTENT, 3500, KEY), true);
 
   part("HTTP success alone never proves a completed refund");
   const cases: [string, unknown][] = [
@@ -38,6 +40,8 @@ async function main(): Promise<void> {
     ["wrong object", { ...valid(), object: "payment_intent" }],
     ["missing id", { ...valid(), id: undefined }],
     ["wrong id", { ...valid(), id: "pi_NotARefund0001" }],
+    ["near-miss id", { ...valid(), id: "py_RefundReceipt0001" }],
+    ["short pyr_ id", { ...valid(), id: "pyr_short" }],
     ["pending", { ...valid(), status: "pending" }],
     ["requires action", { ...valid(), status: "requires_action" }],
     ["failed", { ...valid(), status: "failed" }],

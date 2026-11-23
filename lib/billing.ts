@@ -2139,7 +2139,8 @@ export async function refundCharge(paymentIntent: string, cents: number | null, 
       ? receipt.payment_intent
       : (receipt.payment_intent as { id?: unknown } | null | undefined)?.id;
     return receipt.object === "refund"
-      && typeof receipt.id === "string" && /^re_[A-Za-z0-9]{8,64}$/.test(receipt.id)
+      // re_ for cards, pyr_ for some other methods, as refundsOnIntent reads them (#5361, Claude 5 ibuF's note).
+      && typeof receipt.id === "string" && /^(re|pyr)_[A-Za-z0-9]{8,64}$/.test(receipt.id)
       && receipt.status === "succeeded"
       && intent === paymentIntent
       && receipt.currency === "usd"

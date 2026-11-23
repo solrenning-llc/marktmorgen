@@ -67,6 +67,16 @@ async function main(): Promise<void> {
       lookup = () => json(body, 404);
       is(`${label}: not known, never none`, await findCode(ACCOUNT, live.id), { state: "error" });
     }
+    // The LEVE's second half (Claude 2 lpgvy on #5337): an `active` in another shape is not known either, never a
+    // live or a stopped code.
+    for (const [label, active] of [["active as a word", "true"], ["active null", null], ["active as a number", 1]] as [string, unknown][]) {
+      lookup = () => json({ ...live, active });
+      is(`${label}: not known, never a code found`, await findCode(ACCOUNT, live.id), { state: "error" });
+    }
+    lookup = () => json((({ active: _active, ...rest }) => rest)(live));
+    is("no active at all: not known", await findCode(ACCOUNT, live.id), { state: "error" });
+    lookup = () => json({ ...live, active: false });
+    is("control: a stopped code is found, not live", await findCode(ACCOUNT, live.id), { state: "found", active: false });
     lookup = () => json(live);
 
     part("LEVE 2: the member offer refuses an empty page of live codes that says there are more");

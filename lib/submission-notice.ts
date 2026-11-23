@@ -35,18 +35,31 @@ import { suppressedCommand } from "@/lib/suppression";
 import { submissionsWords } from "@/lib/buyer-words/submissions";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import type { KeptSubmission } from "@/lib/submission-store";
-import type { Store } from "@/lib/store";
+import { MAX_STORE_BYTES, type Store, storeExactly, storeRef } from "@/lib/store";
+import { STUDIO_UNIT_SENT_BYTES } from "@/lib/sent-bytes";
 
 /** How long the once-only mark is kept: past any retry of the reply that sent it. */
 export const SUBMISSION_TOLD_SECONDS = 2 * 86_400;
 /**
  * Redis commands this file sends for one reply, at most: the mark and its
- * read-back, the contact and the deletion check (one batch of two, read after
- * the mark, as the last step before the send), and the mark given back when
- * that check did not read. The email's own allowance take is lib/email.ts's,
+ * read-back, the store's record read again when the request read it with no
+ * list (recipient), the contact and the deletion check (one batch of two, read
+ * after the mark, as the last step before the send), and the mark given back
+ * when a check did not read. The email's own allowance take is lib/email.ts's,
  * priced with each store email.
  */
-export const SUBMISSION_NOTICE_COMMANDS = 5;
+export const SUBMISSION_NOTICE_COMMANDS = 6;
+/**
+ * Studio requests (lib/sent-bytes.ts) the store's record read again takes, at
+ * its largest (MAX_STORE_BYTES). Only a store the request read with no list
+ * reads it (noticeStudioUnits); the studio's reply route takes them with the
+ * reply's own, before anything is read.
+ */
+export const SUBMISSION_NOTICE_STORE_UNITS = Math.ceil(MAX_STORE_BYTES / STUDIO_UNIT_SENT_BYTES);
+/** The studio requests the notice itself takes for this store: none for a store with a list. */
+export function noticeStudioUnits(store: Pick<Store, "listId">): number {
+  return store.listId ? 0 : SUBMISSION_NOTICE_STORE_UNITS;
+}
 
 export type NoticeMessage = Parameters<typeof sendEmail>[0];
 export type ReplyNotice = "sent" | "unsent" | "already" | "stopped" | "unknown" | "none";
@@ -127,9 +140,17 @@ export function emailedAnswer(told: ReplyNotice): boolean | "unknown" {
  * refused, or deleted from the store) or "unknown" when a check did not read exactly.
  */
 async function recipient(store: Store, email: string): Promise<"open" | "stopped" | "unknown"> {
-  const listId = store.listId ?? null;
+  let listId = store.listId ?? null;
   let replies: unknown[] | null;
   try {
+    // A store the request read with no list may have been given one since by an erasure (lib/person-erasure.ts asks
+    // ensureListId first, then marks the person deleted on that list): its record is read again now, exactly, so the
+    // erasure is seen (Claude 7's LOW 2 on #3583). A list, once given, never changes, so a store with one reads nothing.
+    if (!listId) {
+      const now = await storeExactly(storeRef(store));
+      if (!now) return "unknown";
+      listId = now.listId ?? null;
+    }
     replies = repliesFor(
       await redisPipeline([listId ? ["HGET", leadsKey(listId), normaliseEmail(email)] : ["EXISTS", "nl:none"], suppressedCommand(listId, email)]),
       2,

@@ -41,7 +41,8 @@ import { SUBMISSIONS_WORDS } from "@/lib/buyer-words/submissions";
 import type { KeptSubmission } from "@/lib/submission-store";
 import { leadsKey } from "@/lib/contacts";
 import { suppressCommand } from "@/lib/suppression";
-import type { Store } from "@/lib/store";
+import { MAX_STORE_BYTES, type Store, ownerKey, storeRef } from "@/lib/store";
+import { STUDIO_UNIT_SENT_BYTES } from "@/lib/sent-bytes";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -219,6 +220,60 @@ async function main(): Promise<void> {
   await tellBuyerOfReply({ store: STORE, ...where, submission: kept() }, send);
   redis.pipeline = pipeline;
   is("inside SUBMISSION_NOTICE_COMMANDS (the email's own allowance take is lib/email.ts's)", commands <= SUBMISSION_NOTICE_COMMANDS, true);
+
+  part("A store with no list when the reply began reads its list again at the last check (Claude 7's LOW 2 on #3583)");
+  {
+    // A store from before lists: the request read it with no list. An erasure that lands between the reply and the
+    // send gives it one (lib/person-erasure.ts asks ensureListId first) and marks the buyer deleted on that list.
+    const NO_LIST = { ...STORE, listId: null } as unknown as Store;
+    const recordKey = await ownerKey(storeRef(NO_LIST));
+    const units = (notice as Record<string, unknown>).noticeStudioUnits as ((store: Store) => number) | undefined;
+    const storeUnits = (notice as Record<string, unknown>).SUBMISSION_NOTICE_STORE_UNITS;
+    await pipeline([["SET", recordKey, JSON.stringify(NO_LIST)]]);
+    // The list an erasure gives (lib/store.ts newListId: 32 hex characters, as LIST_ID_PATTERN reads it).
+    const GIVEN = "e".repeat(32);
+    const late = kept();
+    redis.pipeline = (async (batch: (string | number)[][]) => {
+      if (batch.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:sub:told:"))) {
+        await pipeline([["SET", recordKey, JSON.stringify({ ...NO_LIST, listId: GIVEN })], suppressCommand(GIVEN, late.buyer, NOW)]);
+      }
+      return pipeline(batch);
+    }) as typeof redis.pipeline;
+    const before = sent.length;
+    is("an erasure that gave the store its list meanwhile is seen: stopped", await tellBuyerOfReply({ store: NO_LIST, ...where, submission: late }, send), "stopped");
+    redis.pipeline = pipeline;
+    is("and no email was sent to the erased buyer", sent.length, before);
+
+    // Control: the store still has no list, so nobody was deleted from it, and the buyer is told.
+    await pipeline([["SET", recordKey, JSON.stringify(NO_LIST)]]);
+    let counted = 0;
+    redis.pipeline = (async (batch: (string | number)[][]) => {
+      counted += batch.length;
+      return pipeline(batch);
+    }) as typeof redis.pipeline;
+    is("a store that still has no list: the buyer is told (control)", await tellBuyerOfReply({ store: NO_LIST, ...where, submission: kept() }, send), "sent");
+    redis.pipeline = pipeline;
+    is("one email", sent.length, before + 1);
+    is("with the store read again, still inside SUBMISSION_NOTICE_COMMANDS", counted <= SUBMISSION_NOTICE_COMMANDS, true);
+
+    // The store's record cannot be read exactly: nothing is sent, and the mark is given back for a later try.
+    const unread = kept();
+    await pipeline([["SET", recordKey, "not a store"]]);
+    is("a store record that does not read is unknown: nothing sent", await tellBuyerOfReply({ store: NO_LIST, ...where, submission: unread }, send), "unknown");
+    is("still one email", sent.length, before + 1);
+    is("the mark was given back", (await pipeline([["EXISTS", `nl:sub:told:${FOLDER}:${unread.id}`]]))[0], 0);
+    await pipeline([["DEL", recordKey]]);
+    is("a store whose record is gone is unknown: nothing sent", await tellBuyerOfReply({ store: NO_LIST, ...where, submission: kept() }, send), "unknown");
+    is("still one email, after the gone record", sent.length, before + 1);
+
+    // That read moves at most the store's whole record, so the reply takes one more studio request for it, and only
+    // for a store with no list; a store with a list reads nothing more.
+    is("the store's record read is priced in studio requests", typeof storeUnits === "number" && storeUnits >= Math.ceil(MAX_STORE_BYTES / STUDIO_UNIT_SENT_BYTES), true);
+    is("a store with no list takes them", typeof units === "function" ? units(NO_LIST) : "missing", storeUnits);
+    is("a store with a list takes none", typeof units === "function" ? units(STORE) : "missing", 0);
+    const replyRoute = readFileSync(join(process.cwd(), "app/api/store/course/submissions/route.ts"), "utf8");
+    is("the studio's reply takes them before anything is read", replyRoute.includes("takeMore(store, SUBMISSION_REPLY_UNITS + noticeStudioUnits(store))"), true);
+  }
 
   part("In the store's language");
   const pt = replyNoticeMessage({ store: { ...STORE, language: "pt" } as unknown as Store, ...where, submission: first });

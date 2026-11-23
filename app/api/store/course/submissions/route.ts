@@ -10,7 +10,7 @@ import { readSubmissionReply, readSubmissionSetup } from "@/lib/submission-rules
 import { SUBMISSION_LIST_UNITS, SUBMISSION_REPLY_UNITS, readReviewCursor, readSetupFor, replySubmission, reviewCursorText, reviewList, saveSetupFor } from "@/lib/submission-store";
 import { DataRoomError } from "@/lib/store-data";
 import { SUBMISSIONS_READY } from "@/lib/submission-switch";
-import { emailedAnswer, tellBuyerOfReply } from "@/lib/submission-notice";
+import { emailedAnswer, noticeStudioUnits, tellBuyerOfReply } from "@/lib/submission-notice";
 
 const json = (body: Record<string, unknown>, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const no = (error: string, status: number) => json({ ok: false, error }, status);
@@ -124,7 +124,8 @@ export async function POST(request: NextRequest) {
     if (action === "reply") {
       const read = readSubmissionReply({ text: body.text });
       if (!read.ok) return no(read.reason === "text" ? "reply" : "invalid", 400);
-      const refused = await takeMore(store, SUBMISSION_REPLY_UNITS);
+      // The notice's own read of the store, when it has no list, is taken here too, before anything is read.
+      const refused = await takeMore(store, SUBMISSION_REPLY_UNITS + noticeStudioUnits(store));
       if (refused) return refused;
       const done = await replySubmission(
         { data: store, folder: await storeFolder(storeRef(store)), courseId: found.courseId, id: text(body.submission, 40), reply: read.reply },

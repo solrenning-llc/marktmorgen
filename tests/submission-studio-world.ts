@@ -62,6 +62,12 @@ export const normaliseEmail = (email: string) => email.trim().toLowerCase();
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const MAX_EMAIL_LENGTH = 254;
 export const storeRef = () => "owner@example.test";
+/** lib/store.ts MAX_STORE_BYTES and storeExactly, which lib/submission-notice.ts reads for a store with no list (Claude 7's LOW 2 on #3583). */
+export const MAX_STORE_BYTES = 1_000_000;
+export async function storeExactly(_ref: string) {
+  state.events.push("read:store");
+  return STORE;
+}
 // Read by lib/auth.ts (through lib/handle-prefill.ts), which the buyer's reply email loads for its address checks (unit 6).
 export const normaliseHandle = (raw: string) => raw.trim().replace(/^@+/, "").toLowerCase();
 export const newAddressProblem = () => null;

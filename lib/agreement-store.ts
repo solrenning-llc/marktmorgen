@@ -542,7 +542,10 @@ export async function agreementsOfPerson(store: Pick<Store, "sid">, email: strin
     // A member that is not an agreement id makes the whole set unknown, as forgetAgreementsPerson refuses it (Claude 4
     // 3rC's LOW on #5154): a shorter list is never "these are all of them".
     if (!members || !members.every((id) => ID_PATTERN.test(id))) return null;
-    const ids = members.slice(0, MAX_PER_PERSON * 2);
+    // A set past twice the per-person limit cannot be made (the create refuses a person past MAX_PER_PERSON): it is
+    // unknown too, never cut to its first ids in silence (Claude 1's NIT on #5293).
+    if (members.length > MAX_PER_PERSON * 2) return null;
+    const ids = members;
     if (!ids.length) return [];
     const read = repliesFor(await redisPipeline([["MGET", ...ids.map(recordKey)]]), 1);
     const values = read ? repliesFor(read[0], ids.length) : null;

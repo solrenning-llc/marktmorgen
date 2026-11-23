@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { heldOrdersKey, MOVE_HELD_ORDERS } from "@/lib/order-admission";
-import { COMMIT_ORDER_CONFIRMATION, countLegacyCheckoutForConfirmation } from "@/lib/orders";
+import { COMMIT_ORDER_CONFIRMATION, LEGACY_CREATED_AHEAD_MS, countLegacyCheckoutForConfirmation } from "@/lib/orders";
 import { store as redis } from "./redis-stub";
 import { storeFolder, storeRef, type Store } from "@/lib/store";
 
@@ -76,4 +76,18 @@ test("a checkout created after the worker's clock is unknown, writes nothing, an
   assert.equal(again.result, "already", "a repeat reads the one receipt back");
   const [first, second] = [later.sent[0], again.sent[0]];
   assert.equal(first[9], second[9], "the receipt is fixed by the checkout, not by the try's time");
+});
+
+test("a checkout created up to the clock allowance ahead of the worker is counted at once (Claude 4's LOW, 6787389203)", async () => {
+  // A Stripe `created` a few seconds ahead of this server's clock is the two clocks differing, not a forged admission:
+  // within LEGACY_CREATED_AHEAD_MS it counts now, so the buyer's receipt is not held to a later sweep. Past it, unknown.
+  const store = paying(null);
+  const reference = "checkout:cs_test_ClockSkewAhead00001";
+  const admission = { hour: Math.floor(now / 3_600_000), items: 1, createdAtMs: now + 60_000 };
+  const skewed = await capture(() => countLegacyCheckoutForConfirmation(store, reference, 2500, now, admission), () => 1);
+  assert.equal(skewed.result, "committed", "a minute ahead is clock skew, counted at once");
+  const edge = { ...admission, createdAtMs: now + LEGACY_CREATED_AHEAD_MS + 1 };
+  const past = await capture(() => countLegacyCheckoutForConfirmation(store, "checkout:cs_test_ClockSkewAhead00002", 2500, now, edge), () => 1);
+  assert.equal(past.result, "unknown", "beyond the allowance it stays unknown");
+  assert.equal(past.sent.length, 0);
 });

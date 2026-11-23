@@ -457,6 +457,11 @@ export async function countOrder(store: Store, reference: string, paidCents: num
  * Reuse the existing atomic counter/hold Lua and its intent protocol. The
  * legacy 45-day horizon is fixed to checkout creation and is never renewed
  * by a retry; after it, refuse instead of counting again after expiry. */
+/** How far a Stripe `created` may sit ahead of this server's clock and still be counted at once: the two clocks
+ * differing by seconds is not a forged admission, and holding it would only delay the buyer's receipt to a later sweep
+ * (Claude 4's LOW on #3667, 6787389203). Beyond it the creation is unknown, as before. */
+export const LEGACY_CREATED_AHEAD_MS = 5 * 60 * 1000;
+
 /** Durable count result for a paid legacy checkout; unknown blocks email. */
 export type LegacyCheckoutCountOutcome = "committed" | "already" | "unknown";
 

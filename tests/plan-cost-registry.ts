@@ -60,7 +60,8 @@ import { READ_SAMPLE } from "@/lib/page-read-sample";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
 import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { TRIAL_VIDEO_HOURS } from "@/lib/video-admission-rules";
-import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
+import { TRIAL_ACTIVE_FLOWS, TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
+import { OWE_COMMANDS } from "@/lib/api-write";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { CERTIFICATE_PASS_EVERY_SECONDS, CERTIFICATE_REFUND_CHECKS_PER_MONTH, CERTIFICATE_REFUND_PAGES_PER_STORE, CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH } from "@/lib/certificate-refunds";
@@ -89,7 +90,7 @@ import { AI_FILE_REDIS_BYTES, AI_FILE_REDIS_COMMANDS, AI_FILE_RENDER_SECONDS, AI
 import { protocolInfrastructureMicroUsd } from "@/lib/spend-cost-table";
 import { PAID_UPLOAD_OPENS, uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { BLOB_MEASURES_PER_DAY } from "@/lib/blob-tally";
-import { DAILY_RUNS_BY_TIER, SES_WAKE_JOB_COMMANDS, SES_WAKE_JOBS_PER_DAY, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
+import { ACTIVE_FLOWS_BY_TIER, DAILY_RUNS_BY_TIER, SES_WAKE_JOB_COMMANDS, SES_WAKE_JOBS_PER_DAY, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS, MOVED_EMAIL_EXTRA_COMMANDS, MOVE_HELD_PASSES, MOVE_HELD_PASS_COMMANDS, PAUSED_IMPORT_CHECKS, PAUSED_IMPORT_CHECKS_MONTH, PAUSED_IMPORT_PASSES, PAUSED_IMPORT_PASSES_MONTH, PAUSED_IMPORT_PASS_BYTES, PAUSED_IMPORT_PASS_COMMANDS, PAUSED_IMPORT_SKIP_BYTES, PAUSED_IMPORT_SKIP_COMMANDS } from "@/lib/imports";
 import { INVITE_GONE_READ_COMMANDS } from "@/lib/move-members";
@@ -550,6 +551,19 @@ export const RECOVERY_ADMIT_EXTRA_COMMANDS = 5;
  * CONFIG_WRITE_TRIES - 1 lost tries, 65 commands, 41 past the unit (8 at the first try).
  */
 export const API_HOOK_ACCESS_EXTRA_COMMANDS = 41;
+/**
+ * What an API write's owed-follow-up note (lib/api-write.ts, oweKey; defects #3979, #4035 and #4077) adds to one API
+ * request at the most, as Upstash bills it, for a store that may run `activeFlows` workflows: the note's own
+ * OWE_COMMANDS (read, written, cleared) and one more sequence check (a label request that also finishes a contact's
+ * owed "joined"; a contact request never checks more moments than a new contact with its labels could), at its
+ * dearest: the workflows and the contact read (API_WRITE_OWED_CHECK_BASE), then for each workflow its start claimed,
+ * the day's runs full, and the claim given back (API_WRITE_OWED_CHECK_PER_FLOW). The runs it starts are the plan's
+ * runs a day, priced on the workflows line. Priced on every API request of each plan ("api-write-owed"), measured in
+ * tests/api-write-follow-up-cost.test.ts; no request takes more of the store's API figure than before.
+ */
+export const API_WRITE_OWED_CHECK_BASE = 2;
+export const API_WRITE_OWED_CHECK_PER_FLOW = 6;
+export const apiWriteOwedExtraCommands = (activeFlows: number): number => OWE_COMMANDS + API_WRITE_OWED_CHECK_BASE + API_WRITE_OWED_CHECK_PER_FLOW * activeFlows;
 /**
  * What reading back one delivery line adds at the most (lib/webhooks.ts, writeLines and countNotKept; Claude 7 on
  * #3446, 6889869993): a SET answered in a shape it cannot read, or a call that failed, is followed by one GET of the
@@ -3274,6 +3288,17 @@ export const COST_LINES: CostLine[] = [
     basis: "Each of the three takes one unit of the store's API figure, as every API request does, and sends more commands than the unit's 20 and TAKE_COMMANDS: the webhook settings are written by a compare-and-set script and read back, and a gift is read before it is taken back, each script billed as Upstash bills it (one, and every redis.call written in it). The excess of the dearest, API_HOOK_ACCESS_EXTRA_COMMANDS, measured through the real routes at their dearest (the last of MAX_ENDPOINTS endpoints added, one removed from a full list, a gift taken back), with the webhook settings' write losing the race to another write on every try but the last, and on every try (lib/webhooks.ts CONFIG_WRITE_TRIES; Claude 4 3Kc's MEDIUM on #5249), in tests/api-hook-access-writes-cost.test.ts, is priced on every API request of the plan's month, the most it can be. Nothing the customer reads changes: the terms, the pricing page and the developers' page still say only a contact added or a product given counts as API_WRITE_UNITS.",
   },
   {
+    id: "api-write-owed",
+    feature: "An API write's follow-up (a sequence's start, the access email) kept through a lost reply, beyond the request's unit (defects #3979, #4035, #4077)",
+    // Every API request of the month as the dearest one (the most it can be).
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].api * apiWriteOwedExtraCommands(ACTIVE_FLOWS_BY_TIER[tier]) * COMMAND,
+    sources: [
+      { file: "lib/api-write.ts", names: ["OWE_COMMANDS", "OWE_SECONDS", "oweKey", "noteOwed", "settleOwed", "claimOwed"] },
+      { file: "lib/flow-limits.ts", names: ["ACTIVE_FLOWS_BY_TIER", "TRIAL_ACTIVE_FLOWS", "DAILY_RUNS_BY_TIER"] },
+    ],
+    basis: "Each contact, label or product written through the API keeps a short note of what it still owes (lib/api-write.ts): read with the contact, written before the write and cleared after it, OWE_COMMANDS at the most, gone by itself after OWE_SECONDS. A retry finishes what the note owes: a contact request checks no more moments than a new contact with its labels always could, and a label request at most one more (an owed \"joined\"), priced here at its dearest for the plan's active workflows (each start claimed and given back with the day's runs full), measured in tests/api-write-follow-up-cost.test.ts; the runs it starts are the plan's runs a day, priced on the workflows line. Priced on every API request of the plan's month. No request takes more of the store's API figure than before, and nothing the customer reads changes.",
+  },
+  {
     id: "creator-card-erasure-fence",
     feature: "Business-card saves and removals refuse a store that is erasing, moved or gone before changing the card or its room",
     monthlyUsd: (tier) => creatorCardFenceCost(STORE_ALLOWANCES[tier]),
@@ -3855,6 +3880,8 @@ export function nonPayingWorst(): number {
     + allowances.integration * VAULT_REFUSED_PASS
     // Each API request may be one of the three API writes that send more than their unit (line api-hook-access-writes).
     + allowances.api * API_HOOK_ACCESS_EXTRA_COMMANDS * COMMAND
+    // Each API request may also finish an API write's owed follow-up (line api-write-owed).
+    + allowances.api * apiWriteOwedExtraCommands(TRIAL_ACTIVE_FLOWS) * COMMAND
     + campaignLandingFenceCost(allowances)
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS

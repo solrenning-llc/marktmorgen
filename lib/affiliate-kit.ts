@@ -13,7 +13,8 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { randomUUID } from "node:crypto";
 import { affiliateCampaignLink } from "@/lib/affiliate-promotion";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
+import { type Store } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { repliesFor } from "@/lib/redis-reply";
 import { type Affiliate, affiliatesOn } from "@/lib/affiliates";
 import { commissionRate } from "@/lib/affiliate-setting";
@@ -114,12 +115,11 @@ return {1}`;
 
 /** One run of KIT_COUNTS for this store; null when its answer is not one KIT_COUNTS gives. */
 async function kitCounts(store: Store, op: "take" | "back", keys: [string, string, string], daySeconds: number, windowSeconds: number): Promise<number[] | null> {
-  const ref = storeRef(store);
-  const withId = STORE_ID_PATTERN.test(store.sid);
-  const statsId = withId ? "" : (store.statsId ?? "");
-  if (!withId && !statsId) return null;
-  const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
-  const reply = repliesFor(await redisPipeline([["EVAL", KIT_COUNTS, 5, live, ERASING_KEY, ...keys, await erasingField(ref), op, daySeconds, windowSeconds, statsId, ref]]), 1)?.[0];
+  // The shared fence (lib/store-live-cache.ts), never a copy of it (Claude 4 3Kc's LEVE on #5101): a store from before
+  // ids with no statsId is told from its owner's next store by nothing, so nothing is counted.
+  const fence = await storeLiveFence(store);
+  if (fence.statsId === null) return null;
+  const reply = repliesFor(await redisPipeline([["EVAL", KIT_COUNTS, 5, fence.live, fence.erasing, ...keys, fence.field, op, daySeconds, windowSeconds, fence.statsId, fence.ref]]), 1)?.[0];
   if (!Array.isArray(reply) || !reply.every((n) => typeof n === "number" && Number.isSafeInteger(n))) return null;
   return reply as number[];
 }

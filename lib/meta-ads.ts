@@ -649,6 +649,29 @@ export async function disconnectMeta(statsId: string): Promise<MetaAccount | nul
   return c.accounts.find((a) => a.id === c.account) ?? null;
 }
 
+/**
+ * Issue #4012: a closing store gives its Meta permission back before the walk deletes its connection
+ * (lib/closed-store-data.ts, forgetLive, after its erasing mark), only when no other store here is connected with the
+ * same Meta user: Meta's DELETE /me/permissions ends the app's access for the whole user, not for one store (as
+ * Google's and Zoom's revoke do, #4011). Nothing is deleted here (the walk deletes the keys); a connection or an index
+ * that does not read keeps the permission, and a give-back Meta does not confirm is only logged. True when it was
+ * asked for.
+ */
+export async function giveMetaBackForClosing(statsId: string): Promise<boolean> {
+  try {
+    const c = await exactConnection(statsId);
+    if (!c) return false;
+    const read = repliesFor(await redisPipeline([["SMEMBERS", userKey(c.user)]]), 1);
+    const members = read ? stringList(read[0]) : null;
+    if (!members || members.some((m) => m !== statsId)) return false;
+    await giveBack(statsId, c);
+    return true;
+  } catch (error) {
+    console.error("giving a closing store's Meta permission back failed", error);
+    return false;
+  }
+}
+
 /** Forgets one store's connection and what was read from it; answers the deletion's own replies. */
 async function forget(statsId: string, user: string): Promise<unknown[]> {
   return redisPipeline([

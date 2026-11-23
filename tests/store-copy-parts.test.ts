@@ -22,10 +22,13 @@ is("no step is listed twice", new Set(steps).size, steps.length);
  * run it (Claude 1's LOW 2 on #3505). Empty when every check runs exactly where the parts expect.
  */
 function escapes(text: string, stepNames: string[]): string[] {
-  const named = [...text.matchAll(/^import\s*\{([^}]*)\}\s*from\s*"\.\/[^"]+";$/gm)]
-    .flatMap((match) => match[1].split(",").map((name) => name.trim()))
-    .filter((name) => /^(check|capture)\w+$/.test(name));
-  const late: string[] = [];
+  const named = [
+    ...[...text.matchAll(/^import\s*\{([^}]*)\}\s*from\s*"\.\/[^"]+";$/gm)].flatMap((match) => match[1].split(",").map((name) => name.trim())),
+    ...[...text.matchAll(/^async function ((?:check|capture)[A-Z]\w*)\(/gm)].map((match) => match[1]),
+  ].filter((name) => /^(check|capture)\w+$/.test(name));
+  const loop = "for (const [name, step] of steps) if (running.has(name)) await step();";
+  const after = text.indexOf(loop) < 0 ? "" : text.slice(text.indexOf(loop) + loop.length);
+  const late = [...after.matchAll(/await ((?:check|capture)[A-Z]\w*)\(/g)].map((match) => `${match[1]} after the steps' loop`);
   const unrun = named.filter((name) => !stepNames.includes(name) && !new RegExp(`await ${name}\\(`).test(text)).map((name) => `${name} never run`);
   return [...unrun, ...late];
 }

@@ -28,8 +28,12 @@ let created = 0;
 let onPriceRead: (() => Promise<void>) | null = null;
 /** The store ref whose one-step live read (lib/live-fence.ts STORE_LIVE_READ) answers something unreadable: "unknown". */
 let liveReadUnknown: string | null = null;
+/** How many one-step live reads were sent for `liveReadsOf`: the restart's whole added cost (Claude 1 coord 65b4 on #5174). */
+let liveReads = 0;
+let liveReadsOf: string | null = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
+  liveReads += commands.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-live-read:") && c.at(-1) === liveReadsOf).length;
   if (liveReadUnknown && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-live-read:") && c.at(-1) === liveReadUnknown)) return commands.map(() => "unreadable");
   return pipeline(commands);
 }) as typeof redis.pipeline;
@@ -138,10 +142,14 @@ async function main() {
   }
   part("Control: a live store's plan starts again on the day");
   {
-    const { until } = await onBreakDue("restart-live@example.com", "restartlive", "sub_RestartLive01");
+    const { store, until } = await onBreakDue("restart-live@example.com", "restartlive", "sub_RestartLive01");
     created = 0;
+    liveReads = 0;
+    liveReadsOf = storeRef(store);
     const counts = await runBreaks(until + 60);
     is("started again, one POST", [counts.restarted, created], [1, 1]);
+    // The fence adds one EVAL, one command, before each POST and nothing else: one restart, one read.
+    is("one live read for the one POST", liveReads, 1);
   }
 
   done();

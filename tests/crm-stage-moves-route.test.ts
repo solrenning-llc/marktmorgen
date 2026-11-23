@@ -126,7 +126,10 @@ async function main(): Promise<void> {
   const sales = (await readPipelines(statsId))[0];
   const withoutTalking = { id: sales.id, name: sales.name, stages: sales.stages.filter((s) => s.id !== "talk00") };
   const keptSales = await crm(owner, { action: "pipeline", pipeline: withoutTalking, moves: {} });
-  is("a stage holding a deal, removed with no destination: its deal shows in New, the first open stage kept, as the board shows", [keptSales.status, keptSales.body.stagesMoved, (await readDeal(statsId, talking.body.deal!.id, await readStageView(statsId)))?.stage], [200, 1, "lead00"]);
+  // Coordinator's 6aeb and HIGH on 2e9cc22f25: a stage holding a deal, removed with no destination, is refused, as on main.
+  is("a stage holding a deal, removed with no destination: 400 moves, the deal still in its stage", [keptSales.status, keptSales.body.error, (await readDeal(statsId, talking.body.deal!.id, await readStageView(statsId)))?.stage], [400, "moves", "talk00"]);
+  const toNew = await crm(owner, { action: "pipeline", pipeline: withoutTalking, moves: { talk00: "lead00" } });
+  is("with New chosen, as the board preselects, it goes and the deal shows in New", [toNew.status, toNew.body.stagesMoved, (await readDeal(statsId, talking.body.deal!.id, await readStageView(statsId)))?.stage], [200, 1, "lead00"]);
   const coach = { id: "coach1", name: "Coach", stages: [{ id: "conew1", name: "New", kind: "open" }, { id: "cowon1", name: "Won", kind: "won" }, { id: "colst1", name: "Lost", kind: "lost" }] };
   is("(the owner adds Coach, with a deal)", [(await crm(owner, { action: "pipeline", pipeline: coach, moves: {} })).status, (await crm(owner, { action: "deal", deal: { title: "Coached", email: "", cents: 1, stage: "conew1", note: "" } })).status], [200, 200]);
   const keptCoach = await record();

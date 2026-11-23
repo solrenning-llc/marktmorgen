@@ -97,12 +97,15 @@ async function main(): Promise<void> {
   is("an existing one is edited at the limit", changePipeline([sales, coaching], { pipeline: { ...coaching, name: "1:1 coaching" } }, {}, counts, 1).ok, true);
   is("the last pipeline is kept", changePipeline([sales], { remove: FIRST_PIPELINE_ID }, "", counts, 5), { ok: false, error: "pipeline_last" });
   const dropTalking = { ...sales, stages: sales.stages.filter((s) => s.id !== "talk00") };
-  // Option B (35th batch): every stage removed keeps an alias; with none sent, the first open stage kept in its pipeline.
-  is("a stage removed with no choice shows its deals in the first open stage kept, the board's default", changePipeline([sales, coaching], { pipeline: dropTalking }, {}, counts, 5), { ok: true, pipelines: [dropTalking, coaching], moves: { talk00: "lead00" }, unsent: [] });
+  // Option B (35th batch): every stage removed keeps an alias. Coordinator's 6aeb and HIGH on 2e9cc22f25: a stage that holds
+  // deals, removed with no destination, is refused ("moves"), as on main; only one shown empty gets its pipeline's first open stage.
+  is("a stage holding deals, removed with no choice, is refused: a deal is never moved where nobody chose", changePipeline([sales, coaching], { pipeline: dropTalking }, {}, counts, 5), { ok: false, error: "moves" });
+  is("its deals not counted yet: listed for the caller to count", changePipeline([sales, coaching], { pipeline: dropTalking }, {}, null, 5), { ok: true, pipelines: [dropTalking, coaching], moves: {}, unsent: ["talk00"] });
   is("and never one being removed", changePipeline([sales, coaching], { pipeline: dropTalking }, { talk00: "talk00" }, counts, 5), { ok: false, error: "moves" });
-  is("an inherited name is not a choice: the default is taken, never the inherited one", changePipeline([sales, coaching], { pipeline: dropTalking }, Object.create({ talk00: "cnew00" }), counts, 5), { ok: true, pipelines: [dropTalking, coaching], moves: { talk00: "lead00" }, unsent: [] });
+  is("an inherited name is not a choice: with deals in the stage, refused, never sent to the inherited one", changePipeline([sales, coaching], { pipeline: dropTalking }, Object.create({ talk00: "cnew00" }), counts, 5), { ok: false, error: "moves" });
   is("with a stage kept, in this pipeline or another", [changePipeline([sales, coaching], { pipeline: dropTalking }, { talk00: "lead00" }, counts, 5), changePipeline([sales, coaching], { pipeline: dropTalking }, { talk00: "cnew00" }, counts, 5).ok], [{ ok: true, pipelines: [dropTalking, coaching], moves: { talk00: "lead00" }, unsent: [] }, true]);
-  is("an empty stage goes without a choice", changePipeline([sales, coaching], { pipeline: { ...sales, stages: sales.stages.filter((s) => s.id !== "offr00") } }, {}, counts, 5).ok, true);
+  const dropOffer = { ...sales, stages: sales.stages.filter((s) => s.id !== "offr00") };
+  is("an empty stage goes without a choice, its alias the first open stage kept in its pipeline", changePipeline([sales, coaching], { pipeline: dropOffer }, {}, counts, 5), { ok: true, pipelines: [dropOffer, coaching], moves: { offr00: "lead00" }, unsent: [] });
   is("a pipeline removed with deals sends them all to one stage of another, each of its stages an alias", changePipeline([sales, coaching], { remove: "coach0" }, "lead00", counts, 5), { ok: true, pipelines: [sales], moves: Object.fromEntries(coaching.stages.map((s) => [s.id, "lead00"])), unsent: [] });
   is("with deals and no stage sent: refused", changePipeline([sales, coaching], { remove: "coach0" }, "", counts, 5), { ok: false, error: "moves" });
   is("its deals not counted yet: listed for the caller to count", changePipeline([sales, coaching], { remove: "coach0" }, "", null, 5), { ok: true, pipelines: [sales], moves: {}, unsent: coaching.stages.map((s) => s.id) });

@@ -49,6 +49,8 @@ const sentTo = (address: string, from = 0) => emails.slice(from).filter((e) => t
 const tokenOf = (e: Sent | undefined) => e?.text.match(/\/unsubscribe\?r=([0-9a-f]{40})/)?.[1] ?? "";
 const keysLike = (pattern: string) => (redis.run(["SCAN", "0", "MATCH", pattern, "COUNT", 1_000_000]) as [string, string[]])[1];
 /** Every stop link kept, by token. */
+/** The stop link's write: since #5010 row 103 one EVAL that writes the grant only while its erasure note is there. */
+const isLinkWrite = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:move-stop-link-if-noted:v1\n");
 const links = () => keysLike("nl:recover:link:*").map((k) => k.slice("nl:recover:link:".length)).sort();
 /** Every erasure note of a stop link, across every address. */
 const linkNotes = () =>
@@ -138,7 +140,7 @@ async function main(): Promise<void> {
     // member's first email carries is kept.
     redis.pipeline = async (commands: (string | number)[][]) => {
       const out = (await original(commands)) as unknown[];
-      return commands.map((c, i) => (c[0] === "SET" && String(c[1]).startsWith("nl:recover:link:") ? "QUEUED" : out[i]));
+      return commands.map((c, i) => (isLinkWrite(c) ? "QUEUED" : out[i]));
     };
     let unknown;
     before = emails.length;
@@ -222,7 +224,7 @@ async function main(): Promise<void> {
     const heldBefore = heldOf();
     redis.pipeline = async (commands: (string | number)[][]) => {
       const out = (await original(commands)) as unknown[];
-      return commands.map((c, i) => (c[0] === "SET" && String(c[1]).startsWith("nl:recover:link:") ? "QUEUED" : out[i]));
+      return commands.map((c, i) => (isLinkWrite(c) ? "QUEUED" : out[i]));
     };
     before = emails.length;
     let first;

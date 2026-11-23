@@ -315,11 +315,12 @@ export const IMPORT_END_EXTRA_COMMANDS = END_TRIES * (1 + JOB_WRITE_IF_EXTRA_COM
  * read (one HMGET a portion, at most one an email: deletedAmong, lib/suppression.ts suppressedAmong; review of #3476,
  * cost MEDIUM 1), the creator's list's rows read (one HMGET a portion, at most one an email: leftListAmong), and for a
  * member's email or reminder the stop mark read (one EXISTS: remindersStoppedAmong) and its stop link, one a store and
- * address, written with its erasure notes once the day and the month have room for the email (three, then one SET:
- * lib/checkout-recovery.ts moveStopLink, lib/erasure-index.ts noteForErasure). Held, command by command, on a member's
- * email and reminder in tests/import-moved-email-commands.test.ts.
+ * address, written with its erasure notes once the day and the month have room for the email (three, then the link
+ * written only while its note is still there: the EVAL, its ZSCORE and its SET, #5010 row 103; lib/checkout-recovery.ts
+ * moveStopLink, lib/erasure-index.ts noteForErasure). Held, command by command, on a member's email and reminder in
+ * tests/import-moved-email-commands.test.ts.
  */
-export const MOVED_EMAIL_EXTRA_COMMANDS = 1 + 1 + 1 + 1 + 3;
+export const MOVED_EMAIL_EXTRA_COMMANDS = 1 + 1 + 1 + 3 + 3;
 /**
  * A member's reminder held because the creator's postal address is missing (review of #3476, Claude 7's cost MEDIUM 1)
  * is tried again once a day (MOVE_HELD_RETRY_MS), not every hour, and only while the renewal date is still more than a

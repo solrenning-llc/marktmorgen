@@ -126,6 +126,15 @@ r = run(["read", "--as", "Claude 2 Z"], as("c2"));
 is("the privileged action is announced to all in the same minute, with the request and its identifier", /interruptor record-review LIGADO/.test(r.out) && new RegExp(`issuecomment-${q1.id}`).test(r.out) && /C1-20261121-2100-TEST/.test(r.out), r.out);
 r = ligar("Claude 5 ibqho", "ibq", q1);
 is("a request is used once only", !r.ok && /já foi usado/.test(r.out), r.out);
+{
+  // Note 2 of Claude 2 upbeat on #5052: two actions with one request at the same instant could both pass the git grep;
+  // each action also writes pedidos-usados/<comment>, so the second one's append is refused. Here the other action's
+  // marker is already there (written raw, as by the action that won the race), and this one is refused.
+  const q2 = pedidoDe(marca("set-switch", "ready-check"));
+  raw(`pedidos-usados/${q2.id}`, `Pedido: x\n`);
+  r = ligar("Claude 5 ibqho", "ibq", q2, [], "ready-check");
+  is("a second action with the same request at the same instant is refused (its use marker already exists)", !r.ok && new RegExp(`pedidos-usados/${q2.id}`).test(r.out) && /ready-check: DESLIGADO/.test(run(["list-switches"]).out), r.out + run(["list-switches"]).out);
+}
 // A shallow clone whose history does not reach the named session's last write: no sign is NOT CHECKED (review of Claude 4 3Kc).
 run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "a"], as("c2"));
 const W2 = join(T, "w2"); g(["init", "-q", W2]); g(["fetch", "-q", "--depth", "1", `file://${join(T, "mail.git")}`, "+refs/heads/correio:refs/x"], W2);

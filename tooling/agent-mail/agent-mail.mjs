@@ -695,8 +695,9 @@ export function commitsDoPr(pr, ramo = null) {
  * O ramo do PR, achado pelo head no momento do pedido: o único ramo (fora da fila de integração) cuja ponta é aquele
  * commit. Guardado no pedido ("Ramo:"), ele permite ler o head atual direto do ramo, cuja referência não atrasa, ao
  * contrário de refs/pull/N/head (caso do #5040, 21/11/2026: refs/pull/5040/head ficou minutos em 9fdf22aa60 depois do
- * envio de d75b7405f2). Tudo pelo git, sem a API do GitHub (revisão do Claude 4 3rC no repo-id-transfer-test#2).
- * null quando não há exatamente um ramo.
+ * envio de d75b7405f2). Com um ramo só, tudo pelo git, sem a API do GitHub (revisão do Claude 4 3rC no
+ * repo-id-transfer-test#2). Com dois ou mais ramos na mesma ponta, vale o head.ref que o GitHub dá ao PR, se for um
+ * deles; sem ele, null. Sem nenhum ramo, null (NIT do Claude 1 no #5138).
  */
 export function ramoDoHead(sha, pr) {
   if (testeLigado("CORREIO_SEM_COMMITS") || !/^[0-9a-f]{10,40}$/.test(String(sha ?? ""))) return null;
@@ -1021,8 +1022,15 @@ function linhasPrivilegio(p) {
   return [`Pedido: ${p.pedido}`, `Identificador do pedido: ${p.idPedido}`, ...(p.reserva ? [`Reserva: ${p.reserva}`] : [])];
 }
 function avisoPrivilegio({ eu, assunto, p, agora }) {
-  return montarMensagem({ de: eu, para: "todos", assunto, agora,
-    texto: [`${assunto}.`, ...linhasPrivilegio(p), `Sessão que agiu: ${p.s.id}`, "Desligar continua livre para todos (set-switch --off)."].join("\n") }).novos;
+  // Uso único também entre duas ações no mesmo instante (nota 2 do Claude 2 upbeat no #5052): a conferência por git grep
+  // vem antes do envio, e duas ações com o mesmo pedido podiam passar as duas. Cada ação grava, no mesmo commit, um
+  // arquivo com o número do comentário do pedido; o envio recusa um caminho que já existe, então só a primeira entra.
+  const n = /issuecomment-(\d+)$/.exec(String(p.pedido ?? ""))?.[1];
+  return {
+    ...montarMensagem({ de: eu, para: "todos", assunto, agora,
+      texto: [`${assunto}.`, ...linhasPrivilegio(p), `Sessão que agiu: ${p.s.id}`, "Desligar continua livre para todos (set-switch --off)."].join("\n") }).novos,
+    ...(n ? { [`pedidos-usados/${n}`]: [`Pedido: ${p.pedido}`, `Identificador do pedido: ${p.idPedido}`, `Por: ${eu}`, `Data: ${agora.toISOString()}`, `Sessão: ${linhaSessao()}`, ""].join("\n") } : {}),
+  };
 }
 
 /** Um "OFF" vale sempre; um "ON" só vale como registro privilegiado (privilegioValido). */

@@ -101,6 +101,41 @@ async function main(): Promise<void> {
   is("nothing in line, no place held, nothing sent", [db.run(["SCARD", "nl:cm:mailq"]), db.run(["SCARD", sends]), sent.length], [0, 0, 0]);
   const again = await queueAnnouncement(store, config, post);
   is("the next announcement, with nobody erased while it reads, is queued", again.ok, true);
+  // Claude 4 AC on #5072, LEVE: a send holds its place from before its members are read until its record is saved, and
+  // a sweep past the cap (another send's, or an erasure's) let go of a place with no record, so a slow send's place
+  // could go: more sends than the cap at once, and an erasure later not finding that send's list.
+  part("a send still reading its members keeps its place against the sweeps of another send and of an erasure");
+  reset();
+  const busyLive = Array.from({ length: MAX_SENDS_UNDER_WAY - 1 }, (_, i) => i.toString(16).padStart(24, "a"));
+  for (const send of busyLive) db.run(["SET", `nl:cm:mail:${send}`, "{}"]);
+  db.run(["SADD", sends, ...busyLive]);
+  const realPipe = db.pipeline.bind(db);
+  let paused = false;
+  let other: Awaited<ReturnType<typeof queueAnnouncement>> | null = null;
+  let held: string[] = [];
+  let erasedDuring: unknown = "not run";
+  db.pipeline = (async (commands: (string | number)[][]) => {
+    if (!paused && commands.some((c) => c[0] === "GET" && c[1] === `nl:cm:${community}:erasures`)) {
+      paused = true;
+      held = (db.run(["SMEMBERS", sends]) as string[]).filter((id) => !busyLive.includes(id));
+      db.pipeline = realPipe;
+      // While the slow send reads: another send past the cap, then an erasure past it (a dead place added first).
+      other = await queueAnnouncement(store, config, post);
+      db.run(["SADD", sends, "d".repeat(24)]);
+      try { erasedDuring = await forgetAnnouncementRecipient(community, "nobody-here"); } catch (error) { erasedDuring = error; }
+    }
+    return realPipe(commands);
+  }) as typeof db.pipeline;
+  let slow: Awaited<ReturnType<typeof queueAnnouncement>> | null = null;
+  try {
+    slow = await queueAnnouncement(store, config, post);
+  } finally {
+    db.pipeline = realPipe;
+  }
+  is("the slow send had taken its place before reading", held.length, 1);
+  is("the send that came meanwhile is refused as busy, not given the slow send's place", other === null ? "none" : (other as { ok: boolean; reason?: string }).ok ? "queued" : (other as { reason: string }).reason, "busy");
+  is("the erasure meanwhile lets the dead place go and walks the sends", [erasedDuring, db.run(["SISMEMBER", sends, "d".repeat(24)])], [0, 0]);
+  is("the slow send keeps its place and is queued", [slow?.ok, db.run(["SISMEMBER", sends, held[0] ?? ""]), db.run(["SCARD", sends])], [true, 1, MAX_SENDS_UNDER_WAY]);
   done();
 }
 

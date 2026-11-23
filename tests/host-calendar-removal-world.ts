@@ -4,6 +4,7 @@ export const MAX_ICS_URL=2_000;
 const view={source:"none",connected:null};
 export async function hostCalendarView(){return view;}
 export async function disconnectHostGoogle(){state.disconnects++;}
+export async function disconnectHostGoogleFor(){state.disconnects++;return {providerAccessRemoved:true,sharedGrantKept:false};}
 export async function removeHostIcs(){state.removals++;}
 export async function checkHostCalendar(){state.checks++;return true;}
 export async function addHostIcs(){state.adds++;return {ok:true};}

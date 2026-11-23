@@ -20,7 +20,7 @@ import { BATCH_KEY, WALK_GAP_MS, WALK_KEY, eraseClosed, markDue } from "@/lib/cl
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { hostId } from "@/lib/host-claims";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { inviteMember, putMember, readTeam, spendInvite } from "@/lib/team";
+import { inviteMember, putMember, readTeam, servingKeys, spendInvite } from "@/lib/team";
 import { paidPeriod } from "./billing-period-fixture";
 import { closeForErasure } from "./closed-for-erasure";
 import { store as redis } from "./redis-stub";
@@ -149,12 +149,15 @@ async function main(): Promise<void> {
     is("... and the closing store leaves the batch once that is known", batchLeft(), 0);
   }
 
-  part("3. The walk reads the host between their join's team write and the rest of it: their calendar is kept");
+  part("3. The walk reads the host right after the first of their join's writes lands: their calendar is kept");
   {
     const { at, token, liveSid } = await setUp();
     const teamKey = `nl:team:${liveSid}`;
-    // Right after the join's write of the team that lists the host lands, the whole walk runs, before the join's next
-    // command: what a walk reading the host at that moment decides.
+    const indexKey = servingKeys(HOST).index;
+    // Right after the join's first write of the host's index or of the team that lists them lands, the whole walk runs,
+    // before the join's next command: what a walk reading the host at that moment decides. Two writes in either order
+    // leave a moment with one and not the other (Claude 4's MEDIUM on #5280: the SADD first, then the walk read an index
+    // naming the live store and a team not listing the host); one step leaves none.
     let armed = true;
     let walked = false;
     let saved = false;
@@ -166,13 +169,17 @@ async function main(): Promise<void> {
         walked = true;
       }
       const real = await realPipeline(commands);
-      if (commands.some((c) => c[0] === "SET" && c[1] === teamKey && String(c[2]).includes(HOST))) saved = true;
+      const writesJoin = (c: Command) =>
+        (c[0] === "SET" && c[1] === teamKey && String(c[2]).includes(HOST)) ||
+        (c[0] === "SADD" && c[1] === indexKey && c[2] === liveSid) ||
+        (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:team-join:") && c.includes(teamKey) && c.includes(indexKey));
+      if (commands.some(writesJoin)) saved = true;
       return real;
     }) as typeof redis.pipeline;
     const result = await spendInvite(token);
     redis.pipeline = realPipeline;
     if (!result.ok) throw new Error(`the host's join was refused (${JSON.stringify(result)})`);
-    if (!walked) for (let k = 0; k <= 3; k += 1) await walkAt(walkTime(at, k));
+    is("the walk ran right after the join's first write", walked, true);
     is("the host joined the live store", await joined(liveSid), true);
     is("the host serves the live store, so their own calendar is kept", calendarKept(HOST), [1, 1, 1, 1]);
   }

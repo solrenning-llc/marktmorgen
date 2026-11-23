@@ -240,13 +240,18 @@ export async function readTeam(sid: string): Promise<Team> {
  * A record read in an unknown shape throws before anything is written.
  */
 async function saveTeam(sid: string, team: Team): Promise<void> {
+  await redisPipeline([["SET", teamKey(sid), await keptTeam(sid, team)]]);
+}
+
+/** The record saveTeam writes for `team`, the owner's two-step requirement read back and kept (see saveTeam). */
+async function keptTeam(sid: string, team: Team): Promise<string> {
   let required = team.requireTwoStep;
   if (required === undefined) {
     // Unreadable, nothing is written: the rule is never switched off by a save that could not read it.
     required = parseTeam(await teamRecord(sid)).requireTwoStep === true;
   }
   const kept: Team = { members: team.members, invites: team.invites, ...(required ? { requireTwoStep: true } : {}) };
-  await redisPipeline([["SET", teamKey(sid), JSON.stringify(kept)]]);
+  return JSON.stringify(kept);
 }
 
 /**
@@ -891,6 +896,19 @@ export function servingKeys(email: string): { index: string; team: (sid: string)
 }
 
 /**
+ * A join's two writes in one step (spendInvite; #5010 row 105): KEYS[1] the person's team index, KEYS[2] the team,
+ * ARGV[1] the store's id, ARGV[2] the team's record as saveTeam writes it. Answers 1. Billed as one EVAL and the
+ * TEAM_JOIN_CALLS calls inside it, in place of the SET and the SADD it replaces.
+ */
+export const TEAM_JOIN = `-- marktmorgen:team-join:v1
+redis.call('SADD', KEYS[1], ARGV[1])
+redis.call('SET', KEYS[2], ARGV[2])
+return 1`;
+
+/** The redis.call one run of TEAM_JOIN makes: its SADD and its SET. */
+export const TEAM_JOIN_CALLS = 2;
+
+/**
  * Spends an invitation and puts its person on the team.
  *
  * The link is deleted first, in one step, so it can only ever be used once
@@ -934,22 +952,20 @@ export async function spendInvite(token: string): Promise<JoinResult> {
     if (!already && team.members.length >= MAX_TEAM) return { ok: false, reason: "full" };
 
     const member: Member = already ?? { email, role: invite.role, joinedAt: new Date().toISOString() };
-    // The person's team index first, still under the team's lock, then the team (#5010 row 105, Codex
-    // L-20261119-0659): written the other way round, after the lock, a closing walk that read them between the two saw
-    // the team listing them and an index that did not, took them for serving no other store and deleted their own
-    // calendar while they were on this one. An index entry with no team behind it, left if the team's write fails,
-    // is no store they serve (memberStoresExact reads the team).
-    await redisPipeline([["SADD", indexKey(email), store.sid]]);
-    await saveTeam(store.sid, {
+    // The person's team index and the team written in one step, still under the team's lock (TEAM_JOIN; #5010 row 105,
+    // Codex L-20261119-0659, Claude 4's MEDIUM on #5280): a closing walk that read them between two writes, in either
+    // order, took the person for serving no other store and deleted their own calendar while they were on this one.
+    // One script, so every reader sees both or neither; and the index-cleaning script (TEAM_INDEX_OFF_TEAM), itself
+    // one step, never finds the id without the team that lists them.
+    const kept = await keptTeam(store.sid, {
       members: already ? team.members : [...team.members, member],
       invites: team.invites.filter((i) => i.id !== invite.id),
     });
+    const [written] = repliesFor(await redisPipeline([["EVAL", TEAM_JOIN, 2, indexKey(email), teamKey(store.sid), store.sid, kept]]), 1) ?? [];
+    if (written !== 1) throw new UnknownReplyError("a team join's write");
     return { ok: true, member };
   });
   if (!joined.ok) return joined;
-  // And once more after the team: an index longer than is read (memberStoresExact) takes out, through
-  // TEAM_INDEX_OFF_TEAM, an id whose team does not list the person yet, which the write above can be for a moment.
-  await redisPipeline([["SADD", indexKey(email), store.sid]]);
   return { ok: true, store, member: joined.member };
 }
 

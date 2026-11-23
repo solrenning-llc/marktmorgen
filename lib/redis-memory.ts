@@ -1917,6 +1917,14 @@ export class MemoryRedis {
           this.run(["SET", receipt, to, "EX", seconds]);
           return 1;
         }
+        // lib/team.ts TEAM_JOIN: a join's team index and team written in one step (#5010 row 105).
+        if (key.startsWith("-- marktmorgen:team-join:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, index, team, sid, record] = args;
+          this.scriptCalls += 2;
+          this.run(["SADD", index, sid]);
+          this.run(["SET", team, record]);
+          return 1;
+        }
         // lib/team.ts KEEP_LOG_IF_LIVE: the reference and erasing fence are checked at the personal write.
         if (key.startsWith("-- marktmorgen:team-log-live:v1\n") && args[0] === "3" && args.length === 8) {
           const [, identity, erasing, log, ref, field, entry, limit] = args;

@@ -1659,14 +1659,6 @@ export async function removeEndpoint(store: Store, id: string, withLog = true): 
 }
 
 /**
- * A resend's mark on the original delivery (resendDelivery): written only while the original still holds the very
- * text read, as the settings' compare-and-set, with the same replies (1 written; [-1] or [-1, n] the text there was another), so
- * compareAndSetReply reads it. Unlike that script, its write keeps the original's expiry in the same step (KEEPTTL),
- * and gives one that has none the delivery's own (ARGV[3] seconds): no command after it has to put the time back, so
- * no second failure can keep a delivery past its retention (Codex G's MEDIUM on #3444). Modelled by
- * lib/redis-memory.ts.
- */
-/**
  * How long a resend that a mark names, and that has no record yet, is taken as under way, not gone (issue #3994): from
  * the mark to the record written after the endpoint's answer, a press runs one call of at most ATTEMPT_TIMEOUT_MS and a
  * few Redis commands, far less than this. A press that stopped in between (a crash, the function's time limit) holds
@@ -1674,6 +1666,14 @@ export async function removeEndpoint(store: Store, id: string, withLog = true): 
  */
 export const RESEND_IN_FLIGHT_MS = 15 * 60_000;
 
+/**
+ * A resend's mark on the original delivery (resendDelivery): written only while the original still holds the very
+ * text read, as the settings' compare-and-set, with the same replies (1 written; [-1] or [-1, n] the text there was another), so
+ * compareAndSetReply reads it. Unlike that script, its write keeps the original's expiry in the same step (KEEPTTL),
+ * and gives one that has none the delivery's own (ARGV[3] seconds): no command after it has to put the time back, so
+ * no second failure can keep a delivery past its retention (Codex G's MEDIUM on #3444). Modelled by
+ * lib/redis-memory.ts.
+ */
 export const RESEND_MARK = `-- marktmorgen:webhook-resend-mark:v1
 local current = redis.call("GET", KEYS[1])
 if (current or "") ~= ARGV[1] then

@@ -295,6 +295,18 @@ async function main(): Promise<void> {
   is("past the pool, nothing is asked of the model: the chat becomes the creator's form", [spent.ok ? "answered" : spent.reason, asked.length], ["spent", callsBefore]);
   is("the studio sees none left", (await assistantLeft(store, now))?.left, 0);
   is("and the question can still be left for the creator, at no AI cost", (await handToCreator({ store, email: "late@example.com", text: "Is there a printed version?", now })).ok, true);
+  // #2674, Claude 3's LEVE (6813499176): the inbox's count for a new conversation (inbox-new) that cannot be read is an
+  // error to try again, never "closed": the buyer is not told the store takes no messages when it does.
+  {
+    const realPipeline = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => String(c[1] ?? "").startsWith("nl:rl:inbox-new:"))) throw new Error("Redis timed out (synthetic)");
+      return realPipeline(commands);
+    }) as typeof redis.pipeline;
+    const unread = await handToCreator({ store, email: "unread@example.com", text: "Is there a printed version?", now });
+    redis.pipeline = realPipeline;
+    is("a hand-over whose inbox count cannot be read is an error to try again, never 'closed'", unread.ok ? "ok" : unread.reason, "error");
+  }
   // Two at once with room for exactly one. Changed 9 Nov 2026 (audit ALTO 2, rule 23): the pool is reserved at a message's
   // worst before the facts are read (the request's own size is not known yet), so "room for one" is the worst plus one.
   await redis.pipeline([["HSET", `nl:assist:pool:${store.statsId}:${window.id}`, "spent", String(assistantPoolMicroUsd() - worst - 1)]]);

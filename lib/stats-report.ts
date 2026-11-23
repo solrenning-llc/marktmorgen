@@ -16,7 +16,7 @@ import { refundActivityFrom } from "@/lib/refund-activity";
 import { COHORT_AGES } from "@/lib/buyer-channel-rules";
 import { dailyCashflowRows } from "@/lib/daily-cashflow";
 import { campaignResultsFrom } from "@/lib/campaign-results";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { Store } from "@/lib/store";
 import { type Ranked, type StatsData, readSales, readsSales, readStats, sourcesToday, studioStats, viewsBefore } from "@/lib/stats";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -441,15 +441,32 @@ export const SUMMARY_TRIES = 3;
  * The most Redis commands the weekly or monthly route sends for one store on one try of a period's summary, its own
  * (the email's sender, lib/email.ts sendEmailPinned, is the email's): measured on the longest try, a post and the
  * owner's email both refused, so every part's mark is taken, its first try's time kept, the mark let go, the tries
- * counted and the period given back (tests/numbers-summary-retry-cost.test.ts). Priced in tests/plan-cost-registry.ts
- * (NUMBERS_SUMMARY_RETRY).
+ * counted and the period given back (tests/numbers-summary-retry-cost.test.ts). Since each team copy is a part of its own
+ * (Board #5285 row #3297), the weekly route's longest try is the post refused, the owner's email gone and all
+ * MAX_WEEKLY_TEAM copies refused: 68 commands measured (64 before, with 35 then measured), so 80 keeps room for it.
+ * Priced in tests/plan-cost-registry.ts (NUMBERS_SUMMARY_RETRY).
  */
-export const SUMMARY_TRY_COMMANDS_MOST = 64;
-/** Extra wire room for the five fenced summary operations and uncertain-claim readbacks; no legacy JSON leaves Redis. */
-export const SUMMARY_TRY_EXTRA_BYTES = 24_576;
+export const SUMMARY_TRY_COMMANDS_MOST = 80;
+/**
+ * The most emails one try of a period's summary sends: the owner's and, on the week, one copy for each team member
+ * chosen (MAX_WEEKLY_TEAM), each a part of its own since Board #5285 row #3297. Priced in tests/plan-cost-registry.ts
+ * (NUMBERS_SUMMARY_RETRY.emailsPerTry).
+ */
+export const SUMMARY_TRY_EMAILS_MOST = 1 + MAX_WEEKLY_TEAM;
+/**
+ * Extra wire room for the fenced summary operations (the claim, the post, the owner's email, the tries, the first-try
+ * read, and since Board #5285 row #3297 one for each of MAX_WEEKLY_TEAM copies) and uncertain-claim readbacks; no
+ * legacy JSON leaves Redis.
+ */
+export const SUMMARY_TRY_EXTRA_BYTES = 40_960;
 
-/** A part of the summary (the owner's email, the channel's post), marked once for the period before it goes. */
-export type SummaryPart = "emailed" | "posted";
+/**
+ * A part of the summary (the owner's email, the channel's post, one team member's copy), marked once for the period
+ * before it goes. A copy's part names the member only by a short hash of their address (copyPart), never the address.
+ */
+export type SummaryPart = "emailed" | "posted" | `copy:${string}`;
+/** The part of one team member's copy of the weekly summary (Board #5285 row #3297): a short hash of the address. */
+export const copyPart = (email: string): SummaryPart => `copy:${createHash("sha256").update(`numbers-copy:${email.trim().toLowerCase()}`).digest("hex").slice(0, 16)}`;
 
 /**
  * What a part's send came to: true or "sent" went; "refused" surely did not; "unknown" may have gone (a chat post

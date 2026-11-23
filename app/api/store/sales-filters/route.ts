@@ -65,8 +65,8 @@ export async function POST(request: NextRequest) {
     if (action === "save" && query.length > 2_000) return refuse("long");
     const result =
       action === "save"
-        ? await saveSalesFilter(statsId, body.name, filterFromQuery(query), filters)
-        : await renameSalesFilter(statsId, text(body.id, 20), body.name, filters);
+        ? await saveSalesFilter(store, body.name, filterFromQuery(query), filters)
+        : await renameSalesFilter(store, text(body.id, 20), body.name, filters);
     if (!result.ok) return refuse(result.reason);
     return Response.json({ ok: true, filter: result.filter, filters: result.filters }, { headers });
   } catch (error) {

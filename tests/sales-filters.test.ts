@@ -84,45 +84,45 @@ async function main(): Promise<void> {
 
   part("Saved, listed by name, renamed, deleted (lib/sales-filters.ts)");
   is("none yet: an empty list, confirmed", await readSavedFilters(statsId), []);
-  const courses = await saveSalesFilter(statsId, "Courses", filterFromQuery("product=Course&kind=products"));
+  const courses = await saveSalesFilter(store, "Courses", filterFromQuery("product=Course&kind=products"));
   is("saved", courses.ok && [courses.filter.name, courses.filter.query], ["Courses", "product=Course&kind=products"]);
-  await saveSalesFilter(statsId, "april", filterFromQuery("from=2026-04-01&to=2026-04-30"));
+  await saveSalesFilter(store, "april", filterFromQuery("from=2026-04-01&to=2026-04-30"));
   is("listed by name, any case", (await readSavedFilters(statsId)).map((f) => f.name), ["april", "Courses"]);
-  is("a name already used refused, any case", await saveSalesFilter(statsId, "COURSES", filterFromQuery("kind=tips")), { ok: false, reason: "taken" });
-  is("a filter that keeps nothing out refused", await saveSalesFilter(statsId, "All", EMPTY_FILTER), { ok: false, reason: "empty" });
-  is("a buyer's address never kept", await saveSalesFilter(statsId, "Jane", filterFromQuery("email=jane@example.com")), { ok: false, reason: "email" });
-  is("no name refused", await saveSalesFilter(statsId, "  ", filterFromQuery("kind=tips")), { ok: false, reason: "name" });
-  is("an address in product words is refused before it can outlive erasure", await saveSalesFilter(statsId, "Jane's orders", filterFromQuery("product=jane%40example.com")), { ok: false, reason: "email" });
-  is("an address in the saved name is refused too", await saveSalesFilter(statsId, "jane@example.com", filterFromQuery("kind=tips")), { ok: false, reason: "email" });
+  is("a name already used refused, any case", await saveSalesFilter(store, "COURSES", filterFromQuery("kind=tips")), { ok: false, reason: "taken" });
+  is("a filter that keeps nothing out refused", await saveSalesFilter(store, "All", EMPTY_FILTER), { ok: false, reason: "empty" });
+  is("a buyer's address never kept", await saveSalesFilter(store, "Jane", filterFromQuery("email=jane@example.com")), { ok: false, reason: "email" });
+  is("no name refused", await saveSalesFilter(store, "  ", filterFromQuery("kind=tips")), { ok: false, reason: "name" });
+  is("an address in product words is refused before it can outlive erasure", await saveSalesFilter(store, "Jane's orders", filterFromQuery("product=jane%40example.com")), { ok: false, reason: "email" });
+  is("an address in the saved name is refused too", await saveSalesFilter(store, "jane@example.com", filterFromQuery("kind=tips")), { ok: false, reason: "email" });
   is("nothing written by a refusal", (await readSavedFilters(statsId)).length, 2);
 
   part("Product words cut at a space are saved as they read back (Claude 3 cloud J's MEDIUM on #3495)");
   // 99 letters, a space, a letter: cut to 100 characters, the words end in a space the read trims away. Saved as
   // they were, the kept address read back as another filter, the list became unreadable and every save failed.
-  const cut = await saveSalesFilter(statsId, "Long words", filterFromQuery(`product=${"a".repeat(99)}+b`));
+  const cut = await saveSalesFilter(store, "Long words", filterFromQuery(`product=${"a".repeat(99)}+b`));
   is("the filter is saved", cut.ok, true);
   is("as it reads back: the words without the space the cut left", cut.ok ? cut.filter.query : null, `product=${"a".repeat(99)}`);
   is("the list still reads, with it", await threw(() => readSavedFilters(statsId)), "no error");
-  is("and the next save still works", await saveSalesFilter(statsId, "Tips", filterFromQuery("kind=tips")).then((r) => r.ok, () => "failed"), true);
+  is("and the next save still works", await saveSalesFilter(store, "Tips", filterFromQuery("kind=tips")).then((r) => r.ok, () => "failed"), true);
   for (const id of [cut.ok ? cut.filter.id : ""].filter(Boolean)) await removeSalesFilter(statsId, id);
   const tips = (await readSavedFilters(statsId).catch(() => [] as Saved[])).find((f) => f.name === "Tips");
   if (tips) await removeSalesFilter(statsId, tips.id);
   const id = courses.ok ? courses.filter.id : "";
-  is("a rename cannot introduce an address", await renameSalesFilter(statsId, id, "jane@example.com"), { ok: false, reason: "email" });
-  const renamed = await renameSalesFilter(statsId, id, "My courses");
+  is("a rename cannot introduce an address", await renameSalesFilter(store, id, "jane@example.com"), { ok: false, reason: "email" });
+  const renamed = await renameSalesFilter(store, id, "My courses");
   is("renamed, its filter kept", renamed.ok && renamed.filter, { id, name: "My courses", query: "product=Course&kind=products" });
-  is("renamed to a name another one has: refused", await renameSalesFilter(statsId, id, "APRIL"), { ok: false, reason: "taken" });
-  is("renamed to its own name in another case: kept", (await renameSalesFilter(statsId, id, "my Courses")).ok, true);
-  is("a filter that is gone is not renamed", await renameSalesFilter(statsId, "ffffffffffff", "Other"), { ok: false, reason: "gone" });
+  is("renamed to a name another one has: refused", await renameSalesFilter(store, id, "APRIL"), { ok: false, reason: "taken" });
+  is("renamed to its own name in another case: kept", (await renameSalesFilter(store, id, "my Courses")).ok, true);
+  is("a filter that is gone is not renamed", await renameSalesFilter(store, "ffffffffffff", "Other"), { ok: false, reason: "gone" });
   is("deleted", await removeSalesFilter(statsId, id), true);
   is("deleted again: already gone", await removeSalesFilter(statsId, id), false);
   is("an id of another shape removes nothing", await removeSalesFilter(statsId, "../x"), false);
   is("the other one stays", (await readSavedFilters(statsId)).map((f) => f.name), ["april"]);
 
   part("A store keeps at most MAX_SAVED_FILTERS, the same on every plan");
-  for (let n = 1; n < MAX_SAVED_FILTERS; n += 1) await saveSalesFilter(statsId, `Filter ${n}`, filterFromQuery(`kind=tips&product=p${n}`));
+  for (let n = 1; n < MAX_SAVED_FILTERS; n += 1) await saveSalesFilter(store, `Filter ${n}`, filterFromQuery(`kind=tips&product=p${n}`));
   is("up to the most", (await readSavedFilters(statsId)).length, MAX_SAVED_FILTERS);
-  is("one more refused", await saveSalesFilter(statsId, "One more", filterFromQuery("kind=calls")), { ok: false, reason: "full" });
+  is("one more refused", await saveSalesFilter(store, "One more", filterFromQuery("kind=calls")), { ok: false, reason: "full" });
   is("and not kept", (await readSavedFilters(statsId)).length, MAX_SAVED_FILTERS);
   is("the words do not call it a plan limit", /plan|upgrade/i.test(SAVED_FILTER_REFUSALS.full), false);
 
@@ -132,14 +132,14 @@ async function main(): Promise<void> {
   is("a kept value that is not text", await threw(() => answering([[42]], () => readSavedFilters(statsId))), "unknown reply");
   is("a kept value that is not a filter", await threw(() => answering([["{"]], () => readSavedFilters(statsId))), "unknown reply");
   is("a deletion answered in another shape", await threw(() => answering(["1"], () => removeSalesFilter(statsId, "0123456789ab"))), "unknown reply");
-  is("a write answered in another shape", await threw(() => answering(["1"], () => saveSalesFilter(statsId, "Calls", filterFromQuery("kind=calls")))), "unknown reply");
+  is("a write answered in another shape", await threw(() => answering(["1"], () => saveSalesFilter(store, "Calls", filterFromQuery("kind=calls")))), "unknown reply");
   await redis.pipeline([["DEL", key]]);
   is("a write answered with the list then not the script's number", await threw(async () => {
     const original = redis.pipeline;
     let calls = 0;
     redis.pipeline = (async (commands: (string | number)[][]) => (calls++ === 0 ? original.call(redis, commands) : ["OK"])) as typeof redis.pipeline;
     try {
-      return await saveSalesFilter(statsId, "Calls", filterFromQuery("kind=calls"));
+      return await saveSalesFilter(store, "Calls", filterFromQuery("kind=calls"));
     } finally {
       redis.pipeline = original;
     }

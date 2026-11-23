@@ -116,6 +116,12 @@ export function gitC(args, input) {
         if (/^[0-9a-f]{40}$/.test(velha)) writeFileSync(ARQUIVO_ANCORA(), `${velha}\n`);
       } catch { /* o clone não tem marca antiga */ }
     }
+    // A manutenção automática do git (gc e maintenance, disparadas por cada fetch) roda em primeiro plano neste repositório:
+    // destacada, ela apagava as pastas vazias de objects/ no meio da escrita seguinte, e o write-tree ou o commit-tree caía
+    // com "unable to create temporary file" (teste "a race that never ends" no CI, 22/11/2026).
+    for (const chave of ["gc.autoDetach", "maintenance.autoDetach"]) {
+      try { execFileSync("git", ["--git-dir", DIR_CORREIO, "config", chave, "false"], { stdio: ["ignore", "pipe", "pipe"] }); } catch { /* segue; a nova tentativa abaixo cobre */ }
+    }
     dirPronto = true;
   }
   return git(args, input, GIT_PRAZO_MS, DIR_CORREIO);
@@ -262,6 +268,8 @@ export const ENVIO_TENTATIVAS = 30;
 export const ENVIO_FALHAS_OUTRAS = 6;
 export const ENVIO_PRAZO_MS = 150000;
 /** Um envio recusado porque o ramo andou no meio (outro agente gravou antes), e não por outro motivo. */
+/** Uma falha passageira ao gravar um objeto (a manutenção do git de outro processo apagou a pasta no meio): tenta de novo. */
+export const falhaPassageira = (erro) => /unable to create temporary file|unable to write (?:loose )?object|insufficient permission for adding an object/i.test(String(erro?.stderr ?? erro?.message ?? erro));
 export const perdeuCorrida = (erro) => /\(fetch first\)|non-fast-forward|failed to update ref|cannot lock ref|incorrect old value|but expected/i.test(String(erro?.stderr ?? erro?.message ?? erro));
 const esperar = (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, Math.round(ms))); };
 
@@ -302,6 +310,15 @@ function acrescentar(novos, mensagem) {
       // Mail-From: o nome de quem escreve, para o último sinal de cada família (dono, OWNER-20261122-0121-MAIL-AVAILABILITY).
       const de = ESCRITOR ? `\nMail-From: ${String(ESCRITOR).replace(/\s+/g, " ").trim()}` : "";
       commit = gitC(["commit-tree", arvore, ...(base ? ["-p", base] : []), "-m", `${mensagem}\n\nMail-Session: ${linhaSessao()}${de}`]);
+    } catch (erro) {
+      // A montagem que cai por uma falha passageira do git conta como "outro erro" e é tentada de novo; as outras sobem.
+      if (!falhaPassageira(erro)) throw erro;
+      outras += 1;
+      if (outras >= ENVIO_FALHAS_OUTRAS || Date.now() - inicio > ENVIO_PRAZO_MS) {
+        throw new Error(`envio falhou depois de ${corridas + outras} tentativas (${corridas} por o correio ter andado no meio, ${outras} por outro erro) em ${Math.round((Date.now() - inicio) / 1000)} s: ${String(erro?.message ?? erro).slice(0, 300)}`);
+      }
+      esperar(200 + Math.random() * 800);
+      continue;
     } finally {
       try { execFileSync("rm", ["-f", indice]); } catch { /* sem índice */ }
     }

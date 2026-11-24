@@ -48,6 +48,22 @@ async function main(): Promise<void> {
   await redis.pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(legacy)), String(now)]]);
   await recoveryReport(legacy, false, now);
   is("being erased: not kept", (await redis.pipeline([["GET", cache]]))[0], null);
+
+  part("A fence write that throws still returns the report already computed");
+  // Claude 5 iZByNH's doubt on #5405 (7121733858): the keep is best effort; Redis failing on it (down, an unknown reply)
+  // must not fail the studio's Membership numbers page, which already has its report.
+  redis.clear();
+  reads = 0;
+  await record(legacy.statsId!);
+  const pipeline = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => {
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-cache-live"))) throw new Error("synthetic Redis failure on the fence write");
+    return pipeline(commands);
+  };
+  const shown = await recoveryReport(legacy, false, now).then((r) => r, () => null);
+  redis.pipeline = pipeline;
+  is("the report is returned, not an error", shown !== null && shown.currency === "usd", true);
+  is("and nothing was kept", (await redis.pipeline([["GET", cache]]))[0], null);
   done();
 }
 

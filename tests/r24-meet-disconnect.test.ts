@@ -56,7 +56,9 @@ const pipe = redis.pipeline.bind(redis);
 const answering = (name: string, key: string, reply: unknown) => {
   redis.pipeline = (async (commands: Commands) => {
     const replies = await pipe(commands);
-    return replies.map((r, i) => (commands[i][0] === name && commands[i][1] === key ? reply : r));
+    // A deletion is a DEL, or the script that deletes the connection and leaves its index in one step (FORGET_CONNECTION).
+    const deletion = (c: Commands[number]) => name === "DEL" && c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:meet-forget:") && c.includes(key);
+    return replies.map((r, i) => ((commands[i][0] === name && commands[i][1] === key) || deletion(commands[i]) ? reply : r));
   }) as typeof redis.pipeline;
 };
 /** The pipeline's whole answer replaced as given, for the GET of the connection only. */

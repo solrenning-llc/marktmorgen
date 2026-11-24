@@ -58,13 +58,20 @@ import {
   parseBenefit,
 } from "@/lib/tier-benefit-rules";
 
-/** Takes `units` of the store's studio requests; false, with the figure's own words, when it may not. */
-export type BenefitsCharge = (units: number) => Promise<{ ok: true } | { ok: false; message: string }>;
+/**
+ * Takes `units` of the store's studio requests; false, with the figure's own words, when it may not. `unavailable`
+ * when they were not refused for the store's own figure: its count could not be read, or the company's pool is full
+ * (Codex X4's LOW on #3014: both were answered 429, as if the store had used its month).
+ */
+export type BenefitsCharge = (units: number) => Promise<{ ok: true } | { ok: false; message: string; unavailable?: boolean }>;
 const chargeStudio = (store: Store): BenefitsCharge => async (units) => {
   const counted = await countStudio(store, null, units).catch(() => null);
   if (counted?.ok) return { ok: true };
-  return { ok: false, message: counted ? counted.message : "" };
+  if (!counted) return { ok: false, message: "" };
+  return counted.reason === "unknown" || counted.reason === "pool" ? { ok: false, message: counted.message, unavailable: true } : { ok: false, message: counted.message };
 };
+/** A refused charge's words, and `unavailable` only when it was not the store's own figure. */
+const usedOf = (taken: { message: string; unavailable?: boolean }) => (taken.unavailable ? { message: taken.message, unavailable: true as const } : { message: taken.message });
 /** Where the marks are counted in the store's data room. */
 const SLOT = "tb";
 const SUB_ID = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -149,7 +156,7 @@ async function runningMemberships(
   statsId: string,
   nowSeconds: number,
   charge: BenefitsCharge,
-): Promise<{ members: Member[]; complete: boolean; unreadable: number } | { used: string } | null> {
+): Promise<{ members: Member[]; complete: boolean; unreadable: number } | { used: string; unavailable?: true } | null> {
   const account = store.stripeAccountId;
   if (!account) return { members: [], complete: true, unreadable: 0 };
   const handles = saleHandles(store);
@@ -161,7 +168,7 @@ async function runningMemberships(
       // Each page's studio requests counted before it is read (BENEFIT_PAGE_UNITS): past the figure, nothing more is
       // read and nothing is shown, never a list cut short as if it were whole.
       const taken = await charge(BENEFIT_PAGE_UNITS);
-      if (!taken.ok) return { used: taken.message };
+      if (!taken.ok) return taken.unavailable ? { used: taken.message, unavailable: true } : { used: taken.message };
       const query = new URLSearchParams({ limit: "100" });
       query.append("expand[]", "data.customer");
       if (after) query.set("starting_after", after);
@@ -290,7 +297,7 @@ export type DueView =
   | { state: "none" }
   | { state: "unknown"; why: "benefits" | "stripe" | "erased" }
   /** The studio requests a page of Stripe takes (BENEFIT_PAGE_UNITS) could not be taken: nothing is shown; the figure's words. */
-  | { state: "used"; message: string }
+  | { state: "used"; message: string; unavailable?: true }
   | {
       state: "ok";
       benefits: Benefit[];
@@ -311,7 +318,7 @@ export async function benefitsDue(store: Store, now = Date.now(), charge: Benefi
   const nowSeconds = Math.floor(now / 1000);
   const read = await runningMemberships(store, store.statsId, nowSeconds, charge);
   if (read === null) return { state: "unknown", why: "stripe" };
-  if ("used" in read) return { state: "used", message: read.used };
+  if ("used" in read) return { state: "used", ...usedOf({ message: read.used, unavailable: read.unavailable }) };
   // A person deleted from the store keeps their membership on the creator's Stripe: never listed here by address
   // again (Claude 1 on #3014), as lib/membership-numbers.ts leaves them out. A list of the deleted that cannot be read
   // is unknown, never "nobody deleted".
@@ -348,7 +355,7 @@ export async function benefitsDue(store: Store, now = Date.now(), charge: Benefi
 
 export type GiveResult =
   | { ok: true; given: number; already: number; notOwed: number; unknown: number }
-  | { ok: false; reason: "too_many" | "missing" | "benefits" | "stripe" | "erased" | "used" | "full" | "room" | "unknown"; message?: string };
+  | { ok: false; reason: "too_many" | "missing" | "benefits" | "stripe" | "erased" | "used" | "full" | "room" | "unknown"; message?: string; unavailable?: true };
 
 
 /**
@@ -363,7 +370,7 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
   const statsId = store.statsId;
   const due = await benefitsDue(store, now, charge);
   if (due.state === "unknown") return { ok: false, reason: due.why };
-  if (due.state === "used") return { ok: false, reason: "used", message: due.message };
+  if (due.state === "used") return { ok: false, reason: "used", ...usedOf(due) };
   if (due.state === "none" || !due.benefits.some((b) => b.id === benefit)) return { ok: false, reason: "missing" };
   const rows = new Map(due.rows.filter((r) => r.benefit === benefit).map((r) => [`${r.sub}:${r.period}`, r]));
   const seen = new Set<string>();
@@ -461,12 +468,12 @@ export async function undoGiven(
   period: unknown,
   now = Date.now(),
   charge: BenefitsCharge = chargeStudio(store),
-): Promise<{ ok: true; undone: boolean } | { ok: false; reason: "missing" | "not_owed" | "benefits" | "stripe" | "erased" | "unknown" } | { ok: false; reason: "used"; message: string }> {
+): Promise<{ ok: true; undone: boolean } | { ok: false; reason: "missing" | "not_owed" | "benefits" | "stripe" | "erased" | "unknown" } | { ok: false; reason: "used"; message: string; unavailable?: true }> {
   if (typeof benefit !== "string" || !BENEFIT_ID.test(benefit) || !store.statsId) return { ok: false, reason: "missing" };
   if (typeof sub !== "string" || !SUB_ID.test(sub) || typeof period !== "string" || !PERIOD.test(period)) return { ok: false, reason: "not_owed" };
   const due = await benefitsDue(store, now, charge);
   if (due.state === "unknown") return { ok: false, reason: due.why };
-  if (due.state === "used") return { ok: false, reason: "used", message: due.message };
+  if (due.state === "used") return { ok: false, reason: "used", ...usedOf(due) };
   const row = due.state === "ok" ? due.rows.find((r) => r.benefit === benefit && r.sub === sub && r.period === period) : undefined;
   if (!row) return { ok: false, reason: "not_owed" };
   const f = field(benefit, sub, period);

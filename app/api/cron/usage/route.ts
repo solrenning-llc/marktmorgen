@@ -93,7 +93,7 @@ const LOCK = "nl:usage-watch:lock";
 const LOCK_SECONDS = 120;
 
 /** `unread`: an inventory of this part could not be read; never said as zero stores (issue #4145). */
-type VideoRun = { stores: number; billed: number; cents: number; paused: number; failed: number; told: number; unread?: true };
+type VideoRun = { stores: number; billed: number; cents: number; paused: number; failed: number; told: number; unread?: true; unreadParts?: ("settlement" | "notices")[] };
 
 /** Bills video past the plan's hours, and writes to each creator the first time a month passes them. */
 async function videoRun(): Promise<VideoRun> {
@@ -105,6 +105,7 @@ async function videoRun(): Promise<VideoRun> {
     // Unknown, never "nothing to settle" (issue #4145); the notices below are their own part and still run.
     console.error("settling video hours failed", error);
     out.unread = true;
+    out.unreadParts = [...(out.unreadParts ?? []), "settlement"];
   }
   for (const row of settled) {
     out.stores += 1;
@@ -129,6 +130,7 @@ async function videoRun(): Promise<VideoRun> {
   } catch (error) {
     console.error("could not read the stores whose video was watched", error);
     out.unread = true;
+    out.unreadParts = [...(out.unreadParts ?? []), "notices"];
   }
   for (const folder of watchedStores) {
     try {
@@ -165,10 +167,20 @@ async function videoRun(): Promise<VideoRun> {
       console.error("writing to a creator about video hours failed", error);
     }
   }
-  // An inventory that could not be read is never logged as "every store inside" (Claude 3 ivvh on #5466): said as unread.
+  // An inventory that could not be read is never logged as "every store inside" (Claude 3 ivvh and Claude 5 id8Ws on
+  // #5466): said as unread, naming which of the two reads failed, and only the counts of the part that did read
+  // (Claude 5 ichw on #5466): the settlement's when the notices' read failed, the notices' when the settlement's did.
+  const settlementWords = `${out.stores} past a plan's hours, ${out.billed} billed ${centsWords(out.cents)}, ${out.failed} failed`;
+  const noticeWords = `${out.paused} playback paused, ${out.told} written to`;
+  const unreadWords = (parts: ("settlement" | "notices")[]) =>
+    parts.length === 2
+      ? "video-watch: unread, the settlement's and the notices' stores are unknown; nothing was settled or written to"
+      : parts[0] === "settlement"
+      ? `video-watch: unread, the settlement's stores are unknown, so what it settled today is unknown; the notices read theirs: ${noticeWords}`
+      : `video-watch: unread, the notices' stores are unknown; the settlement read its own: ${settlementWords}`;
   console.log(
     out.unread
-      ? `video-watch: unread, the stores to look at are unknown; of those read, ${out.stores} past a plan's hours, ${out.billed} billed ${centsWords(out.cents)}, ${out.paused} playback paused, ${out.failed} failed, ${out.told} written to`
+      ? unreadWords(out.unreadParts ?? ["settlement", "notices"])
       : out.stores === 0 && out.paused === 0
       ? "video-watch: every store inside its hours"
       : `video-watch: ${out.stores} past a plan's hours, ${out.billed} billed ${centsWords(out.cents)}, ${out.paused} playback paused, ${out.failed} failed, ${out.told} written to`,
@@ -525,6 +537,8 @@ async function ordersRun(): Promise<OrdersRun> {
   } catch (error) {
     console.error("could not read the stores with orders", error);
     out.unread = true;
+    // Its own summary line too, never only the error (Claude 5 ichw on #5466): no store was looked at.
+    console.log("orders-watch: unread, the stores to look at are unknown; none was looked at");
     return out;
   }
   for (const folder of ordered) {

@@ -124,7 +124,7 @@ export async function watchedForAdmission(folder: string, month = calendarWindow
 export async function watchedFolders(month = calendarWindow().id): Promise<string[]> {
   if (!isRedisConfigured()) return [];
   // Read exactly (rule 24; Claude 3 ykH on #5466, issue #4145): a reply in another shape is unknown, never "no store
-  // watched any video", which would bill nobody and tell nobody while the usage watch answered ok.
+  // watched any video", which would settle nobody and tell nobody while the usage watch answered ok.
   const list = stringList(repliesFor(await redisPipeline([["SMEMBERS", foldersKey(month)]]), 1)?.[0]);
   if (!list) throw new UnknownReplyError("the stores whose video was watched in a month");
   return list.filter((f) => FOLDER_PATTERN.test(f)).sort();

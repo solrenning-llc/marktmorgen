@@ -1476,8 +1476,26 @@ console.log("strict to add, loose to take out: the READY the 3-READY gate counts
   tira.push([`Claude 3 X review #${N} ＠${h}: CHANGES`, "claude-3"], [`Claude 3 X: I retract the READY above`, "claude-3"], [`Claude 3 X: I retract my READY on @0000000000`, null],
     [`Claude 5 icEJ focal review #${N} @${h} (\`a..b\`): CHANGES`, "claude-5"], [`Review #${N} @${h} by Claude 3 yaQt (session x), mail request y: CHANGES`, "claude-3"]);
   for (const [t, e] of soma) is(`adds: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.readyEstrito?.(t, N, H) === e, String(mod.readyEstrito?.(t, N, H)));
-  for (const [t, e] of tira) is(`takes out: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.tiraReady?.(t, N, H) === e, String(mod.tiraReady?.(t, N, H)));
-  is("takes out: a GitHub review in the CHANGES_REQUESTED state with no family named is '?' (NOT CHECKED)", mod.tiraReady?.("Looks good to me", N, H, "CHANGES_REQUESTED") === "?");
+  // Seventh round (Claude 5 hed9 7118892597 and Claude 3 7118918923 on ab697952b5).
+  const H7 = H;
+  soma.push([`* Claude 3 review #${N} @${h}: READY`, null], [`    Claude 3 review #${N} @${h}: READY`, null], [`\tClaude 3 review #${N} @${h}: READY`, null],
+    [`Claude 3 review #${N} @${h} (not yet, waiting for CI): READY`, null], [`Claude 3 review #${N} @${h} (if CI passes): READY`, null],
+    [`Claude 3 review #${N} @${h}: READY. Sorry, I meant CHANGES`, null], [`Claude 3 review #${N} @${h}: READY; scratch that`, null],
+    [`Claude 3 review #${N} @${h}: READY, CI still running`, null], [`Claude 33 review #${N} @${h}: READY`, null], [`Claude 5 iZ — Codex X6 review #${N} @${h}: READY`, null]);
+  tira.push([`WITHDRAWN: my READY 7111050238 — Claude 3 Q`, "claude-3"], [`Claude 3 Q: I withdraw my READY 7116000000 above (the fix was wrong)`, "claude-3"],
+    [`Claude 3 Q: I withdraw my READY https://github.com/solrenning-llc/marktmorgen/pull/5408#issuecomment-7116000000 (found a GRAVE)`, "claude-3"],
+    [`Queue request withdrawn: #${N} @${h} — Claude 5 icRk, 19:13 UTC`, null], [`Claude 5 icRk: my queue request for #${N} @${h} is withdrawn`, null],
+    [`Withdrawn in favor of #5410.`, null], [`O PR retira a trava antiga do tax gate.`, null], [`Retiro o pedido de fila; vou juntar o main antes.`, null],
+    [`#${N} @${h}: the CHANGES above are fixed in this head`, null], [`NOT READY #${N} @${h} — see inline`, null],
+    [`Claude 3 review #${N} @${h}: BLOCKED, ALTO found`, "claude-3"], [`Claude 3 review #${N} @${h}: REJECTED`, "claude-3"], [`Claude 3 X #${N} @${h}: do not merge yet`, "claude-3"],
+    [`Claude 3 X: I revoke my READY on #${N} @${h}`, "claude-3"], [`Claude 3 X: meu READY no #${N} @${h} fica retirado`, "claude-3"], [`Claude 3 X: I take back my review of #${N} @${h}`, "claude-3"],
+    [`Claude 5 iZ — Codex X6 review #${N} @${h}: CHANGES`, "codex"], [`Claude 3 X: I retract my READY on @0000000aaa`, null], [`Claude 1 coord: #${N} @${h} — retiro o HOLD`, null],
+    [`Claude 3 X\nsome text\n#${N} @${h}: CHANGES (head on line 3)`, "claude-3"]);
+  for (const [t, e] of tira) is(`takes out: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, (mod.tiraReady?.(t, N, H7)?.familia ?? null) === e, JSON.stringify(mod.tiraReady?.(t, N, H7)));
+  is("takes out: a GitHub review in the CHANGES_REQUESTED state with no family named is '?' (NOT CHECKED)", mod.tiraReady?.("Looks good to me", N, H, "CHANGES_REQUESTED")?.familia === "?");
+  is("takes out: a CHANGES_REQUESTED review of another head (commit_id) takes nothing out (MÉDIO 2 of hed9)", mod.tiraReady?.("", N, H, "CHANGES_REQUESTED", "0000000aaa0000000000000000000000000000aa") === null);
+  is("LEVE 5 of hed9: a header that starts with the family is its own, though it names a sibling as 'by'",
+    mod.comentarioDaSessao?.(`Claude 2 main review #979 @abc: READY — confirms the fix by Claude 2 upbeat`, "Claude 2 main", null) === true);
   // LEVE 2 of Claude 5 iYnra on ca80774537: a family-wide session prefix is no session mark; an explicit signer wins.
   is("iYnra LEVE 2: '01FR6Z1' is Claude 2's family prefix, not the mark of 'Claude 2 (main, 01FR6Z1)'",
     mod.comentarioDaSessao?.(`Claude 2 (upbeat, 01FR6Z1) review #979 @abc: READY`, "Claude 2 (main, 01FR6Z1)", null) === false);
@@ -1485,7 +1503,7 @@ console.log("strict to add, loose to take out: the READY the 3-READY gate counts
   is("iYnra LEVE 2: with an explicit signer, the first label is not the session's ('Focal review of the Claude 5 hed9 fix — Claude 5 ibqho')",
     mod.comentarioDaSessao?.(`Focal review of the Claude 5 hed9 fix #979 @abc — Claude 5 ibqho: READY`, "Claude 5 hed9", null) === false
     && mod.comentarioDaSessao?.(`Focal review of the Claude 5 hed9 fix #979 @abc — Claude 5 ibqho: READY`, "Claude 5 ibqho", null) === true);
-  is("takes out: a CHANGES_REQUESTED review names its family when it says it", mod.tiraReady?.(`Claude 4 X: see inline notes on @${h}`, N, H, "CHANGES_REQUESTED") === "claude-4");
+  is("takes out: a CHANGES_REQUESTED review names its family when it says it", mod.tiraReady?.(`Claude 4 X: see inline notes on @${h}`, N, H, "CHANGES_REQUESTED")?.familia === "claude-4");
 }
 
 console.log("three READY from three outside families on the exact head before a PR is enqueued (owner, OWNER-20261123-1442-THREE-REVIEWS)");
@@ -1565,13 +1583,14 @@ console.log("three READY from three outside families on the exact head before a 
   // READY, "READY?", a withdrawal or a correction takes its READY out, until a later strict READY of that family.
   for (const linha of [`Claude 3 X review #1442 @${h}: CHANGES requested (1 ALTO)`, `Claude 3 X review #1442 @${h}: NOT READY (1 ALTO)`,
     `Claude 3 iYzLs review #1442 @${h}: READY withdrawn`, `Claude 3 X review #1442 @${h}: READY → CHANGES (ALTO found)`, `Focal review #1442 @${h} — CHANGES — Claude 3 X`,
-    `Re: Claude 3's CHANGES on #1442 @${h} — answered`, `Claude 3 focal review #1442 @${h}: READY (the earlier request was withdrawn by the author)`]) {
+    `Re: Claude 3's CHANGES on #1442 @${h} — answered`]) {
     r = verify(id, { FAKE_COMMENTS: tres + comentario(linha) });
     is(`1442: "${linha.slice(0, 55)}" takes Claude 3's READY out`, !r.ok && /2 READY/.test(r.out), r.out);
   }
   r = verify(id, { FAKE_COMMENTS: tres + comentario(`Claude 3 X review #1442 @${h}: NOT READY (1 ALTO)`) + ready("Claude 3 X") });
   is("1442: a later strict READY of the family brings it back", r.ok, r.out);
-  r = verify(id, { FAKE_COMMENTS: tres + comentario(`Claude 1 coord: #1442 @${h} — 2 READY (Claude 3, Claude 5)`) + comentario(`Claude 3 focal review #1442 @${h}: READY (the earlier finding was retirado after the fix)`) });
+  r = verify(id, { FAKE_COMMENTS: tres + comentario(`Claude 1 coord: #1442 @${h} — 2 READY (Claude 3, Claude 5)`) + comentario(`Claude 3 focal review #1442 @${h}: READY (the earlier finding was retirado after the fix)`)
+    + comentario(`Claude 3 focal review #1442 @${h}: READY (the earlier request was withdrawn by the author)`) });
   is("1442: a status line with no CHANGES or withdrawal, and a READY that only mentions a 'retirado' finding, take nothing out", r.ok, r.out);
   // MEDIUM 2 of hed9 on ca80774537: GitHub review states.
   const revisao = (t, estado, em = "2026-11-23T23:00:00Z") => JSON.stringify([t, "COLLABORATOR", em, estado, em]) + "\n";
@@ -1601,6 +1620,17 @@ console.log("three READY from three outside families on the exact head before a 
   is("1442: a strict-looking line whose label has a status word does not count", !r.ok && /2 READY/.test(r.out), r.out);
   r = run(["claim-enqueue", "--as", "Claude 7 X"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq, FAKE_COMMENTS: tres });
   is("1442: the claim message no longer offers record-review as a way to make a review count (L4qm's LEVE)", !/record-review/.test(r.out), r.out);
+  // MEDIUM of Claude 3 on ab697952b5 (#5313 @ad11d680df): a queue request's withdrawal is no withdrawn READY.
+  r = verify(id, { FAKE_COMMENTS: tres + comentario(`Queue request withdrawn: #1442 @${h} — Claude 2 Q, 19:13 UTC. The 3 READY stay valid on this head.`) });
+  is("1442: 'Queue request withdrawn: #N @head — <family>' keeps that family's READY (Claude 3 on #5408 @ab697952b5)", r.ok, r.out);
+  r = verify(id, { FAKE_COMMENTS: tres + comentario(`Claude 2 Q review #1442 @${h}: CHANGES, 1 LEVE`) });
+  is("1442: the refusal names the comment that took a READY out", !r.ok && /saiu por um comentário posterior/.test(r.out) && /claude-2: "Claude 2 Q review #1442/.test(r.out), r.out);
+  r = verify(id, { FAKE_COMMENTS: tres + comentario(`Withdrawn in favor of #5410.`) + comentario(`O PR retira a trava antiga do tax gate.`) });
+  is("1442: a withdrawal that names no family is ignored, never NOT CHECKED (MÉDIO 2 of hed9)", r.ok, r.out);
+  r = verify(id, { FAKE_COMMENTS: tres, FAKE_REVIEWS: JSON.stringify(["", "COLLABORATOR", "2026-11-23T23:00:00Z", "CHANGES_REQUESTED", "2026-11-23T23:00:00Z", "0000000aaa0000000000000000000000000000aa"]) + "\n" });
+  is("1442: a CHANGES_REQUESTED review of an older head (commit_id) leaves this head checked (MÉDIO 2 of hed9)", r.ok, r.out);
+  r = verify(id, { FAKE_COMMENTS: tres, CORREIO_SEM_GH: "1" });
+  is("1442: without the PR's texts the gate is NOT CHECKED, never '0 READY' (NIT 2 of iYnra)", !r.ok && /NÃO FORAM CONFERIDAS/.test(r.out), r.out);
   // LEVE 1 of iYnra: the enqueuer is outside the head's reviewers (FQ (1)).
   r = verify(id, { FAKE_COMMENTS: tres + ready("Claude 6 Q") });
   is("1442: an enqueuer whose family reviewed the head is refused (FQ (1))", !r.ok && /revisou #1442/.test(r.out), r.out);

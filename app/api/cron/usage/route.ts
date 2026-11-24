@@ -296,7 +296,8 @@ async function watchUsage(): Promise<Response> {
 
   // The delivery part on its own: a list or total Redis answered in an unknown shape (CX-123 rule 24) is never
   // "nobody is over". It is said as unknown, nobody is written to on it and its told list is left as it was; the
-  // other parts above have run whatever it does, and the run answers an error only here, at the end.
+  // other parts above have run whatever it does, and the run answers an error naming it, with any unread inventory
+  // above. An unread inventory alone makes every other answer below an error too (answer, above).
   // One date for the month's over list and the month's told list, so a run across midnight UTC reads both alike.
   const today = new Date();
   const toldList = toldKey(monthKey(today));

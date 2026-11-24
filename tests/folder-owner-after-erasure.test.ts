@@ -5,12 +5,14 @@
  * The month's first visit, and every hundredth, wrote the folder's owner (nl:store:folder-owner:<folder>, the creator's
  * address) with a plain SET. A visit that reached the store's public page after its erasure began wrote the erased
  * creator's address back, for good, under a folder the erasure had just cleared (Codex L-20261120-0627). Now the write
- * goes through the store's fence (lib/live-fence.ts, SET_IF_STORE_LIVE): a store erasing or gone gets nothing written;
- * a live store's owner is kept FOLDER_OWNER_SECONDS, as long as the month it is billed with.
+ * goes through the store's fence (lib/live-fence.ts, KEEP_IF_STORE_LIVE): a store erasing or gone gets nothing written;
+ * a live store's owner is kept with no expiry, as before: it is the creator's record, read by the daily usage job, not
+ * a cache (Claude 3's LEVE on #5110: a fenced write with EX turned the key an upload kept for good into one that
+ * expired 400 days after a visit).
  *
  * Real code over the in-memory Redis; synthetic records only.
  */
-import { FOLDER_OWNER_SECONDS } from "@/lib/delivery";
+import { rememberFolderOwner, storeKeysOf } from "@/lib/delivery";
 import { ERASING_KEY, claimHandle, closeStoreRecord, ensureStatsId, ensureStoreId, erasingField, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { PARTS_PER_VISIT } from "@/lib/traffic-rules";
 import { recordParts, recordVisit } from "@/lib/traffic";
@@ -44,13 +46,22 @@ const owner = async (key: string) => (await original([["GET", key]]))[0];
 const ttl = async (key: string) => Number((await original([["TTL", key]]))[0]);
 
 async function main() {
-  part("Control: the month's first visit remembers the folder's owner, through the fence, for as long as the month is billed");
+  part("Control: the month's first visit remembers the folder's owner, through the fence, with no expiry");
   const live = await shop();
   is("the visit counts", await recordVisit(live.store, "203.0.113.1"), true);
   is("the owner is remembered", await owner(live.key), live.ref.toLowerCase());
-  const kept = await ttl(live.key);
-  is("kept FOLDER_OWNER_SECONDS", kept > 0 && kept <= FOLDER_OWNER_SECONDS, true);
+  is("kept with no expiry (TTL -1), as before the fence", await ttl(live.key), -1);
   is("no plain SET", plainWrites, 0);
+
+  part("An upload keeps the owner for good; a visit after it never gives the key an expiry");
+  const uploaded = await shop();
+  const folder = uploaded.key.slice("nl:store:folder-owner:".length);
+  await rememberFolderOwner(folder, uploaded.ref);
+  plainWrites = 0;
+  is("the upload's write has no expiry", await ttl(uploaded.key), -1);
+  is("a visit counts", await recordVisit(uploaded.store, "203.0.113.4"), true);
+  is("the key still has no expiry", await ttl(uploaded.key), -1);
+  is("the daily usage job still finds the store for its folder", (await storeKeysOf([folder]))[0] !== null, true);
 
   part("A store whose erasure has begun: the live room's first hundredths, which mark the month, write no owner back");
   const erasing = await shop();

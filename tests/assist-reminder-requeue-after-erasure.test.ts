@@ -102,6 +102,24 @@ function residue(session: string): { yes: Record<string, unknown> | null; member
   return { yes: typeof raw === "string" ? (JSON.parse(raw) as Record<string, unknown>) : null, members: queue.filter((m) => m.includes(session)).length };
 }
 
+/**
+ * Each queue member naming this checkout, with its score: a ZADD that re-adds the same member keeps the count of
+ * members, so a "no ZADD" check compares these before and after (Claude 6 jAAv7's NIT on #5372).
+ */
+function queued(session: string): [string, unknown][] {
+  const queue = redis.run(["ZRANGEBYSCORE", QUEUE, "-inf", "+inf"]) as string[];
+  return queue.filter((m) => m.includes(session)).sort().map((m) => [m, redis.run(["ZSCORE", QUEUE, m])]);
+}
+
+/**
+ * The checkout's queue members moved to score 1, a time no requeue writes, and read back: a requeue's ZADD would
+ * give them its own due time, which may be the score they already had, so only a score it could never write shows it.
+ */
+function markedQueue(session: string): [string, unknown][] {
+  for (const [member] of queued(session)) redis.run(["ZADD", QUEUE, 1, member]);
+  return queued(session);
+}
+
 /** What the store's closing walk does to a reminder after closeStoreRecord: its yes and its queue member go. */
 function walkDeletes(session: string): void {
   redis.run(["DEL", assistRemindKey(session)]);
@@ -163,9 +181,11 @@ async function main(): Promise<void> {
     during.read = async () => {
       redis.run(["SET", storeIdCommand(store.sid)[1], "moved-elsewhere@example.test"]);
     };
+    const before = markedQueue(session);
     is("skip", await remindFromConsent(store, session, later), "skip");
     const after = residue(session);
     is("the yes not rewritten, and no new queue member", [after.yes?.r, after.members], [undefined, 1]);
+    is("and the member that was there is not added again: its score is unchanged (no ZADD)", queued(session), before);
   }
 
   part("The person erased while Stripe was read: the yes is not recreated, and no new queue member is added");
@@ -177,8 +197,10 @@ async function main(): Promise<void> {
     during.read = async () => {
       await forgetAssistReminderPerson(store.statsId!, "fay@example.com");
     };
+    const before = markedQueue(session);
     is("skip", await remindFromConsent(store, session, later), "skip");
-    is("no yes, and only the member that was there (SET ... XX wrote nothing, so no ZADD)", residue(session), { yes: null, members: 1 });
+    is("no yes, and only the member that was there", residue(session), { yes: null, members: 1 });
+    is("and it is not added again: its score is unchanged (SET ... XX wrote nothing, so no ZADD)", queued(session), before);
   }
 
   part("A store from before ids: fenced on its owner's record still carrying its statsId");

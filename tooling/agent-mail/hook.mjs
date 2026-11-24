@@ -16,10 +16,11 @@
 // failure ends with exit code 0, said once at the start of a session and silent during work.
 
 import { execFileSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const REPO = process.env.CORREIO_REPO || "https://github.com/solrenning-llc/repo-id-transfer-test";
 export const RAMO = process.env.CORREIO_RAMO || "correio";
@@ -147,6 +148,39 @@ export function resumo(commit, m) {
   return linha.length > MAX_CARACTERES ? `${linha.slice(0, MAX_CARACTERES - 1)}…` : linha;
 }
 
+/**
+ * The reviewed copy of the hook runs from PASTA (.claude/settings.json takes it from origin/main, never from the branch
+ * checked out: Claude 3's MÉDIO on #5485). Next to it, the tool it reads SESSOES from must be the reviewed one too:
+ * its SHA-256 is compared with tooling/agent-mail/agent-mail.sha256 on origin/main of the project, and a different or
+ * missing copy is installed again from origin/main only when that file has that same SHA-256 (the install of CO (b)).
+ * If none of this can be done, nothing of the tool is run: the hook reads only everyone's box and says why.
+ * A copy of the hook run from elsewhere (this repository's own tests) reads the tool beside it.
+ */
+export async function tabelaDeSessoes(env = process.env) {
+  const aqui = fileURLToPath(new URL(".", import.meta.url));
+  if (resolve(aqui) !== resolve(PASTA)) return { sessoes: (await import("./agent-mail.mjs")).SESSOES, aviso: "" };
+  const projeto = env.CLAUDE_PROJECT_DIR || process.cwd();
+  const show = (caminho) => execFileSync("git", ["-C", projeto, "show", `origin/main:${caminho}`], { stdio: ["ignore", "pipe", "pipe"], timeout: PRAZO_GIT_MS, maxBuffer: 64 << 20 });
+  const sha = (dados) => createHash("sha256").update(dados).digest("hex");
+  try {
+    const revisado = /^[0-9a-f]{64}/.exec(show("tooling/agent-mail/agent-mail.sha256").toString("utf8"))?.[0];
+    if (!revisado) throw new Error("no reviewed SHA-256 on origin/main");
+    const ferramenta = join(PASTA, "agent-mail.mjs");
+    if (!existsSync(ferramenta) || sha(readFileSync(ferramenta)) !== revisado) {
+      const doMain = show("tooling/agent-mail/agent-mail.mjs");
+      if (sha(doMain) !== revisado) throw new Error("origin/main's tool does not match its own SHA-256");
+      const tmp = `${ferramenta}.${process.pid}.tmp`;
+      writeFileSync(tmp, doMain);
+      renameSync(tmp, ferramenta);
+    }
+    // Read again after the install: what is imported is exactly what was checked.
+    if (sha(readFileSync(ferramenta)) !== revisado) throw new Error("the installed tool changed while it was checked");
+    return { sessoes: (await import(pathToFileURL(ferramenta).href)).SESSOES, aviso: "" };
+  } catch (erro) {
+    return { sessoes: {}, aviso: ` Só a caixa de todos foi lida: a ferramenta do correio revisada não pôde ser conferida agora (${semSegredo(erro?.message ?? erro).split("\n")[0].slice(0, 160)}).` };
+  }
+}
+
 const arquivoEstado = (eu) => join(PASTA, `hook-state-${eu.chave.replace(/[^0-9A-Za-z]/g, "")}.json`);
 function lerEstado(eu) {
   try { const e = JSON.parse(readFileSync(arquivoEstado(eu), "utf8")); return { ultima: Number(e.ultima) || 0, vistos: Array.isArray(e.vistos) ? e.vistos : [] }; }
@@ -167,18 +201,19 @@ const comoLer = (eu) => {
 
 /** The text to put in front of the agent, or "" when there is nothing to say. */
 export async function rodar(modo, env = process.env) {
-  const { SESSOES } = await import("./agent-mail.mjs");
-  const eu = quemSou(SESSOES, env);
   const agoraMs = agora(env);
-  const estado = lerEstado(eu);
+  // The minute's limit is read before anything else is done, the tool's check included.
+  const estado = lerEstado(quemSou({}, env));
   if (modo === "check" && agoraMs - estado.ultima < INTERVALO_MS) return "";
+  const { sessoes, aviso } = await tabelaDeSessoes(env);
+  const eu = quemSou(sessoes, env);
   // The time is written before the network: hooks that run together in one session do not all fetch.
   gravarEstado(eu, { ...estado, ultima: agoraMs });
   let commit;
   try {
     commit = buscar();
   } catch (erro) {
-    return modo === "start" ? `CORREIO DOS AGENTES: não consegui ler o correio agora (${semSegredo(erro?.message ?? erro).split("\n")[0].slice(0, 200)}). ${comoLer(eu)}` : "";
+    return modo === "start" ? `CORREIO DOS AGENTES: não consegui ler o correio agora (${semSegredo(erro?.message ?? erro).split("\n")[0].slice(0, 200)}). ${comoLer(eu)}${aviso}` : "";
   }
   if (!commit) return "";
   const todas = mensagens(commit, eu);
@@ -190,12 +225,12 @@ export async function rodar(modo, env = process.env) {
   const janela = agoraMs - JANELA_NOVAS_H * 3_600_000;
   const vistosDepois = [...new Set([...estado.vistos.filter((id) => (dataDe(id) ?? 0) >= janela), ...todas.filter((m) => m.quando >= janela).map((m) => m.id)])];
   gravarEstado(eu, { ultima: agoraMs, vistos: vistosDepois });
-  if (!novas.length) return modo === "start" ? `CORREIO DOS AGENTES: nenhuma mensagem nas últimas ${JANELA_INICIO_H} horas nas caixas desta sessão (${[...caixasDe(eu, [])].join(", ")} e as da sessão). ${comoLer(eu)}` : "";
+  if (!novas.length) return modo === "start" ? `CORREIO DOS AGENTES: nenhuma mensagem nas últimas ${JANELA_INICIO_H} horas nas caixas desta sessão (${[...caixasDe(eu, [])].join(", ")} e as da sessão). ${comoLer(eu)}${aviso}` : "";
   const mostradas = novas.slice(-MAX_MENSAGENS);
   const cabeca = modo === "start"
     ? `CORREIO DOS AGENTES: ${novas.length} mensagem(ns) nas últimas ${JANELA_INICIO_H} horas para esta sessão (todos, a família e a própria caixa)${novas.length > mostradas.length ? `; as ${mostradas.length} mais novas` : ""}:`
     : `CORREIO DOS AGENTES: ${novas.length} mensagem(ns) nova(s) para esta sessão${novas.length > mostradas.length ? `; as ${mostradas.length} mais novas` : ""}:`;
-  return [cabeca, ...mostradas.map((m) => resumo(commit, m)), comoLer(eu)].join("\n");
+  return [cabeca, ...mostradas.map((m) => resumo(commit, m)), `${comoLer(eu)}${modo === "start" ? aviso : ""}`].join("\n");
 }
 
 export async function principal(argv = process.argv.slice(2), env = process.env) {

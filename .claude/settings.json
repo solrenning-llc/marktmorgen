@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/tooling/agent-mail/hook.mjs\" start",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && mkdir -p \"$HOME/.agent-mail\" && { git fetch -q origin main 2>/dev/null; true; } && git show origin/main:tooling/agent-mail/hook.mjs > \"$HOME/.agent-mail/hook.mjs.tmp\" 2>/dev/null && mv \"$HOME/.agent-mail/hook.mjs.tmp\" \"$HOME/.agent-mail/hook.mjs\" && node \"$HOME/.agent-mail/hook.mjs\" start; exit 0",
             "timeout": 60
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/tooling/agent-mail/hook.mjs\" check",
+            "command": "[ -f \"$HOME/.agent-mail/hook.mjs\" ] && cd \"$CLAUDE_PROJECT_DIR\" && node \"$HOME/.agent-mail/hook.mjs\" check; exit 0",
             "timeout": 30
           }
         ]

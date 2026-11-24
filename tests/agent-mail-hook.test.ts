@@ -107,13 +107,66 @@ try {
   const nobody = hook("start", NOW - 60_000, { CLAUDE_CODE_REMOTE_SESSION_ID: "", AGENT_MAIL_AS: "", AGENT_MAIL_HOOK_DIR: join(root, "home4") });
   is("no identity: everyone's box only", [nobody.text.includes(toAll), nobody.text.includes(toFamily)], [true, false]);
 
-  part("Claude Code runs it: .claude/settings.json");
+  part("Claude Code runs it: .claude/settings.json, only the copy reviewed on main");
   const settings = JSON.parse(readFileSync(".claude/settings.json", "utf8")) as { hooks: Record<string, Array<{ matcher: string; hooks: Array<{ type: string; command: string; timeout: number }> }>> };
   const command = (event: string) => settings.hooks[event]?.[0]?.hooks?.[0];
-  is("at every session start, resume, clear and compaction", [settings.hooks.SessionStart?.[0]?.matcher, command("SessionStart")?.command], ["startup|resume|clear|compact", 'node "$CLAUDE_PROJECT_DIR/tooling/agent-mail/hook.mjs" start']);
-  is("after every tool", [settings.hooks.PostToolUse?.[0]?.matcher, command("PostToolUse")?.command], ["*", 'node "$CLAUDE_PROJECT_DIR/tooling/agent-mail/hook.mjs" check']);
-  is("each with a short time limit", [command("SessionStart")?.timeout, command("PostToolUse")?.timeout], [60, 30]);
-  is("and no other hook", Object.keys(settings.hooks).sort(), ["PostToolUse", "SessionStart"]);
+  const startCommand = command("SessionStart")?.command ?? "";
+  const checkCommand = command("PostToolUse")?.command ?? "";
+  is("at every session start, resume, clear and compaction; after every tool", [settings.hooks.SessionStart?.[0]?.matcher, settings.hooks.PostToolUse?.[0]?.matcher], ["startup|resume|clear|compact", "*"]);
+  is("the start takes the hook from origin/main and runs that copy", [startCommand.includes("git show origin/main:tooling/agent-mail/hook.mjs"), startCommand.includes('node "$HOME/.agent-mail/hook.mjs" start')], [true, true]);
+  is("during work, the same copy", checkCommand.includes('node "$HOME/.agent-mail/hook.mjs" check'), true);
+  is("never the hook of the branch checked out", [startCommand, checkCommand].some((c) => c.includes("$CLAUDE_PROJECT_DIR/tooling/agent-mail/hook.mjs")), false);
+  is("each with a short time limit, and no other hook", [command("SessionStart")?.timeout, command("PostToolUse")?.timeout, Object.keys(settings.hooks).sort()], [60, 30, ["PostToolUse", "SessionStart"]]);
+
+  // A project whose origin/main holds the reviewed hook and tool; HOME is a throwaway folder.
+  const project = (name: string, files: Record<string, string>) => {
+    const dir = join(root, name);
+    mkdirSync(join(dir, "tooling/agent-mail"), { recursive: true });
+    for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text);
+    const g = (...args: string[]) => spawnSync("git", ["-C", dir, ...args], { encoding: "utf8", env: gitEnv });
+    g("init", "-q", "-b", "main");
+    g("add", "-A");
+    g("commit", "-q", "-m", "main");
+    g("update-ref", "refs/remotes/origin/main", "HEAD");
+    return dir;
+  };
+  const tool = readFileSync("tooling/agent-mail/agent-mail.mjs", "utf8");
+  const toolSha = readFileSync("tooling/agent-mail/agent-mail.sha256", "utf8");
+  const hookText = readFileSync("tooling/agent-mail/hook.mjs", "utf8");
+  const reviewed = project("reviewed", { "tooling/agent-mail/hook.mjs": hookText, "tooling/agent-mail/agent-mail.mjs": tool, "tooling/agent-mail/agent-mail.sha256": toolSha });
+  const run = (cmd: string, dir: string, homeDir: string, at: number): Run => {
+    const r = spawnSync("bash", ["-c", cmd], {
+      encoding: "utf8",
+      timeout: 90_000,
+      env: { ...gitEnv, HOME: homeDir, CLAUDE_PROJECT_DIR: dir, CORREIO_REPO: mail, AGENT_MAIL_TEST: "1", AGENT_MAIL_HOOK_NOW: String(at), CLAUDE_CODE_REMOTE_SESSION_ID: SESSION, AGENT_MAIL_HOOK_DIR: "" },
+    });
+    const out = r.stdout.trim();
+    if (!out) return { status: r.status, event: null, text: "" };
+    const parsed = JSON.parse(out) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
+    return { status: r.status, event: parsed.hookSpecificOutput.hookEventName, text: parsed.hookSpecificOutput.additionalContext };
+  };
+
+  part("The settings' own commands, run as Claude Code runs them");
+  const home5 = join(root, "home5");
+  mkdirSync(home5);
+  writeFileSync(join(reviewed, "tooling/agent-mail/hook.mjs"), `${hookText}\nconsole.log("BRANCH CODE RAN");\n`);
+  const viaStart = run(startCommand, reviewed, home5, NOW - 60_000);
+  is("the start runs main's copy, not the branch's changed file", [viaStart.status, viaStart.event, viaStart.text.includes("BRANCH CODE")], [0, "SessionStart", false]);
+  is("it installed the reviewed tool and read the family's box", [readFileSync(join(home5, ".agent-mail/agent-mail.mjs"), "utf8") === tool, viaStart.text.includes(toFamily)], [true, true]);
+  writeFileSync(join(home5, ".agent-mail/agent-mail.mjs"), "export const SESSOES = {};\n");
+  const afterTamper = run(checkCommand, reviewed, home5, NOW + 3_600_000);
+  is("a changed tool copy is installed again from main before it is read", [afterTamper.status, readFileSync(join(home5, ".agent-mail/agent-mail.mjs"), "utf8") === tool], [0, true]);
+
+  const badSha = project("bad-sha", { "tooling/agent-mail/hook.mjs": hookText, "tooling/agent-mail/agent-mail.mjs": tool, "tooling/agent-mail/agent-mail.sha256": `${"0".repeat(64)}  agent-mail.mjs\n` });
+  const home6 = join(root, "home6");
+  mkdirSync(home6);
+  const refused = run(startCommand, badSha, home6, NOW - 60_000);
+  is("a tool that does not match main's SHA-256 is never run: everyone's box only, and why", [refused.status, refused.text.includes(toAll), refused.text.includes(toFamily), refused.text.includes("Só a caixa de todos foi lida")], [0, true, false, true]);
+
+  const before = project("before-merge", { "tooling/agent-mail/agent-mail.mjs": tool, "tooling/agent-mail/agent-mail.sha256": toolSha });
+  const home7 = join(root, "home7");
+  mkdirSync(home7);
+  is("before the hook is on main, the commands do nothing and exit 0", [run(startCommand, before, home7, NOW), run(checkCommand, before, home7, NOW)], [{ status: 0, event: null, text: "" }, { status: 0, event: null, text: "" }]);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

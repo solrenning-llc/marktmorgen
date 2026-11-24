@@ -19,6 +19,7 @@ import { paidPeriod } from "./billing-period-fixture";
 const OWNER = "membershipowner@example.com";
 const ADA = "adakey00000000000000000000000001";
 const BOB = "bobkey00000000000000000000000002";
+const CAROL = "carolkey000000000000000000000003";
 type Batch = (string | number)[][];
 const realNow = Date.now;
 
@@ -118,4 +119,34 @@ test("the issue's case: one like in the trace, its SISMEMBER answered null", asy
   const who = "a".repeat(32);
   await redis.pipeline([["SADD", traceKey(id, who), "l:p1"]]);
   await assert.rejects(withMarks(() => [null], () => memberTraces(id, who)), UnknownReplyError);
+});
+
+// A batch with no SISMEMBER at all is held by copyBatch alone (Claude 3 woRu's LEVE on #5171): a member whose trace
+// holds only her own comment reads it in a batch of HGETs, and a reply cut from it must fail the copy, never drop the
+// comment from it.
+test("read from her own trace: a batch of comments only, cut short, makes the copy fail, never leaves her comment out", async () => {
+  const { id, post } = await world(TRACED_SINCE + 86_400);
+  Date.now = () => (TRACED_SINCE + 86_401) * 1000;
+  try {
+    const store = (await storeForEmail(OWNER))!;
+    const said = await addComment(id, post, { parent: "", author: CAROL, text: "Carol's comment" }, store);
+    if (!said.ok) throw new Error("no comment");
+  } finally {
+    Date.now = realNow;
+  }
+  const copy = await memberTraces(id, CAROL);
+  assert.deepEqual(copy.comments.map((c) => c.text), ["Carol's comment"]);
+  let cut = 0;
+  const real = redis.pipeline.bind(redis);
+  redis.pipeline = (async (batch: Batch) => {
+    const replies = await real(batch);
+    const commentsOnly = batch.length > 0 && batch.every(([op, key]) => op === "HGET" && String(key).includes(`:c:${post}`));
+    return commentsOnly ? (cut++, replies.slice(0, -1)) : replies;
+  }) as typeof redis.pipeline;
+  try {
+    await assert.rejects(memberTraces(id, CAROL), UnknownReplyError);
+  } finally {
+    redis.pipeline = real;
+  }
+  assert.ok(cut > 0, "the copy read her comment in a batch of HGETs only");
 });

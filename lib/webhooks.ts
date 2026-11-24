@@ -273,6 +273,13 @@ const KEY_UNREAD_WORDS = {
   retrying: "Not sent yet: the state of the API key that added this endpoint could not be read. It will be tried again.",
   failed: "Not sent: the state of the API key that added this endpoint could not be read at any try. Once the key can be read again, you can send it again by hand.",
 };
+/**
+ * A delivery whose month's webhook count could not be made at this try, waiting on the published schedule: the
+ * endpoint was not called, nothing can be resent by hand, and the next try can be a day away, so it never says to
+ * try again in a minute (#5285 row #3096).
+ */
+const COUNT_UNREAD_RETRYING_WORDS =
+  "Not sent yet: this month's webhook deliveries could not be counted, so the endpoint was not called. It will be tried again.";
 /** A delivery whose month's webhook count could not be made at its last try: the endpoint was never called (rule 30). */
 const COUNT_UNREAD_FAILED_WORDS =
   "Not sent: this month's webhook deliveries could not be counted at any try, so the endpoint was not called. Once they can be counted again, you can send it again by hand.";
@@ -890,7 +897,7 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
     if (taken.reason === "unknown" && delivery.type !== "test") {
       const retryIn = RETRY_MINUTES[next.attempts - 1];
       if (retryIn === undefined) return { ...next, ...counted, state: "failed", next: 0, lastStatus: 0, lastError: COUNT_UNREAD_FAILED_WORDS };
-      return { ...next, ...counted, state: "retrying", next: now + retryIn * 60_000, lastStatus: 0, lastError: taken.message };
+      return { ...next, ...counted, state: "retrying", next: now + retryIn * 60_000, lastStatus: 0, lastError: COUNT_UNREAD_RETRYING_WORDS };
     }
     return { ...delivery, ...counted, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: `Not sent. ${taken.message}`, ...unkept };
   }

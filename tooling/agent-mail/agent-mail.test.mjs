@@ -40,6 +40,7 @@ for a in "$@"; do case "$a" in
     if [ "$FAKE_READY_ALL" = 1 ]; then n=\${a#*issues/}; n=\${n%%/*}
       for h in $(git --git-dir="$CORREIO_PR_REPO" for-each-ref --format='%(objectname:short=10)' refs/heads refs/pull); do
         for f in "Claude 1 R" "Claude 2 R" "Claude 3 R" "Claude 4 R" "Claude 5 R" "Claude 6 R" "Claude 7 R" "Codex R"; do
+          case "$f" in "$FAKE_READY_SKIP "*) continue ;; esac
           printf '["%s review #%s @%s: READY\\\\n\\\\nbody","COLLABORATOR"]\\n' "$f" "$n" "$h"; done; done; exit 0; fi
     printf '%s' "\${FAKE_COMMENTS:-}"; exit 0 ;;
   repos/*/pulls/[0-9]*/reviews) printf '%s' "\${FAKE_REVIEWS:-}"; exit 0 ;;
@@ -74,6 +75,11 @@ const revisoesNoCorreio = (repo, pr, sha, quem) => rawMany(Object.fromEntries(qu
   return [`revisao/feitas/t-${pr}-${Math.random().toString(16).slice(2, 10)}.md`, `Resultado: ${resultado}\nPR: ${pr}\nHead: ${head}\nPor: ${nome}\nData (UTC): 2026-11-23 00:00\n\nt\n`];
 })), repo);
 const run = (args, env = {}, cwd = join(T, "w")) => {
+  // The enqueuer is outside the head's reviewers (FQ (1)): FAKE_READY_ALL leaves out the READY of the --as family.
+  if (env.FAKE_READY_ALL === "1" && !env.FAKE_READY_SKIP) {
+    const quem = String(args[args.indexOf("--as") + 1] ?? "");
+    env = { ...env, FAKE_READY_SKIP: /^Codex/i.test(quem) ? "Codex" : (/^Claude \d+/.exec(quem)?.[0] ?? "") };
+  }
   const r = spawnSync("node", [TOOL, ...args], { cwd, env: { ...base, ...env }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 };
@@ -1372,7 +1378,8 @@ console.log("e0bc: complete-review knows its own verdict on the PR, also for a n
   is("e0bc: the marks of 'Claude 2 (main, 01FR6Z1)', 'Claude 6 UoHAG' and a Claude 1 cloud name are their own words, without generic ones, and the session id's first 10",
     JSON.stringify([mod.marcasDaSessao("Claude 2 (main, 01FR6Z1)", { id: "session_01FR6Z1MtkLEMTRT4AviXXzK" }), mod.marcasDaSessao("Claude 6 UoHAG", null),
       mod.marcasDaSessao("Claude 1 (nuvem c1-revisoes-f, cse_01DKvYQbspYs)", null)])
-    === JSON.stringify([{ palavras: ["main", "01FR6Z1"], id: "01FR6Z1Mtk" }, { palavras: ["UoHAG"], id: "" }, { palavras: ["c1-revisoes-f", "cse_01DKvYQbspYs"], id: "" }]),
+    // "01FR6Z1" is Claude 2's family prefix in SESSOES, not this session's mark (LEVE 2 of Claude 5 iYnra on #5408 @ca80774537).
+    === JSON.stringify([{ palavras: ["main"], id: "01FR6Z1Mtk" }, { palavras: ["UoHAG"], id: "" }, { palavras: ["c1-revisoes-f", "cse_01DKvYQbspYs"], id: "" }]),
     JSON.stringify([mod.marcasDaSessao("Claude 2 (main, 01FR6Z1)", { id: "session_01FR6Z1MtkLEMTRT4AviXXzK" }), mod.marcasDaSessao("Claude 1 (nuvem c1-revisoes-f, cse_01DKvYQbspYs)", null)]));
   const C1 = "Claude 1 (nuvem c1-revisoes-f, cse_01DKvYQbspYs)";
   is("e0bc: a Claude 1 cloud sibling's label sharing only 'nuvem' is a sibling's",
@@ -1462,9 +1469,22 @@ console.log("strict to add, loose to take out: the READY the 3-READY gate counts
     [`Claude 3 review #${N} @${h}: READY`, null],
     [`Claude 1 coord: #${N} @${h} — 2 READY (Claude 3, Claude 5)`, null],
   ];
+  soma.push([`Claude 3 X review #${N} ＠${h}: READY`, null], [`Claude 1 coord status review #${N} @${h}: READY`, null], [`Claude 3 X review #${N} @${h}: READY if CI passes`, null],
+    [`Claude 3 X review #${N} @${h}: READY unless the tests fail`, null], [`Claude 3 X review #${N} @${h}: READY until the next head`, null],
+    [`Claude 3 X review #${N} @${h}: READY pending CI`, null], [`Claude 3 X review #${N} @${h}: READY after the fix`, null], [`Claude 3 X review #${N} @${h}: READY but one NIT`, null],
+    [`Claude 3 X review #${N} @${h}: READY retracted`, null], [`Claude 3 X review #${N} @${h}: READY -> CHANGES`, null], [`Claude 3 X review #${N} @${h}: READY 2/3 (Claude 1, 2)`, null]);
+  tira.push([`Claude 3 X review #${N} ＠${h}: CHANGES`, "claude-3"], [`Claude 3 X: I retract the READY above`, "claude-3"], [`Claude 3 X: I retract my READY on @0000000000`, null],
+    [`Claude 5 icEJ focal review #${N} @${h} (\`a..b\`): CHANGES`, "claude-5"], [`Review #${N} @${h} by Claude 3 yaQt (session x), mail request y: CHANGES`, "claude-3"]);
   for (const [t, e] of soma) is(`adds: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.readyEstrito?.(t, N, H) === e, String(mod.readyEstrito?.(t, N, H)));
   for (const [t, e] of tira) is(`takes out: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.tiraReady?.(t, N, H) === e, String(mod.tiraReady?.(t, N, H)));
   is("takes out: a GitHub review in the CHANGES_REQUESTED state with no family named is '?' (NOT CHECKED)", mod.tiraReady?.("Looks good to me", N, H, "CHANGES_REQUESTED") === "?");
+  // LEVE 2 of Claude 5 iYnra on ca80774537: a family-wide session prefix is no session mark; an explicit signer wins.
+  is("iYnra LEVE 2: '01FR6Z1' is Claude 2's family prefix, not the mark of 'Claude 2 (main, 01FR6Z1)'",
+    mod.comentarioDaSessao?.(`Claude 2 (upbeat, 01FR6Z1) review #979 @abc: READY`, "Claude 2 (main, 01FR6Z1)", null) === false);
+  is("iYnra LEVE 2: 'main' is still that session's mark", mod.comentarioDaSessao?.(`Claude 2 (main, 01FR6Z1) review #979 @abc: READY`, "Claude 2 (main, 01FR6Z1)", null) === true);
+  is("iYnra LEVE 2: with an explicit signer, the first label is not the session's ('Focal review of the Claude 5 hed9 fix — Claude 5 ibqho')",
+    mod.comentarioDaSessao?.(`Focal review of the Claude 5 hed9 fix #979 @abc — Claude 5 ibqho: READY`, "Claude 5 hed9", null) === false
+    && mod.comentarioDaSessao?.(`Focal review of the Claude 5 hed9 fix #979 @abc — Claude 5 ibqho: READY`, "Claude 5 ibqho", null) === true);
   is("takes out: a CHANGES_REQUESTED review names its family when it says it", mod.tiraReady?.(`Claude 4 X: see inline notes on @${h}`, N, H, "CHANGES_REQUESTED") === "claude-4");
 }
 
@@ -1572,6 +1592,18 @@ console.log("three READY from three outside families on the exact head before a 
     r = verify(id, { FAKE_COMMENTS: tres + comentario(linha) });
     is(`1442: a written withdrawal takes the READY out: "${linha.slice(0, 50)}"`, !r.ok && /2 READY/.test(r.out), r.out);
   }
+  // LEVE 3 of Claude 5 iYnra on ca80774537: each guard has a check that fails without it.
+  r = verify(id, { FAKE_COMMENTS: [ready("Claude 2 Q"), comentario(`Claude 2 Q review #1442 @${h}: CHANGES`, "2026-11-23T07:00:00Z")].join("") + dois });
+  is("1442: the time order is used, not the order the comments arrive in (an earlier CHANGES listed after a READY)", r.ok, r.out);
+  r = verify(id, { FAKE_COMMENTS: dois + JSON.stringify([`Claude 4 X review #1442 @${h}: READY`, "NONE", "2026-11-23T12:00:00Z"]) + "\n" });
+  is("1442: a comment of someone who does not work in the repository never counts", !r.ok && /2 READY/.test(r.out), r.out);
+  r = verify(id, { FAKE_COMMENTS: dois + comentario(`Claude 1 coord status review #1442 @${h}: READY`).replace("Claude 1 coord", "Claude 4 coord") });
+  is("1442: a strict-looking line whose label has a status word does not count", !r.ok && /2 READY/.test(r.out), r.out);
+  r = run(["claim-enqueue", "--as", "Claude 7 X"], { CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01Hfzoz3uVKpUo5Wosq4VYjL", ...mq, FAKE_COMMENTS: tres });
+  is("1442: the claim message no longer offers record-review as a way to make a review count (L4qm's LEVE)", !/record-review/.test(r.out), r.out);
+  // LEVE 1 of iYnra: the enqueuer is outside the head's reviewers (FQ (1)).
+  r = verify(id, { FAKE_COMMENTS: tres + ready("Claude 6 Q") });
+  is("1442: an enqueuer whose family reviewed the head is refused (FQ (1))", !r.ok && /revisou #1442/.test(r.out), r.out);
   r = run(["complete-enqueue", "--as", "Claude 6 X", id, "--result", "enqueued", "--text", "t"], { ...as("c6"), ...mq, FAKE_COMMENTS: tres });
   is("1442: three READY from three outside families on the head: complete-enqueue records it", r.ok, r.out);
 
@@ -1593,6 +1625,18 @@ console.log("three READY from three outside families on the exact head before a 
   r = run(["verify-enqueue", "--as", "Claude 7 X", id3], { ...C7, ...mq, FAKE_COMMENTS: c1443 + ready("Claude 5 Q", 1443, h3) });
   is("1443: on a prefixed branch, the requester's READY counts: three from Claude 2, 5 and 6 pass", r.ok && new RegExp(`enfileire ${H3b}`).test(r.out), r.out);
   run(["complete-enqueue", "--as", "Claude 7 X", id3, "--result", "declined", "--text", "test done"], { ...C7, ...mq });
+
+  // LEVE 3 of iYnra: a family with a commit on the PR does not count, even with a strict READY.
+  g3(["checkout", "-q", "-B", "claude3/fix-1447", M]); commit("f1447.txt", "1447\n", "pr1447");
+  writeFileSync(join(P, "g1447.txt"), "x\n"); g3(["add", "."]); g3(["-c", "user.name=Claude 7", "-c", "user.email=c@c", "commit", "-q", "-m", "c7 commit\n\nClaude-Session: https://claude.ai/code/session_01Hfzoz3uVKpUo5Wosq4VYjL"]);
+  g3(["push", "-q", "../prs.git", "HEAD:refs/heads/claude3/fix-1447", "HEAD:refs/pull/1447/head"]);
+  const H7 = g3(["rev-parse", "HEAD"]), h7 = H7.slice(0, 10);
+  r = run(["request-enqueue", "--from", "Claude 5", "--pr", "1447", "--sha", h7, "--text", "fila #1447"], { ...as("c5"), ...mq });
+  const id7 = /registrado: (\S+)/.exec(r.out)?.[1];
+  r = run(["claim-enqueue", "--as", "Claude 4 X"], { ...as("c4"), ...mq });
+  r = run(["verify-enqueue", "--as", "Claude 4 X", id7], { ...as("c4"), ...mq, FAKE_COMMENTS: ["Claude 1 Q", "Claude 2 Q", "Claude 7 Q"].map((q) => ready(q, 1447, h7)).join("") });
+  is("1447: a strict READY of a family with a commit on the PR does not count", !r.ok && /2 READY/.test(r.out), r.out);
+  run(["complete-enqueue", "--as", "Claude 4 X", id7, "--result", "declined", "--text", "test done"], { ...as("c4"), ...mq });
 
   // MEDIUM 2 of Claude 5 hed9 on #5408: a commit of an unknown family (a "Claude" author with no trailer) is NOT CHECKED.
   g3(["checkout", "-q", "-B", "claude3/fix-1444", M]);

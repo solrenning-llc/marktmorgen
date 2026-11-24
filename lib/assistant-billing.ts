@@ -6,9 +6,12 @@
  * yearly plan cannot carry a monthly line, and the plan's code reads a
  * subscription's first line as the plan. So it pays its own fixed card fee,
  * which its margin counts (assistantMonthWorst). Its metadata names the
- * store under `assistant_for`, never `store`, so nothing that reads plans
+ * store by its id under `assistant_sid` and by its handle under
+ * `assistant_for`, never `store`, so nothing that reads plans
  * (lib/billing.ts findStoreSubscriptions, lib/billing-sync.ts) can take it
- * for one.
+ * for one. One that names an id is a store's only when the id is its own
+ * (an empty id names none); one made before ids is read by its handle
+ * (metaNamesStore).
  *
  * Sold only while Marktmorgen is open (lib/opening.ts, ASSISTANT_ON_SALE),
  * and only to a store whose plan is paid, not in its trial. A store whose

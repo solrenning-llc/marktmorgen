@@ -1,12 +1,12 @@
 /**
- * A file's problem note (nl:stamp:problem:) is priced for as long as it can live (Claude 5 ygH4 and iao9Ep on #5360).
- * The stamp writes it, and the preview writes "unreadable" there on its second failure; the preview's once-mark is its
- * own key (nl:preview:bad:, Claude 3 on #5360), priced and closed for its own longest life, below. No write
- * extends the note's time: a write to a note already there keeps its expiry (KEEPTTL), and only a new note takes
- * PROBLEM_NOTE_SECONDS. So one note lives at most PROBLEM_NOTE_SECONDS from its first write, however many failures
- * follow (a stamp note then the preview's two notes, or a PDF whose stamping fails on every download). The data
- * registry's part and the key's closing rule cover that life, tied to the constants, never a number typed beside them.
- * Synthetic Redis only; no network.
+ * A file's problem note (nl:stamp:problem:) is priced for as long as it can live (Claude 5 ygH4 and iao9Ep, Claude 3
+ * xvBY8 on #5360). The stamp writes it through one script that keeps an existing note's expiry and never writes over
+ * the preview's "unreadable" (problemNoteCommands); the preview's second failure writes "unreadable" fresh, once a
+ * mark's life, so the studio says why as long as the preview refuses the file. So one note lives at most a stamp note's
+ * PROBLEM_NOTE_SECONDS, then that fresh write for PREVIEW_MARK_SECONDS. The preview's own marks live in their own key
+ * (nl:preview:bad:), priced and closed for their own longest life. The data registry's parts and the closing rules
+ * cover both, tied to the constants. A copy that found room again clears only the stamp's "storage" note, and a closing
+ * store's traces include the preview's mark. Synthetic Redis only; no network.
  */
 import { readFileSync } from "node:fs";
 import * as rules from "@/lib/stamp-cost-rules";
@@ -25,7 +25,8 @@ async function main(): Promise<void> {
   is("the note's time is named once (PROBLEM_NOTE_SECONDS, 60 days)", r.PROBLEM_NOTE_SECONDS, 60 * DAY);
   // The preview's second failure writes "unreadable" fresh, once, so the studio says why as long as the preview refuses
   // the file (Claude 5 ygH4 on #5360): a stamp note, then that write just before it runs out.
-  is("its longest life is twice that time: a note, then the preview's fresh unreadable", r.PROBLEM_NOTE_LONGEST_DAYS, (2 * (r.PROBLEM_NOTE_SECONDS ?? 0)) / DAY);
+  const rp = rules as { PREVIEW_MARK_SECONDS?: number };
+  is("its longest life is a stamp note's time, then the preview's fresh unreadable", r.PROBLEM_NOTE_LONGEST_DAYS, ((r.PROBLEM_NOTE_SECONDS ?? 0) + (rp.PREVIEW_MARK_SECONDS ?? 0)) / DAY);
 
   part("The data registry and the closing rule cover that longest life");
   const family = FAMILIES["nl:stamp:problem:@lib/pdf-stamp.ts"];
@@ -57,21 +58,44 @@ async function main(): Promise<void> {
   const put = async (path: string, value: string) => { if (write) await redis.pipeline(write(path, value)); };
   const SECONDS = r.PROBLEM_NOTE_SECONDS ?? 60 * DAY;
 
-  part("A stamp note, then the preview's once-note and unreadable: the note ends at the first note's time");
+  part("A stamp note, then another stamp reason: the note ends at the first note's time");
   {
     redis.clear();
     const path = "stores/aa/prod/chain.pdf";
     await put(path, "storage");
     is("a new note takes the note's whole time", await ttl(at(path)), SECONDS);
     advance(59 * DAY * 1000);
-    await put(path, `unreadable-once:${Date.now()}`);
-    is("the once-note keeps the stamp note's expiry", await ttl(at(path)) <= DAY, true);
-    advance(2 * 3600 * 1000);
-    await put(path, "unreadable");
-    is("unreadable keeps it too, and says unreadable", [await ttl(at(path)) <= DAY, (await redis.pipeline([["GET", at(path)]]))[0]], [true, "unreadable"]);
+    await put(path, "too_big");
+    is("the next reason keeps the first note's expiry, and says it", [await ttl(at(path)) <= DAY, (await redis.pipeline([["GET", at(path)]]))[0]], [true, "too_big"]);
     advance(DAY * 1000);
     is("60 days after its first write the note is gone", (await redis.pipeline([["GET", at(path)]]))[0], null);
   }
+
+  // Claude 3 xvBY8 on #5360 @6c9e98a6ab: the stamp never writes over the preview's "unreadable", which a later copy
+  // that found room would then delete while the preview still refused the file.
+  part("The stamp never writes over the preview's unreadable");
+  {
+    redis.clear();
+    const path = "stores/aa/prod/locked.pdf";
+    await redis.pipeline([["SET", at(path), "unreadable", "EX", 3_600]]);
+    await put(path, "storage");
+    is("the note still says unreadable, with its own time", [(await redis.pipeline([["GET", at(path)]]))[0], await ttl(at(path))], ["unreadable", 3_600]);
+  }
+
+  part("A copy that found room again clears only the stamp's storage note");
+  const clear = (stamp as { clearStorageNote?: (pathname: string) => Promise<void> }).clearStorageNote;
+  is("the clear is named (clearStorageNote)", typeof clear, "function");
+  for (const [value, after] of [["storage", null], ["unreadable", "unreadable"], ["too_big", "too_big"]] as [string, string | null][]) {
+    redis.clear();
+    const path = `stores/aa/prod/clear-${value}.pdf`;
+    await redis.pipeline([["SET", at(path), value, "EX", 3_600]]);
+    if (clear) await clear(path);
+    is(`a "${value}" note: ${after === null ? "cleared" : "kept"}`, (await redis.pipeline([["GET", at(path)]]))[0], after);
+  }
+  is("the copy that found room uses it, never a plain DEL of the note", [/clearStorageNote\(file\.pathname\)/.test(readFileSync("lib/pdf-stamp.ts", "utf8")), /\["DEL",\s*problemKey\(/.test(readFileSync("lib/pdf-stamp.ts", "utf8"))], [true, false]);
+
+  part("A closing store's traces include the preview's own mark");
+  is("deleteSalesTraces deletes previewMarkKey with the note", /keys\.push\(problemKey\(file\.pathname\), previewMarkKey\(file\.pathname\)\)/.test(readFileSync("lib/closed-store-data.ts", "utf8")), true);
 
   part("A PDF whose stamping fails on every download: the note is never extended");
   {

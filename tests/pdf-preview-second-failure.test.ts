@@ -76,6 +76,9 @@ async function main(): Promise<void> {
     is("and marks it once, not unreadable", String(await mark(good.file)).startsWith("unreadable-once:"), true);
     is("the stamp's shared note is not written", await note(good.file), null);
     is("within the hour, no new parse is tried", [await ask(good.id), blobReads.get(good.file.pathname)], [404, 1]);
+    // Claude 3 xvBY8 on #5360: half an hour on is still within PREVIEW_RETRY_SECONDS.
+    shift = 30 * 60_000;
+    is("half an hour on, still no new parse", [await ask(good.id), blobReads.get(good.file.pathname)], [404, 1]);
     files.set(good.file.pathname, { bytes: await readablePdf(), contentType: "application/pdf" });
     shift = 3_600_000 + 1_000;
     is("an hour on, the same path parses: the preview is made", [await ask(good.id), blobReads.get(good.file.pathname)], [200, 2]);
@@ -206,7 +209,7 @@ async function main(): Promise<void> {
     // Claude 3 vyDE's NIT 3: the mark is read exactly (rule 24): a reply out of shape, or a mark in no known shape, is
     // refused before the file is read.
     part("A mark read in an unknown shape, or holding no known value, refuses before the file is read");
-    for (const [label, value] of [["a number", 5], ["a list", ["unreadable"]]] as [string, unknown][]) {
+    for (const [label, value] of [["a number", 5], ["a list", ["unreadable"]], ["no reply", undefined]] as [string, unknown][]) {
       const odd = await product(`Odd-reply ebook ${label}`, await readablePdf());
       const pipeOdd = redis.pipeline.bind(redis);
       redis.pipeline = (async (commands: (string | number)[][]) =>

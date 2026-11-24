@@ -22,6 +22,7 @@
  * progress reads the open pages again instead of failing; an add-on whose payment failed is not told "Stripe has not
  * confirmed the payment yet".
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
@@ -125,7 +126,8 @@ function install(): void {
       if (postDelayMs) await new Promise((resolve) => setTimeout(resolve, postDelayMs));
       const id = `cs_test_R23Assist${String(sessions.length + 1).padStart(4, "0")}`;
       const body = new URLSearchParams(String(init?.body ?? ""));
-      const made: Session = { id, url: `https://checkout.stripe.com/c/pay/${id}`, status: "open", mode: "subscription", customer: body.get("customer") ?? "", subscription: null, metadata: { addon: body.get("metadata[addon]") ?? "", assistant_for: body.get("metadata[assistant_for]") ?? "" }, amount_subtotal: 6900, currency: "usd" };
+      const made: Session = { id, url: `https://checkout.stripe.com/c/pay/${id}`, status: "open", mode: "subscription", customer: body.get("customer") ?? "", subscription: null, metadata: { addon: body.get("metadata[addon]") ?? "", assistant_for: body.get("metadata[assistant_for]") ?? "", ...(body.get("metadata[assistant_sid]") ? { assistant_sid: body.get("metadata[assistant_sid]")! } : {}) }, amount_subtotal: 6900, currency: "usd" };
+      lastBody = body;
       sessions.push(made);
       if (key) keys.set(key, id);
       if (postNoStatus) {
@@ -162,6 +164,8 @@ function install(): void {
   }) as typeof fetch;
 }
 let invoicesDisputed = false;
+/** The last checkout POST's form (#5285 row #3334, LOW 2: the add-on names its store by id). */
+let lastBody: URLSearchParams | null = null;
 /** The open pages asked to expire, and whether Stripe answers that ask with an error (#5285 row #3334, LOW 1). */
 const expired: string[] = [];
 let expireFails = false;
@@ -323,6 +327,46 @@ async function main(): Promise<void> {
   posts.length = 0;
   is("an expiry Stripe does not confirm opens nothing", [await outcome(store), posts.length], ["refused", 0]);
   expireFails = false;
+
+  // Board #5285, row #3334: Claude's LOW 2 of 6786975580. The add-on named its store only by its handle; once a store
+  // renames and releases a handle, another store of the same owner and customer can take it, and the add-on would
+  // then be read as that other store's. A new add-on names its store by id (assistant_sid) beside the handle, and an
+  // add-on that names an id is this store's only when the id is its own; one made before keeps the handle.
+  part("The add-on names its store by id: never another store's that took its handle");
+  store = await freshStore();
+  lastBody = null;
+  await outcome(store);
+  // Read through its declared type: the stand-in writes lastBody inside outcome(), which TypeScript's narrowing
+  // after "lastBody = null" cannot see.
+  const pageBody = lastBody as URLSearchParams | null;
+  is("a new page names the store by id, on the page and on the subscription", [pageBody?.get("metadata[assistant_sid]"), pageBody?.get("subscription_data[metadata][assistant_sid]")], [store.sid, store.sid]);
+  store = await freshStore();
+  subs.push(addOn(1, "active", { metadata: { addon: "assistant", assistant_for: HANDLE, assistant_sid: "s".repeat(32) } }));
+  posts.length = 0;
+  const notMine = await outcome(store);
+  is("a live add-on naming this handle but another store's id is not adopted: a page of this store's own is opened", [notMine.startsWith("checkout "), posts.length], [true, 1]);
+  is("and the daily sync never writes it on this store", [await applyListedAssistant({ ...subs[0] }), (await storeForEmail(OWNER))?.assistantPlan?.subscriptionId ?? null], [false, null]);
+  store = await freshStore();
+  subs.push(addOn(1, "active", { metadata: { addon: "assistant", assistant_for: "someoneelse", assistant_sid: store.sid } }));
+  is("one naming this store's id is this store's, whatever handle it names", [await applyListedAssistant({ ...subs[0] }), (await storeForEmail(OWNER))?.assistantPlan?.subscriptionId], [true, subs[0].id]);
+  store = await freshStore();
+  subs.push(addOn(1, "active"));
+  is("control: one made before, with no id, is still read by its handle", [await applyListedAssistant({ ...subs[0] }), (await storeForEmail(OWNER))?.assistantPlan?.subscriptionId], [true, subs[0].id]);
+  // Claude 3 xvBY8's LEVE and NIT on #5379: the paid return reads the store by id too, and an empty id names no store.
+  store = await freshStore();
+  const othersPage = ((await start(store, ORIGIN)) as { checkout: string }).checkout;
+  const othersSession = sessions.find((s) => s.url === othersPage)!;
+  othersSession.metadata = { ...othersSession.metadata, assistant_sid: "0123456789abcdef0123456789abcdef" };
+  is("a paid return naming this handle but another store's id is not this store's", await readAssistantReturn(store, pay(othersPage)), null);
+  store = await freshStore();
+  const ownPage = ((await start(store, ORIGIN)) as { checkout: string }).checkout;
+  is("control: the paid return naming this store's id is this store's", (await readAssistantReturn(store, pay(ownPage)))?.subscriptionId?.startsWith("sub_"), true);
+  store = await freshStore();
+  subs.push(addOn(1, "active", { metadata: { addon: "assistant", assistant_for: HANDLE, assistant_sid: "" } }));
+  posts.length = 0;
+  const emptyId = await outcome(store);
+  is("a live add-on whose id is there but empty names no store, never read by its handle: a page of this store's own is opened", [emptyId.startsWith("checkout "), posts.length], [true, 1]);
+  is("and the daily sync never writes it on this store", [await applyListedAssistant({ ...subs[0] }), (await storeForEmail(OWNER))?.assistantPlan?.subscriptionId ?? null], [false, null]);
 
   // Claude 1's LEVE 1 on #5349 @30b8c0d1ea: two of this store's open pages, both at another price, are never both
   // expired nor followed by a third: the start says it could not, and nothing is expired or opened.
@@ -492,6 +536,14 @@ async function main(): Promise<void> {
   await setAssistantPlan(OWNER, { subscriptionId: "sub_R23Assist0009", active: true, period, cancelsAtEnd: false, disputedAt: "" });
   store = (await storeForEmail(OWNER))!;
   is("refused, with no list read and no POST", [await outcome(store), lists.length, posts.length], ["refused", 0, 0]);
+
+  // Claude 5 iZdj's LEVE on #5379: the add-on's design document (named by AGENTS.md) says how a subscription names its
+  // store, so nobody following it matches add-ons by handle alone.
+  part("The design document says an add-on names its store by id");
+  const design = readFileSync("docs/store-assistant.md", "utf8");
+  const billing = design.slice(design.indexOf("## Billing"), design.indexOf("## Privacy"));
+  is("its Billing section names assistant_sid, the id rule and the handle kept for older ones",
+    [/assistant_sid/.test(billing), /only when the id is its own/.test(billing), /made before[^.]*handle/.test(billing)], [true, true, true]);
 
   done();
 }

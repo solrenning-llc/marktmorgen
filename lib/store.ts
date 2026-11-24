@@ -2487,7 +2487,8 @@ export type DeleteResult =
  * money still running. A Store assistant add-on that still renews holds the
  * store too: once its address is let go nothing finds that subscription again
  * (lib/assistant-billing.ts, applyListedAssistant reads the store by
- * `assistant_for`), so it would charge every month for a store that is gone
+ * `assistant_sid`, or by `assistant_for` on an add-on made before it named the
+ * id), so it would charge every month for a store that is gone
  * (#4080). Set to stop at the end of its month, or ended, it charges nothing
  * more and does not hold it. Its addresses are let go the way a released address
  * is — dark for a month before anyone else may take them — so a link

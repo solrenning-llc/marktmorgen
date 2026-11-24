@@ -97,6 +97,21 @@ async function main(): Promise<void> {
   part("A closing store's traces include the preview's own mark");
   is("deleteSalesTraces deletes previewMarkKey with the note", /keys\.push\(problemKey\(file\.pathname\), previewMarkKey\(file\.pathname\)\)/.test(readFileSync("lib/closed-store-data.ts", "utf8")), true);
 
+  part("The script Redis runs is the one the in-memory mirror copies (no test runs the Lua itself)");
+  {
+    const [command] = write ? write("stores/aa/prod/script.pdf", "storage") : [[]];
+    const lua = String(command[1] ?? "").split("\n");
+    is("it is one EVAL on the note's key alone", [command[0], command[2], command[3]], ["EVAL", 1, stamp.problemKey("stores/aa/prod/script.pdf")]);
+    is("it reads the note first", lua[1], "local now = redis.call('GET', KEYS[1])");
+    is("an \"unreadable\" note is left as it is, before any write", lua[2], "if now == 'unreadable' then return 0 end");
+    is(
+      "a note there keeps its end, a missing one gets the full lifetime",
+      lua[3],
+      "if now then redis.call('SET', KEYS[1], ARGV[1], 'KEEPTTL') else redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]) end",
+    );
+    is("nothing else is written", [lua.length, lua[4]], [5, "return 1"]);
+  }
+
   part("A PDF whose stamping fails on every download: the note is never extended");
   {
     redis.clear();

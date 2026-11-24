@@ -313,7 +313,9 @@ export const STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE = 0.12;
 /**
  * Every look the five-minute job takes at one offer after paying still waiting on Stripe (lib/upsell.ts,
  * settlePendingOffers), from its first minute to the day it is let go: a payment the bank asked the buyer to confirm,
- * one whose answer was lost on the way back, or one still processing. At most OFFER_WATCH_LOOKS_MOST looks an offer,
+ * one whose answer was lost on the way back, or one still processing. A look that throws, or whose record does not read,
+ * is looked at again on the same schedule, from the offer's own time carried on its member (lib/upsell.ts AT_MARK), so
+ * it adds no look (tests/upsell-pending-thrown-behind.test.ts). At most OFFER_WATCH_LOOKS_MOST looks an offer,
  * each at most OFFER_WATCH_LOOK_COMMANDS_MOST database commands (its record read twice, its next look written, the
  * store's record and the run's share of reading the list), and Stripe reads of the creator's account, which bill no API
  * call. Measured in tests/upsell-settle-late.test.ts and held to a declared share of ORDER_COMPUTE, an offer being its
@@ -2508,7 +2510,7 @@ export const COST_LINES: CostLine[] = [
       // An offer still waiting on Stripe is looked at by the five-minute job less often the longer it waits (WATCH_AFTER_MS),
       // and a bank payment still processing past its second day once a day until its seventh: OFFER_WATCH_LOOKS_MOST x
       // OFFER_WATCH_LOOK_COMMANDS_MOST commands at most, inside OFFER_WATCH_SHARE_OF_ORDER_COMPUTE.
-      { file: "lib/upsell.ts", names: ["settlePendingOffers", "WATCH_AFTER_MS", "nextLook", "PROCESSING_WATCH_MS = 7 * 24", "PROCESSING_RECHECK_MS = 24 * 60"] },
+      { file: "lib/upsell.ts", names: ["settlePendingOffers", "WATCH_AFTER_MS", "nextLook", "PROCESSING_WATCH_MS = 7 * 24", "PROCESSING_RECHECK_MS = 24 * 60", "AT_MARK", "lookAgain"] },
       // A contact an order writes is written only over the row it was decided from (consent audit of 9 November 2026; review of #3448): its worst case, a script counted as 1 plus the calls inside it, held in tests/contacts-write-cost.test.ts.
       { file: "lib/contacts.ts", names: ["CONTACT_COMMANDS_MOST", "CONTACT_FENCED_WRITE_CALLS", "CONTACT_WRITE_CALLS"] },
     ],

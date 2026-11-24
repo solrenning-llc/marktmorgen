@@ -1520,6 +1520,12 @@ console.log("strict to add, loose to take out: the READY the 3-READY gate counts
     "READY, 0 findings, no defect of any level, NIT included, LEVE included", "READY, sem achados, teste leve e rápido"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, "claude-3"]));
   soma.push(...["READY, 0 findings. HIGH: the lock", "READY, sem achados. ALTA: a trava", "READY, 0 findings, nits only"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, null]));
   // Twelfth round (Claude 5 ichw on 044dca4bfa): a severity in any case that labels something refuses.
+  // Thirteenth round, wSUb3's probe (6f16, bb3c): unspaced em dash and title-case plurals refuse; the owner's phrases count.
+  soma.push(...["READY, 0 findings. High—the lock leaks", "READY, 0 findings. Medium—the retry loop", "READY, sem achados. Grave—o dinheiro", "READY, sem achados. Leve—o nome",
+    "READY, 0 findings. Highs remain", "READY, 0 findings. Lows remain", "READY, sem achados. Leves no teste", "READY, nenhum defeito encontrado, nem mesmo leve ou mínimo. Leve: o nome"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, null]));
+  soma.push(...["READY, sem nenhum defeito, nem leve ou mínimo", "READY, sem nenhum defeito", "READY, no defect at all, not even LEVE or minimal",
+    "READY, nenhum defeito encontrado, nem mesmo leve ou mínimo", "READY (nenhum defeito encontrado, nem mesmo leve ou mínimo)", "READY — nenhum defeito encontrado, nem mesmo leve ou mínimo, conferido por Claude 3 X",
+    "READY, 0 findings, high-risk path covered"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, "claude-3"]));
   // Thirteenth round (Claude 3 hujg on 14f645808f): a severity in the note before READY, numbered or worded, refuses.
   soma.push(...["(Grave 1: leak): READY", "(Medium 1: the lock): READY", "(Alto 1: x): READY", "(Leve 1: typo): READY", "(Leve 2 — typo): READY", "(Low 3: typo): READY",
     "(a Leve finding: typo): READY", "(Leve finding — typo): READY", "(cost, Leve 1 open): READY", "(Leve left: typo): READY"].map((r) => [`Claude 3 review #${N} @${h} ${r}`, null]));

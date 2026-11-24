@@ -138,7 +138,12 @@ async function main(): Promise<void> {
     takeUpsell({ headers: new Headers(), store, session, secret: browser.secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
 
   const job = () => settlePendingOffers(async (handle) => (handle === "harbor" ? store : null), Date.now() + 60_000);
-  const listed = async (session: string) => (await redis.pipeline([["ZSCORE", "nl:upsell:pending", `harbor|${session}|`]]))[0];
+  // The offer's member, plain or carrying its time ("|at:<ms>", lib/upsell.ts AT_MARK), by its score; null when not listed.
+  const listed = async (session: string) => {
+    const all = ((await redis.pipeline([["ZRANGE", "nl:upsell:pending", 0, -1]]))[0] as string[] | null) ?? [];
+    const member = all.find((m) => m === `harbor|${session}|` || m.startsWith(`harbor|${session}||at:`));
+    return member ? (await redis.pipeline([["ZSCORE", "nl:upsell:pending", member]]))[0] : null;
+  };
 
   part("RED: a bank payment still processing after two days stays on the job's list");
   nextCharge = "processing";

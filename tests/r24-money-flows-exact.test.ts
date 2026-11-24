@@ -188,7 +188,9 @@ async function pendingOffer(): Promise<{ session: string; member: string }> {
   ]);
   return { session, member };
 }
-const listed = async (member: string) => (await original([["ZSCORE", PENDING, member]]))[0] !== null;
+// The offer's member, plain or carrying its time once the job rescheduled it ("|at:<ms>", lib/upsell.ts AT_MARK).
+const listed = async (member: string) =>
+  ((await original([["ZRANGE", PENDING, 0, -1]]))[0] as string[]).some((m) => m === member || m.startsWith(`${member}|at:`));
 
 test("the job lets go of an offer whose record is gone (confirmed-absence control)", async () => {
   await world;

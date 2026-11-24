@@ -171,9 +171,11 @@ async function main(): Promise<void> {
   before = null;
   is("a step that adds and then fails: the three are listed, none said as waiting, the step said as failed", [after?.list.length, redis.run(["ZCARD", atKey(AFTER)]), after?.unlisted, after?.walkProblem], [3, 3, 0, "step"]);
   const studioPage = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
-  const note = studioPage.slice(studioPage.indexOf("{certificates.unlisted > 0 ? ("), studioPage.indexOf("Up to 25 more are added") + 40);
-  const order = ['certificates.walkProblem === "place"', "They can't be added for now.", 'certificates.walkProblem === "step"', "Opening this page again tries again.", "certificates.roomFull", "Up to 25 more are added"].map((text) => note.indexOf(text));
+  const note = studioPage.slice(studioPage.indexOf("{certificates.unlisted > 0 ? ("), studioPage.indexOf("more are added each time this page opens.") + 50);
+  const order = ['certificates.walkProblem === "place"', "They can't be added for now.", 'certificates.walkProblem === "step"', "Opening this page again tries again.", "certificates.roomFull", "`Up to ${CERT_BACKFILL_PER_DRAW} more are added each time this page opens.`"].map((text) => note.indexOf(text));
   is("the page's note, inside the waiting block, says a stopped walk, then a failed step, then a full room, then progress", order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), true);
+  // The figure the page promises is the walk's own constant, never a number typed by hand (Claude 5 id8Ws's NIT on #5481).
+  is("the page states the walk's step from CERT_BACKFILL_PER_DRAW, with no figure typed by hand", [/import \{[^}]*\bCERT_BACKFILL_PER_DRAW\b[^}]*\} from "@\/lib\/certificate"/.test(studioPage), /Up to \d+ more are added/.test(studioPage)], [true, false]);
 
   part("A walk that does not read is left for the next draw and never hides the page (Claude 5 iYnra's NIT 8)");
   const ODD = "b".repeat(12);

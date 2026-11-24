@@ -21,7 +21,7 @@ import { CourseAccessCheck } from "@/components/course-access-check";
 import { emailKey, studentEmail, studentsOf } from "@/lib/learn";
 import { canSellProduct } from "@/lib/store-checkout";
 import { passedFor } from "@/lib/quiz";
-import { certificatesFor } from "@/lib/certificate";
+import { CERT_BACKFILL_PER_DRAW, certificatesFor } from "@/lib/certificate";
 import { CertificateValidity } from "@/components/certificate-validity";
 import {
   CertificateSwitch, CourseAccessEnd, CourseStart,
@@ -417,7 +417,7 @@ export default async function StudioCoursePage({
                   ? "They could not be added on this visit. Opening this page again tries again."
                   : certificates.roomFull
                     ? "Your store's data room is full, so none could be added now. Free some room and open this page again."
-                    : "Up to 25 more are added each time this page opens."}
+                    : `Up to ${CERT_BACKFILL_PER_DRAW} more are added each time this page opens.`}
               </p>
             ) : null}
             {certsPage > 0 || certificates.more ? (

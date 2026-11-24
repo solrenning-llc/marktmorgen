@@ -29,7 +29,7 @@ export const FUNNEL_EXPLAIN_JOBS = jobsForCall(FUNNEL_EXPLAIN_CALL);
  * checks reads no more than drawing the funnels page reads for every funnel (app/studio/funnels/page.tsx).
  */
 export const FUNNEL_EXPLAIN_READ_UNITS = STUDIO_PAGE_UNITS - 1;
-/** At most this many steps of the funnel are described to the model, each name at most MAX_STEP_NAME characters. */
+/** At most this many steps of the funnel are described to the model, each name at most MAX_STEP_NAME bytes of UTF-8. */
 export const MAX_EXPLAIN_STEPS = 12;
 export const MAX_STEP_NAME = 120;
 export const MAX_EXPLAIN_WHY = 320;
@@ -40,15 +40,30 @@ export type FunnelExplanation = { why: string; todo: string[] };
 
 const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
 
-/** A creator's words as quoted data: one line, no angle brackets or quotes that could close the quote, bounded. */
+/** The longest start of a text that holds at most `max` bytes of UTF-8, never cut inside a character. */
+function withinBytes(text: string, max: number): string {
+  let used = 0;
+  let kept = "";
+  for (const character of text) {
+    used += bytes(character);
+    if (used > max) break;
+    kept += character;
+  }
+  return kept;
+}
+
+/**
+ * A creator's words as quoted data: one line, no angle brackets or quotes that could close the quote, bounded at
+ * `max` bytes of UTF-8. A cut by characters let a name of emoji or of another script hold up to four times its bound,
+ * so a funnel whose ASCII twin fits was refused as "long" (Claude 1's LOW 2 on #3454; #5285).
+ */
 export function quoted(value: string, max: number): string {
   const line = value
     .replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ")
     .replace(/[<>"\u201c\u201d]/g, "'")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, max);
-  return `"${line}"`;
+    .trim();
+  return `"${withinBytes(line, max).trim()}"`;
 }
 
 /** The request: the check exactly as the code found it, and the funnel's steps as quoted data. */
@@ -88,6 +103,12 @@ export function explainFits(request: { system: string; prompt: string }): boolea
 /** Words that would overturn the fixed check: such an answer is never shown. */
 const OVERTURNS = /\b(?:no (?:problem|issue|action)|nothing to (?:fix|do|change)|(?:is|was|looks|seems) (?:fine|ok|okay|correct|resolved)|already (?:fixed|resolved|done)|false (?:alarm|positive)|(?:can|may) (?:safely )?(?:ignore|skip) (?:this|it))\b/i;
 
+/**
+ * A result promised in words, which the rules forbid as they forbid an invented figure: never shown (Claude 1's
+ * LOW 3 on #3454, first written on claude3/keep/h-3454). Digits are caught by withoutInventedNumbers.
+ */
+const PREDICTS = /\b(?:double|triple|quadruple|multiply)\s+(?:your\s+|the\s+)?(?:sales|revenue|income|profits?|conversions?|sign-?ups|leads|buyers|orders|visits|visitors)\b|\bguarantee(?:s|d)?\b/i;
+
 /** A web address or an email address: the facts never hold one, so a line that carries one is never shown (Claude 6 on #3454). */
 const LINK = /(?:https?:\/\/|www\.)\S|[\w.+-]+@[\w-]+(?:\.[\w-]+)+/i;
 /** A web address written without http or www ("fix-funnel.example/login"), in any case (Codex V on #3508); ".js" is a library's name. */
@@ -102,7 +123,7 @@ export function readExplanation(json: Record<string, unknown> | null, request: {
   const why = line(json.why, MAX_EXPLAIN_WHY);
   const todo = (Array.isArray(json.todo) ? json.todo : []).map((item) => line(item, MAX_EXPLAIN_STEP)).filter(Boolean).slice(0, MAX_EXPLAIN_TODO);
   if (!why || !todo.length) return null;
-  if ([why, ...todo].some((text) => OVERTURNS.test(text))) return null;
+  if ([why, ...todo].some((text) => OVERTURNS.test(text) || PREDICTS.test(text))) return null;
   return { why, todo };
 }
 

@@ -97,10 +97,11 @@ export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
         const reason = typeof body?.error === "string" ? body.error : "";
         // Focus stays where the person pressed (the button, or the sentence saying why it is off now).
         setSaid(explainErrorText(reason));
-        const after = reason === "used" ? 0 : reason === "failed" && left !== null ? Math.max(0, left - 1) : left;
-        focusNext.current = backTo(after);
-        if (reason === "failed" && left !== null) onLeft(Math.max(0, left - 1));
-        if (reason === "used") onLeft(0);
+        // The count this refusal leaves, computed once (Claude 6's NIT on #3454): none after "used", one fewer after
+        // "failed" (the attempt used a job), unchanged otherwise.
+        const spent = reason === "used" ? 0 : reason === "failed" && left !== null ? Math.max(0, left - 1) : null;
+        focusNext.current = backTo(spent ?? left);
+        if (spent !== null) onLeft(spent);
       }
     } catch {
       focusNext.current = backTo(left);
@@ -113,7 +114,7 @@ export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
   return (
     <div className="mt-2">
       {answer ? (
-        <div ref={takeFocus("answer")} tabIndex={-1} role="group" aria-labelledby={`${id}-label`} className="mt-1 rounded-lg border border-line p-3">
+        <div ref={takeFocus("answer")} tabIndex={-1} role="group" aria-labelledby={`${id}-label`} className="mt-1 rounded-lg border border-line p-3 focus:outline-3 focus:outline-offset-3 focus:outline-(--focus)">
           <p id={`${id}-label`} className="text-xs font-semibold text-ink-soft">{EXPLAIN_LABEL}</p>
           <p className="mt-2 text-ink">{answer.why}</p>
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-ink">
@@ -129,7 +130,8 @@ export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
           <button ref={takeFocus("button")} type="button" className="btn btn-ghost inline-flex min-h-11 items-center" aria-describedby={`${id}-cost`} disabled={busy || off} onClick={ask}>
             {busy ? "Writing an explanation…" : "Explain this with AI"}
           </button>
-          <p ref={takeFocus("cost")} tabIndex={-1} id={`${id}-cost`} className="mt-1 text-xs text-ink-soft">
+          {/* Both tabIndex -1 targets take the site's ring when focus is moved to them (Claude 6's N4 on #3454). */}
+          <p ref={takeFocus("cost")} tabIndex={-1} id={`${id}-cost`} className="mt-1 rounded-md text-xs text-ink-soft focus:outline-3 focus:outline-offset-3 focus:outline-(--focus)">
             {left === null ? AI_ALLOWANCE_UNKNOWN : `${left < 1 ? "No AI writing jobs are left this month." : `Uses 1 of your ${left} AI writing jobs left this month.`} The check above stays as it is.`}
           </p>
         </>

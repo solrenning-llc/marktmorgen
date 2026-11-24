@@ -792,10 +792,6 @@ export async function findOfferCharge(
 }
 
 /**
- * Deletes an offer's record only while it is still exactly the orphan claim that was read (ARGV[1]): a record
- * written since — naming the customer, a payment or an answer — is never taken off.
- */
-/**
  * A waiting offer's entry replaced by the one carrying its time, in one step (Claude 5 id8Ws on #5482): only while the
  * old entry is still listed, so an entry another path took off is never put back, and never removed without its
  * replacement, so a still-pending offer never leaves the job's list on a failed second write. 1 when swapped.
@@ -804,6 +800,10 @@ const PENDING_SWAP = `-- marktmorgen:upsell-pending-swap:v1
 if redis.call('ZREM', KEYS[1], ARGV[1]) == 1 then redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3]) return 1 end
 return 0`;
 
+/**
+ * Deletes an offer's record only while it is still exactly the orphan claim that was read (ARGV[1]): a record
+ * written since — naming the customer, a payment or an answer — is never taken off.
+ */
 const ORPHAN_RELEASE = `-- marktmorgen:upsell-orphan-release:v1
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
 return 0`;

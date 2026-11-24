@@ -196,6 +196,12 @@ const codeHash = (code: string) => sha(`nimbus-2fa-code:${code.toLowerCase().rep
 type TwoStep = { s: string; since: number; codes: string[]; last: number; reset: number; backup: string };
 
 /**
+ * Which app a record is (#4179): a print of its sealed secret, which a new setup always replaces. A code checked
+ * against one generation proves nothing about another, so a login keeps its session only while it is the same.
+ */
+const generationOf = (record: TwoStep) => sha(`nimbus-2fa-generation:${record.s}`).slice(0, 32);
+
+/**
  * The record as read: null only when Redis says there is none (GET null). A reply in any other shape, or a
  * record that does not parse, is unknown and throws (CX-123 rule 24): it is never read as "two-step login is
  * off", which would open a session on the emailed link alone.
@@ -935,7 +941,7 @@ export type CodeCheck = "app" | "recovery" | "wrong" | "unreadable" | "limited";
  * record's lock already held (withTwoStep): what it writes is fenced, read
  * under the same lock.
  */
-async function checkHeld(held: Held, email: string, typed: string, now: number): Promise<{ check: CodeCheck; left?: number }> {
+async function checkHeld(held: Held, email: string, typed: string, now: number): Promise<{ check: CodeCheck; left?: number; generation?: string }> {
   const record = await read(email);
   if (!record) return { check: "wrong" };
   if (!(await withinLimit("two-step", normaliseEmail(email), CODES_PER_HOUR, 60 * 60))) return { check: "limited" };
@@ -947,14 +953,14 @@ async function checkHeld(held: Held, email: string, typed: string, now: number):
     if (step === null) return { check: "wrong" };
     if (!(await spendOnce(email, `step:${step}`, 5 * 60))) return { check: "wrong" };
     if (!(await writeHeld(held, email, { ...record, last: step }))) return { check: "wrong" };
-    return { check: "app" };
+    return { check: "app", generation: generationOf(record) };
   }
   const hash = codeHash(cleaned);
   if (!record.codes.includes(hash)) return { check: "wrong" };
   if (!(await spendOnce(email, `code:${hash}`, 86_400))) return { check: "wrong" };
   const left = record.codes.filter((c) => c !== hash);
   if (!(await writeHeld(held, email, { ...record, codes: left }))) return { check: "wrong" };
-  return { check: "recovery", left: left.length };
+  return { check: "recovery", left: left.length, generation: generationOf(record) };
 }
 
 async function toldCodeUsed(email: string, left: number): Promise<void> {
@@ -963,9 +969,24 @@ async function toldCodeUsed(email: string, left: number): Promise<void> {
 
 /** Checks a code (checkHeld), under the record's lock. */
 export async function checkCode(email: string, typed: string, now = Date.now()): Promise<CodeCheck> {
+  return (await checkCodeOf(email, typed, now)).check;
+}
+
+/** checkCode, and the generation of the record a right code was checked against (generationOf). */
+async function checkCodeOf(email: string, typed: string, now: number): Promise<{ check: CodeCheck; generation?: string }> {
   const out = await withTwoStep(email, (held) => checkHeld(held, email, typed, now));
   if (out.check === "recovery") await toldCodeUsed(email, out.left ?? 0);
-  return out.check;
+  return { check: out.check, generation: out.generation };
+}
+
+/**
+ * The generation of this account's record now (generationOf), or null when two-step login is off. The code route
+ * keeps a session it opened only while this is still the generation its code was checked against (#4179). Throws
+ * when the record does not read (rule 24), never read as "off" or as the same.
+ */
+export async function twoStepGeneration(email: string): Promise<string | null> {
+  const record = await read(email);
+  return record ? generationOf(record) : null;
 }
 
 /** Turns it off, with a right code, in one hold of the lock. */
@@ -1005,7 +1026,7 @@ export async function holdSignIn(email: string, viaRecovery = false, byGoogle = 
   return token;
 }
 
-export type HoldAnswer = { ok: true; email: string; how: "app" | "recovery"; byGoogle: boolean } | { ok: false; reason: "expired" | "wrong" | "unreadable" | "limited" };
+export type HoldAnswer = { ok: true; email: string; how: "app" | "recovery"; byGoogle: boolean; generation: string } | { ok: false; reason: "expired" | "wrong" | "unreadable" | "limited" };
 
 /** Finishes a waiting login with its code. Five wrong codes end it. */
 export async function finishSignIn(token: string, typed: string, now = Date.now()): Promise<HoldAnswer> {
@@ -1026,15 +1047,19 @@ export async function finishSignIn(token: string, typed: string, now = Date.now(
     await redisPipeline([["DEL", key]]);
     return { ok: false, reason: "expired" };
   }
-  const checked = await checkCode(hold.e, typed, now);
+  const proved = await checkCodeOf(hold.e, typed, now);
+  const checked = proved.check;
   if (checked === "app" || checked === "recovery") {
+    // A right code always names the record it was checked against; without it nothing is proved.
+    const generation = proved.generation;
+    if (!generation) return { ok: false, reason: "expired" };
     // Spent: only the caller whose delete removed it opens the session.
     const [removed] = await redisPipeline([["DEL", key]]);
     if (countOf(removed) !== 1) return { ok: false, reason: "expired" };
     // The owner has the second step after all: anything opened without it is called off.
     await cancelReset(hold.e, "login");
     await endRecoveryAccess(hold.e);
-    return { ok: true, email: hold.e, how: checked, byGoogle: hold.g === 1 };
+    return { ok: true, email: hold.e, how: checked, byGoogle: hold.g === 1, generation };
   }
   if (checked === "wrong") await redisPipeline([["SET", key, JSON.stringify({ e: hold.e, n: tries + 1, ...(hold.v === 1 ? { v: 1 } : {}), ...(hold.g === 1 ? { g: 1 } : {}) }), "EX", HOLD_SECONDS]]);
   return { ok: false, reason: checked };

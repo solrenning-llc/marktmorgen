@@ -42,5 +42,18 @@ is("coverage note prevents missing means zero",full.coverage_note.includes("unav
 const missingAds=channelsTool({...data,ads:undefined} as unknown as StatsData,"d7");
 is("missing creative ledger is unavailable despite successful purchases",[missingAds.paid_figures_complete,missingAds.ad_records_complete,missingAds.ads_total,missingAds.ads.length],[true,false,null,0]);
 is("complete empty creative ledger is distinct",empty.ad_records_complete,true);
+part("Post scope: a list cut at 25 says how many there are (#4481)");
+const posts=Array.from({length:26},(_,i)=>({campaign:"post-"+i,source:"instagram",sources:["instagram"],visits:10,sales:1,cents:100+i}));
+const manyPosts=channelsTool({...data,posts:{d7:posts,d30:[],d90:[]}},"d7");
+is("post total disclosed before limit",[manyPosts.posts_total,manyPosts.posts.length],[26,25]);
+is("the limit is said",manyPosts.post_records_note.includes("At most 25 posts are returned"),true);
+is("a short list is whole",[full.posts_total,full.posts.length],[1,1]);
+const missingPosts=channelsTool({...data,posts:undefined} as unknown as StatsData,"d7");
+is("missing post ledger is unavailable, not zero",[missingPosts.post_records_complete,missingPosts.posts_total,missingPosts.posts.length],[false,null,0]);
+is("complete empty post ledger is distinct",[channelsTool({...data,posts:{d7:[],d30:[],d90:[]}},"d7").post_records_complete,channelsTool({...data,posts:{d7:[],d30:[],d90:[]}},"d7").posts_total],[true,0]);
+for(const state of [{partial:true},{sales:"error" as const}]){
+  const result=channelsTool({...data,posts:{d7:posts,d30:[],d90:[]},...state},"d7");
+  is("post total withheld with paid figures "+JSON.stringify(state),[result.post_records_complete,result.posts_total,result.posts.length],[false,null,0]);
+}
 is("buyer identities absent",/receipt_email|customer_details|@example.com/.test(JSON.stringify(full)),false);
 done();

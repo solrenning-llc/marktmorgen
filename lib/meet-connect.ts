@@ -48,14 +48,16 @@
  *                                       store they host on uses the one connection,
  *                                       whatever `statsId` the caller passes.
  *   nl:meet:state:<hash>                one consent in progress, ten minutes
- *   nl:meet:user:<provider>:<hash>      the stores a Zoom user connected, for Zoom's uninstall notice
+ *   nl:meet:user:<provider>:<hash>      the stores (statsId) and team hosts (h:<host>) connected with one provider
+ *                                       account: whether a disconnect may give the grant back (#4011), and the
+ *                                       stores the provider's removal notice forgets (forgetUser)
  *   nl:meet:gone:<provider>:<hash>      when Zoom last told us a user removed the app, a day: a consent
  *                                       flow begun before it keeps nothing (KEEP_UNLESS_GONE)
  *   nl:meet:log:<statsId>               the store's last problems, newest first
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, listSlots, repliesFor, stringList } from "@/lib/redis-reply";
 import * as exactReply from "@/lib/redis-reply";
 import { type Held, LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
@@ -76,7 +78,7 @@ import {
   revoke,
 } from "@/lib/meet-providers";
 import type { Store } from "@/lib/store";
-import { type Member, readTeamMembers } from "@/lib/team";
+import { MAX_TEAM, type Member, readTeamMembers } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 import { hostId } from "@/lib/host-claims";
 
@@ -136,6 +138,237 @@ const refreshLockKey = (statsId: string, provider: MeetProvider, host = "") => `
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 40);
 const stateKey = (state: string) => `nl:meet:state:${hash(`meet-state:${state}`)}`;
 const userKey = (provider: MeetProvider, id: string) => `nl:meet:user:${provider}:${hash(`meet-user:${provider}:${id}`)}`;
+/** A connection's member of its account's index: the store's id, or "h:" and the team host's id (issue #4011). */
+const memberOf = (statsId: string, host: string) => (host ? `h:${host}` : statsId);
+
+/**
+ * Whether anything here other than `self` (memberOf) is still connected to this account, by its index (issue #4011):
+ * a store, or a team host's own calendar. Google's and Zoom's revoke end the user's grant for the whole app, so a
+ * grant is given back only on a confirmed false. Read exactly: null when the index cannot be read, and then the grant
+ * is kept, never revoked on an unread answer.
+ */
+async function grantStillUsed(provider: MeetProvider, accountId: string, self: string): Promise<boolean | null> {
+  try {
+    const read = repliesFor(await redisPipeline([["SMEMBERS", userKey(provider, accountId)]]), 1);
+    const members = read ? stringList(read[0]) : null;
+    if (!members) return null;
+    return members.some((m) => m !== self);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One connection leaving its account's index and counting who is left, in one step (Claude 3 xy6b's LOW on #5476): two
+ * disconnects of one account run under two locks, so a count read before leaving let each see the other and keep the
+ * grant, and nobody gave it back. KEYS[1] the account's index, ARGV[1] the member. Used by a damaged connection, whose
+ * grant is given back before its text is deleted; one that fails after it left is listed again (LIST_KEPT).
+ */
+export const LEAVE_ACCOUNT = `-- marktmorgen:meet-leave-account:v1
+redis.call("SREM", KEYS[1], ARGV[1])
+return redis.call("SCARD", KEYS[1])`;
+
+/**
+ * A connection deleted, out of its account's index and who is left counted, in one step (Claude 3 K9t's MEDIUM on
+ * #5476 @44f80c1b76): a connection that is kept is always listed under its account, so the provider's removal notice
+ * (forgetUser) finds it and another connection's disconnect counts it. Before, it left the index first and a failure
+ * after that kept it unlisted. Of two disconnects of one account at once, exactly one counts nobody left (xy6b's LOW).
+ * KEYS[1] the account's index, then the keys deleted (the connection, and a store's test meeting); ARGV[1] the member.
+ * The count left, or -1 for a call of another shape, refused before anything is deleted.
+ */
+export const FORGET_CONNECTION = `-- marktmorgen:meet-forget:v1
+if #KEYS < 2 or #KEYS > 3 or #ARGV ~= 1 or ARGV[1] == "" then return -1 end
+redis.call("DEL", unpack(KEYS, 2))
+redis.call("SREM", KEYS[1], ARGV[1])
+return redis.call("SCARD", KEYS[1])`;
+
+/**
+ * Connections listed under their account only while each is still the text read (unlistedHostUses; a damaged one put
+ * back, disconnectFor): KEYS[1] the account's index, then the connections; ARGV the texts read, one a connection, then
+ * the members, in the same order. A connection that changed or went since is not listed, so its own disconnect leaves
+ * no member with nothing behind it. How many were listed, or -1 for a call of another shape.
+ */
+export const LIST_KEPT = `-- marktmorgen:meet-list-kept:v1
+local n = #KEYS - 1
+if n < 1 or #ARGV ~= 2 * n then return -1 end
+local texts = redis.call("MGET", unpack(KEYS, 2))
+local members = {}
+for i = 1, n do
+  if texts[i] == ARGV[i] then members[#members + 1] = ARGV[n + i] end
+end
+if #members == 0 then return 0 end
+redis.call("SADD", KEYS[1], unpack(members))
+return #members`;
+
+/** Upstash's count of each script: the EVAL and each redis.call in its text (none runs a redis.call in a loop). */
+export const LEAVE_ACCOUNT_COMMANDS = 3;
+export const FORGET_CONNECTION_COMMANDS = 4;
+export const LIST_KEPT_COMMANDS = 3;
+
+/** The most team hosts a Google grant's read counts (unlistedHostUses): the store's owner now, the owner the connection was kept for, its team. */
+export const POSSIBLE_HOSTS = MAX_TEAM + 2;
+/** That read at the most: the team's GET, one MGET of POSSIBLE_HOSTS connections, and LIST_KEPT when one is found. */
+export const UNLISTED_HOSTS_COMMANDS = 1 + 1 + LIST_KEPT_COMMANDS;
+
+/**
+ * What counting who else uses a grant (issue #4011) adds to one request at the most, as Upstash bills it, over the same
+ * request before (tests/meet-shared-grant-cost.test.ts drives each worst case against the stand-in):
+ *  - a healthy disconnect: a Google grant's SMEMBERS of the index and the hosts' read, FORGET_CONNECTION in place of the
+ *    pipeline of DEL, DEL and SREM, and, when its answer does not read, the GET and SMEMBERS that read whether it ran;
+ *  - a damaged one with a grant in it: LEAVE_ACCOUNT, the hosts' read, FORGET_CONNECTION in place of that pipeline, the
+ *    same read again, and LIST_KEPT listing it again when it was not deleted;
+ *  - a consent that kept nothing: SMEMBERS and the hosts' read;
+ *  - a team host's account change: KEEP_HOST in place of the fenced SET (one redis.call more), the SREM leaving the
+ *    old account, SMEMBERS and the hosts' read.
+ * Priced on every studio request of the month in the studio line of tests/plan-cost-registry.ts (meetSharedGrantUsd):
+ * each is a studio request, or the callback of a consent whose start was one.
+ */
+export const SHARED_GRANT_EXTRA_COMMANDS = Math.max(
+  1 + UNLISTED_HOSTS_COMMANDS + (FORGET_CONNECTION_COMMANDS - 3) + 2,
+  LEAVE_ACCOUNT_COMMANDS + UNLISTED_HOSTS_COMMANDS + (FORGET_CONNECTION_COMMANDS - 3) + 2 + LIST_KEPT_COMMANDS,
+  1 + UNLISTED_HOSTS_COMMANDS,
+  1 + 1 + 1 + UNLISTED_HOSTS_COMMANDS,
+);
+
+/** How many connections are left on the account once this one has left its index; null when the answer does not read. */
+async function leaveAccount(provider: MeetProvider, accountId: string, member: string): Promise<number | null> {
+  try {
+    const read = repliesFor(await redisPipeline([["EVAL", LEAVE_ACCOUNT, 1, userKey(provider, accountId), member]]), 1);
+    return read ? countOf(read[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Deletes a connection, takes it out of its account's index and counts who is left, in one step (FORGET_CONNECTION).
+ * When the answer does not read, whether it ran is read again: the connection still there is not deleted (and still
+ * listed), and this throws; gone, it ran, and the count is read from the index (`unread`, for the caller to give the
+ * grant back when nobody is left, then say try again). Any other answer throws.
+ */
+async function forgetConnection(provider: MeetProvider, accountId: string, member: string, keys: string[]): Promise<{ left: number; unread: boolean }> {
+  const index = userKey(provider, accountId);
+  try {
+    const read = repliesFor(await redisPipeline([["EVAL", FORGET_CONNECTION, 1 + keys.length, index, ...keys, member]]), 1);
+    const left = read ? countOf(read[0]) : null;
+    if (left !== null) return { left, unread: false };
+  } catch {
+    // Read again below.
+  }
+  const again = repliesFor(await redisPipeline([["GET", keys[0]], ["SMEMBERS", index]]), 2);
+  const members = again ? stringList(again[1]) : null;
+  if (!again || again[0] !== null || !members) throw new UnknownReplyError("a meeting connection's deletion");
+  return { left: members.filter((m) => m !== member).length, unread: true };
+}
+
+/**
+ * Whether a team host's own Google Calendar connected before the account's index listed hosts (h:<host>) uses this
+ * account (Claude 3 wSUb3's MEDIUM on #5476): such a host is not in the index, so a store's disconnect that counted
+ * nobody else would end the grant that calendar still uses (issue #4011). The hosts read are the ones the store may
+ * have, as lib/team-booking.ts possibleHosts counts them: its owner now, the owner it was connected for, and its team
+ * now (MAX_TEAM at most). Each one found on this account is listed in the index (LIST_KEPT, a repair, kept or not:
+ * the grant is kept either way). Read exactly: an unknown team or connection reply throws UnknownReplyError, before
+ * anything is deleted or given back. A team host's own grant is read the same way (Claude 5 zr's LEVE on #5476
+ * @d882bc7424: hosts A and B on one Google account, both kept before hosts were listed, and A's disconnect or account
+ * change gave back the grant B's calendar uses), with `self`, that host, left out: its own connection is the one
+ * leaving, never another use. Hosts are shared by every store, so only the hosts of the store the host acts from are
+ * read; without that store, only the owner the connection was kept for. Commands, only on a Google grant given back
+ * that the index finds nobody else on: the team's GET (readTeamMembers, for a store with a team id), one MGET of at
+ * most POSSIBLE_HOSTS host connections, and, in one more round trip, one LIST_KEPT for all the hosts found
+ * (UNLISTED_HOSTS_COMMANDS).
+ */
+async function unlistedHostUses(accountId: string, store: Pick<Store, "sid" | "email"> | undefined, ownerThen: string, self = ""): Promise<boolean> {
+  const team = store?.sid ? await readTeamMembers(store.sid) : [];
+  const hosts = [...new Set([store?.email ?? "", ownerThen, ...team.map((m) => m.email)].filter((e) => e.trim()).map(hostId))].filter((h) => h !== self);
+  if (!accountId || !hosts.length) return false;
+  const keys = hosts.map((h) => connKey("", "google", h));
+  const read = repliesFor(await redisPipeline([["MGET", ...keys]]), 1);
+  const texts = read ? listSlots(read[0]) : null;
+  if (!texts || texts.length !== keys.length || texts.some((t) => t !== null && typeof t !== "string")) {
+    throw new UnknownReplyError("the team hosts' meeting connections");
+  }
+  const found = hosts.flatMap((h, i) => {
+    const text = texts[i];
+    return typeof text === "string" && recordedIn(text).accountId === accountId ? [{ key: keys[i], text, member: memberOf("", h) }] : [];
+  });
+  if (!found.length) return false;
+  // All of them in one script (LIST_KEPT), so the repair costs LIST_KEPT_COMMANDS whatever the team (iYwjc's MEDIUM).
+  await listKept(accountId, "google", found).catch((error) => console.error("listing a team host's meeting connection under its account failed", error));
+  return true;
+}
+
+/** Lists each connection under its account while it is still the text read (LIST_KEPT); throws when the answer does not read. */
+async function listKept(accountId: string, provider: MeetProvider, kept: { key: string; text: string; member: string }[]): Promise<void> {
+  const read = repliesFor(
+    await redisPipeline([["EVAL", LIST_KEPT, 1 + kept.length, userKey(provider, accountId), ...kept.map((k) => k.key), ...kept.map((k) => k.text), ...kept.map((k) => k.member)]]),
+    1,
+  );
+  if (!read || countOf(read[0]) === null) throw new UnknownReplyError("listing a meeting connection under its account");
+}
+
+/**
+ * How many connections are left on the account once this one left its index (leaveAccount), with a Google connection
+ * also counting a team host's calendar on that account that the index does not list (unlistedHostUses): a store's, and
+ * a team host's own, that host itself left out (Claude 5 zr's LEVE on #5476 @d882bc7424). Null when the count does not
+ * read.
+ */
+async function leftOnAccount(
+  statsId: string,
+  provider: MeetProvider,
+  accountId: string,
+  host: string,
+  store: Pick<Store, "sid" | "email"> | undefined,
+  ownerThen: string,
+): Promise<number | null> {
+  const others = await leaveAccount(provider, accountId, memberOf(statsId, host));
+  if (others !== 0 || provider !== "google") return others;
+  return (await unlistedHostUses(accountId, store, ownerThen, host)) ? 1 : 0;
+}
+
+/**
+ * Whether anything here other than `self` still uses this account's grant, before it is given back without a
+ * disconnect (a store reconnecting with another account, a keep that lost its lock, a flow that expired): the index
+ * (grantStillUsed), and, for a Google grant the index finds nobody else on (not Zoom), a team host's calendar the index
+ * does not list (unlistedHostUses, which lists the one it finds; Claude 3 wSUb3's MEDIUM on #5476, 7116841447). A team
+ * host's own grant counts them too (Claude 5 zr's LEVE on #5476 @d882bc7424): with `self` that host (h:<host>), its own
+ * connection is left out; with `self` empty (a consent that kept nothing), the host's own earlier connection still
+ * counts, since it still uses the grant. `store` is the store's team id and its owner now (for a host, the store it
+ * acts from); `ownerThen` the owner the grant was kept for.
+ * Commands, only when the index finds nobody: the team's GET (a store with a team id), one MGET, and one LIST_KEPT for the hosts
+ * found (UNLISTED_HOSTS_COMMANDS). Null when either cannot be read (logged): the grant is then kept, never given back on an unread answer.
+ */
+async function grantUsedElsewhere(
+  provider: MeetProvider,
+  accountId: string,
+  self: string,
+  store: Pick<Store, "sid" | "email"> | undefined,
+  ownerThen: string,
+): Promise<boolean | null> {
+  const used = await grantStillUsed(provider, accountId, self);
+  if (used !== false || provider !== "google") return used;
+  try {
+    return await unlistedHostUses(accountId, store, ownerThen, self.startsWith("h:") ? self.slice(2) : "");
+  } catch (error) {
+    console.error("reading the team hosts' meeting connections before giving a grant back failed; the grant is kept", error);
+    return null;
+  }
+}
+
+/**
+ * Gives a connection's grant back only when nothing else here uses its account (grantUsedElsewhere). `removed` is true
+ * only when the provider confirmed it; `shared` when the grant was kept for another connection; neither when the
+ * index or the hosts' connections could not be read (kept) or the provider did not confirm.
+ */
+async function giveBackUnlessShared(
+  statsId: string,
+  c: Connection,
+  host = "",
+  store?: Pick<Store, "sid" | "email">,
+): Promise<{ removed: boolean; shared: boolean }> {
+  const used = await grantUsedElsewhere(c.provider, c.account.id, memberOf(statsId, host), store, c.owner.email);
+  if (used !== false) return { removed: false, shared: used === true };
+  return { removed: await giveBack(statsId, c, host), shared: false };
+}
 /** When the provider last told us this account removed the app (forgetUser), a day: a consent flow begun before keeps nothing. */
 const goneKey = (provider: MeetProvider, id: string) => `nl:meet:gone:${provider}:${hash(`meet-gone:${provider}:${id}`)}`;
 const logKey = (statsId: string) => `nl:meet:log:${statsId}`;
@@ -234,7 +467,16 @@ export type DisconnectedView = ConnectionView & { providerAccessRemoved?: false 
  * so whether the provider took it back can no longer be known, and is never
  * said (G review 5815599962).
  */
-export type DisconnectOutcome = { view: DisconnectedView | null; providerAccessRemoved: boolean };
+export type DisconnectOutcome = {
+  view: DisconnectedView | null;
+  providerAccessRemoved: boolean;
+  /**
+   * True when the grant was kept at the provider because another store or a team host's own calendar here is still
+   * connected to the same account (issue #4011): Google's and Zoom's revoke end the user's grant for the whole app, so
+   * giving it back would break that other connection. The studio says so, never "remove it at Google yourself".
+   */
+  sharedGrantKept?: boolean;
+};
 
 export type MeetProblem = { at: number; provider: MeetProvider; what: string; error: string };
 
@@ -399,6 +641,12 @@ export async function finishConsent(
     by: string;
     owner: { email: string; handle: string };
     host?: string;
+    /**
+     * The store's team id (beginConsent's sid; takeConsent's `sid`): a store's or a team host's Google grant given
+     * back without a disconnect then also counts its team hosts' calendars the index does not list
+     * (grantUsedElsewhere). Without it, only the owner's are read.
+     */
+    sid?: string;
     /** When the consent flow began (beginConsent; takeConsent's `at`), in milliseconds. */
     startedAt: number;
   },
@@ -418,7 +666,11 @@ export async function finishConsent(
     // not kept either. An unknown acknowledgement after the keep may already
     // have stored the new grant: leave it live, rather than revoke what Redis may hold.
     if (error instanceof LockBusyError || error instanceof PriorConnectionUnreadError) {
-      await revoke(provider, provider === "zoom" ? traded.tokens.access : traded.tokens.refresh).catch(() => {});
+      // Given back only when nothing here uses that account (issue #4011): a revoke ends the grant every connection
+      // to it shares, so another store's or host's would break, a host's calendar the index does not list included.
+      if ((await grantUsedElsewhere(provider, traded.account.id, "", storeOf(input), input.owner.email)) === false) {
+        await revoke(provider, provider === "zoom" ? traded.tokens.access : traded.tokens.refresh).catch(() => {});
+      }
     }
     throw error;
   }
@@ -443,12 +695,27 @@ redis.call("SADD", KEYS[3], ARGV[4])
 redis.call("SET", KEYS[2], ARGV[2])
 return 1`;
 
+/**
+ * A team host's connection kept and listed in its account's index in one step, only while the lock is still ours
+ * (Claude 5 iZByNH's LEVE 1 on #5476). KEYS: the lock, the connection, the account's index; ARGV: the lock's token, the
+ * connection, the member (h:<host>). 1 kept, 0 the lock lost (nothing written), -1 malformed.
+ */
+export const KEEP_HOST = `-- marktmorgen:meet-keep-host:v1
+if #KEYS ~= 3 or #ARGV ~= 3 or ARGV[1] == "" or ARGV[2] == "" or ARGV[3] == "" then return -1 end
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SADD", KEYS[3], ARGV[3])
+redis.call("SET", KEYS[2], ARGV[2])
+return 1`;
+
 /** A malformed prior read stops this attempt before the grant's write. */
 class PriorConnectionUnreadError extends UnknownReplyError {}
 
+/** The store a consent was for, as grantUsedElsewhere reads it: its team id when the consent has it, its owner now. */
+const storeOf = (input: { sid?: string; owner: { email: string } }): Pick<Store, "sid" | "email"> => ({ sid: input.sid ?? "", email: input.owner.email });
+
 async function keepConnection(
   provider: MeetProvider,
-  input: { statsId: string; by: string; owner: { email: string; handle: string }; host?: string; startedAt: number },
+  input: { statsId: string; by: string; owner: { email: string; handle: string }; host?: string; sid?: string; startedAt: number },
   traded: { tokens: Tokens; account: Account },
   held: Held,
 ): Promise<ConnectResult> {
@@ -475,12 +742,26 @@ async function keepConnection(
     brokenAt: 0,
   };
   if (host) {
-    if (!(await setIfHeld(held, connKey(input.statsId, provider, host), JSON.stringify(connection)))) {
-      throw new LockBusyError("the connection changed while it was saved");
+    // Kept and listed in its account's index in one step, only while the lock is still ours (KEEP_HOST), as a store's
+    // is (issue #4011): a store's disconnect then sees that this host's calendar still uses the grant. Before, the
+    // SADD ran first and a lost lock left h:<host> listed with no connection behind it, so the grant was never given
+    // back and later disconnects said a calendar still used it (Claude 5 iZByNH's LEVE 1 on #5476).
+    const hostKeys = [held.key, connKey(input.statsId, provider, host), userKey(provider, traded.account.id)];
+    const hostReplies = repliesFor(
+      await redisPipeline([["EVAL", KEEP_HOST, hostKeys.length, ...hostKeys, held.token, JSON.stringify(connection), memberOf(input.statsId, host)]]),
+      1,
+    );
+    const hostKept = hostReplies ? countOf(hostReplies[0]) : null;
+    if (hostKept === 0) throw new LockBusyError("the connection changed while it was saved");
+    if (hostKept !== 1) throw new UnknownReplyError("keeping a host's meeting connection and listing it under its account");
+    // A different account connected in its place leaves that account's index, and its access is given back unless
+    // another store or host still uses it.
+    if (before && before.account.id !== traded.account.id) {
+      await redisPipeline([["SREM", userKey(provider, before.account.id), memberOf(input.statsId, host)]]).catch(() => {});
+      // A team host's calendar on the old account that the index does not list counts too, the host itself left out
+      // (Claude 5 zr's LEVE on #5476 @d882bc7424): the hosts of the store this host connects from.
+      await giveBackUnlessShared(input.statsId, before, host, storeOf(input)).catch(() => {});
     }
-    // A host's own: nothing else here is keyed by it. A different account
-    // connected in its place has its access given back.
-    if (before && before.account.id !== traded.account.id) await giveBack(input.statsId, before, host).catch(() => {});
     return { ok: true, view: viewOf(connection), replaced: Boolean(before) };
   }
   // A store's own: kept and indexed in one step, and only while no deletion of that account was confirmed since the
@@ -488,7 +769,11 @@ async function keepConnection(
   // between them, or before both, so a deletion confirmed to Zoom was undone by the write that followed.
   const access = provider === "zoom" ? traded.tokens.access : traded.tokens.refresh;
   if (!flowFresh(input.startedAt)) {
-    await revoke(provider, access).catch(() => {});
+    // Not kept: given back only when nothing here uses that account (issue #4011), since a revoke ends the grant
+    // every connection to it shares, a host's calendar the index does not list included.
+    if ((await grantUsedElsewhere(provider, traded.account.id, "", storeOf(input), input.owner.email)) === false) {
+      await revoke(provider, access).catch(() => {});
+    }
     return { ok: false, error: "expired" };
   }
   const keys = [held.key, connKey(input.statsId, provider), userKey(provider, traded.account.id), goneKey(provider, traded.account.id)];
@@ -504,13 +789,15 @@ async function keepConnection(
     return { ok: false, error: "removed" };
   }
   if (keptAs !== 1) throw new UnknownReplyError("keeping a meeting connection only while its account was not deleted since");
-  // A different account connected in its place: the old one's access is given back.
+  // A different account connected in its place: the store leaves that account's index first, and the old one's
+  // access is given back unless another store or host still uses it (issue #4011), a host's calendar kept for the
+  // owner the old connection was made for, the owner now or the team, that the index does not list included.
   if (before && before.account.id !== traded.account.id) {
-    await giveBack(input.statsId, before).catch(() => {});
     await redisPipeline([
       ["SREM", userKey(provider, before.account.id), input.statsId],
       ["DEL", testKey(input.statsId, provider)],
     ]).catch(() => {});
+    await giveBackUnlessShared(input.statsId, before, "", storeOf(input)).catch(() => {});
   }
   return { ok: true, view: viewOf(connection), replaced: Boolean(before) };
 }
@@ -543,17 +830,31 @@ async function giveBack(statsId: string, c: Connection, host = ""): Promise<bool
  * in this connection's own context, and the account id it was listed under,
  * if one is still there.
  */
-function salvage(raw: string, statsId: string, provider: MeetProvider, host: string): { token: string; accountId: string } {
+function salvage(raw: string, statsId: string, provider: MeetProvider, host: string): { token: string; accountId: string; owner: string } {
+  const { accountId, owner, sealed } = recordedIn(raw);
+  return { token: sealed ? grantToken(statsId, provider, sealed, host) : "", accountId, owner };
+}
+
+/**
+ * What a connection's text still says, whether or not it reads as one (a damaged one included): the account id and
+ * the owner's address it was kept with ("" when either does not read), and its sealed texts (null when it is no object).
+ */
+function recordedIn(raw: string): { accountId: string; owner: string; sealed: { refresh: unknown; access: unknown } | null } {
   let value: unknown;
   try {
     value = JSON.parse(raw);
   } catch {
-    return { token: "", accountId: "" };
+    return { accountId: "", owner: "", sealed: null };
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) return { token: "", accountId: "" };
-  const v = value as { refresh?: unknown; access?: unknown; account?: unknown };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { accountId: "", owner: "", sealed: null };
+  const v = value as { refresh?: unknown; access?: unknown; account?: unknown; owner?: unknown };
   const account = v.account && typeof v.account === "object" ? (v.account as { id?: unknown }).id : undefined;
-  return { token: grantToken(statsId, provider, { refresh: v.refresh, access: v.access }, host), accountId: typeof account === "string" ? account : "" };
+  const owner = v.owner && typeof v.owner === "object" ? (v.owner as { email?: unknown }).email : undefined;
+  return {
+    accountId: typeof account === "string" ? account : "",
+    owner: typeof owner === "string" ? owner : "",
+    sealed: { refresh: v.refresh, access: v.access },
+  };
 }
 
 /** Each reply of a pipeline that deletes, confirmed by its own count (DEL, SREM), or UnknownReplyError: never taken as done unseen. */
@@ -584,12 +885,18 @@ function confirmCounts(replies: unknown, commands: number, what: string): void {
  * for the studio and the email to tell the creator how to remove it at the
  * provider, never that it was removed (G review 5815300198, disposition A).
  */
-export async function disconnect(statsId: string, provider: MeetProvider, host = ""): Promise<DisconnectedView | null> {
-  return (await disconnectFor(statsId, provider, host)).view;
+export async function disconnect(statsId: string, provider: MeetProvider, host = "", store?: Pick<Store, "sid" | "email">): Promise<DisconnectedView | null> {
+  return (await disconnectFor(statsId, provider, host, store)).view;
 }
 
-/** Disconnects as `disconnect` does, and says whether the provider confirmed the give-back in this request. */
-export async function disconnectFor(statsId: string, provider: MeetProvider, host = ""): Promise<DisconnectOutcome> {
+/**
+ * Disconnects as `disconnect` does, and says whether the provider confirmed the give-back in this request. `store` is
+ * the store it is disconnected from (for a team host's own connection, the store the host acts from): its owner and
+ * team are the team hosts whose calendar may use the same Google account without being listed (unlistedHostUses), the
+ * disconnecting host itself left out (Claude 5 zr's LEVE on #5476 @d882bc7424); without it, only the owner the
+ * connection was kept for is read.
+ */
+export async function disconnectFor(statsId: string, provider: MeetProvider, host = "", store?: Pick<Store, "sid" | "email">): Promise<DisconnectOutcome> {
   // Under the renewal lock: a renewal under way finishes first, and none can
   // write the connection back after it is gone.
   return withLock(refreshLockKey(statsId, provider, host), 20, 9_000, async (): Promise<DisconnectOutcome> => {
@@ -597,49 +904,93 @@ export async function disconnectFor(statsId: string, provider: MeetProvider, hos
     if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a meeting connection");
     if (read[0] === null) return { view: null, providerAccessRemoved: false };
     const c = parseConnection(read[0], provider);
+    const self = memberOf(statsId, host);
+    const keys = host ? [connKey(statsId, provider, host)] : [connKey(statsId, provider), testKey(statsId, provider)];
     if (!c) {
-      const left = salvage(read[0], statsId, provider, host);
-      if (left.token) {
-        // Not forgotten until the provider confirmed the access is back: a
-        // failed or unconfirmed revoke throws (ProviderError included) and
-        // keeps the text, so a retry can still give it back.
-        if (!(await revoke(provider, left.token))) throw new Error("a damaged meeting connection's access could not be given back");
-      } else {
-        console.error("a damaged meeting connection was deleted with no access in it that could be given back", provider, host ? "host" : "store");
+      const raw = read[0];
+      const left = salvage(raw, statsId, provider, host);
+      if (!left.accountId) {
+        // Listed under no account: nobody to count and no index to stay in. Not forgotten until the provider confirmed
+        // the access is back: a failed or unconfirmed revoke throws (ProviderError included) and keeps the text, so a
+        // retry can still give it back.
+        if (left.token && !(await revoke(provider, left.token))) throw new Error("a damaged meeting connection's access could not be given back");
+        if (!left.token) console.error("a damaged meeting connection was deleted with no access in it that could be given back", provider, host ? "host" : "store");
+        confirmCounts(await redisPipeline(keys.map((k) => ["DEL", k])), keys.length, "a meeting connection's deletion");
+        return { view: null, providerAccessRemoved: Boolean(left.token) };
       }
-      const gone = host
-        ? [["DEL", connKey(statsId, provider, host)]]
-        : [
-            ["DEL", connKey(statsId, provider)],
-            ["DEL", testKey(statsId, provider)],
-            ...(left.accountId ? [["SREM", userKey(provider, left.accountId), statsId]] : []),
-          ];
-      confirmCounts(await redisPipeline(gone), gone.length, "a meeting connection's deletion");
-      return { view: null, providerAccessRemoved: Boolean(left.token) };
+      if (!left.token) {
+        // Nothing in it to give back: deleted and out of its account's index in one step (FORGET_CONNECTION).
+        console.error("a damaged meeting connection was deleted with no access in it that could be given back", provider, host ? "host" : "store");
+        if ((await forgetConnection(provider, left.accountId, self, keys)).unread) throw new UnknownReplyError("a meeting connection's deletion");
+        return { view: null, providerAccessRemoved: false };
+      }
+      // A grant to give back first, only when nothing else here uses its account (issue #4011): the connection leaves its
+      // account's index in the same step as the count (LEAVE_ACCOUNT), so of two disconnects at once exactly one sees
+      // nobody left (Claude 3 xy6b's LOW on #5476), and a team host's calendar the index does not list counts too
+      // (unlistedHostUses). Not forgotten until the provider confirmed the access is back. Whatever fails after it left
+      // the index (an unread count, the hosts' read, a refused revoke, the deletion) lists it again before this throws,
+      // only while its text is still the one read (LIST_KEPT): a connection that is kept is always listed, and a retry
+      // decides (Claude 3 K9t's MEDIUM on #5476 @44f80c1b76).
+      try {
+        const others = await leftOnAccount(statsId, provider, left.accountId, host, store, left.owner);
+        if (others === null) throw new UnknownReplyError("the stores still connected to a damaged meeting connection's account");
+        const shared = others > 0;
+        if (!shared) {
+          if (!(await revoke(provider, left.token))) throw new Error("a damaged meeting connection's access could not be given back");
+        } else {
+          console.error("a damaged meeting connection was deleted with its grant kept for another connection to the same account", provider, host ? "host" : "store");
+        }
+        if ((await forgetConnection(provider, left.accountId, self, keys)).unread) throw new UnknownReplyError("a meeting connection's deletion");
+        return { view: null, providerAccessRemoved: !shared, ...(shared ? { sharedGrantKept: true } : {}) };
+      } catch (error) {
+        await listKept(left.accountId, provider, [{ key: keys[0], text: raw, member: self }]).catch((e) =>
+          console.error("listing a damaged meeting connection under its account again after its disconnect failed", e),
+        );
+        throw error;
+      }
     }
     // Forgotten here whatever the provider says: a revoke that fails must not
     // leave a connection the creator asked to end. One the provider did not
     // confirm is said in the answer, never taken as given back.
-    const removed = await giveBack(statsId, c, host).catch((error) => {
-      console.error("giving a meeting connection back failed", error);
-      return false;
-    });
-    if (!removed) console.error("a meeting connection was disconnected here without the provider confirming its access was given back", provider, host ? "host" : "store");
-    const view: DisconnectedView = removed ? viewOf(c) : { ...viewOf(c), providerAccessRemoved: false };
-    if (host) {
-      confirmCounts(await redisPipeline([["DEL", connKey(statsId, provider, host)]]), 1, "a meeting connection's deletion");
-      return { view, providerAccessRemoved: removed };
+    // A grant another store or team host still uses is kept at the provider (issue #4011), and said so.
+    // A Google grant the index lists nobody else on: before anything is deleted, a team host's calendar on the account
+    // that the index does not list is read, and listed (unlistedHostUses). An index or hosts' read that does not answer
+    // throws here, with nothing deleted and nothing said, so the creator is never told to remove at the provider what
+    // another connection may use, and a retry decides once it reads (Claude 5 iZByNH's LEVE 2 on #5476).
+    let hostsRead = provider !== "google";
+    let hostsFound = false;
+    if (!hostsRead) {
+      const listedElsewhere = await grantStillUsed(provider, c.account.id, self);
+      if (listedElsewhere === null) throw new UnknownReplyError("the stores still connected to a meeting connection's account");
+      if (!listedElsewhere) {
+        hostsFound = await unlistedHostUses(c.account.id, store, c.owner.email, host);
+        hostsRead = true;
+      }
     }
-    confirmCounts(
-      await redisPipeline([
-        ["DEL", connKey(statsId, provider)],
-        ["DEL", testKey(statsId, provider)],
-        ["SREM", userKey(provider, c.account.id), statsId],
-      ]),
-      3,
-      "a meeting connection's deletion",
-    );
-    return { view, providerAccessRemoved: removed };
+    // Deleted and out of its account's index in the same step as counting who is left (FORGET_CONNECTION), before the
+    // give-back, whose token is already read: a connection that is kept is always listed, so the provider's removal
+    // notice still finds it and another disconnect still counts it (Claude 3 K9t's MEDIUM on #5476 @44f80c1b76), and of
+    // two disconnects of one account at once exactly one counts nobody left (Claude 3 xy6b's LOW).
+    const gone = await forgetConnection(provider, c.account.id, self, keys);
+    let shared = gone.left > 0 || hostsFound;
+    if (!shared && !hostsRead) {
+      // The index listed another connection when it was read, which has left since: a team host's unlisted calendar is
+      // read now, with this connection already deleted. A read that does not answer throws: the grant is kept, nothing
+      // is said, and a retry finds nothing left to do.
+      shared = await unlistedHostUses(c.account.id, store, c.owner.email, host);
+    }
+    const removed = shared
+      ? false
+      : await giveBack(statsId, c, host).catch((error) => {
+          console.error("giving a meeting connection back failed", error);
+          return false;
+        });
+    // Deleted, though its answer was lost and read again: said as try again, as before, once the grant was given back if
+    // nobody is left; the retry finds nothing and never says it was given back (G review 5815599962).
+    if (gone.unread) throw new UnknownReplyError("a meeting connection's deletion");
+    if (!removed && !shared) console.error("a meeting connection was disconnected here without the provider confirming its access was given back", provider, host ? "host" : "store");
+    const view: DisconnectedView = removed ? viewOf(c) : { ...viewOf(c), providerAccessRemoved: false };
+    return { view, providerAccessRemoved: removed, ...(shared ? { sharedGrantKept: true } : {}) };
   });
 }
 
@@ -682,8 +1033,12 @@ export async function forgetUser(
     2,
   );
   if (!read || read[0] !== "OK") throw new UnknownReplyError("the mark of a meeting account's deletion");
-  const stores = stringList(read[1]);
-  if (!stores) throw new UnknownReplyError("the stores a meeting account connected");
+  const members = stringList(read[1]);
+  if (!members) throw new UnknownReplyError("the stores a meeting account connected");
+  // A team host's own calendar is listed as h:<host> (memberOf, #4011), which is no store's id: left alone here, never
+  // dropped as a store with no connection, so a store's later disconnect still sees the grant the host uses (Claude 5
+  // iYwjc's MEDIUM on #5476). The host's calendar is the person's own, ended by its own disconnect.
+  const stores = members.filter((m) => !m.startsWith("h:"));
   const forgot: { statsId: string; owner: { email: string; handle: string }; account: string }[] = [];
   const pass = stores.slice(0, FORGET_PASS);
   // Stores connected again after the removal (a notice sent again by the provider after a first try failed, while

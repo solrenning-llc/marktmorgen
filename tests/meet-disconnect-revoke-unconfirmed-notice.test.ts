@@ -105,7 +105,7 @@ async function main() {
   const meetRoute = readFileSync("app/api/integrations/meetings/route.ts", "utf8");
   is("the store route answers providerAccessRemoved false only when unconfirmed", /providerAccessRemoved === false \? \{ providerAccessRemoved: false \}/.test(meetRoute), true);
   const hostRoute = readFileSync("app/api/store/host-calendar/route.ts", "utf8");
-  is("the host route answers providerAccessRemoved false only when unconfirmed", /removed === false \? \{ providerAccessRemoved: false \}/.test(hostRoute), true);
+  is("the host route answers providerAccessRemoved false only when unconfirmed", /providerAccessRemoved === false \? \{ providerAccessRemoved: false \}/.test(hostRoute), true);
   const meetings = readFileSync("components/meeting-connections.tsx", "utf8");
   const hostCal = readFileSync("components/host-calendar.tsx", "utf8");
   is("the meeting connections screen reads it", meetings.includes("data.providerAccessRemoved === false"), true);

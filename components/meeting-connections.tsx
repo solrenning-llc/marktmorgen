@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
-import { MEET_ACCESS_UNCONFIRMED, type MeetProvider } from "@/lib/call-setup";
+import { MEET_ACCESS_SHARED, MEET_ACCESS_UNCONFIRMED, type MeetProvider } from "@/lib/call-setup";
 import type { MeetView } from "@/lib/meet-connect";
 import type { TestMeeting } from "@/lib/meet-test";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -65,16 +65,24 @@ function when(ms: number): string {
  * access may still be on, and how to remove it there. A live region that is
  * always on the page, so the words are announced when they appear; the notice
  * takes the focus then, since the Disconnect button that had it is gone.
- * Empty, and silent, when the provider confirmed.
+ * Empty, and silent, when the provider confirmed. With `shared` (`sharedGrantKept`, issue #4011), it says instead that
+ * the access was kept on because another store or team calendar here uses the same account, and never asks the
+ * creator to remove it at the provider, which would disconnect that one too.
  */
-export function ProviderAccessNotice({ provider }: { provider: MeetProvider | null }) {
-  const words = provider ? MEET_ACCESS_UNCONFIRMED[provider] : null;
+export function ProviderAccessNotice({ provider, shared = false }: { provider: MeetProvider | null; shared?: boolean }) {
+  const words = provider && !shared ? MEET_ACCESS_UNCONFIRMED[provider] : null;
+  const kept = provider && shared ? MEET_ACCESS_SHARED[provider] : null;
   const ref = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     if (provider) ref.current?.focus();
-  }, [provider]);
+  }, [provider, shared]);
   return (
-    <div role="status" aria-live="polite" data-provider-access={provider ?? undefined}>
+    <div role="status" aria-live="polite" data-provider-access={provider ?? undefined} data-shared-grant={kept ? "kept" : undefined}>
+      {kept ? (
+        <p ref={ref} tabIndex={-1} className="notice text-sm">
+          <strong className="font-semibold">{kept.lead}</strong> {kept.rest}
+        </p>
+      ) : null}
       {words ? (
         <p ref={ref} tabIndex={-1} className="notice notice-warn text-sm">
           <strong className="font-semibold">{words.lead}</strong> {words.before}
@@ -119,6 +127,8 @@ export function MeetingConnections({
   const [error, setError] = useState<string | null>(null);
   /** The provider whose last disconnect it did not confirm taking our access back, if any. */
   const [unconfirmed, setUnconfirmed] = useState<MeetProvider | null>(null);
+  /** Whether that last disconnect kept the grant for another store or team calendar on the same account (issue #4011). */
+  const [sharedKept, setSharedKept] = useState(false);
   const [tests, setTests] = useState(firstTests ?? {});
   /** The test meetings could not be read: nothing about them is offered, so none is made over one that is there. */
   const unread = firstTests === null;
@@ -164,16 +174,18 @@ export function MeetingConnections({
     setBusy(provider);
     setError(null);
     setUnconfirmed(null);
+    setSharedKept(false);
     try {
       const response = await fetch("/api/integrations/meetings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "disconnect", provider }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; providerAccessRemoved?: boolean };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; providerAccessRemoved?: boolean; sharedGrantKept?: boolean };
       if (data.ok) {
         toast(`${ACCOUNTS[provider].name} disconnected.`);
         if (data.providerAccessRemoved === false) setUnconfirmed(provider);
+        setSharedKept(data.sharedGrantKept === true);
         router.refresh();
         return;
       }
@@ -336,7 +348,7 @@ export function MeetingConnections({
             </section>
           );
         })}
-        <ProviderAccessNotice provider={unconfirmed} />
+        <ProviderAccessNotice provider={unconfirmed} shared={sharedKept} />
         {error ? (
           <p className="notice notice-error" role="alert">
             {error}

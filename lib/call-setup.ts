@@ -240,6 +240,22 @@ export const MEET_ACCESS_UNCONFIRMED: Record<MeetProvider, { company: string; le
   },
 };
 
+/**
+ * Said after a disconnect whose grant was kept at the provider because another store or a team host's own calendar
+ * here still uses the same account (lib/meet-connect.ts, `sharedGrantKept`, issue #4011): Google's and Zoom's
+ * revoke end the grant for every connection to that account, so removing it there would disconnect the other one too.
+ */
+export const MEET_ACCESS_SHARED: Record<MeetProvider, { lead: string; rest: string }> = {
+  google: {
+    lead: "We disconnected your Google account here and kept its access on at Google.",
+    rest: "Another store or a team calendar on Marktmorgen still uses the same Google account, and removing the access at Google would disconnect that one too. It is given back when the last one is disconnected.",
+  },
+  zoom: {
+    lead: "We disconnected your Zoom account here and kept its access on at Zoom.",
+    rest: "Another store on Marktmorgen still uses the same Zoom account, and removing the access at Zoom would disconnect that one too. It is given back when the last one is disconnected.",
+  },
+};
+
 /** How to remove the access at the provider, as plain text. */
 export function meetAccessRemoveWords(provider: MeetProvider): string {
   const w = MEET_ACCESS_UNCONFIRMED[provider];

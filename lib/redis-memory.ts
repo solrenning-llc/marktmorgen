@@ -4237,7 +4237,48 @@ export class MemoryRedis {
           this.run(["HSET", teams, product, value]);
           return 1;
         }
+        // lib/meet-connect.ts FORGET_CONNECTION: a connection deleted, out of its account's index and who is left
+        // counted, in one step.
+        if (key.startsWith("-- marktmorgen:meet-forget:v1\n")) {
+          if ((args[0] !== "2" && args[0] !== "3") || args.length !== Number(args[0]) + 2 || !args[args.length - 1]) return -1;
+          this.scriptCalls += 3;
+          this.run(["DEL", ...args.slice(2, -1)]);
+          this.run(["SREM", args[1], args[args.length - 1]]);
+          return this.run(["SCARD", args[1]]);
+        }
         if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
+        // lib/meet-connect.ts KEEP_HOST: a team host's connection kept and listed under its account in one step, only
+        // while the lock is ours.
+        if (key.startsWith("-- marktmorgen:meet-keep-host:v1\n")) {
+          if (args.length !== 7 || args[0] !== "3" || !args[4] || !args[5] || !args[6]) return -1;
+          this.scriptCalls += 1;
+          if (this.run(["GET", args[1]]) !== args[4]) return 0;
+          this.scriptCalls += 2;
+          this.run(["SADD", args[3], args[6]]);
+          this.run(["SET", args[2], args[5]]);
+          return 1;
+        }
+        // lib/meet-connect.ts LEAVE_ACCOUNT: a connection leaves its account's index and counts who is left, in one step.
+        if (key.startsWith("-- marktmorgen:meet-leave-account:v1\n") && args[0] === "1" && args.length === 3) {
+          this.scriptCalls += 2;
+          this.run(["SREM", args[1], args[2]]);
+          return this.run(["SCARD", args[1]]);
+        }
+        // lib/meet-connect.ts LIST_KEPT: connections listed under their account only while each is still the text read.
+        if (key.startsWith("-- marktmorgen:meet-list-kept:v1\n")) {
+          const n = Number(args[0]) - 1;
+          if (!/^[1-9]\d*$/.test(args[0]) || n < 1 || args.length !== 1 + (n + 1) + 2 * n) return -1;
+          const connections = args.slice(2, 2 + n);
+          const texts = args.slice(2 + n, 2 + 2 * n);
+          const members = args.slice(2 + 2 * n);
+          this.scriptCalls += 1;
+          const read = this.run(["MGET", ...connections]) as (string | null)[];
+          const listed = members.filter((_, i) => read[i] === texts[i]);
+          if (!listed.length) return 0;
+          this.scriptCalls += 1;
+          this.run(["SADD", args[1], ...listed]);
+          return listed.length;
+        }
         // The take scripts and their kin, mirrored from the tests' stand-in (lib/redis-memory-take.ts), by the name on the
         // script's first line, so `next dev` and the demo store run them too (#4969's Mobile render). Last, before the
         // refusal: a script the chain above already runs is never taken here.

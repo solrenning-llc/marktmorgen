@@ -104,6 +104,7 @@ import { PICTURE_DOOR_MAX } from "@/lib/picture-door";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { HOST_LOCK_OWNER_COMMANDS, HOST_READING_FENCE_BYTES, HOST_READING_FENCE_COMMANDS, SYNC_SECONDS } from "@/lib/host-calendar";
+import { SHARED_GRANT_EXTRA_COMMANDS } from "@/lib/meet-connect";
 import { MAX_TEAM, MEMBER_STORES_READ, TEAM_LOG_FENCE_COMMANDS } from "@/lib/team";
 import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
@@ -1383,6 +1384,19 @@ export function teamLogFenceUsd(tier: Tier): number {
   // And on every essential request of the month (Claude 6 i51q on #4988), counted apart from the studio figure: a
   // teammate's export goes through studioAccess, a teammate leaving through the team route.
   return (STORE_ALLOWANCES[tier].studio + ESSENTIAL_PER_DAY * DAY_WINDOWS) * TEAM_LOG_LINES_PER_STUDIO_REQUEST * TEAM_LOG_FENCE_COMMANDS * COMMAND;
+}
+
+/**
+ * Counting who else uses a Google or Zoom grant before it is given back (issue #4011, lib/meet-connect.ts): a
+ * disconnect, a damaged one, a consent that kept nothing or a team host's account change sends at most
+ * SHARED_GRANT_EXTRA_COMMANDS more than before, as Upstash bills scripts (the account's index read, the team hosts'
+ * read of at most POSSIBLE_HOSTS connections, FORGET_CONNECTION, LEAVE_ACCOUNT and LIST_KEPT at their inner commands;
+ * Claude 5 iYwjc's MEDIUM on #5476). Each is a studio request, or the callback of a consent whose start was one, so it
+ * is priced on every studio request of the month as if each were the worst of them
+ * (tests/meet-shared-grant-cost.test.ts drives each against the stand-in).
+ */
+export function meetSharedGrantUsd(tier: Tier): number {
+  return STORE_ALLOWANCES[tier].studio * SHARED_GRANT_EXTRA_COMMANDS * COMMAND;
 }
 
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
@@ -3059,7 +3073,7 @@ export const COST_LINES: CostLine[] = [
     feature: "The studio's own reads and writes: every page of it drawn (STUDIO_PAGE_UNITS each), every save and read, its refreshing; and the never-paused plan, cancel, delete and data-download requests (17 October 2026)",
     // And the beside pool's read, take and give-back on a product save while the store pays, priced on every studio
     // request (besideSaveUsd; TAKE_DATA's inner commands, as Upstash bills them).
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier) + aboutFenceUsd(tier) + newFeedFenceUsd(tier) + teamLogFenceUsd(tier),
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier) + aboutFenceUsd(tier) + newFeedFenceUsd(tier) + teamLogFenceUsd(tier) + meetSharedGrantUsd(tier),
     sources: [
       // A product's long description written fenced by the store's erasure (aboutFenceUsd).
       { file: "lib/product-about-live.ts", names: ["ABOUT_FENCE_EXTRA_COMMANDS", "ABOUT_WRITE_IF_STORE_LIVE"] },
@@ -3079,6 +3093,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/team-booking.ts", names: ["TEAM_WRITE_MAX_COMMANDS", "WRITE_TEAM_IF_LIVE", "writeTeam"] },
       // The activity log's fence, priced on every studio request (teamLogFenceUsd).
       { file: "lib/team.ts", names: ["TEAM_LOG_COMMANDS", "TEAM_LOG_FENCE_COMMANDS", "KEEP_LOG_IF_LIVE"] },
+      // Counting who else uses a meeting grant before it is given back (meetSharedGrantUsd; issue #4011).
+      { file: "lib/meet-connect.ts", names: ["SHARED_GRANT_EXTRA_COMMANDS", "UNLISTED_HOSTS_COMMANDS", "POSSIBLE_HOSTS", "FORGET_CONNECTION", "LIST_KEPT", "LEAVE_ACCOUNT"] },
       { file: "lib/studio-route.ts", names: ["logTeam(access.store.sid"] },
       // A product's removal admits its ordinary request and WAITLIST_DROP_UNITS together before anything goes, for its
       // waitlist's hold and drop (or its drop finished when asked again): at most WAITLIST_DROP_COMMANDS commands and

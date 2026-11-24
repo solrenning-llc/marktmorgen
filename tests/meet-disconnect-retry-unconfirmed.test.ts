@@ -32,11 +32,12 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch;
 
 // The deletion is applied, then its reply is lost once: the first disconnect stops after forgetting the connection.
+// The deletion is a DEL, or the script that deletes the connection and leaves its index in one step (FORGET_CONNECTION).
 const raw = redis.pipeline.bind(redis);
 let loseDeleteReply = "";
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const result = await raw(commands);
-  if (loseDeleteReply && commands.some((c) => c[0] === "DEL" && c[1] === loseDeleteReply)) {
+  if (loseDeleteReply && commands.some((c) => (c[0] === "DEL" || c[0] === "EVAL") && c.includes(loseDeleteReply))) {
     loseDeleteReply = "";
     throw Error("synthetic lost deletion reply");
   }
@@ -128,10 +129,10 @@ async function main() {
 
   part("The routes say it from the outcome");
   const meetRoute = readFileSync("app/api/integrations/meetings/route.ts", "utf8");
-  is("the store route reads the outcome", /disconnectFor\(store\.statsId, provider\)/.test(meetRoute), true);
-  is("the store route's email says not confirmed from the same outcome", /const unconfirmed = providerAccessRemoved === false;/.test(meetRoute), true);
+  is("the store route reads the outcome", /disconnectFor\(store\.statsId, provider, "", store\)/.test(meetRoute), true);
+  is("the store route's email says not confirmed from the same outcome", /const unconfirmed = providerAccessRemoved === false && !sharedGrantKept;/.test(meetRoute), true);
   const host = readFileSync("lib/host-calendar.ts", "utf8");
-  is("the host wrapper answers the outcome", /return providerAccessRemoved;/.test(host), true);
+  is("the host wrapper answers the outcome", /return \(await disconnectHostGoogleFor\(store, email\)\)\.providerAccessRemoved;/.test(host), true);
   done();
 }
 void main();

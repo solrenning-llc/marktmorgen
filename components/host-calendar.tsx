@@ -49,6 +49,8 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
   const [error, setError] = useState<string | null>(null);
   /** The last disconnect was done here, but Google did not confirm it took our access back. */
   const [unconfirmed, setUnconfirmed] = useState(false);
+  /** Whether that last disconnect kept the grant for a store or another team calendar on the same account (issue #4011). */
+  const [sharedKept, setSharedKept] = useState(false);
   const [url, setUrl] = useState("");
   const [read, setRead] = useState<string[]>(first.read);
   const [write, setWrite] = useState(first.write);
@@ -57,19 +59,21 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
     setBusy(action);
     setError(null);
     setUnconfirmed(false);
+    setSharedKept(false);
     try {
       const response = await fetch("/api/store/host-calendar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, tz, ...extra }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string; view?: HostCalendarView; providerAccessRemoved?: boolean };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string; view?: HostCalendarView; providerAccessRemoved?: boolean; sharedGrantKept?: boolean };
       if (data.ok && data.view) {
         setView(data.view);
         setRead(data.view.read);
         setWrite(data.view.write);
         toast(done);
         if (action === "disconnect" && data.providerAccessRemoved === false) setUnconfirmed(true);
+        if (action === "disconnect") setSharedKept(data.sharedGrantKept === true);
         if (action === "ics-add") setUrl("");
         return;
       }
@@ -288,7 +292,7 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
           )}
         </section>
 
-        <ProviderAccessNotice provider={unconfirmed ? "google" : null} />
+        <ProviderAccessNotice provider={unconfirmed ? "google" : null} shared={sharedKept} />
         {error ? (
           <p className="notice notice-error" role="alert">
             {error}

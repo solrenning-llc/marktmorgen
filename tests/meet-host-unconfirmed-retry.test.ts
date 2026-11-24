@@ -15,7 +15,8 @@ redis.pipeline=(async(commands:(string|number)[][])=>{
   if(mode==="throw")throw Error("synthetic post-delete config failure");
  }
  const result=await raw(commands);
- if(mode!=="none"&&commands.some(c=>c[0]==="DEL"&&c[1]===KEY))armed=true;
+ // The deletion: a DEL, or the script that deletes the connection and leaves its index in one step (FORGET_CONNECTION).
+ if(mode!=="none"&&commands.some(c=>(c[0]==="DEL"&&c[1]===KEY)||(c[0]==="EVAL"&&c.includes(KEY))))armed=true;
  return result;
 }) as typeof redis.pipeline;
 globalThis.fetch=(async(input:RequestInfo|URL,init?:RequestInit)=>{

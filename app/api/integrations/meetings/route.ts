@@ -70,13 +70,21 @@ export async function POST(request: NextRequest) {
     }
   }
   try {
-    const { view: was, providerAccessRemoved } = await disconnectFor(store.statsId, provider);
+    const { view: was, providerAccessRemoved, sharedGrantKept } = await disconnectFor(store.statsId, provider, "", store);
     // Forgotten here either way; when the provider did not confirm it took the access back in this request, the page
     // and the email say so. Nothing there counts as not confirmed: an earlier try may have stopped after forgetting it,
     // its answer lost, and the retry has nothing to ask the provider (G review 5815599962).
-    const unconfirmed = providerAccessRemoved === false;
-    if (was) after(() => noticeCreator(store, { kind: "meeting-disconnected", name: ACCOUNT_NAMES[provider], account: was.account, ...(unconfirmed ? { provider, providerAccessRemoved: false as const } : {}) }));
-    return Response.json({ ok: true, view: await meetView(store.statsId, store), ...(providerAccessRemoved === false ? { providerAccessRemoved: false } : {}) });
+    // A grant kept for another store or team calendar on the same account (issue #4011) is said as that, never as a
+    // give-back the provider did not confirm: removing it there would disconnect the other one too.
+    const unconfirmed = providerAccessRemoved === false && !sharedGrantKept;
+    const said = sharedGrantKept ? { provider, sharedGrantKept: true as const } : unconfirmed ? { provider, providerAccessRemoved: false as const } : {};
+    if (was) after(() => noticeCreator(store, { kind: "meeting-disconnected", name: ACCOUNT_NAMES[provider], account: was.account, ...said }));
+    return Response.json({
+      ok: true,
+      view: await meetView(store.statsId, store),
+      ...(providerAccessRemoved === false ? { providerAccessRemoved: false } : {}),
+      ...(sharedGrantKept ? { sharedGrantKept: true } : {}),
+    });
   } catch (error) {
     console.error("disconnecting a meeting account failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

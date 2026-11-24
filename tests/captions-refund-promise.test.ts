@@ -35,11 +35,15 @@ for (const [name, text] of Object.entries(sources)) {
   is(`${name}: a deleted lesson video is refunded without waiting for the hours`, /video\s+is\s+deleted[^.]{0,120}without\s+waiting/.test(text), true);
 }
 
-part("A charged request that never reached the provider is refunded without the wait too (Claude 5 ia5d's LEVE on #5456)");
+part("A charged request that never reached the provider is refunded usually within 15 minutes, otherwise after the hours (Claude 5 ia5d's and iaqyQ's LEVE on #5456)");
 is("the code refunds a charged order whose record was never confirmed, from the queue after ORDER_SETTLE_MS",
   /export const ORDER_SETTLE_MS = 15 \* 60_000;/.test(readFileSync("lib/auto-captions.ts", "utf8")), true);
+// When the record's write landed but neither its reply nor its read-back reads, the key holds a Pending record, and the
+// sweep refunds it only past GIVE_UP_HOURS (iaqyQ's probe: refunds 0 at T+2 h, 1 at T+49 h): no text promises less.
 for (const [name, text] of Object.entries(sources)) {
-  is(`${name}: a request that never reaches the provider is refunded without waiting`, /never\s+reaches\s+(our|the)\s+video\s+provider[^.]{0,160}without\s+waiting/.test(text), true);
+  is(`${name}: never promises a request that never reached the provider is refunded without waiting`, /never\s+reaches\s+(our|the)\s+video\s+provider[^.;]{0,160}without\s+waiting/.test(text), false);
+  is(`${name}: says it is refunded usually within 15 minutes, otherwise at the first check after the hours`,
+    /never\s+reaches\s+(our|the)\s+video\s+provider[^.;]{0,120}usually\s+within\s+15\s+minutes[^.;]{0,80}first\s+check\s+after/.test(text), true);
 }
 
 part("The Terms and the help say what happens when the provider never confirms");

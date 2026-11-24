@@ -1333,7 +1333,7 @@ const RESSALVA = /\?|→|->|\b(?:not|once|if|unless|until|conditional\w*|pending
 const GRAU_RE = String.raw`(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL|findings?|achados?|issues?|defects?|defeitos?|notes?)s?`;
 const GRAU_CONTADO = new RegExp(String.raw`\b(?:[1-9]\d*|um|uma|one|two|three|several|some|dois|duas|tr[eê]s|alguns|algumas)\s+${GRAU_RE}\b`, "i");
 const GRAU = new RegExp(String.raw`\b${GRAU_RE}\b`, "i");
-const ZERO_RE = String.raw`(?:(?:0|zero|no|sem|nenhum|nenhuma|none)\s+${GRAU_RE}(?:\s+of\s+any\s+level)?(?:,?\s*${GRAU_RE}\s+included)?|no\s+defect\s+of\s+any\s+level(?:,?\s*${GRAU_RE}\s+included)?)`;
+const ZERO_RE = String.raw`(?:(?:0|zero|no|sem|nenhum|nenhuma|none)\s+${GRAU_RE}(?:\s+of\s+any\s+level)?(?:,?\s*${GRAU_RE}\s+included)*|no\s+defect\s+of\s+any\s+level(?:,?\s*${GRAU_RE}\s+included)*)`;
 const ZERO_ACHADOS = new RegExp(String.raw`\b${ZERO_RE}\b`, "i");
 const ZERO_G = new RegExp(String.raw`\b${ZERO_RE}\b`, "gi");
 const LOGO_DEPOIS = new RegExp(String.raw`^\s*(?:$|\.(?:\s|$)|[,;:—–-]?\s*\(?\s*${ZERO_RE}\b|[,;:—–-]?\s*\([^()\n]*\b${ZERO_RE}\b[^()\n]*\))`, "i");
@@ -1342,7 +1342,9 @@ const LOGO_DEPOIS = new RegExp(String.raw`^\s*(?:$|\.(?:\s|$)|[,;:—–-]?\s*\(
 // @91bae56314).
 // Um grau com nome (GRAVE, ALTO, MÉDIO, LEVE, NIT...) recusa sempre; uma palavra genérica ("finding", "achado",
 // "issue") só com contagem acima de zero: "the ZA check of every earlier finding" descreve, não aponta achado.
-const GRAU_NOMEADO = /\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)s?\b/i;
+// Em maiúsculas, como as revisões daqui escrevem o grau; minúsculas são palavras comuns ("alta cobertura", "high-risk",
+// "low fee", "leve"); só "nit"/"nits" vale também em minúsculas (LEVE do Claude 3 wSUb3 no #5408 @0aefb8aa0f).
+const GRAU_NOMEADO = /\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)S?\b|\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)s\b|\bnits?\b/;
 function abreAchado(texto) {
   const semZeros = String(texto ?? "").replace(ZERO_G, " ");
   return RESSALVA.test(texto) || GRAU_CONTADO.test(semZeros) || GRAU_NOMEADO.test(semZeros);

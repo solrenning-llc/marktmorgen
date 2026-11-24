@@ -22,6 +22,7 @@ import { emailKey, studentEmail, studentsOf } from "@/lib/learn";
 import { canSellProduct } from "@/lib/store-checkout";
 import { passedFor } from "@/lib/quiz";
 import { CERT_BACKFILL_PER_DRAW, certificatesFor } from "@/lib/certificate";
+import { certsHref, certsPageOf } from "@/lib/certificate-pages";
 import { CertificateValidity } from "@/components/certificate-validity";
 import {
   CertificateSwitch, CourseAccessEnd, CourseStart,
@@ -117,14 +118,9 @@ export default async function StudioCoursePage({
   const quizLessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz).map(({ lesson }) => lesson.id);
   const passed = quizLessons.length ? await passedFor(course.id, students.map((s) => emailKey(s.email))) : [];
   // One page of the course's certificates, newest first (#4304): a draw reads a bounded page whatever the course holds.
-  const certsPage = typeof query.certs === "string" && /^[0-9]{1,6}$/.test(query.certs) ? Number(query.certs) : 0;
-  // A page of the certificates, keeping the page's other choices (lesson=, work=; Claude 5 iYnra's NIT 9 on #5481).
-  const certsHref = (to: number) => {
-    const kept = new URLSearchParams();
-    for (const [name, value] of Object.entries(query)) if (name !== "store" && name !== "certs" && typeof value === "string") kept.set(name, value);
-    if (to > 0) kept.set("certs", String(to));
-    return `${studioPath(store, kept.toString(), `course/${product.id}`)}#certificates`;
-  };
+  const certsPage = certsPageOf(query.certs);
+  // A page of the certificates, keeping the page's other choices (lib/certificate-pages.ts).
+  const certsHrefTo = (to: number) => certsHref(store, product.id, query, to);
   // The empty state only when none was ever issued (certificates.total === 0); a page that lists none of many says so
   // (Claude 3 wSUb3's and Claude 5 iYnra's MEDIUM on #5481).
   const certificates = await certificatesFor(course.id, { room: store, page: certsPage }).catch(() => null);
@@ -357,13 +353,15 @@ export default async function StudioCoursePage({
           ) : (
             <>
             {certificates.list.length === 0 ? (
-              <p className="mt-3 text-sm text-ink-soft" role="status">
-                {certsPage > 0
-                  ? "No certificates on this page. Go back to the newer ones."
-                  : certificates.unlisted > 0
-                    ? "The certificates of this course are not in this list yet."
-                    : "No certificate of this course can be shown here: their records are gone or cannot be read."}
-              </p>
+              // On the first page with none listed and some waiting, only the note below speaks, once (Claude 5 ic5y3's
+              // LEVE 4 on #5481).
+              certsPage === 0 && certificates.unlisted > 0 ? null : (
+                <p className="mt-3 text-sm text-ink-soft" role="status">
+                  {certsPage > 0
+                    ? "No certificates on this page. Go back to the newer ones."
+                    : "None of this course's certificates can be shown here. Their records are missing or can't be read."}
+                </p>
+              )
             ) : (
             <>
             {seesBuyers ? null : <p className="mt-3 text-sm text-ink-soft">{NO_BUYER_ADDRESSES}</p>}
@@ -410,7 +408,8 @@ export default async function StudioCoursePage({
               // Said as it is (#5481): stopped (its place does not read), failed on this visit and tried again on the next,
               // held by a full room, or added a few each visit.
               <p className="mt-3 text-sm text-ink-soft" role="status">
-                {`${certificates.unlisted} older ${certificates.unlisted === 1 ? "certificate is" : "certificates are"} not in this list yet. `}
+                {/* "older" only beside newer ones shown, or on a later page. */}
+                {`${certificates.unlisted}${certificates.list.length === 0 && certsPage === 0 ? "" : " older"} ${certificates.unlisted === 1 ? "certificate is" : "certificates are"} not in this list yet. `}
                 {certificates.walkProblem === "place"
                   ? "They can't be added for now. Your students' certificates stay valid."
                   : certificates.walkProblem === "step"
@@ -423,12 +422,12 @@ export default async function StudioCoursePage({
             {certsPage > 0 || certificates.more ? (
               <nav aria-label="Pages of certificates" className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
                 {certsPage > 0 ? (
-                  <Link href={certsHref(certsPage - 1)} className="inline-flex min-h-11 items-center font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
+                  <Link href={certsHrefTo(certsPage - 1)} className="inline-flex min-h-11 items-center font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
                     Newer certificates
                   </Link>
                 ) : null}
                 {certificates.more ? (
-                  <Link href={certsHref(certsPage + 1)} className="inline-flex min-h-11 items-center font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
+                  <Link href={certsHrefTo(certsPage + 1)} className="inline-flex min-h-11 items-center font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
                     Older certificates
                   </Link>
                 ) : null}

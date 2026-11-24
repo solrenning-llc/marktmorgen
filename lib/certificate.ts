@@ -437,7 +437,8 @@ export async function issueCertificate(input: {
 /**
  * Puts a standing certificate on its course's by-time list when it is not there (#4304): one whose press failed after
  * its slot was claimed, or one issued before that list was kept. Its entry's room is taken before the write and given
- * back when another draw or press added it meanwhile; with the room full it is left for the studio's walk. A press
+ * back when another draw or press added it meanwhile; with the room full it is left for the studio's walk, which starts a
+ * new round when the set holds more off the list than it last left (`done:<gap>`, Claude 5 ic5y3's LEVE 1). A press
  * that failed after taking the room for that entry took it once more here, which only ever counts too much, never too
  * little. Each reply read exactly; any other throws (rule 24).
  */
@@ -578,18 +579,23 @@ export async function certificatesFor(courseId: string, options: { room?: DataSt
   if (!counted || counted.length !== 4 || !counted.slice(0, 3).every((n) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0)) return null;
   const [total, listedBefore, standing] = counted as number[];
   if (total === 0) return empty;
-  const state = readWalk(counted[3]);
+  const read0 = readWalk(counted[3]);
   let listed = listedBefore;
   let roomFull = false;
-  let done = state === "done" || listed >= total;
+  // A walk that ended keeps the gap it could not close (records gone, malformed or another course's). An id that reaches
+  // the set later without its by-time place (an issue whose pipeline broke after its SADDs, a re-press in a full room)
+  // makes the gap larger, and a new round starts from the walk's kept place (Claude 5 ic5y3's LEVE 1 on #5481).
+  const ended = read0 !== null && "gap" in read0 ? read0 : null;
+  let done = listed >= total || (ended !== null && total - listed <= ended.gap);
+  const state: Walk | null = ended ? (done ? null : { cursor: "0", offset: 0, added: false }) : (read0 as Walk | null);
   let walkProblem: CertificatePage["walkProblem"] = null;
-  if (!done && state === null) {
+  if (!done && read0 === null) {
     // A place that does not read is left alone, never started again on a guess; logged, and said on the page.
     walkProblem = "place";
     console.error("the studio's walk of a course's older certificates stopped: its place does not read", courseId);
   }
-  if (!done && options.room && state !== null && state !== "done") {
-    const walked = await addOlder(courseId, options.room, state).catch((error: unknown) => {
+  if (!done && options.room && state !== null) {
+    const walked = await addOlder(courseId, options.room, state, total - listed).catch((error: unknown) => {
       console.error("the studio's walk of a course's older certificates failed; the next draw tries again", courseId, error);
       return null;
     });
@@ -630,19 +636,23 @@ export async function certificatesFor(courseId: string, options: { room?: DataSt
 export const CERT_WALK_SECONDS = 60 * 86_400;
 /**
  * Where the studio's walk of a course's set stands (#4304): the SSCAN cursor, how far into that cursor's page it has
- * looked, and whether this cycle added any; or "done" once a whole cycle added none, so what is left can never be
- * added (a record that is gone, does not read or is another course's) and the walk stops (Claude 5 iYnra's LEVE 4 on
- * #5481). Null for a value that does not read: the walk is left alone, never started again on a guess.
+ * looked, and whether this cycle added any; or "done:<gap>" once a whole cycle added none, so what is left can never
+ * be added (a record that is gone, does not read or is another course's) and the walk stops (Claude 5 iYnra's LEVE 4 on
+ * #5481), until the set holds more off the list than that gap (Claude 5 ic5y3's LEVE 1). Null for a value that does
+ * not read: the walk is left alone, never started again on a guess.
  */
 type Walk = { cursor: string; offset: number; added: boolean; fresh?: boolean };
-function readWalk(raw: unknown): Walk | "done" | null {
+/** A walk that ended, with how many of the set it left off the by-time list (`total - listed` then). */
+type Ended = { gap: number };
+function readWalk(raw: unknown): Walk | Ended | null {
   if (raw === null || raw === undefined) return { cursor: "0", offset: 0, added: false, fresh: true };
-  if (raw === "done") return "done";
+  const ended = typeof raw === "string" ? /^done:([0-9]{1,9})$/.exec(raw) : null;
+  if (ended) return { gap: Number(ended[1]) };
   if (typeof raw !== "string") return null;
   const m = /^([0-9]{1,20}):([0-9]{1,6}):([01])$/.exec(raw);
   return m ? { cursor: m[1], offset: Number(m[2]), added: m[3] === "1" } : null;
 }
-const walkValue = (walk: Walk | "done") => (walk === "done" ? "done" : `${walk.cursor}:${walk.offset}:${walk.added ? 1 : 0}`);
+const walkValue = (walk: Walk | Ended) => ("gap" in walk ? `done:${walk.gap}` : `${walk.cursor}:${walk.offset}:${walk.added ? 1 : 0}`);
 /** The room the walk's place takes (dataBytes of its longest value, one entry), for CERT_WALK_SECONDS at a time. */
 const WALK_BYTES = dataBytes(["99999999999999999999:999999:1"], 1);
 
@@ -657,7 +667,7 @@ const WALK_BYTES = dataBytes(["99999999999999999999:999999:1"], 1);
  * for CERT_WALK_SECONDS when it is first written, kept that long and then gone (Claude 5 iYnra's LEVE 5 on #5481).
  * Throws when a reply does not read (rule 24); the caller then leaves the walk for the next draw.
  */
-async function addOlder(courseId: string, room: DataStore, walk: Walk): Promise<{ added: number; roomFull: boolean; done: boolean }> {
+async function addOlder(courseId: string, room: DataStore, walk: Walk, waiting: number): Promise<{ added: number; roomFull: boolean; done: boolean }> {
   const what = "the studio's walk of a course's older certificates";
   const [scannedRaw] = exactReplies(await redisPipeline([["SSCAN", allKey(courseId), walk.cursor, "COUNT", CERT_BACKFILL_PER_DRAW]]), 1, what);
   const reply = plainList(scannedRaw);
@@ -706,15 +716,15 @@ async function addOlder(courseId: string, room: DataStore, walk: Walk): Promise<
   }
   const offset = walk.offset + CERT_BACKFILL_PER_DRAW;
   const cycleAdded = walk.added || added > 0;
-  const next: Walk | "done" =
+  const next: Walk | Ended =
     offset < page.length ? { cursor: walk.cursor, offset, added: cycleAdded }
     : reply[0] !== "0" ? { cursor: reply[0], offset: 0, added: cycleAdded }
     : cycleAdded ? { cursor: "0", offset: 0, added: false }
-    : "done";
+    : { gap: Math.max(0, waiting - added) };
   // A first place that does not fit is said as a full room, never a walk that silently never moves (Claude 5 iYwjc's
   // LEVE A on #5481): the step is tried again on a later draw, and what it added stays added (ZADD NX).
   const kept = await keepWalk(courseId, room, walk, next);
-  return { added, roomFull: !kept, done: kept && next === "done" };
+  return { added, roomFull: !kept, done: kept && "gap" in next };
 }
 
 /**
@@ -723,7 +733,7 @@ async function addOlder(courseId: string, room: DataStore, walk: Walk): Promise<
  * write finds the room full: nothing is written, and the caller says the room is full. A room that could not be read
  * throws, and the walk is left for the next draw.
  */
-async function keepWalk(courseId: string, room: DataStore, before: Walk, next: Walk | "done"): Promise<boolean> {
+async function keepWalk(courseId: string, room: DataStore, before: Walk, next: Walk | Ended): Promise<boolean> {
   const what = "the studio's walk of a course's older certificates";
   // Only a walk whose place was not kept yet (no key) takes room; one that went round and starts again keeps its key.
   if (before.fresh) {

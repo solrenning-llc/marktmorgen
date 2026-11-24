@@ -125,10 +125,26 @@ async function main(): Promise<void> {
   let deadPage = await certificatesFor(DEAD, { room: ROOM });
   for (let draw = 0; draw < 6 && (deadPage?.unlisted ?? 1) > 0; draw += 1) deadPage = await certificatesFor(DEAD, { room: ROOM });
   is("the two that can be added are listed", deadPage?.list.length ?? null, 2);
-  is("and once a whole round added none, the walk is done: nothing more is said as waiting", [deadPage?.unlisted, redis.run(["GET", cursorKey(DEAD)])], [0, "done"]);
+  is("and once a whole round added none, the walk is done, with the 30 it could not add kept as its gap: nothing more is said as waiting", [deadPage?.unlisted, redis.run(["GET", cursorKey(DEAD)])], [0, "done:30"]);
   const [deadSteady, deadCommands] = await counted(() => certificatesFor(DEAD, { room: ROOM }));
   is("so a draw is steady again, 6 commands", [deadSteady?.unlisted, deadCommands], [0, 6]);
   is("the walk's place expires (it never stays for good)", Number(redis.run(["TTL", cursorKey(DEAD)])) > 0, true);
+
+  part("A done walk sees an id that reaches the set later without its by-time place (Claude 5 ic5y3's LEVE 1 on #5481)");
+  const LATE = "1".repeat(12);
+  seedOlder(LATE, 80_000, 3);
+  redis.run(["SADD", allKey(LATE), idOf(80_900)]);
+  let lateDraw = await certificatesFor(LATE, { room: ROOM });
+  for (let draw = 0; draw < 4 && !String(redis.run(["GET", cursorKey(LATE)])).startsWith("done"); draw += 1) lateDraw = await certificatesFor(LATE, { room: ROOM });
+  is("setup: the walk is done with the one dead id as its gap", [lateDraw?.list.length, lateDraw?.unlisted, redis.run(["GET", cursorKey(LATE)])], [3, 0, "done:1"]);
+  // An issue whose pipeline broke after its SADDs: the record and the set hold it, the by-time list does not.
+  redis.run(["SET", certKey(idOf(80_901)), record(idOf(80_901), LATE, T0 + 901)]);
+  redis.run(["SADD", allKey(LATE), idOf(80_901)]);
+  const lateFound = await certificatesFor(LATE, { room: ROOM });
+  is("the next draw starts a new round and lists it, never leaving it out silently", [lateFound?.list.length, redis.run(["ZSCORE", atKey(LATE), idOf(80_901)]) !== null], [4, true]);
+  const lateSettled = await certificatesFor(LATE, { room: ROOM });
+  is("and the round that adds none ends the walk again, with the same gap: nothing said as waiting", [lateSettled?.list.length, lateSettled?.unlisted, redis.run(["GET", cursorKey(LATE)])], [4, 0, "done:1"]);
+  is("the walk's place keeps its expiry through the new round", Number(redis.run(["TTL", cursorKey(LATE)])) > 0, true);
 
   part("A full room adds nothing to the by-time list, and the page says the room is full");
   const FULL = "a".repeat(12);
@@ -161,7 +177,7 @@ async function main(): Promise<void> {
   const MID = "3".repeat(12);
   seedOlder(MID, 60_000, 30);
   const mid1 = await certificatesFor(MID, { room: ROOM });
-  is("control: a walk mid-way with room is said as going, its place valid and not done", [mid1?.walkProblem, mid1?.unlisted, mid1?.roomFull, redis.run(["GET", cursorKey(MID)]) !== "done"], [null, 30 - CERT_BACKFILL_PER_DRAW, false, true]);
+  is("control: a walk mid-way with room is said as going, its place valid and not done", [mid1?.walkProblem, mid1?.unlisted, mid1?.roomFull, !String(redis.run(["GET", cursorKey(MID)])).startsWith("done")], [null, 30 - CERT_BACKFILL_PER_DRAW, false, true]);
   is("and a full room is said as the room, never as a stopped walk", [full?.walkProblem, noPlace?.walkProblem], [null, null]);
   const AFTER = "2".repeat(12);
   seedOlder(AFTER, 70_000, 3);
@@ -259,6 +275,56 @@ async function main(): Promise<void> {
   const raced = await used(ROOM);
   await issueCertificate(issueInput(ISSUE, "raceda"));
   is("an issue whose by-time entry another draw added gives its own reserved entry back", (await used(ROOM)) - raced, controlTaken - ENTRY_BYTES);
+
+  part("A re-press puts a standing certificate back on the by-time list with its guards (Claude 5 ic5y3's LEVE 2 on #5481)");
+  const RE = courseOf("8".repeat(32));
+  /** One student's standing certificate, taken off the by-time list as a press that failed after its slot left it. */
+  const unplaced = async (who: string) => {
+    const issued = await issueCertificate(issueInput(RE, who));
+    if (!issued.ok) throw new Error("setup: no certificate");
+    redis.run(["ZREM", atKey(RE.id), issued.certificate.id]);
+    return issued.certificate.id;
+  };
+  const isPlacement = (batch: (string | number)[][]) => batch.length === 1 && batch[0][0] === "ZADD" && batch[0][1] === atKey(RE.id);
+  const isPlacementRead = (batch: (string | number)[][]) => batch.length === 1 && batch[0][0] === "ZSCORE" && batch[0][1] === atKey(RE.id);
+  // 1. Another draw adds the entry between the re-press's read and its ZADD: the re-press's own entry comes back.
+  const racedId = await unplaced("repres");
+  before = (batch) => {
+    if (isPlacement(batch)) {
+      before = null;
+      redis.run(["ZADD", atKey(RE.id), T0, racedId]);
+    }
+    return null;
+  };
+  const racedRoom = await used(ROOM);
+  const racedPress = await issueCertificate(issueInput(RE, "repres"));
+  is("a re-press whose by-time entry a draw added first: the standing one, and its own entry given back", [racedPress.ok, (await used(ROOM)) - racedRoom], [true, 0]);
+  // 2. An erasure between the re-press's read and its ZADD: the id is taken off again, its entry given back.
+  const erasedId = await unplaced("reeras");
+  before = (batch) => {
+    if (isPlacementRead(batch)) {
+      before = null;
+      redis.run(["DEL", certKey(erasedId)]);
+    }
+    return null;
+  };
+  const erasedRoom = await used(ROOM);
+  await issueCertificate(issueInput(RE, "reeras"));
+  is("an erasure between the re-press's read and its ZADD: off the by-time list, and the room as before", [redis.run(["ZSCORE", atKey(RE.id), erasedId]), (await used(ROOM)) - erasedRoom], [null, 0]);
+  // 3. The room full for the entry alone: the student still gets the certificate they hold, and no entry is taken.
+  const fullId = await unplaced("refull");
+  let scored = false;
+  before = (batch) => {
+    if (isPlacementRead(batch)) scored = true;
+    else if (scored && batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:store-data:v1")) {
+      before = null;
+      return [[0, 999_999_999]];
+    }
+    return null;
+  };
+  const fullPress = await issueCertificate(issueInput(RE, "refull")).catch(() => null);
+  before = null;
+  is("a re-press with the room full for its entry: ok with the standing certificate, left off the by-time list for the walk", [fullPress?.ok, fullPress?.ok ? fullPress.certificate.id : null, redis.run(["ZSCORE", atKey(RE.id), fullId])], [true, fullId, null]);
 
   done();
 }

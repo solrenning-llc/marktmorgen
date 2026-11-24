@@ -50,7 +50,7 @@ import { readStreamPath, STREAM_ID_PATTERN } from "@/lib/stream-rules";
 import { captionLabel } from "@/lib/captions";
 import { chargeNow, isBillingConfigured, onPlatformAt, refundCharge, refundsOnIntent } from "@/lib/billing";
 import type { Store } from "@/lib/store";
-import { DELIVERY_LOOK_DAYS, GIVE_UP_HOURS, MAX_AUTO_MINUTES, autoCaptionCents, chargedMinutes, readAutoAsk } from "@/lib/auto-captions-rules";
+import { DELIVERY_LOOK_DAYS, GIVE_UP_HOURS, MAX_AUTO_MINUTES, ORDER_LOOK_DAYS, autoCaptionCents, chargedMinutes, readAutoAsk } from "@/lib/auto-captions-rules";
 
 const pendingKey = (id: string) => `nl:stream:auto:${id}`;
 /** The videos of one store folder with captions money not settled: a refund owed, or a charge kept for a person. */
@@ -71,7 +71,7 @@ const REFUND_KEEP_SECONDS = 400 * 86_400;
  */
 export const ORDER_SETTLE_MS = 15 * 60_000;
 /** An order Stripe's invoices cannot settle is looked at, further apart each time, for this long; then kept for a person. */
-const ORDER_LOOKS_MS = 14 * 86_400_000;
+const ORDER_LOOKS_MS = ORDER_LOOK_DAYS * 86_400_000;
 /**
  * Past GIVE_UP_HOURS, a request whose answer from the service stays unknown is looked at, further apart each time,
  * for this long; then kept for a person, never refunded on an unknown answer and never dropped.

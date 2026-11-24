@@ -1,7 +1,7 @@
 import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
 import { BUYER_CAP_MONTHS, BUYER_NOTICE_DAYS } from "@/lib/closing-buyers-rules";
 import { CLOSING_CHECKOUT_SECONDS } from "@/lib/closing-plan-guard";
-import { CENTS_PER_MINUTE, DELIVERY_LOOK_DAYS, GIVE_UP_HOURS, MIN_CENTS, dollars } from "@/lib/auto-captions-rules";
+import { CENTS_PER_MINUTE, DELIVERY_LOOK_DAYS, GIVE_UP_HOURS, MIN_CENTS, ORDER_LOOK_DAYS, dollars } from "@/lib/auto-captions-rules";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
@@ -558,8 +558,10 @@ export default function TermsPage() {
           refunded at once. If a request that was charged never reaches our
           video provider, what was paid for it is refunded automatically,
           usually within the hour, and otherwise at our first check after the
-          hours below; if Stripe or our video provider cannot tell us what
-          happened, we keep checking as described below. If the lesson&apos;s video is deleted before its
+          hours below. If Stripe cannot tell us whether it was paid, we keep
+          checking on our own for {ORDER_LOOK_DAYS} days after the order, then
+          look into it by hand; if our video provider cannot tell us what it
+          received, as described below. If the lesson&apos;s video is deleted before its
           captions are delivered, what was paid for them is refunded without
           waiting for the hours below. For a request that reached our video
           provider, what was paid for a

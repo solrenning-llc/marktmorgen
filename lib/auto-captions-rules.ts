@@ -44,6 +44,8 @@ export const GIVE_UP_HOURS = 48;
  * kept for a person (lib/auto-captions.ts, DELIVERY_LOOKS_MS). The Terms and the help say it in these words.
  */
 export const DELIVERY_LOOK_DAYS = 14;
+/** How long a charge Stripe's invoices cannot settle is looked at, from the order, before it is kept for a person (lib/auto-captions.ts). */
+export const ORDER_LOOK_DAYS = 14;
 
 /** Minutes of video, as they are charged: rounded up. */
 export function chargedMinutes(seconds: number): number {

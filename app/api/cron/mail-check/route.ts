@@ -7,6 +7,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Check, verifyAmazonAccount, verifyHostToken, verifyMailLoop, verifyProviderUsage } from "@/lib/verify-mail";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { timed, withCutoff } from "@/lib/fetch-timeout";
+import { failedNames } from "@/lib/health-check-status";
 import { STATUS_CHECKS, statusRunCommands, statusRunResult } from "@/lib/status-page";
 
 // The senders announce a bounce within seconds and a spam report within a
@@ -21,7 +22,8 @@ const RUN_MS = 160_000;
  * Run every day by Vercel: a list email's bounce and spam report, all the way
  * out through each sender and back (lib/verify-mail.ts), and the token and
  * key Amazon is reached with. The last answer is kept; the site's own inbox
- * hears when a check fails, and again when all pass after a failure. Nobody
+ * hears when a check fails, and again when all pass after a failure. A run with a failed check answers HTTP 500
+ * with error "failed" and the names of the failed checks (failed); a passing run answers 200. Nobody
  * else can start it: only Vercel's scheduled call carries the secret.
  */
 export async function GET(request: NextRequest) {
@@ -106,7 +108,12 @@ export async function GET(request: NextRequest) {
       // Kept for the public status page (lib/status-page.ts), after the save and the notice and apart from
       // them, so its failure stops neither: its time and whether a delivery loop ran and passed, nothing else.
       await redisPipeline(statusRunCommands(STATUS_CHECKS[0].key, at, statusRunResult(checks))).catch((error) => console.error("keeping the mail check's run for the status page failed", error));
-      return Response.json({ ok, checks, usage }, { headers: { "Cache-Control": "no-store" } });
+      // A failed check is the cron routes' failed-run answer (issue #4147): HTTP 500 with error "failed", as
+      // affiliates, shares and monthly answer (Claude 5 ichw on #5472), after every side effect above, so a monitor
+      // reading the status never takes it for a good run; the body still names each check, and which failed.
+      return ok
+        ? Response.json({ ok, checks, usage }, { headers: { "Cache-Control": "no-store" } })
+        : Response.json({ ok, error: "failed", checks, usage, failed: failedNames(checks) }, { status: 500, headers: { "Cache-Control": "no-store" } });
     } finally {
       await releaseMark("nl:mail-check:lock", lock);
     }

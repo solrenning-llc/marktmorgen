@@ -167,6 +167,28 @@ const listedAs = (prefix: string): { member: string; score: number } | null => {
     is("the offer is not listed again", listedAs(`broken|${settled}|`), null);
   }
 
+  // Claude 5 id8Ws on #5482 @6ce9cb447e: the entry's replacement by the one carrying its time is one step, so a write
+  // that fails never leaves a still-pending offer off the job's list.
+  part("A failed write while replacing an entry never takes a still-pending offer off the list");
+  redis.clear();
+  {
+    const kept = "cs_test_keptonfailure001";
+    const began = Date.now() - 10 * 60_000;
+    redis.run(["SET", `nl:upsell:${kept}`, JSON.stringify({ state: "pending", product: "p1", pi: "pi_kept", at: began })]);
+    redis.run(["ZADD", PENDING, began, `quiet|${kept}|`]);
+    const writes = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      // The write that puts the entry carrying its time on the list fails, as Redis can (a timeout, a refused write).
+      if (commands.some((c) => (c[0] === "ZADD" && String(c.at(-1)).includes("|at:")) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:upsell-pending-swap:")))) {
+        throw new Error("synthetic refused write");
+      }
+      return writes(commands);
+    }) as typeof redis.pipeline;
+    await settlePendingOffers(async () => null, Date.now() + 10_000);
+    redis.pipeline = writes;
+    is("the offer is still on the job's list, still pending", [listedAs(`quiet|${kept}|`) !== null, JSON.parse(String(redis.run(["GET", `nl:upsell:${kept}`]))).state], [true, "pending"]);
+  }
+
   // Claude 5 ichw's LEVE 4 on #5482: a record that has expired is let go at its next look.
   part("A record that has expired is let go at its next look");
   redis.clear();

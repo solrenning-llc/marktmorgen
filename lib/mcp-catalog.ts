@@ -246,3 +246,39 @@ export const MCP_TOOLS: readonly McpTool[] = DRAFTS.map((tool) => {
   const title = TITLES[tool.name] ?? "";
   return { ...tool, title, annotations: { ...tool.annotations, title } };
 });
+
+/** A property of a tool's inputSchema, in the subset this catalog writes: a type, and for a number maybe an enum. */
+type PropertySchema = { type?: unknown; enum?: unknown };
+
+/**
+ * Why a tools/call's `arguments` do not match the named tool's own inputSchema, or null when they do (#4346): the
+ * arguments an object (or left out, as no arguments), no property the schema does not list (additionalProperties
+ * false), each one of its type ("string", or a finite "number"), within its enum, and every required one there. Null
+ * also for a name that is no tool: the route answers that on its own. Checked before the key or any read, so a call
+ * the contract forbids is never answered as a different reading.
+ */
+export function argumentsProblem(name: string, args: unknown): string | null {
+  const tool = MCP_TOOLS.find((one) => one.name === name);
+  if (!tool) return null;
+  // No arguments, sent as missing or as null, is an empty object: the MCP spec makes arguments optional, and a client
+  // that sends null for a tool without arguments is not refused (Claude 1's NIT on #5228).
+  if (args === undefined || args === null) args = {};
+  if (typeof args !== "object" || Array.isArray(args)) return "arguments must be an object";
+  const given = args as Record<string, unknown>;
+  const properties = tool.inputSchema.properties as Record<string, PropertySchema>;
+  for (const [key, value] of Object.entries(given)) {
+    const schema = Object.hasOwn(properties, key) ? properties[key] : undefined;
+    if (!schema) {
+      if (tool.inputSchema.additionalProperties === false) return `${key} is not an argument of ${name}`;
+      continue;
+    }
+    // A known argument sent as null is read as left out, as every reader in app/api/mcp/route.ts reads it (version:
+    // null is the list, as before #5228; Claude 5 ibuF's LOW on #5228). A required one is still required below.
+    if (value === null) continue;
+    if (schema.type === "string" && typeof value !== "string") return `${key} must be a string`;
+    if (schema.type === "number" && !(typeof value === "number" && Number.isFinite(value))) return `${key} must be a number`;
+    if (Array.isArray(schema.enum) && !schema.enum.includes(value)) return `${key} must be one of ${schema.enum.join(", ")}`;
+  }
+  for (const key of tool.inputSchema.required ?? []) if (!Object.hasOwn(given, key) || given[key] === null) return `${key} is required`;
+  return null;
+}

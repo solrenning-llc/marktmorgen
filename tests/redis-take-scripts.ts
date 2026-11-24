@@ -11,6 +11,19 @@ type Command = (string | number)[];
 type Script = (run: (command: Command) => unknown, keys: string[], argv: string[]) => unknown;
 
 const SCRIPTS: Record<string, Script> = {
+  // lib/product-about-live.ts ABOUT_WRITE_IF_STORE_LIVE: a store's product description written (or compared and written) only
+  // while it is not erasing and its id key still holds its ref. {1} written, {0, length} changed, {-1} gone, moved or erasing.
+  "about-write-live:v2": (run, [storeId, erasing, about], [field, compare, expected, text, ref]) => {
+    if (run(["HGET", erasing, field]) !== null) return [-1];
+    if (run(["GET", storeId]) !== ref) return [-1];
+    if (compare === "1") {
+      const now = run(["GET", about]);
+      const held = typeof now === "string" ? now : "";
+      if (held !== expected) return [0, Buffer.byteLength(held, "utf8")];
+    }
+    run(text === "" ? ["DEL", about] : ["SET", about, text]);
+    return [1];
+  },
   // lib/card-update.ts KEEP_CARD_OPEN_IF_LIVE: a setup page kept only while its store (id key, or record before ids) is live.
   "card-open-live:v1": (run, [storeId, erasing, open], [erasingField, session, seconds]) => {
     if (run(["EXISTS", storeId]) !== 1 || run(["HEXISTS", erasing, erasingField]) === 1) return "gone";
@@ -40,6 +53,12 @@ const SCRIPTS: Record<string, Script> = {
     run(["SET", key, value]);
     return 1;
   },
+  "store-forget-complete:v1": (run, [queue, month], [field, seconds]) => {
+    if (run(["HDEL", queue, field]) !== 1) return [0, 0];
+    const done = run(["HINCRBY", month, "done", 1]);
+    run(["EXPIRE", month, seconds]);
+    return [1, done];
+  },
   "set-take-count:v1": (run, [set]) => {
     const n = Number(run(["SCARD", set])) || 0;
     run(["DEL", set]);
@@ -66,6 +85,29 @@ const SCRIPTS: Record<string, Script> = {
     run(["SET", key, value, "EX", seconds]);
     return 1;
   },
+  // lib/live-fence.ts PUSH_IF_STORE_LIVE: a line pushed onto a bounded, renewed list only while the store is not
+  // erasing and its key is still its own, by the same identity rule (Codex L-20261120-2338).
+  "store-push-live:v1": (run, [live, erasing, key], [field, value, seconds, statsId, ref, most]) => {
+    if (run(["HGET", erasing, field]) !== null) return 0;
+    if (statsId === "") {
+      if (run(["GET", live]) !== ref) return 0;
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return 0;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -1;
+      }
+      if (!record || typeof record !== "object") return -1;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+    }
+    run(["LPUSH", key, value]);
+    run(["LTRIM", key, "0", String(Number(most) - 1)]);
+    run(["EXPIRE", key, seconds]);
+    return 1;
+  },
   // lib/store-live-cache.ts CLAIM_IF_STORE_LIVE: a mark taken once (SET NX) only while the store is its own and not
   // erasing, by the same identity rule; -1 gone or erasing, -2 an owner's record that does not parse, 1 ours, 0 taken.
   "store-claim-live:v1": (run, [live, erasing, key], [field, value, seconds, statsId, ref]) => {
@@ -84,7 +126,8 @@ const SCRIPTS: Record<string, Script> = {
       if (!record || typeof record !== "object") return -2;
       if ((record as { statsId?: unknown }).statsId !== statsId) return -1;
     }
-    return run(["SET", key, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
+    // An empty `seconds` keeps the mark for good (claimWhileStoreLive with null; Codex L-20261120-1745).
+    return run(seconds === "" ? ["SET", key, value, "NX"] : ["SET", key, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
   },
   "zset-take-count:v1": (run, [zset]) => {
     const n = Number(run(["ZCARD", zset])) || 0;
@@ -110,8 +153,8 @@ const SCRIPTS: Record<string, Script> = {
     run(["DEL", set, ...plain]);
     return [members, values, gone];
   },
-  "recent-feed-live:v1": (run, [live, erasing, feed], [field, json, seconds]) => {
-    if (Number(run(["EXISTS", live])) !== 1 || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
+  "recent-feed-live:v2": (run, [live, erasing, feed], [field, json, seconds, ref]) => {
+    if (run(["GET", live]) !== ref || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
     run(["SET", feed, json, "EX", seconds]);
     return 1;
   },

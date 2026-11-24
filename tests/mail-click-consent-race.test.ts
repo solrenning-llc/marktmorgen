@@ -20,7 +20,7 @@ async function main(): Promise<void> {
   const list = store.listId as string;
   await upsertContact(list, email, { agreed: true, explicit: true, clicks: true, source: "free" }, ROOM);
   const token = (await tokensFor(list, [email], store.handle)).get(email)!;
-  await rememberLinkKeys([token]);
+  await rememberLinkKeys(list, [{ email, token }]);
   const key = linkKeyOf(token);
   const campaign = "s-0123456789abcdef-fedcba9876543210";
 

@@ -44,7 +44,7 @@ export const fetch = (...args: Parameters<typeof globalThis.fetch>) => globalThi
 
 // ---------------------------------------------------------------- @/lib/assignment-access
 
-export const STORE = { handle: "shop", name: "Shop", email: "creator@example.com", sid: "s-1", tier: "creator", subscriptionActive: true, trialEnds: 0, language: "en" };
+export const STORE = { handle: "shop", name: "Shop", email: "creator@example.com", sid: "s-1", listId: "list-1", tier: "creator", subscriptionActive: true, trialEnds: 0, language: "en" };
 /** A course's, a lesson's and two students' ids in the shapes lib/course.ts and lib/learn.ts make them. */
 export const COURSE = "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0";
 export const LESSON = "lesson000001";
@@ -79,3 +79,4 @@ export async function takeBuyerAction() {
 export async function takeBuyerRead() {
   return true;
 }
+export const takeBuyerReadExact = takeBuyerRead;

@@ -149,7 +149,9 @@ export function exitHoldSeconds(closedAt: number, now: number, quarantineDays: n
   const until = exitNoticeUntil(closedAt);
   if (until === null) return quarantine ?? notice;
   if (!Number.isFinite(now)) return Math.max(quarantine ?? 0, notice);
-  const left = Math.ceil((until - now) / 1000);
+  // Never past the notice counted from now (Claude 1 on #3648, LEVE): a closedAt later than now is not the real closing
+  // day, and the hold's code ceiling stays the 90 days the cost line pays for.
+  const left = Math.min(Math.ceil((until - now) / 1000), notice);
   return Math.max(quarantine ?? notice, left);
 }
 
@@ -176,4 +178,81 @@ export function exitAnswer(input: { record: ExitNotice | null; holder: ExitHolde
   if (until === null) return { kind: "none" };
   if (now >= until) return { kind: "gone" };
   return { kind: "moved", to: record.to, host: record.host, until };
+}
+
+/**
+ * The value of a closed store's old address key (lib/store.ts,
+ * closeStoreRecord) is "released:" and the time; with a notice, the notice
+ * follows it in the same value. A visit to an old address already reads that
+ * key, so the notice costs no command more per visit, and the value is gone
+ * with the key: when another store takes the address, the notice goes with
+ * it. The value still starts "released:", so it never leads to a store
+ * (handleLeadsToStore in lib/store.ts, held by tests/exit-released-value.test.ts).
+ */
+const RELEASED = "released:";
+const EXIT_PART = " exit:";
+
+/**
+ * The longest such value: "released:", the longest time toISOString writes
+ * (27 characters for a year past 9999), the notice's part and its record as
+ * JSON, its address at the longest with every character written twice (a
+ * backslash in the query is the one character an address keeps that JSON
+ * escapes), its host at the longest a name may be (253) and two dates of 16
+ * digits.
+ */
+export const EXIT_RELEASED_MAX_BYTES =
+  RELEASED.length + 27 + EXIT_PART.length + '{"to":"","host":"","closedAt":,"setAt":}'.length + 2 * EXIT_DESTINATION_MAX + 253 + 2 * 16;
+
+/** The value written for an old address released at `at`, with the notice when there is one that reads. An invalid time throws. */
+export function releasedValue(at: Date, notice: ExitNotice | null): string {
+  const base = `${RELEASED}${at.toISOString()}`;
+  const kept = notice ? readExitNotice(notice) : null;
+  if (!kept) return base;
+  const value = `${base}${EXIT_PART}${JSON.stringify({ to: kept.to, host: kept.host, closedAt: kept.closedAt, setAt: kept.setAt })}`;
+  return value.length <= EXIT_RELEASED_MAX_BYTES ? value : base;
+}
+
+/** The notice kept in an old address's value, read whole or not at all. */
+export function exitFromReleased(raw: unknown): ExitNotice | null {
+  if (typeof raw !== "string" || raw.length > EXIT_RELEASED_MAX_BYTES || !raw.startsWith(RELEASED)) return null;
+  const split = raw.indexOf(EXIT_PART);
+  if (split < 0) return null;
+  const at = raw.slice(RELEASED.length, split);
+  // Only a time as releasedValue writes it: toISOString of itself (no bare number, no day that does not exist).
+  const ms = Date.parse(at);
+  if (!at || !Number.isFinite(ms) || new Date(ms).toISOString() !== at) return null;
+  return readExitNotice(raw.slice(split + EXIT_PART.length));
+}
+
+/**
+ * What a visitor to an old address is shown, from the one value the visit
+ * already read for it (lib/store.ts, handleLookup): a released value is held
+ * for nobody, so its notice, if it has one, is the closed store's own.
+ * Anything else, a live store's value or nothing read, gives no notice.
+ */
+export function exitAnswerForValue(raw: unknown, now: number): ExitAnswer {
+  const released = typeof raw === "string" && raw.startsWith(RELEASED);
+  return exitAnswer({ record: released ? exitFromReleased(raw) : null, holder: released ? "released" : "unknown", now });
+}
+
+/**
+ * The same notice from a store record that is still there: from the store's
+ * closing day until its record is deleted (lib/closed-store-data.ts, within
+ * ERASE_WITHIN_DAYS), its old address still finds it, and the notice its
+ * owner chose is shown instead of the store. Read from the record the page
+ * already has; a notice that does not read gives none.
+ */
+export function exitAnswerForStore(
+  store: { exitNotice?: unknown; suspended?: string },
+  closing: { day: number; today?: boolean } | null | "unknown",
+  now: number,
+): ExitAnswer {
+  // Only a store whose closing day has really begun (lib/plan-closing.ts closingOf, today): never one that gave up
+  // closing (null), whose closing could not be read, whose day moved later, or that is suspended. Its 90 days run
+  // from the day it really closed, not the one known when the address was chosen (review of #3730).
+  // A store's suspension is the day it was switched off (lib/store.ts), "" when it is not.
+  if ((typeof store.suspended === "string" ? store.suspended !== "" : Boolean(store.suspended)) || store.exitNotice === undefined) return { kind: "none" };
+  if (!closing || closing === "unknown" || closing.today !== true || !Number.isFinite(closing.day)) return { kind: "none" };
+  const record = readExitNotice(store.exitNotice);
+  return exitAnswer({ record: record ? { ...record, closedAt: closing.day } : null, holder: "released", now });
 }

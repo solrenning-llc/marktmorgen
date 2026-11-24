@@ -9,10 +9,11 @@
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/store/creator-card/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { CARD_REFUSALS, type CreatorCard, MAX_CARD_NAME, MAX_CARD_NOTE, NO_CARD, cardVcard, foldLine, parseCard, readCard, readCreatorCard, vcardFileName, vcardText } from "@/lib/creator-card";
+import { CARD_REFUSALS, type CreatorCard, MAX_CARD_NAME, MAX_CARD_NOTE, NO_CARD, cardVcard, foldLine, parseCard, readCard, readCreatorCard, saveCreatorCard, vcardFileName, vcardText } from "@/lib/creator-card";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { redisPipeline } from "@/lib/redis";
 import { dataKey } from "@/lib/store-data";
-import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
+import { claimHandle, closeStoreRecord, ensureStatsId, ensureStoreId, ERASING_KEY, erasingField, moveAccount, ownerKey, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -90,6 +91,123 @@ async function main(): Promise<void> {
   is("an action that is not one", (await post({ action: "print" })).body.error, "unknown");
   const stranger = await post({ action: "save", ...card }, {});
   is("no session: refused, and nothing kept", [stranger.status >= 400 && stranger.status < 500, await readCreatorCard(statsId)], [true, NO_CARD]);
+
+
+  for (const state of ["live", "erasing", "closed", "moved-live", "moved-erasing"] as const) {
+    part(`A card save already admitted when its store is ${state}`);
+    redis.clear();
+    const actor = "private-card@example.test", handle = "privatecard";
+    await claimHandle(actor, handle, "Private contact fixture", "");
+    await ensureStatsId(actor);
+    await ensureStoreId(actor);
+    await setSubscription(actor, { customerId: "cus_CardFence", subscriptionId: "sub_CardFence", active: true, tier: "creator", period: paidPeriod() });
+    const parent = (await storeForEmail(actor))!;
+    const actorCookie = `${SESSION_COOKIE}=${await openSession(actor)}`;
+    const request = (session: string) => POST(new NextRequest("https://marktmorgen.com/api/store/creator-card", {
+      method: "POST", headers: { "content-type": "application/json", cookie: session },
+      body: JSON.stringify({ action: "save", ...card, on: false }),
+    }));
+    const key = `nl:vcard:${parent.statsId}`, roomKey = dataKey(parent)!;
+    const pipeline = redis.pipeline.bind(redis);
+    let hits = 0;
+    redis.pipeline = async (commands) => {
+      if (!hits && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:card-save") && c[4] === key)) {
+        hits++;
+        let current = parent;
+        if (state.startsWith("moved")) {
+          const changed = await moveAccount(actor, "private-card-moved@example.test");
+          is("the real account move completes before the final card write", changed.ok, true);
+          const found = await storeForEmail("private-card-moved@example.test");
+          if (!changed.ok || !found || found.sid !== parent.sid || found.statsId !== parent.statsId) throw new Error("move fixture");
+          current = found;
+        }
+        if (state === "closed") {
+          is("real close deletes both card and room", await closeStoreRecord(current, [key, roomKey]), true);
+        } else if (state === "erasing" || state === "moved-erasing") {
+          await pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(current)), String(Date.now())], ["DEL", key, roomKey]]);
+        }
+      }
+      return pipeline(commands);
+    };
+    let response: Response;
+    try { response = await request(actorCookie); }
+    finally { redis.pipeline = pipeline; }
+    const result = await response.json() as Reply;
+    is("the real POST reaches its final card mutation once", hits, 1);
+    const raw = (await pipeline([["GET", key]]))[0];
+    if (state === "live") {
+      is("live saves preserve private off-card fields", [response.status, result.ok, typeof raw === "string" && raw.includes(card.email) && raw.includes(card.phone)], [200, true, true]);
+    } else {
+      is("a stale or erased save is not reported successful", [response.status, result.error, Boolean(result.ok)], [410, "gone", false]);
+      is("no erased contact record is recreated", raw, null);
+      if (state !== "moved-live") is("the erased data-room counter is not recreated either", (await pipeline([["EXISTS", roomKey]]))[0], 0);
+      if (state === "erasing" || state === "moved-erasing") {
+        const finishing = await storeForEmail(state === "moved-erasing" ? "private-card-moved@example.test" : actor);
+        if (!finishing) throw new Error("closing fixture");
+        is("final close completes without revisiting card/room", await closeStoreRecord(finishing), true);
+        is("no contact data survives final closure", await pipeline([["GET", key], ["EXISTS", roomKey]]), [null, 0]);
+      } else if (state === "moved-live") {
+        const currentCookie = `${SESSION_COOKIE}=${await openSession("private-card-moved@example.test")}`;
+        const fresh = await request(currentCookie);
+        is("the moved live store's fresh session still saves", [fresh.status, ((await fresh.json()) as Reply).ok], [200, true]);
+      }
+    }
+  }
+
+  part("An empty-card removal admitted before closure cannot recreate the data room");
+  redis.clear();
+  const dropOwner = "drop-card@example.test";
+  await claimHandle(dropOwner, "dropcard", "Drop fixture", "");
+  await ensureStatsId(dropOwner);
+  await ensureStoreId(dropOwner);
+  await setSubscription(dropOwner, { customerId: "cus_DropCardFence", subscriptionId: "sub_DropCardFence", active: true, tier: "creator", period: paidPeriod() });
+  const dropping = (await storeForEmail(dropOwner))!;
+  const dropCookie = `${SESSION_COOKIE}=${await openSession(dropOwner)}`;
+  const dropKey = `nl:vcard:${dropping.statsId}`, dropRoom = dataKey(dropping)!;
+  const dropPipeline = redis.pipeline.bind(redis);
+  let dropHits = 0;
+  redis.pipeline = async (commands) => {
+    if (!dropHits && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:card-drop") && c[4] === dropKey)) {
+      dropHits++;
+      is("real close precedes the delayed empty-card removal", await closeStoreRecord(dropping, [dropKey, dropRoom]), true);
+    }
+    return dropPipeline(commands);
+  };
+  let removal: Response;
+  try {
+    removal = await POST(new NextRequest("https://marktmorgen.com/api/store/creator-card", { method: "POST", headers: { "content-type": "application/json", cookie: dropCookie }, body: JSON.stringify({ action: "remove" }) }));
+  } finally { redis.pipeline = dropPipeline; }
+  is("the actual remove mutation is intercepted", dropHits, 1);
+  is("closure is reported instead of claiming a live-store removal", [removal.status, ((await removal.json()) as Reply).error], [410, "gone"]);
+  is("neither card nor data room is recreated", await dropPipeline([["GET", dropKey], ["EXISTS", dropRoom]]), [null, 0]);
+
+  part("A legacy snapshot is fenced by immutable statsId, never a reused owner key");
+  redis.clear();
+  const legacyOwner = "legacy-card@example.test";
+  await claimHandle(legacyOwner, "legacycard", "Legacy card fixture", "");
+  await ensureStatsId(legacyOwner);
+  await ensureStoreId(legacyOwner);
+  await setSubscription(legacyOwner, { customerId: "cus_LegacyCardFence", subscriptionId: "sub_LegacyCardFence", active: true, tier: "creator", period: paidPeriod() });
+  const originalStore = (await storeForEmail(legacyOwner))!;
+  const legacy = { ...originalStore, sid: "", extra: false };
+  const legacyKey = `nl:vcard:${legacy.statsId}`, legacyRoom = dataKey(legacy)!;
+  is("a live legacy identity may save", (await saveCreatorCard(legacy.statsId!, { ...card, on: false }, legacy, await storeLiveFence(legacy))).ok, true);
+  is("the actual old record closes", await closeStoreRecord(originalStore, [legacyKey, legacyRoom]), true);
+  await claimHandle(legacyOwner, "replacementcard", "Different store", "");
+  await ensureStatsId(legacyOwner);
+  let gone = "";
+  try { await saveCreatorCard(legacy.statsId!, { ...card, on: false }, legacy, await storeLiveFence(legacy)); }
+  catch (error) { gone = error instanceof Error ? error.name : String(error); }
+  is("a reused owner record is not the erased legacy store", gone, "CardStoreGone");
+  is("no old contact or its room is recreated", await redis.pipeline([["GET", legacyKey], ["EXISTS", legacyRoom]]), [null, 0]);
+
+  // A legacy identity read in an unknown shape is never 'gone' or permission to write.
+  await redis.pipeline([["SET", await ownerKey(storeRef(legacy)), "{not-json"]]);
+  let unknown = "";
+  try { await saveCreatorCard(legacy.statsId!, { ...card, on: false }, legacy, await storeLiveFence(legacy)); }
+  catch (error) { unknown = error instanceof Error ? error.name : String(error); }
+  is("unknown identity is reported unconfirmed", unknown, "CardSaveUnconfirmed");
+  is("unknown identity writes neither card nor room", await redis.pipeline([["GET", legacyKey], ["EXISTS", legacyRoom]]), [null, 0]);
 
   done();
 }

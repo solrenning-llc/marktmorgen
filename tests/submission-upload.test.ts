@@ -22,6 +22,7 @@ import { saveSetupFor } from "@/lib/submission-store";
 import type { SubmissionSetup } from "@/lib/submission-rules";
 import type { DataStore } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
+import { suppressCommand, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { COURSE, LESSON, resetWorld, state } from "./submission-upload-world";
 import { done, is, part } from "./check";
 
@@ -103,6 +104,9 @@ async function main(): Promise<void> {
   const upload = first.body.upload as { pathname: string } | undefined;
   is("it opens", first.status, 200);
   is("in this order", state.events, ["read:store", "hold", "read:listing", "read:course", "read:access", "limit:submission-open", "action", "budget", "vault:open"]);
+  // Codex G-20261121-0801 (MEDIUM): the route builds the store's identity and the vault receives it, so a provider reply
+  // that comes back after the store's erasure writes no upload state (lib/vault-storage.ts, as the vault route).
+  is("the route carries this store's erasure fence into the vault", state.vaultFence, { live: `nl:store:id:${state.store.sid}`, erasing: "nl:closed:erasing", field: "store-field", statsId: "", ref: "owner@example.test" });
   resetWorld();
   state.budget = false;
   is("no upload allowance left", await open(), { status: 503, body: { ok: false, error: "upload_budget_unavailable" } });
@@ -111,6 +115,19 @@ async function main(): Promise<void> {
   state.action = false;
   is("the store's buyer actions are used up", await open(), { status: 503, body: { ok: false, error: "resting" } });
   is("so no allowance is spent", state.events.includes("budget"), false);
+  // Codex L-20261120-2049 (MEDIUM): a person deleted from the store opens nothing, and a store whose list of the
+  // deleted cannot be named (no list id) opens nothing either, before any buyer action or allowance is taken.
+  resetWorld();
+  await redis.pipeline([suppressCommand("list_submission_route", "ana@example.com", 1_800_000_000)]);
+  is("a buyer deleted from the store cannot open", await open(), { status: 503, body: { ok: false, error: "files_unavailable" } });
+  is("the buyer action is taken, the allowance and the vault are not", [state.events.includes("action"), state.events.includes("budget"), state.events.includes("vault:open")], [true, false, false]);
+  await redis.pipeline([["HDEL", suppressedKey("list_submission_route"), suppressionPrint("list_submission_route", "ana@example.com")]]);
+  resetWorld();
+  const { listId } = state.store;
+  delete state.store.listId;
+  is("a store from before list ids is given one, and the open goes on under it (review of #5065)", (await open()).status, 200);
+  is("the id made before its buyer action", state.events.indexOf("list-id") < state.events.indexOf("action"), true);
+  state.store.listId = listId;
 
   part("Signing, closing and giving up");
   const path = upload?.pathname ?? "";

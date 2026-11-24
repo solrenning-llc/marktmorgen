@@ -35,6 +35,10 @@ export function MarkShipped({
 }) {
   const ready = useSyncExternalStore(subscribeReady, clientReady, serverReady);
   const inFlight = useRef(false);
+  // After a press marks the order shipped, the form is replaced by the status region: focus moves to it, so a keyboard
+  // or screen reader user is not left on a control that is gone (WCAG 2.4.3; note on #2544, board #5285).
+  const statusRegion = useRef<HTMLDivElement>(null);
+  const focusStatus = useRef(false);
   const [done, setDone] = useState(() => readShippedRecord(shipped));
   const [tracking, setTracking] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,6 +57,11 @@ export function MarkShipped({
       }).catch(() => {});
     return () => controller.abort();
   }, [done, mail, session]);
+  useEffect(() => {
+    if (!done || !focusStatus.current) return;
+    focusStatus.current = false;
+    statusRegion.current?.focus();
+  }, [done]);
   const id = `ship-${session.slice(-10)}`;
   return (
     <div className="mt-3 rounded-xl bg-white px-4 py-3 text-sm">
@@ -67,7 +76,7 @@ export function MarkShipped({
         <p className="mt-0.5 text-ink-soft">The address is on this payment in your Stripe dashboard.</p>
       )}
       {done ? (
-        <div className="mt-2" role="status">
+        <div ref={statusRegion} tabIndex={-1} className="mt-2" role="status">
           <p className="font-semibold text-ink">{`Marked as shipped on ${day(done.at)}.`}</p>
           {!mail ? (
             <p className="mt-1">The email&apos;s status has not been confirmed here.</p>
@@ -106,6 +115,7 @@ export function MarkShipped({
               const data: unknown = await response.json().catch(() => null);
               const confirmed = readShipmentConfirmation(data, response.ok);
               if (confirmed) {
+                focusStatus.current = true;
                 setDone(confirmed.shipped);
                 setMail(confirmed.mail ?? null);
                 toast(confirmed.emailed ? "Marked as shipped. The email was accepted for sending." : confirmed.mail?.state === "queued" ? "Marked as shipped. The email is saved and waiting." : "Marked as shipped. No new email was confirmed.");

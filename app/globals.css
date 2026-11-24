@@ -1355,16 +1355,19 @@ a.chip {
    details element on a narrow one, and the current section is marked by a
    bar rather than by colour alone. */
 
+/* Each entry is a target of at least 44 by 44 px (WCAG 2.5.5, AAA), wide as well as tall, and its words keep a
+   line height of 1.5 (1.4.8): before, an entry was 30 px tall. Held by tests/e2e/accessibility-public-pages.mjs. */
 .toc-link {
   /* A 44 px tall target for each entry of a page index (2.5.5 AAA, tests/legal-pages-accessibility.test.ts). */
   display: flex;
   align-items: center;
   min-height: 2.75rem;
+  min-width: 2.75rem;
   border-left: 2px solid var(--line);
   padding: 0.3rem 0 0.3rem 0.85rem;
   color: var(--ink-mute);
   font-size: 0.875rem;
-  line-height: 1.45;
+  line-height: 1.5;
   transition:
     color var(--d-base) var(--ease),
     border-color var(--d-base) var(--ease);
@@ -5359,9 +5362,9 @@ html:has([data-product-editor]) {
 }
 /* end 654 [WG14] */
 
-/* 274 [AX1] dark mode, stage 1: dormant dark tokens (lib/dark-tokens.ts). */
-/* Nothing sets data-color-scheme yet, so no page changes. tests/dark-tokens.test.ts holds every pair to AAA. */
-:root[data-color-scheme="dark"] {
+/* 274 [AX1] dark mode: dark tokens (lib/dark-tokens.ts). */
+/* Only for a reader who chose dark (lib/color-scheme.ts), only on the pages DARK_READY names. Generated: edit the module. */
+:root[data-color-scheme="dark"]:has(.legal-body) {
   color-scheme: dark;
   --paper: #10151d;
   --sand: #161c26;
@@ -5389,7 +5392,37 @@ html:has([data-product-editor]) {
   --amber-soft: #2e2210;
   --amber: #ffcf8a;
   --amber-text: #ffcf8a;
+  --violet-deep: var(--link);
+  --violet-ink: var(--link);
+  --violet: var(--action-bg);
+  --focus: var(--focus-ring);
   --background: var(--paper);
   --foreground: var(--ink);
 }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .text-black { color: var(--ink); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .bg-white { background-color: var(--sand); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .bg-white\/92 { background-color: color-mix(in srgb, var(--paper) 92%, transparent); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .focus\:bg-white:focus { background-color: var(--sand-deep); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .bg-ink { background-color: var(--sand-deep); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .text-danger { color: var(--danger-text); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .card { background: var(--sand); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .card-flat { background: var(--sand); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .notice { background: var(--sand); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .chip { background: var(--sand-deep); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .field { background: var(--sand-deep); border-color: var(--line-off); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .btn-secondary { background-color: var(--sand-deep); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .btn-light { background-color: var(--sand-deep); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .chip-brand { background: var(--lilac); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .chip-dark { background: var(--fill-dark); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .notice-success { background: var(--mint-soft); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .notice-warn { background: var(--amber-soft); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .notice-error { background: var(--danger-soft); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .notice-info { background: var(--lilac); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .btn-primary { color: var(--action-on); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .btn-danger-solid { color: var(--action-on); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .btn-danger-solid:hover { background-color: var(--danger-text); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .nb-toast { color: var(--action-on); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .nb-toast-close { color: var(--action-on); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .legal-body a { text-decoration-color: color-mix(in srgb, var(--link) 60%, transparent); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body)) .on-dark ::selection { color: var(--on-dark); background: rgba(255, 255, 255, 0.2); }
 /* end dark tokens */

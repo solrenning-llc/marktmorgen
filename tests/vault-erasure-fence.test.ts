@@ -66,7 +66,7 @@ async function openDuringErasure(n: number) {
   let release: () => void = () => undefined;
   hold = new Promise<void>((done) => { release = done; });
   const asking = new Promise<void>((done) => { started = done; });
-  const opening = openReservedVault({ folder: folder(n), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure)
+  const opening = openReservedVault({ folder: folder(n), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure, async () => true)
     .then((r) => r, (e: unknown) => e);
   await asking;
   // The store's erasure runs while the provider has not answered: its mark, its live key, and the families walked.
@@ -115,7 +115,7 @@ test("an erasure between the record's write and the bind: the session is retired
     }
     return reply;
   }) as typeof redis.pipeline;
-  const outcome = await openReservedVault({ folder: folder(4), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure)
+  const outcome = await openReservedVault({ folder: folder(4), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure, async () => true)
     .then((r) => r, (e: unknown) => e)
     .finally(() => { redis.pipeline = pipeline; });
   assert.equal(erased, true, "the erasure ran after the record was written");
@@ -145,7 +145,7 @@ test("an erasure begun before the bind, its storage row still there: the bind is
     }
     return reply;
   }) as typeof redis.pipeline;
-  const outcome = await openReservedVault({ folder: folder(5), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure)
+  const outcome = await openReservedVault({ folder: folder(5), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure, async () => true)
     .then((r) => r, (e: unknown) => e)
     .finally(() => { redis.pipeline = pipeline; });
   assert.equal(erased, true, "the erasure began after the record was written");
@@ -161,7 +161,7 @@ test("control: a live store's upload opens, with its record and its storage row"
   sessions.clear();
   await redis.pipeline([["SET", LIVE, REF]]);
   const fence = { live: LIVE, erasing: ERASING_KEY, field: await erasingField(REF), statsId: "", ref: REF };
-  const opened = await openReservedVault({ folder: folder(3), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure);
+  const opened = await openReservedVault({ folder: folder(3), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure, async () => true);
   assert.equal(opened.ok, true);
   assert.equal((await keys("nl:vault:up:*")).length, 1);
   assert.equal((await keys("nl:storage:pending:*")).length, 1);
@@ -178,7 +178,7 @@ test("the fence's commands on an open stay within what each upload start is pric
     let commands = 0;
     redis.run = ((command: (string | number)[]) => { commands += 1; return run(command); }) as typeof redis.run;
     try {
-      const opened = await openReservedVault({ folder: folder(n), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, ...(fenced ? { fence } : {}) } as never, 10, measure);
+      const opened = await openReservedVault({ folder: folder(n), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, ...(fenced ? { fence } : {}) } as never, 10, measure, async () => true);
       assert.equal(opened.ok, true);
     } finally {
       redis.run = run;
@@ -206,4 +206,11 @@ test("the vault route opens every upload with its store's fence", async () => {
   const { join } = await import("node:path");
   const route = readFileSync(join(process.cwd(), "app/api/store/vault/route.ts"), "utf8");
   assert.match(route, /const fence = await storeLiveFence\(store\);\s*\n\s*const opened = await openReservedVault\(\{[^}]*\bfence \}/);
+});
+
+test("the buyer's submission route opens every upload with its store's fence (Codex G-20261121-0801)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const route = readFileSync(join(process.cwd(), "app/api/store/course/submission/route.ts"), "utf8");
+  assert.match(route, /const fence = await storeLiveFence\(store\);\s*\n\s*const opened = await openSubmissionDoor\(\{[^}]*\bfence \}/);
 });

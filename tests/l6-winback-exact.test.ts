@@ -164,15 +164,16 @@ async function main(): Promise<void> {
 
   part("Is the mark ours? Only an exact OK says yes");
   ended("sub_Cat0000001", cus("cat"), 8, meta);
-  const claimOf = (key: string) => (command: (string | number)[]) => String(command[1]).includes(key);
+  // The membership's mark is taken by WINBACK_MARK since C5-20261119-1050-wb: its script, naming the mark among its keys.
+  const markOf = (key: string) => (command: (string | number)[]) => String(command[1]).startsWith("-- marktmorgen:winback-mark:") && command.some((x) => String(x).includes(key));
   // Changed assertions (rule 23, Claude 4 on #2714): an oddly answered claim used to be kept and never sent. The claim
   // now holds a value of its own and is read back: ours only when that value is there, and sent once.
-  await withReplyOnly("SET", claimOf("sub_Cat0000001"), [undefined], () => sendWinBacks(Date.now() + 30_000, now));
+  await withReplyOnly("EVAL", markOf("sub_Cat0000001"), [undefined], () => sendWinBacks(Date.now() + 30_000, now));
   is("a claim answered in an unknown shape that did not land is not taken for ours: Cat is not written to", sentTo().includes("cat@example.com"), false);
   await sendWinBacks(Date.now() + 30_000, now);
   is("the next run claims it whole and writes to Cat, once", sentTo().filter((to) => to === "cat@example.com").length, 1);
   ended("sub_Fay0000001", cus("fay"), 8, meta);
-  await withReply("SET", claimOf("sub_Fay0000001"), () => ["QUEUED"], () => sendWinBacks(Date.now() + 30_000, now));
+  await withReply("EVAL", markOf("sub_Fay0000001"), () => ["QUEUED"], () => sendWinBacks(Date.now() + 30_000, now));
   is("a claim answered oddly that did land with our own value is read back as ours: Fay is written to", sentTo().filter((to) => to === "fay@example.com").length, 1);
   await sendWinBacks(Date.now() + 30_000, now);
   is("and never twice", sentTo().filter((to) => to === "fay@example.com" || to === "cat@example.com").length, 2);

@@ -81,7 +81,8 @@ import {
 import { readAllListings, readListings, readTitles } from "@/lib/catalog";
 import { priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { LINK_PROBLEMS, type LinkProblem, readLink } from "@/lib/product-link";
-import { MAX_ABOUT_LENGTH, cleanAbout, writeAbout } from "@/lib/product-about";
+import { MAX_ABOUT_LENGTH, cleanAbout } from "@/lib/product-about";
+import { writeStoreAbout } from "@/lib/product-about-live";
 import { BATCH_BYTES, BATCH_ROWS } from "@/lib/import-batches";
 import { ContactImportUnknownError, type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, leftListAmong, previewContactRows, readTags } from "@/lib/contacts";
 import { moveStopLink, remindersStoppedAmong } from "@/lib/checkout-recovery";
@@ -103,6 +104,7 @@ import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { inviteEmail, inviteMembers, keptAlready, moveFoot, movePostal, noteKept, dropReminder, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
 import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, REMIND_DAYS_BEFORE, readRenewal } from "@/lib/move-rules";
 import { type ContactConsent, consentFrom, readClickFunnelsStatus, readOrderStatus } from "@/lib/clickfunnels-csv";
+import { emailDocument, emailParagraphs } from "@/lib/email-document";
 
 export type ImportKind = "contacts" | "products" | "purchases" | "members";
 /** Where the file came from: any platform's spreadsheet, or ClickFunnels' own exports (lib/clickfunnels-csv.ts). */
@@ -1298,7 +1300,7 @@ async function productsStep(job: ImportJob, store: Store, rows: string[][]): Pro
     }
     const statsId = made.store.statsId;
     for (let i = 0; i < made.ids.length; i += 1) {
-      if (taking[i].about && statsId) await writeAbout(statsId, made.ids[i], taking[i].about, made.store);
+      if (taking[i].about && statsId) await writeStoreAbout(made.store, made.ids[i], taking[i].about);
     }
     job.counts.added += made.ids.length;
   }
@@ -1668,7 +1670,6 @@ async function membersStep(job: ImportJob, store: Store, rows: string[][], now =
   await note(job, problems, "errors");
 }
 
-const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 function displayName(name: string): string {
   return name.replace(/["\\<>\r\n]/g, "").trim().slice(0, 60) || "A store";
@@ -1680,11 +1681,9 @@ function senderAddress(): string {
 }
 
 /** A plain letter's HTML, a paragraph for each blank line of its text, marked with the store's language (WCAG 3.1.1). */
-function letterHtml(store: Pick<Store, "language">, text: string): string {
-  return `<div lang="${LANGUAGES[parseLanguage(store.language)].locale}" style="font-family:system-ui,sans-serif;line-height:1.5">${text
-    .split("\n\n")
-    .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
-    .join("")}</div>`;
+/** The letter as a whole HTML document beside its text, in the store's language, its subject as the title (AX274 Part A, item 5). */
+export function letterHtml(store: Pick<Store, "language">, subject: string, text: string): string {
+  return emailDocument({ lang: LANGUAGES[parseLanguage(store.language)].locale, title: subject, body: emailParagraphs(text) });
 }
 
 /** The one email a past buyer gets, when the creator ticked it: what moved, and how to open it. */
@@ -1900,7 +1899,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
       return "retry";
     }
   }
-  for (const message of sending) message.html = letterHtml(store, message.text);
+  for (const message of sending) message.html = letterHtml(store, message.subject, message.text);
   const sent = await sendBatch(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
   if (sent === "retry") {
     await giveBack();
@@ -2373,7 +2372,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
             to: letter.to,
             subject: letter.subject,
             text,
-            html: letterHtml(store, text),
+            html: letterHtml(store, letter.subject, text),
             replyTo: store.email,
             headers: { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
             tags: { ...moveTags(store), ...stopTags(store) },

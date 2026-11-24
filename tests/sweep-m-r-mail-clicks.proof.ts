@@ -38,8 +38,8 @@ async function main(): Promise<void> {
   const restore = () => { redis.pipeline = pipe as typeof redis.pipeline; };
   const setUp = async () => {
     redis.clear();
-    await redisPipeline([["HSET", leadsKey(LIST), EMAIL, JSON.stringify({ agreed: true, t: TOKEN })]]);
-    await rememberLinkKeys([TOKEN]);
+    await redisPipeline([["HSET", leadsKey(LIST), EMAIL, JSON.stringify({ agreed: true, t: TOKEN, clicks: "2026-11-01T00:00:00.000Z" })]]);
+    await rememberLinkKeys(LIST, [{ email: EMAIL, token: TOKEN }]);
   };
   const linkIndexKept = async () => (await redisPipeline([["EXISTS", keyIndex(linkKeyOf(TOKEN))]]))[0] === 1;
 

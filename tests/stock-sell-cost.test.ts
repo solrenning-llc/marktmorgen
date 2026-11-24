@@ -20,7 +20,6 @@ import { done, is, part } from "./check";
 import {
   CART_STOCK_SHARE_OF_ORDER_COMPUTE,
   COMMAND,
-  CONTACT_SHARE_OF_ORDER_COMPUTE,
   ORDER_COMPUTE,
   STOCK_CONFIRM_COMMANDS_MOST,
   STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE,
@@ -86,7 +85,7 @@ async function main(): Promise<void> {
   is("every unit counted once", await Promise.all(cart.map((product) => stockLeft(creator, product))), cart.map(() => 4));
   is("its commands stay inside STOCK_CONFIRM_COMMANDS_MOST", first.commands <= STOCK_CONFIRM_COMMANDS_MOST, true);
   is("that line stays inside its share of an order's compute", STOCK_CONFIRM_COMMANDS_MOST * COMMAND <= STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE, true);
-  is("and the order's declared shares stay inside one order's compute", CART_STOCK_SHARE_OF_ORDER_COMPUTE + STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE + CONTACT_SHARE_OF_ORDER_COMPUTE <= 1, true);
+  is("and the order's declared shares stay inside one order's compute (its contact write has its own line, order-contact-write)", CART_STOCK_SHARE_OF_ORDER_COMPUTE + STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE <= 1, true);
   console.log(`  (measured: ${first.commands} commands for ${MAX_CART} limited products; declared ${STOCK_CONFIRM_COMMANDS_MOST})`);
 
   part("The thanks page opened again");

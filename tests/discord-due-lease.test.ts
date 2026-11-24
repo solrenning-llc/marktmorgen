@@ -12,7 +12,8 @@ import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount
 import { emailKey, storeKey } from "@/lib/learn";
 import { CHECK_HOURS } from "@/lib/discord-rules";
 import { joinServer, sweepDiscord } from "@/lib/discord-access";
-import { DISCORD_DUE_PER_RUN, DUE_LEASE_SECONDS, checkSoon, dueMembers, forgetMember, readMember, saveServer, setProductRoles } from "@/lib/discord-store";
+import { DISCORD_DUE_PER_RUN, DUE_LEASE_SECONDS, checkSoon, dueMembers, forgetMember, readMember, setProductRoles } from "@/lib/discord-store";
+import { seedDiscordServer as saveServer } from "./discord-server-fixture";
 import { store as redis } from "./redis-stub";
 import { NOT_A_COST } from "./plan-cost-registry";
 import { done, is, part } from "./check";
@@ -194,8 +195,10 @@ async function main(): Promise<void> {
   {
     const real = redis.pipeline.bind(redis);
     let sent = 0;
+    let commands: (string | number)[][] = [];
     redis.pipeline = (async (batch: (string | number)[][]) => {
       sent += batch.length;
+      commands.push(...batch);
       return real(batch);
     }) as typeof redis.pipeline;
     try {
@@ -204,13 +207,72 @@ async function main(): Promise<void> {
       const line = await dueMembers(clock + 60_000, DISCORD_DUE_PER_RUN);
       is("the line handed out the three (and whoever else is due)", ["sid-count-0", "sid-count-1", "sid-count-2"].every((sid) => line.some((p) => p.sid === sid)), true);
       is("one read of the line and one lease, whatever its length (a third command only for entries that are nobody)", sent <= 3, true);
-      sent = 0;
-      await sweepDiscord(Date.now() + 30_000, clock + DUE_LEASE_SECONDS * 1_000 + 120_000);
+      // The registry's per-person claim (Claude 3 local's LOW 1 on #4239): besides the line's at most 3, at most three
+      // commands more a person than the check's own work: a ZREM of dropDue and a ZADD of checkSoon on the line, and a
+      // second readMember of a rejoin.
+      commands = [];
+      const swept = await sweepDiscord(Date.now() + 30_000, clock + DUE_LEASE_SECONDS * 1_000 + 120_000);
+      const people = Object.values(swept).reduce((sum, n) => sum + n, 0);
+      is("the sweep checked the people handed out", people >= 3, true);
+      // Counted for each person, never summed (Claude 4 3Kc's LEVE on #5306): a person who reaches the member read
+      // (Bea, a real member) must not hide extra reads behind the people who leave at the store read.
+      const lease = commands.findIndex((c) => c[0] === "ZADD" && c[1] === "nl:dc:due" && c[2] === "XX");
+      const after = commands.slice(lease + 1);
+      const entries = new Set(after.filter((c) => c[1] === "nl:dc:due").map((c) => String(c[c.length - 1])));
+      const reads = new Map<string, number>();
+      for (const c of after) if (c[0] === "HGET" && String(c[1]).startsWith("nl:dc:mem:")) reads.set(String(c[2]), (reads.get(String(c[2])) ?? 0) + 1);
+      const onLineEach = [...entries].map((entry) => after.filter((c) => c[1] === "nl:dc:due" && c.slice(2).map(String).includes(entry)).length);
+      is("someone in the run reached the member read", reads.size >= 1, true);
+      is("on the line, at most three commands a person: the check's own, a dropDue ZREM and a checkSoon ZADD", onLineEach.every((n) => n <= 3), true);
+      is("at most two member reads a person (the check's and a rejoin's)", [...reads.values()].every((n) => n <= 2), true);
     } finally {
       redis.pipeline = real as typeof redis.pipeline;
     }
     is("a run hands out at most DISCORD_DUE_PER_RUN people by default", DISCORD_DUE_PER_RUN, 200);
     is("its line in the cost registry names the job's commands", /lib\/discord-store\.ts/.test(NOT_A_COST.DISCORD_DUE_PER_RUN ?? "") && /never zero/.test(NOT_A_COST.DISCORD_DUE_PER_RUN ?? ""), true);
+  }
+
+  part("The rejoin path, counted exactly (Claude 1's MEDIUM on #5306): gone at the first member read, back at the second");
+  {
+    // Cy is a member of a real store with a real server, in line. Her record is gone at the sweep's first member read
+    // and back right after it, as a rejoin between that read and dropDue leaves it: the path that runs the second
+    // readMember and checkSoon's ZADD (lib/discord-access.ts), which the registry says this test holds.
+    const CY = "300000000000000034";
+    const cyEntry = `${store.sid}|${CY}`;
+    const membersOf = `nl:dc:mem:${room}`;
+    const beaRecord = (await plain([["HGET", membersOf, BEA]]))[0];
+    is("set-up: a member record to give Cy", typeof beaRecord, "string");
+    await plain([["HSET", membersOf, CY, String(beaRecord)]]);
+    await checkSoon(store.sid, CY);
+    const real = redis.pipeline.bind(redis);
+    const commands: (string | number)[][] = [];
+    let firstRead = true;
+    redis.pipeline = (async (batch: (string | number)[][]) => {
+      commands.push(...batch);
+      if (firstRead && batch.some((c) => c[0] === "HGET" && c[1] === membersOf && c[2] === CY)) {
+        firstRead = false;
+        const kept = (await plain([["HGET", membersOf, CY]]))[0];
+        await plain([["HDEL", membersOf, CY]]);
+        const answer = await real(batch);
+        await plain([["HSET", membersOf, CY, String(kept)]]);
+        return answer;
+      }
+      return real(batch);
+    }) as typeof redis.pipeline;
+    try {
+      clock += DUE_LEASE_SECONDS * 1_000 + CHECK_HOURS * 3_600_000 + 2_000;
+      const swept = await sweepDiscord(Date.now() + 30_000, clock);
+      is("Cy counted as gone by this run", swept.gone >= 1, true);
+    } finally {
+      redis.pipeline = real as typeof redis.pipeline;
+    }
+    const lease = commands.findIndex((c) => c[0] === "ZADD" && c[1] === "nl:dc:due" && c[2] === "XX" && c.slice(3).map(String).includes(cyEntry));
+    is("set-up: the run leased Cy", lease >= 0, true);
+    const after = commands.slice(lease + 1);
+    const forCy = (op: string) => after.filter((c) => c[0] === op && c[1] === "nl:dc:due" && c.slice(2).map(String).includes(cyEntry)).length;
+    is("exactly two member reads for her: the check's and the rejoin's", after.filter((c) => c[0] === "HGET" && c[1] === membersOf && c[2] === CY).length, 2);
+    is("exactly one ZREM of dropDue and one ZADD of checkSoon on the line", [forCy("ZREM"), forCy("ZADD")], [1, 1]);
+    is("and she is back in line, so a later refund is checked", (await score(cyEntry)) !== null, true);
   }
 
   done();

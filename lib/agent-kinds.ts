@@ -10,7 +10,8 @@
  * (confirmed in a batch is fine), with undo.
  */
 import type { Json, ProposalKind } from "@/lib/agent-proposal-rules";
-import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, readAboutExact, writeAboutIf } from "@/lib/product-about";
+import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, readAboutExact } from "@/lib/product-about";
+import { writeStoreAboutIf } from "@/lib/product-about-live";
 import { setProductAbout, setProductSummary, setProductTitle, type Store } from "@/lib/store";
 import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH, readListing } from "@/lib/catalog";
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
@@ -103,12 +104,12 @@ export const PRODUCT_DESCRIPTION: AgentKind = {
     if (await descriptionRefusal(store, target, value)) return "terms";
     const text = cleanAbout(value);
     // The words first, only over the ones it was decided on; then the product's mark that it has some.
-    const written = await writeAboutIf(store.statsId, target, expected, text, store);
+    const written = await writeStoreAboutIf(store, target, expected, text);
     if (written !== true) return written;
     const marked = await setProductAbout(ref, target, text !== "");
     if (!marked.ok) {
       // The mark could not follow: the words go back to what they were, so the two never disagree.
-      await writeAboutIf(store.statsId, target, text, expected, store).catch((error: unknown) => console.error("putting back a description failed", error));
+      await writeStoreAboutIf(store, target, text, expected).catch((error: unknown) => console.error("putting back a description failed", error));
       return false;
     }
     return true;

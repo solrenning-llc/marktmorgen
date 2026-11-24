@@ -455,7 +455,7 @@ async function readConfig(statsId: string): Promise<Config | null> {
 }
 
 /** How many times a change is tried again from a fresh read when another one landed first. */
-const CONFIG_WRITE_TRIES = 4;
+export const CONFIG_WRITE_TRIES = 4;
 
 /** What the studio says when a settings change may or may not have been saved (WebhookSettingsUnsureError). */
 export const WEBHOOK_SETTINGS_UNSURE_WORDS = "We could not confirm whether that change was saved. Reload the page to see your endpoints before you try again.";

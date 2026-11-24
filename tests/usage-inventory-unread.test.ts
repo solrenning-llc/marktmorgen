@@ -89,6 +89,9 @@ async function main(): Promise<void> {
     is("the other parts still ran", others.every((other) => askedFor(got.from, other)), true);
     is(`the log never says every store is inside for the ${name} part`, logged.some((line) => line.startsWith(`${name}-watch: every store inside`)), false);
     is(`and it says the ${name} part is unread`, logged.some((line) => line.startsWith(`${name}-watch: unread`)), true);
+    // Claude 5 id8Ws on #5466 @c906d9e537: on days 1-5 the settlement charges last month's stores before this month's read
+    // fails, so no line says nothing was settled.
+    is(`and never that nothing was settled`, logged.some((line) => /nothing was settled/.test(line)), false);
   }
 
   part("Control: every inventory read: ok, as before");

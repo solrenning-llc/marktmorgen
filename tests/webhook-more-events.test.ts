@@ -108,7 +108,7 @@ async function main() {
 
   part("Disputes have a budget of their own, bounded");
   store = await setup(["dispute.opened", "refund.issued"]);
-  const refunds = Array.from({ length: 12 }, (_, i) => ({ id: `evt_Ref${i}`, type: "charge.refunded", created: 1_790_003_000 + i, data: { object: { id: `ch_r${i}`, payment_intent: `pi_Ref${i}`, amount_refunded: 100, amount: 100, refunded: true, currency: "usd", metadata: {} } } }));
+  const refunds = Array.from({ length: 12 }, (_, i) => ({ id: `evt_Ref${i}`, type: "charge.refunded", created: 1_790_003_000 + i, data: { object: { id: `ch_r${i}`, payment_intent: `pi_Ref${i}`, amount_refunded: 100, amount: 100, refunded: true, currency: "usd", metadata: {} }, previous_attributes: { amount_refunded: 0 } } }));
   const disputes = Array.from({ length: 11 }, (_, i) => ({ id: `evt_Many${i}`, type: "charge.dispute.created", created: 1_790_004_000 + i, data: { object: dispute(`dm_${i}`, "pi_Mine") } }));
   events = [...disputes, ...refunds].reverse();
   const quiet = console.error;

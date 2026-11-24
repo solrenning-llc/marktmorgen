@@ -2226,10 +2226,17 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     const total = paidCents(object.amount_refunded, "a refund's amount");
     const charged = paidCents(object.amount, "a refunded charge's amount");
     const currency = paidMoney(object.currency, "a refund's money");
-    // The previous refunded total, when Stripe gives one, is whole cents from 0 and never above the new total; anything
-    // else waits, never sent as a wrong amount. Absent is the first refund, 0 (Codex G-20261119-0604).
+    // The previous refunded total is whole cents from 0 and never above the new total; anything else waits, never sent
+    // as a wrong amount (Codex G-20261119-0604). Absent waits too, never read as 0: Stripe documents
+    // previous_attributes only for *.updated events (API reference, "The Event object", read 24/11/2026), so its
+    // absence on charge.refunded does not prove a first refund, and a second partial refund read as 0 would send the
+    // whole refunded total as this refund's amount, kept for good by its once-only mark.
     const previousRefunded = previous.amount_refunded;
-    const before = previousRefunded === undefined ? 0 : paidCents(previousRefunded, "a refund's previous amount");
+    if (previousRefunded === undefined) {
+      console.error("a refund's previous refunded amount is missing from the Stripe event; it waits and is never sent as a guess", store.handle, str(event.id), charge);
+      throw new StripeShapeError("Stripe gave no refund's previous amount");
+    }
+    const before = paidCents(previousRefunded, "a refund's previous amount");
     if (before > total) throw new StripeShapeError("Stripe gave a refund's previous amount above its new total");
     const billing = (object.billing_details ?? {}) as { email?: unknown; name?: unknown };
     await emitEvent(store, "refund.issued", `${charge}|${total}`, {

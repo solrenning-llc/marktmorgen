@@ -67,8 +67,11 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
 }) as typeof redis.pipeline;
 
 const PAID = 1_790_000_000;
-const evt = (id: string, type: string, created: number, object: Record<string, unknown>, previous?: Record<string, unknown>) =>
-  ({ id, type, created, data: { object, ...(previous ? { previous_attributes: previous } : {}) } });
+// A refund here is always the charge's first: Stripe gives the refunded total before it, 0 (lib/webhooks.ts waits when it is missing).
+const evt = (id: string, type: string, created: number, object: Record<string, unknown>, previous?: Record<string, unknown>) => {
+  const before = previous ?? (type === "charge.refunded" ? { amount_refunded: 0 } : undefined);
+  return { id, type, created, data: { object, ...(before ? { previous_attributes: before } : {}) } };
+};
 const refund = (id: string, email: string, created: number | undefined = PAID) => ({
   id, object: "charge", ...(created === undefined ? {} : { created }), payment_intent: `pi_${id}`, amount: 2900, amount_refunded: 2900, refunded: true, currency: "usd",
   metadata: { store: HANDLE, product: "p_course" }, billing_details: { email, name: `Name of ${email}` }, receipt_email: email,

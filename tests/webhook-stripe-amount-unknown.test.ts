@@ -167,6 +167,31 @@ async function main() {
     const later = (await recentMessages(store, "refund.issued", 10)).map((m) => String((m.data as Record<string, unknown>).charge)).sort();
     is(`its previous refunded amount is ${what}: it waited, so once whole it is sent, and the one before it is not sent again`, later, ["ch_BadRefund", "ch_GoodRefund"]);
   }
+  // A missing previous refunded total is unknown, never the first refund's 0 (#5206, adopted by Claude 5 iZUmuf after an
+  // independent review): Stripe's event reference says previous_attributes is "only included in events of type
+  // *.updated" (https://docs.stripe.com/api/events/object, read 24/11/2026), and charge.refunded is not one. On a second
+  // partial refund (1000 before, 1500 now), reading it as 0 sent 1500 refunded instead of 500, once and for good.
+  const second = (id: string) => ({ ...refund(id), amount_refunded: 1500 });
+  for (const [what, data] of [
+    ["missing from previous_attributes", (id: string) => ({ object: second(id), previous_attributes: { refunded: false } })],
+    ["missing with no previous_attributes", (id: string) => ({ object: second(id) })],
+  ] as const) {
+    const store = await setup(["refund.issued"]);
+    events = [
+      { id: "evt_BadRefund", type: "charge.refunded", created: 1_790_002_100, data: data("ch_BadRefund") },
+      { id: "evt_GoodRefund", type: "charge.refunded", created: 1_790_002_000, data: { object: second("ch_GoodRefund"), previous_attributes: { amount_refunded: 1000 } } },
+    ];
+    await watchStripe(Date.now() + 10_000);
+    const sent = (await recentMessages(store, "refund.issued", 10)).map((m) => m.data as Record<string, unknown>);
+    is(`its previous refunded amount ${what}: only the one with its amount is sent, with the refund's own 500`, sent.map((d) => [d.charge, d.amount_refunded_cents, d.total_refunded_cents]), [["ch_GoodRefund", 500, 1500]]);
+    events = [
+      { id: "evt_BadRefund", type: "charge.refunded", created: 1_790_002_100, data: { object: second("ch_BadRefund"), previous_attributes: { amount_refunded: 1000 } } },
+      { id: "evt_GoodRefund", type: "charge.refunded", created: 1_790_002_000, data: { object: second("ch_GoodRefund"), previous_attributes: { amount_refunded: 1000 } } },
+    ];
+    await watchStripe(Date.now() + 10_000);
+    const later = (await recentMessages(store, "refund.issued", 10)).map((m) => m.data as Record<string, unknown>).map((d) => [d.charge, d.amount_refunded_cents]).sort();
+    is(`its previous refunded amount ${what}: it waited, never sent as 1500; once Stripe gives it, it is sent as 500`, later, [["ch_BadRefund", 500], ["ch_GoodRefund", 500]]);
+  }
 
   part("A dispute");
   intents.pi_Disputed = { store: HANDLE, product: "p_course" };

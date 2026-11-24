@@ -99,7 +99,9 @@ console.error = (...args: unknown[]) => {
 const subscriptionInvoice = (meta: Record<string, string>) => ({ parent: { type: "subscription_details", subscription_details: { subscription: "sub_Member01", metadata: meta } } });
 const dispute = (id: string, intent: string) => ({ id, object: "dispute", charge: `ch_${id}`, payment_intent: intent, amount: 2900, currency: "usd", reason: "product_not_received", status: "needs_response", evidence_details: { due_by: 1_791_000_000 }, metadata: {} });
 const refund = (id: string, intent: string, metadata: Record<string, string> = {}) => ({ id, object: "charge", payment_intent: intent, amount: 2900, amount_refunded: 2900, refunded: true, currency: "usd", metadata, billing_details: { email: null, name: null } });
-const evt = (id: string, type: string, created: number, object: Record<string, unknown>) => ({ id, type, created, data: { object } });
+// A refund here is always the charge's first: Stripe gives the refunded total before it, 0 (lib/webhooks.ts waits when it is missing).
+const evt = (id: string, type: string, created: number, object: Record<string, unknown>) =>
+  ({ id, type, created, data: { object, ...(type === "charge.refunded" ? { previous_attributes: { amount_refunded: 0 } } : {}) } });
 const sentIds = async (store: Awaited<ReturnType<typeof setup>>, type: "dispute.opened" | "refund.issued", key: "dispute" | "charge") =>
   (await recentMessages(store, type, 10)).map((m) => (m.data as Record<string, string>)[key]).sort();
 const lookups = () => asked.filter((a) => a.path !== "/v1/events");

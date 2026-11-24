@@ -1475,7 +1475,6 @@ console.log("strict to add, loose to take out: the READY the 3-READY gate counts
     [`Claude 3 X review #${N} @${h}: READY retracted`, null], [`Claude 3 X review #${N} @${h}: READY -> CHANGES`, null], [`Claude 3 X review #${N} @${h}: READY 2/3 (Claude 1, 2)`, null]);
   tira.push([`Claude 3 X review #${N} ＠${h}: CHANGES`, "claude-3"], [`Claude 3 X: I retract the READY above`, "claude-3"], [`Claude 3 X: I retract my READY on @0000000000`, null],
     [`Claude 5 icEJ focal review #${N} @${h} (\`a..b\`): CHANGES`, "claude-5"], [`Review #${N} @${h} by Claude 3 yaQt (session x), mail request y: CHANGES`, "claude-3"]);
-  for (const [t, e] of soma) is(`adds: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.readyEstrito?.(t, N, H) === e, String(mod.readyEstrito?.(t, N, H)));
   // Seventh round (Claude 5 hed9 7118892597 and Claude 3 7118918923 on ab697952b5).
   const H7 = H;
   soma.push([`* Claude 3 review #${N} @${h}: READY`, null], [`    Claude 3 review #${N} @${h}: READY`, null], [`\tClaude 3 review #${N} @${h}: READY`, null],
@@ -1506,7 +1505,20 @@ console.log("strict to add, loose to take out: the READY the 3-READY gate counts
   tira.push([`Claude 3 nota #${N} @${h}: o READY acima fica retirado`, "claude-3"], [`Claude 3 #${N} @${h}: mudanças necessárias`, "claude-3"],
     [`Claude 3 review #${N} @${h}: NÃO PRONTO`, "claude-3"], [`Claude 3 review #${N} @${h}: reprovado, 1 ALTO`, "claude-3"]);
   for (const [t, e] of tira) is(`takes out: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, (mod.tiraReady?.(t, N, H7)?.familia ?? null) === e, JSON.stringify(mod.tiraReady?.(t, N, H7)));
-  for (const [t, e] of soma.slice(n8)) is(`adds (ichw): "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.readyEstrito?.(t, N, H) === e, String(mod.readyEstrito?.(t, N, H)));
+  // Ninth round (Claude 5 hed9 7120228073 on a1818c8b0b). Every soma case is asserted, after all pushes (LEVE 1).
+  soma.push(...["READY — 2 MÉDIO", "READY. 1 LEVE below.", "READY — if CI passes", "READY — pending CI", "READY — not yet", "READY. If CI passes.",
+    "READY (0 findings) — but CI must pass", "READY, 0 findings. Still running the tests.", "READY, 2 LEVEs", "READY, assuming CI passes", "READY, desde que o CI passe",
+    "READY, 2 nits", "READY, nits only", "READY (2 LEVEs, non-blocking)", "READY, caso o CI passe", "READY, contanto que o CI passe", "READY, com ressalvas",
+    "READY, as long as CI is green", "READY, however one test is flaky", "READY, apart from the NIT", "READY-ish", "READY — Claude 3 X (cloud)"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, null]));
+  soma.push([`Claude 3 review #${N} @${h}: READY.`, "claude-3"], [`Claude 3 review #${N} @${h}: READY. Taken from the agents' mail.`, "claude-3"]);
+  for (const [t, e] of soma) is(`adds: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.readyEstrito?.(t, N, H) === e, String(mod.readyEstrito?.(t, N, H)));
+  const tira9 = [[`Claude 3 review #${N} @${h}: Not ready`, "claude-3"], [`Claude 3 review #${N} @${h}: changes requested (1 ALTO)`, "claude-3"],
+    [`Claude 3 review #${N} @${h}: Changes needed`, "claude-3"], [`Claude 3 review #${N} @${h}: needs changes`, "claude-3"], [`Claude 3 review #${N} @${h}: ALTO found, not ready`, "claude-3"],
+    [`Claude 3 review #${N} @${h}: blocked`, "claude-3"], [`Claude 3 X: #${N} head ${h}: CHANGES`, "claude-3"], [`Claude 3 X review #${N} (head ${h}): NOT READY`, "claude-3"],
+    [`## Review #${N} @${h}\n**Verdict: CHANGES**\nReviewer: Claude 3 X`, "claude-3"], [`NOT READY #${N} @${h} — 1 ALTO, see below\nbody\nmore — Claude 3 X`, "claude-3"],
+    [`Claude 5 transcribing Codex X6 review #${N} @${h}: CHANGES`, "codex"], [`Claude 1 coord: #${N} @${h}, Claude 4 asked CHANGES`, "claude-4"],
+    [`Claude 3: cancel the review request on #${N} @${h}`, null], [`Claude 3 X: I withdraw my READY on ${h}c0`, null], [`Claude 3 X: I withdraw my READY on ${H.slice(0, 12)}`, "claude-3"]];
+  for (const [t, e] of tira9) is(`takes out (9th): "${t.replace(/\n/g, " / ").slice(0, 70)}" -> ${e ?? "nothing"}`, (mod.tiraReady?.(t, N, H)?.familia ?? null) === e, JSON.stringify(mod.tiraReady?.(t, N, H)));
   is("takes out: a GitHub review in the CHANGES_REQUESTED state with no family named is '?' (NOT CHECKED)", mod.tiraReady?.("Looks good to me", N, H, "CHANGES_REQUESTED")?.familia === "?");
   is("takes out: a CHANGES_REQUESTED review of another head (commit_id) takes nothing out (MÉDIO 2 of hed9)", mod.tiraReady?.("", N, H, "CHANGES_REQUESTED", "0000000aaa0000000000000000000000000000aa") === null);
   is("LEVE 5 of hed9: a header that starts with the family is its own, though it names a sibling as 'by'",
@@ -1646,6 +1658,10 @@ console.log("three READY from three outside families on the exact head before a 
   is("1442: a CHANGES_REQUESTED review of an older head (commit_id) leaves this head checked (MÉDIO 2 of hed9)", r.ok, r.out);
   r = verify(id, { FAKE_COMMENTS: tres, CORREIO_SEM_GH: "1" });
   is("1442: without the PR's texts the gate is NOT CHECKED, never '0 READY' (NIT 2 of iYnra)", !r.ok && /NÃO FORAM CONFERIDAS/.test(r.out), r.out);
+  // LEVE 2 of hed9 on a1818c8b0b: a family whose only verdict on the head is a take-out the loose reader misses is a
+  // reviewer too, and does not enqueue it.
+  r = verify(id, { FAKE_COMMENTS: tres + comentario(`Claude 6 Q review #1442 @${h}: BLOCKED, ALTO found`) });
+  is("1442: a family whose only verdict is 'BLOCKED, ALTO found' is a reviewer of the head and may not enqueue it", !r.ok && /revisou #1442/.test(r.out), r.out);
   // LEVE 1 of iYnra: the enqueuer is outside the head's reviewers (FQ (1)).
   r = verify(id, { FAKE_COMMENTS: tres + ready("Claude 6 Q") });
   is("1442: an enqueuer whose family reviewed the head is refused (FQ (1))", !r.ok && /revisou #1442/.test(r.out), r.out);

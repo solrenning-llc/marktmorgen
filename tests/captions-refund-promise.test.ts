@@ -42,8 +42,12 @@ is("the code refunds a charged order whose record was never confirmed, from the 
 // sweep refunds it only past GIVE_UP_HOURS (iaqyQ's probe: refunds 0 at T+2 h, 1 at T+49 h): no text promises less.
 for (const [name, text] of Object.entries(sources)) {
   is(`${name}: never promises a request that never reached the provider is refunded without waiting`, /never\s+reaches\s+(our|the)\s+video\s+provider[^.;]{0,160}without\s+waiting/.test(text), false);
-  is(`${name}: says it is refunded usually within the hour, and in every case at the first check after the hours`,
-    /never\s+reaches\s+(our|the)\s+video\s+provider[^.;]{0,120}usually\s+within\s+the\s+hour[^.;]{0,80}first\s+check\s+after/.test(text), true);
+  is(`${name}: says it is refunded usually within the hour, otherwise at the first check after the hours`,
+    /never\s+reaches\s+(our|the)\s+video\s+provider[^.;]{0,120}usually\s+within\s+the\s+hour[^.;]{0,80}otherwise\s+at\s+our\s+first\s+check\s+after/.test(text), true);
+  // Claude 3 on #5456 @b1dd9b1d73: when Stripe's invoice or the provider's answer stays unknown, the code keeps the
+  // order for a person (ORDER_LOOKS_MS, unknownLook) and never refunds it on its own: no "in every case".
+  is(`${name}: promises nothing "in every case", and names the case where nobody can tell us`,
+    [/in\s+every\s+case/.test(text), /never\s+reaches\s+(our|the)\s+video\s+provider[^.]{0,260}cannot\s+tell\s+us\s+what\s+happened/.test(text)], [false, true]);
   is(`${name}: promises no time in minutes for it`, /never\s+reaches\s+(our|the)\s+video\s+provider[^.;]{0,120}\d+\s+minutes/.test(text), false);
 }
 // "Usually within the hour" (Claude 5 ichw on #5456): the order settles at the first stream run after ORDER_SETTLE_MS,

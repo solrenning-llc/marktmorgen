@@ -1322,9 +1322,23 @@ export const READY_EXIGIDAS = 3;
  * código (* _ `) e um "#" de título no começo saem antes da leitura.
  */
 const SITUACAO = /\b(?:needed|status|tally|asked|request\w*|waiting|still|pending|queue|fila)\b/i;
-const RESTO_CONDICIONAL = /\?|→|->|\b(?:not|once|if|unless|until|conditional\w*|pending|provided|after|but|withdrawn|retracted)\b|\b\d+\s+(?:of|de)\s+\d+\b/i;
-// Depois do READY, palavras que o desdizem ou o deixam em aberto (LEVE 1 do Claude 5 hed9 no #5408 @ab697952b5).
-const DESDIZ = /\b(?:CHANGES|NOT\s+READY|BLOCKED|REJECT\w*|sorry|meant|scratch|still|running|waiting)\b/i;
+// Depois do READY (LEVE 1 do Claude 5 hed9 e MÉDIO do Claude 5 ichw no #5408), em inglês e em português:
+//  - na linha inteira, o que desdiz o READY: CHANGES, NOT READY, BLOCKED, REJECT, "sorry", "meant", "scratch", "withdrawn",
+//    "retracted", "retirado", "desconsiderar", "não pronto";
+//  - na frase do veredito (até o primeiro ". " ou " — "), uma ressalva ("if", "but", "after", "except", "still", "waiting",
+//    "mas", "falta", "ainda", "depois", "exceto", "salvo", "se", "quando", "não"...) ou um achado: um grau com contagem
+//    acima de zero ("com 1 LEVE", "1 NIT") sempre; um grau sem contagem só quando a frase não diz zero achados ("0
+//    findings", "sem achados"). Assim "READY, 0 findings (sem achados), no defect of any level, NIT included." conta, e
+//    "READY, com 1 LEVE" não (ZA).
+const DESDIZ = /\b(?:CHANGES|NOT\s+READY|BLOCKED|REJECT\w*|sorry|meant|scratch|withdrawn|retracted|retirad\w*|desconsider\w*)\b|\bn[aã]o\s+pronto\b/i;
+const RESSALVA = /\?|→|->|\b(?:not|once|if|unless|until|conditional\w*|pending|provided|after|but|except\w*|still|running|waiting|mas|por[eé]m|contudo|falt\w*|ainda|depois|exceto|salvo|se|quando|at[eé]|enquanto|pendente\w*|condiciona\w*|rodando|esperando|aguardando|n[aã]o)\b|\b\d+\s+(?:of|de)\s+\d+\b/i;
+const GRAU_RE = String.raw`(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL|findings?|achados?|issues?|defects?|defeitos?)`;
+const GRAU_CONTADO = new RegExp(String.raw`\b(?:[1-9]\d*|um|uma|one|two|three|dois|duas|tr[eê]s)\s+${GRAU_RE}\b`, "i");
+const GRAU = new RegExp(String.raw`\b${GRAU_RE}\b`, "i");
+const ZERO_ACHADOS = new RegExp(String.raw`\b(?:0|zero|no|sem|nenhum|nenhuma|none)\s+${GRAU_RE}\b`, "i");
+function abreAchado(frase) {
+  return RESSALVA.test(frase) || GRAU_CONTADO.test(frase) || (GRAU.test(frase) && !ZERO_ACHADOS.test(frase));
+}
 // As famílias que existem (Claude 1 a 7 e o Codex): "Claude 33" não é família (LEVE 1 do hed9).
 const FAM_RE = String.raw`(Claude [1-7]|Codex)\b(?!\s*\d)`;
 export function readyEstrito(corpo, pr, sha) {
@@ -1339,9 +1353,10 @@ export function readyEstrito(corpo, pr, sha) {
   // Outra família no rótulo ("Claude 5 iZ — Codex X6 review"): não se sabe de quem é o READY (LEVE 2 do hed9).
   if (new RegExp(FAM_RE, "i").test(m[2])) return null;
   const nota = m[4] ?? "", resto = m[5];
-  if (RESTO_CONDICIONAL.test(nota) || DESDIZ.test(nota)) return null;
   if (resto && !/^\s*(?:$|[,.;(—–-])/.test(resto)) return null;
-  if (RESTO_CONDICIONAL.test(resto) || DESDIZ.test(resto)) return null;
+  if (DESDIZ.test(nota) || DESDIZ.test(resto) || abreAchado(nota)) return null;
+  const frase = resto.split(/\.\s|\s[—–]\s/)[0];
+  if (abreAchado(frase)) return null;
   return familia(m[1]);
 }
 
@@ -1358,12 +1373,13 @@ export function readyEstrito(corpo, pr, sha) {
  *    ou a que a leitura larga dos pedidos lê, ou a primeira citada na primeira linha. Sem família, não tira (MÉDIO 2).
  */
 const PALAVRA_TIRA = /\bCHANGES\b|\bNOT\s+READY\b|\bREADY\s*\?|\bBLOCKED\b|\bREJECT\w*\b|\bdo\s+not\s+merge\b/;
-const PALAVRA_TIRA_I = /\bdo\s+not\s+merge\b/i;
+// Em português, sem distinguir maiúsculas (LEVE do Claude 5 ichw no #5408 @0d1fe3c549).
+const PALAVRA_TIRA_I = /\bdo\s+not\s+merge\b|\bn[aã]o\s+pronto\b|\bmudan[cç]as\s+(?:necess[aá]rias|pedidas|solicitadas)\b|\breprovad\w*|\bbloquead\w*|\bn[aã]o\s+(?:incorporar|enfileirar|juntar)\b/i;
 // A retirada de uma revisão: o verbo antes de READY/approval/review ("I withdraw my READY", "retiro o READY"), ou o
 // próprio veredito retirado ("my READY ... withdrawn", "meu READY ... retirado", "READY withdrawn"). Um READY que só
 // menciona um achado ou um pedido retirado ("READY (the earlier finding was retirado after the fix)") não é retirada
 // (MÉDIO 2 do hed9 em c615434258).
-const RETIRA = new RegExp(String.raw`\b(?:withdr[ae]w\w*|retract\w*|revok\w*|take\s+back|cancel\w*|retir\w*)\b[^\n]{0,40}\b(?:READY|approval|aprova\w*|review|revis\w*)\b|\b(?:my|our|meu|o meu|nosso)\s+(?:READY|approval|aprova\w*|review|revis\w*)\b[^\n]{0,40}\b(?:withdrawn|retracted|revoked|taken\s+back|cancel\w*|retirad\w*)\b|\bREADY\s+(?:withdrawn|retracted|revoked|cancel\w*|retirad\w*)\b|\bcorrection\s+to\s+my\s+READY\b|^\s*WITHDRAWN\b`, "im");
+const RETIRA = new RegExp(String.raw`\b(?:withdr[ae]w\w*|retract\w*|revok\w*|take\s+back|cancel\w*|retir\w*)\b[^\n]{0,40}\b(?:READY|approval|aprova\w*|review|revis\w*)\b|\b(?:my|our|meu|o meu|nosso|o|the|este|esse|this)\s+(?:READY|approval|aprova\w*|review|revis\w*)\b[^\n]{0,40}\b(?:withdrawn|retracted|revoked|taken\s+back|cancel\w*|retirad\w*)\b|\bREADY\s+(?:withdrawn|retracted|revoked|cancel\w*|retirad\w*)\b|\bcorrection\s+to\s+my\s+READY\b|^\s*WITHDRAWN\b`, "im");
 const DE_FILA = /\b(?:queue|fila|enqueue\w*)\b/i;
 export function tiraReady(corpo, pr, sha, estado = "", commitId = "") {
   const cheio = String(sha ?? "").toLowerCase();

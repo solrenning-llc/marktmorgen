@@ -25,13 +25,13 @@ for (const level of ["log", "error"] as const) console[level] = () => {};
 
 function reset(): void {
   redis.clear();
-  world.fakeLoop = true; world.checksOk = true;
+  world.fakeLoop = true; world.checksOk = true; world.failing.clear(); world.throwing = null;
   world.ran.length = 0; world.notices.length = 0;
 }
 
 const routes = [
-  { name: "mail-check", run: mailCheck, lock: "nl:mail-check:lock", last: "nl:mail-check:last", status: STATUS_CHECKS[0].key },
-  { name: "stripe-check", run: stripeCheck, lock: "nl:stripe-check:lock", last: "nl:stripe-check:last", status: STATUS_CHECKS[1].key },
+  { name: "mail-check", run: mailCheck, lock: "nl:mail-check:lock", last: "nl:mail-check:last", status: STATUS_CHECKS[0].key, one: "account", first: "account" },
+  { name: "stripe-check", run: stripeCheck, lock: "nl:stripe-check:lock", last: "nl:stripe-check:last", status: STATUS_CHECKS[1].key, one: "tax", first: "tiers" },
 ] as const;
 const request = (name: string) => new NextRequest(`https://example.test/api/cron/${name}`);
 const statusRuns = (key: string) => (redis.run(["LRANGE", key, 0, -1]) as string[] | null) ?? [];
@@ -42,15 +42,41 @@ for (const route of routes) {
     world.checksOk = false;
     const response = await route.run(request(route.name));
     const body = await response.json();
-    assert.ok(response.status >= 500 && response.status < 600, `status ${response.status} is an error`);
+    // The same answer as every other cron route's failed run (Claude 5 ichw on #5472): 500 with error "failed".
+    assert.equal(response.status, 500, `status ${response.status} is the cron routes' failed-run status`);
     assert.equal(response.headers.get("cache-control"), "no-store");
     assert.equal(body.ok, false);
+    assert.equal(body.error, "failed");
     assert.ok(Array.isArray(body.checks) && body.checks.length > 0, "the individual checks are still in the answer");
     assert.ok(Array.isArray(body.failed) && body.failed.length > 0, "the failed checks are named");
     assert.deepEqual(body.failed, body.checks.filter((c: { ok: boolean }) => !c.ok).map((c: { check: string }) => c.check));
     assert.equal(JSON.parse(String(redis.run(["GET", route.last]))).ok, false, "the result is still saved");
     assert.equal(world.notices.length, 1, "the owner's notice is still sent");
     assert.equal(JSON.parse(String(statusRuns(route.status)[0])).ok, false, "the status page's run is still kept, as failed");
+    assert.equal(redis.run(["GET", route.lock]), null, "the lock is let go");
+  });
+
+  test(`${route.name}: a mixed run answers the error status naming only the check that failed`, async () => {
+    reset();
+    world.failing.add(route.one);
+    const response = await route.run(request(route.name));
+    const body = await response.json();
+    assert.equal(response.status, 500);
+    assert.equal(body.error, "failed");
+    assert.ok(body.checks.some((c: { ok: boolean }) => c.ok), "some checks passed");
+    assert.deepEqual(body.failed, [`synthetic ${route.one}`]);
+    assert.equal(redis.run(["GET", route.lock]), null, "the lock is let go");
+  });
+
+  test(`${route.name}: a check that cannot run at all answers the error status naming the run itself`, async () => {
+    reset();
+    world.throwing = route.first;
+    const response = await route.run(request(route.name));
+    const body = await response.json();
+    assert.equal(response.status, 500);
+    assert.equal(body.error, "failed");
+    assert.deepEqual(body.failed, ["the run itself"]);
+    assert.equal(world.notices.length, 1, "the owner's notice is still sent");
     assert.equal(redis.run(["GET", route.lock]), null, "the lock is let go");
   });
 
@@ -61,6 +87,7 @@ for (const route of routes) {
     assert.equal(response.status, 200);
     assert.equal(body.ok, true);
     assert.equal(body.failed, undefined);
+    assert.equal(body.error, undefined);
   });
 
   test(`${route.name}: a busy run (another holds the lock) is still 200, not a failed check`, async () => {

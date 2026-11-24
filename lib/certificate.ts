@@ -565,7 +565,9 @@ export type CertificatePage = {
  * One draw reads a bounded page (#4304): the counts, a page of the by-time list (atKey) and its records in one MGET,
  * whatever the course holds. A course whose set holds certificates issued before that list was kept gets at most
  * CERT_BACKFILL_PER_DRAW of them added on each draw that brings the store's room (`room`), by the walk (addOlder). A
- * walk that does not read is left for the next draw and never hides the page (Claude 5 iYnra's NIT 8 on #5481).
+ * walk that does not read is left for the next draw and never hides the page (Claude 5 iYnra's NIT 8 on #5481), except
+ * when the count read again after a failed step does not read either: then nothing known can be said, and the page is
+ * unknown (null), never a list beside a wrong count (Claude 3 wSUb3's NIT on #5481).
  * `page` is 0 for the newest.
  */
 export async function certificatesFor(courseId: string, options: { room?: DataStore; page?: number } = {}): Promise<CertificatePage | null> {

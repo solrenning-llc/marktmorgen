@@ -195,6 +195,9 @@ async function main(): Promise<void> {
   before = (batch) => (batch.length === 1 && batch[0][0] === "ZMSCORE" ? ["not a list"] : null);
   const oddScores = await certificatesFor(ODD, { room: ROOM });
   is("a ZMSCORE that does not read: no ZADD, the page still listed, and the step said as failed", [oddScores?.list.length, redis.run(["ZCARD", atKey(ODD)]), oddScores?.walkProblem], [1, 1, "step"]);
+  // And the count read again after it does not read either: unknown, never a list beside a wrong count (Claude 3 wSUb3's NIT).
+  before = (batch) => (batch.length === 1 && batch[0][0] === "ZMSCORE" ? ["not a list"] : batch.length === 1 && batch[0][0] === "ZCARD" ? ["nine"] : null);
+  is("a failed step whose recount does not read either: the page is unknown (null)", await certificatesFor(ODD, { room: ROOM }), null);
   const beforeOdd = await used(ROOM);
   before = (batch) => (batch.length === 1 && batch[0][0] === "ZADD" ? ["three"] : null);
   const oddCount = await certificatesFor(ODD, { room: ROOM });

@@ -1333,11 +1333,19 @@ const RESSALVA = /\?|→|->|\b(?:not|once|if|unless|until|conditional\w*|pending
 const GRAU_RE = String.raw`(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL|findings?|achados?|issues?|defects?|defeitos?|notes?)s?`;
 const GRAU_CONTADO = new RegExp(String.raw`\b(?:[1-9]\d*|um|uma|one|two|three|several|some|dois|duas|tr[eê]s|alguns|algumas)\s+${GRAU_RE}\b`, "i");
 const GRAU = new RegExp(String.raw`\b${GRAU_RE}\b`, "i");
-const ZERO_RE = String.raw`(?:(?:0|zero|no|sem|nenhum|nenhuma|none)\s+${GRAU_RE}(?:\s+of\s+any\s+level)?|no\s+defect\s+of\s+any\s+level)`;
+const ZERO_RE = String.raw`(?:(?:0|zero|no|sem|nenhum|nenhuma|none)\s+${GRAU_RE}(?:\s+of\s+any\s+level)?(?:,?\s*${GRAU_RE}\s+included)?|no\s+defect\s+of\s+any\s+level(?:,?\s*${GRAU_RE}\s+included)?)`;
 const ZERO_ACHADOS = new RegExp(String.raw`\b${ZERO_RE}\b`, "i");
+const ZERO_G = new RegExp(String.raw`\b${ZERO_RE}\b`, "gi");
 const LOGO_DEPOIS = new RegExp(String.raw`^\s*(?:$|\.(?:\s|$)|[,;:—–-]?\s*\(?\s*${ZERO_RE}\b|[,;:—–-]?\s*\([^()\n]*\b${ZERO_RE}\b[^()\n]*\))`, "i");
+// Cada declaração de zero achados sai antes da busca dos graus: um achado escrito depois dela na mesma linha ("READY,
+// no findings. NIT: typo", "READY, sem achados. LEVE no teste") continua contando (MÉDIO do Claude 5 ichw no #5408
+// @91bae56314).
+// Um grau com nome (GRAVE, ALTO, MÉDIO, LEVE, NIT...) recusa sempre; uma palavra genérica ("finding", "achado",
+// "issue") só com contagem acima de zero: "the ZA check of every earlier finding" descreve, não aponta achado.
+const GRAU_NOMEADO = /\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)s?\b/i;
 function abreAchado(texto) {
-  return RESSALVA.test(texto) || GRAU_CONTADO.test(texto) || (GRAU.test(texto) && !ZERO_ACHADOS.test(texto));
+  const semZeros = String(texto ?? "").replace(ZERO_G, " ");
+  return RESSALVA.test(texto) || GRAU_CONTADO.test(semZeros) || GRAU_NOMEADO.test(semZeros);
 }
 // As famílias que existem (Claude 1 a 7 e o Codex): "Claude 33" não é família (LEVE 1 do hed9).
 const FAM_RE = String.raw`(Claude [1-7]|Codex)\b(?!\s*\d)`;

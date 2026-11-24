@@ -167,6 +167,52 @@ const listedAs = (prefix: string): { member: string; score: number } | null => {
     is("the offer is not listed again", listedAs(`broken|${settled}|`), null);
   }
 
+  // Claude 3 yUZf on #5482 @5a5b98139b: an entry that already carries the offer's time is moved only while it is listed
+  // (ZADD XX), so one the thanks page took off during the look is never put back either.
+  part("An entry carrying its time that another path takes off during a look is never put back");
+  redis.clear();
+  {
+    const settled = "cs_test_settledtimed0001";
+    const began = Date.now() - 10 * 60_000;
+    const timed = `broken|${settled}||at:${began}`;
+    redis.run(["SET", `nl:upsell:${settled}`, JSON.stringify({ state: "pending", product: "p1", pi: "pi_settledtimed", at: began })]);
+    redis.run(["ZADD", PENDING, began, timed]);
+    const throwsAfterUnlisting = async (): Promise<Store | null> => {
+      redis.run(["ZREM", PENDING, timed]);
+      throw new Error("synthetic store read failure");
+    };
+    await settlePendingOffers(throwsAfterUnlisting, Date.now() + 10_000);
+    is("the offer is not listed again", listedAs(`broken|${settled}|`), null);
+  }
+
+  // Claude 3 yUZf on #5482 @5a5b98139b: no test runs the PENDING_SWAP Lua itself, only lib/redis-memory.ts's mirror of
+  // it, so the script Redis runs is held here line by line.
+  part("The swap script Redis runs is the one the in-memory mirror copies");
+  redis.clear();
+  {
+    const swapped = "cs_test_swapscript00001";
+    const began = Date.now() - 10 * 60_000;
+    redis.run(["SET", `nl:upsell:${swapped}`, JSON.stringify({ state: "pending", product: "p1", pi: "pi_swap", at: began })]);
+    redis.run(["ZADD", PENDING, began, `quiet|${swapped}|`]);
+    const writes = redis.pipeline.bind(redis);
+    const evals: (string | number)[][] = [];
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      evals.push(...commands.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:upsell-pending-swap:")));
+      return writes(commands);
+    }) as typeof redis.pipeline;
+    await settlePendingOffers(async () => null, Date.now() + 10_000);
+    redis.pipeline = writes;
+    const [swap] = evals;
+    const lua = String(swap?.[1] ?? "").split("\n");
+    is("one swap, on the job's list alone, old entry first, then the new score and entry", [evals.length, swap?.[2], swap?.[3], swap?.[4], String(swap?.[6])], [1, 1, PENDING, `quiet|${swapped}|`, `quiet|${swapped}||at:${began}`]);
+    is(
+      "the new entry is written only when the old one was still listed and is taken off in the same step",
+      lua[1],
+      "if redis.call('ZREM', KEYS[1], ARGV[1]) == 1 then redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3]) return 1 end",
+    );
+    is("otherwise nothing is written", [lua.length, lua[2]], [3, "return 0"]);
+  }
+
   // Claude 5 id8Ws on #5482 @6ce9cb447e: the entry's replacement by the one carrying its time is one step, so a write
   // that fails never leaves a still-pending offer off the job's list.
   part("A failed write while replacing an entry never takes a still-pending offer off the list");

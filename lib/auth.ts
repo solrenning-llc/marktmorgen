@@ -476,7 +476,7 @@ export class SessionsUnknownError extends UnknownReplyError {
 export async function dropSecondStep(email: string, gone: (mark: string) => boolean, keep?: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const owned = await sessionsKey(normaliseEmail(email));
-  const [members] = await redisPipeline([["SMEMBERS", owned]]);
+  const members = repliesFor(await redisPipeline([["SMEMBERS", owned]]), 1)?.[0];
   // Every member a session's key, as endAllSessions reads it (Claude 6 z5v4's LEVE on #5144): any other is never DELed.
   const keys = sessionMembers(members);
   if (!keys) throw new SessionsUnknownError("an account's sessions");
@@ -512,7 +512,8 @@ const SESSION_KEY = /^nl:auth:session:[0-9a-f]{40}$/;
 
 /**
  * An account's sessions set read exactly (rule 24; Codex G, #4287 item 4): every member a session's key, or null.
- * A member in any other shape is never deleted as a key: the set is unknown, and nothing is closed.
+ * A member in any other shape is never deleted as a key: the set is unknown, and nothing is closed. `reply` is the
+ * one reply of an exact one-command answer (repliesFor): the first of a longer answer is never read as the set (#4059).
  */
 function sessionMembers(reply: unknown): string[] | null {
   const keys = stringList(reply);
@@ -1012,7 +1013,7 @@ export async function endAllSessions(email: string): Promise<number | null> {
   if (!isRedisConfigured()) return 0;
   const owned = await sessionsKey(normaliseEmail(email));
   try {
-    const [members] = await redisPipeline([["SMEMBERS", owned]]);
+    const members = repliesFor(await redisPipeline([["SMEMBERS", owned]]), 1)?.[0];
     // The set is the only way to the sessions (audit SG2, rule 30): unread, it is kept and nothing is deleted.
     const keys = sessionMembers(members);
     if (!keys) throw new SessionsUnknownError("an account's sessions");
@@ -1043,7 +1044,7 @@ export async function endOtherSessions(email: string, keep: string | undefined):
   const owned = await sessionsKey(normaliseEmail(email));
   try {
     const kept = await sessionKey(keep);
-    const [members] = await redisPipeline([["SMEMBERS", owned]]);
+    const members = repliesFor(await redisPipeline([["SMEMBERS", owned]]), 1)?.[0];
     // As endAllSessions: the set is the only way to the sessions, so an unread one closes nothing.
     const keys = sessionMembers(members);
     if (!keys) throw new SessionsUnknownError("an account's sessions");

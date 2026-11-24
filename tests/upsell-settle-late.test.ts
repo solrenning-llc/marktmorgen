@@ -192,6 +192,28 @@ async function main(): Promise<void> {
   is("still processing all week: looked at no more than its declared number of times after the second day", looks <= OFFER_WATCH_LOOKS_MOST, true);
   is("and let go by the eighth day", await listed("cs_test_settlelate000004"), null);
 
+  // Claude 5 icEJ on #5482 @e28cf37787: an orphan claim (only the claim written, no customer and no payment) is let
+  // go at its late look by ORPHAN_RELEASE, the EVAL and its GET and DEL, three billed: that look is measured too.
+  part("What one late look at an orphan claim costs");
+  {
+    const orphan = "cs_test_settleorphan0001";
+    const at = Date.now() - 20 * 60 * 1000;
+    await redis.pipeline([
+      ["SET", `nl:upsell:${orphan}`, JSON.stringify({ state: "pending", product: "kit001", at })],
+      ["ZADD", "nl:upsell:pending", at, `harbor|${orphan}|`],
+    ]);
+    const plainOrphan = redis.pipeline.bind(redis);
+    let orphanCommands = 0;
+    redis.pipeline = async (list: (string | number)[][]) => {
+      orphanCommands += billed(list);
+      return plainOrphan(list);
+    };
+    await settlePendingOffers(storeForHandle, Date.now() + 60_000);
+    redis.pipeline = plainOrphan;
+    is("the orphan claim is let go and off the list", [(await redis.pipeline([["GET", `nl:upsell:${orphan}`]]))[0], await listed(orphan)], [null, null]);
+    is("its look, the release's script counted with its calls, is within its declared commands", [orphanCommands, orphanCommands <= OFFER_WATCH_LOOK_COMMANDS_MOST], [orphanCommands, true]);
+  }
+
   part("RED: every look at one waiting offer, from its first minute to its last day, inside a declared cost");
   ahead = 0;
   nextCharge = "processing";

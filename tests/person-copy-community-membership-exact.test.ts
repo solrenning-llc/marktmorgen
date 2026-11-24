@@ -42,7 +42,15 @@ const SHAPES: [string, (batch: Batch, replies: unknown[]) => unknown[]][] = [
   ["a reply of another shape", (batch, replies) => replies.map((r, i) => (batch[i][0] === "SISMEMBER" ? "1" : r))],
 ];
 
-/** A community where Ada liked Bob's post and one of his comments and reported one, written at `at` seconds. */
+/** One kind of SISMEMBER the copy reads, by its key: a like of a post, of a comment, a report of each. */
+const KINDS: [string, RegExp][] = [
+  ["a like of a post", /:l:[^:]+$/],
+  ["a like of a comment", /:lc:[^:]+:[^:]+$/],
+  ["a report of a post", /:rep:p:[^:]+$/],
+  ["a report of a comment", /:rep:c:[^:]+:[^:]+$/],
+];
+
+/** A community where Ada liked Bob's post and his comment and reported both, written at `at` seconds. */
 async function world(at: number): Promise<{ id: string; post: string; comment: string }> {
   redis.clear();
   await claimHandle(OWNER, "membershipshop", "Membership Shop", "");
@@ -61,6 +69,7 @@ async function world(at: number): Promise<{ id: string; post: string; comment: s
     await toggleLike(id, made.post.id, ADA, store);
     await toggleCommentLike(id, made.post.id, said.comment.id, ADA, store);
     await report(id, { kind: "post", post: made.post.id }, ADA, store);
+    await report(id, { kind: "comment", post: made.post.id, comment: said.comment.id }, ADA, store);
     return { id, post: made.post.id, comment: said.comment.id };
   } finally {
     Date.now = realNow;
@@ -73,8 +82,21 @@ for (const [reader, at] of [["her own trace", TRACED_SINCE + 86_400], ["the whol
     const copy = await memberTraces(id, ADA);
     assert.deepEqual(copy.likedPosts, [post]);
     assert.deepEqual(copy.likedComments, [{ post, comment }]);
-    assert.deepEqual(copy.reported, [`post ${post}`]);
+    assert.deepEqual([...copy.reported].sort(), [`comment ${comment} under post ${post}`, `post ${post}`]);
   });
+
+  // Each of the seven reads is held on its own (Claude 5 iZdj's LEVE on #5171): only one kind of SISMEMBER is
+  // answered null, every other reply stays real, so a read turned back into Number(reply) alone fails here.
+  for (const [kind, key] of KINDS) {
+    test(`read from ${reader}: only ${kind} answered null makes the copy fail`, async () => {
+      const { id } = await world(at);
+      let hit = 0;
+      const alter = (batch: Batch, replies: unknown[]) =>
+        replies.map((r, i) => (batch[i][0] === "SISMEMBER" && key.test(String(batch[i][1])) ? (hit++, null) : r));
+      await assert.rejects(withMarks(alter, () => memberTraces(id, ADA)), UnknownReplyError);
+      assert.ok(hit > 0, `the copy read ${kind}`);
+    });
+  }
 
   for (const [label, alter] of SHAPES) {
     test(`read from ${reader}: ${label} makes the copy fail, never leave a like or a report out`, async () => {

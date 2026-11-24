@@ -138,6 +138,34 @@ Decisão do dono DONO-20261120-1841-REGRAS-FILA (substitui DONO-20261120-1840-RE
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## ZA — Zero achados: só entra PR sem nenhum defeito apontado, por todos os revisores (dono, 23/11/2026, 12h29 Fortaleza)
+
+Pedido do dono, nas palavras dele (23/11/2026, por volta das 12h25 Fortaleza): "todos revisores (nao apenas um deles) tem que dizer que nao tem nenhum defeito, nem leve nem mínimo"; aprovação dos itens 1 a 5 da proposta do Claude 6 (sessão `018ZjhH`), às 12h29: "faça". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. Motivo: conferido pelo Claude 6 em 23/11/2026, o #5130 entrou no main com 1 LEVE apontado e "não bloqueia" (comentário 7083359730), o #5251 com defeitos mínimos (NIT) apontados pelos revisores e não corrigidos (7090640746, 7090663224), e o #3650 com três LEVES de heads anteriores nunca corrigidos, porque as revisões do head final olharam só a junção do main (7058658361). É ordem posterior a FQ (1), RV (a) e (f), CV (f) e CO (e) e prevalece sobre elas onde divergirem (Pedidos repetidos, passo 3 (b)).
+
+**Mesmo pedido, já dado antes (Pedidos repetidos, passo 1).** Às 04h55 de 23/11/2026 (Fortaleza), o dono deu ao Claude 3 (sessão `014YNUx`) a mesma ordem, repassada a todos no correio (20261123T075523Z-claude-3-73ce) e aplicada pelo coordenador (dfe3), nas palavras dele: "QUAL SERIA O PROCEDIMENTO MAIS SEGURO? NAO QUERO NADA ENTRANDO NA FILA COM NENHUM ERRO, NEM LEVE NEM MINIMO", com a escolha "Zero achado aberto"; e, às 04h57: "DEVE SER OLHADO O QUE JÁ ENTROU NO SITE PARA SER CORRIGIDO TUDO, INCLUSIVE COISAS MINIMAS, LOW, LEVE" (quadro #5285, "Open findings in merged PRs: owner, PR, main"). Por volta das 13h45, ao Claude 5 (sessão `012ST5ib47`, correio 20261123T164636Z-claude-5-1d7b): "TUDO O QUE TIVER NO SITE TEM QUE SER CORRIGIDO. QUALQUER DEFEITO QUE TIVER NO SITE TEM QUE SER CORRIDITO, MESMO DEFEITO LEVE, MESMO DEFEITO MINIMO" e "TUDO O QUE JA TIVER SIDO INCORPORADO NO SITE TEM QUE SER CORRIGIDO. QUALQUER DEFEITO QUE TIVER NO SITE TEM QUE SER CORRIDITO, MESMO DEFEITO LEVE, MESMO DEFEITO MINIMO". As três são o mesmo pedido; esta seção grava as três, e a de 12h25 acrescenta só "todos revisores (nao apenas um deles)". Um achado do Codex espera o Codex: só ele o retira (73ce, item 3).
+
+Recebido novamente em 23/11/2026, por volta das 14h05 (Fortaleza), pelo Claude 5 (sessão 012ST5ibzr); repetição sem mudança; nada alterado.
+
+(a) **READY só com zero achados.** Qualquer defeito apontado, de qualquer tamanho (GRAVE, ALTO, MÉDIO, LEVE ou mínimo, NIT inclusive), torna o veredito CHANGES, nunca READY. "Não bloqueia", "non-blocking", "fica para depois", "follow-up" e "READY com 1 LEVE" deixam de existir. O READY traz a frase "sem achados" (ou "0 achados", "no findings").
+
+(b) **Todos os revisores do head, não só dois.** O PR só está pronto (FQ (1)) quando nenhum revisor daquele head deixou defeito sem correção: o número mínimo de READY de RV (a) continua, e qualquer achado de qualquer outra família, comentário de linha inclusive, segura o PR até ser corrigido num head novo, com revisão focal, ou retirado por escrito por quem o apontou. Ninguém retira o achado de outro, nem o autor, nem quem enfileira, nem o coordenador; o achado do Codex espera o Codex.
+
+(c) **Observação que não é defeito vem escrita como "não é defeito".** Uma nota que o revisor não marca assim conta como achado. Na dúvida, conta como defeito.
+
+(d) **Achados de heads anteriores.** Toda revisão de um head novo, inclusive a de uma junção do main sem outra mudança, confere que cada achado apontado em qualquer head anterior do PR está corrigido neste head ou foi retirado por escrito por quem o apontou, e diz isso no veredito. Achado antigo sem correção nem retirada torna o veredito CHANGES.
+
+(e) **Quem enfileira** lê todos os comentários do PR e os comentários de linha antes de enfileirar, e recusa (`complete-enqueue --result declined`) o PR com qualquer achado sem correção nem retirada, em qualquer head.
+
+(f) **A ferramenta do correio** passará a recusar o `complete-review --result READY` cujo texto aponte achado (item 4 da proposta, num PR próprio de `tooling/agent-mail/`, com hash novo, CO (a)). Até ela entrar, (a) a (e) valem pela conferência de quem revisa e de quem enfileira.
+
+(g) **O que já entrou assim** é corrigido em PRs próprios, um por defeito (até 3 do mesmo padrão, AD (c)), cada um com teste que falha antes da correção. O escopo é tudo: todo achado deixado aberto num PR já incorporado (quadro #5285, 73ce item 4) e todo defeito do que já está no site (1d7b, as issues de defeito divididas pelo coordenador). O LEVE do #5130, os defeitos mínimos do #5251 e os três LEVES do #3650 são só exemplos, os primeiros conferidos.
+
+Isto garante que nenhum PR entra com defeito **conhecido**; não garante código sem nenhum defeito (VR, item 5).
+
+**Estado (regra VR):** regra vigente desde a decisão do dono; a recusa automática de (f) e as correções de (g) ainda não estão construídas.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## RV — Revisor garantido, na quantidade e na qualidade certas (dono, 20/11/2026, por volta das 23h Fortaleza)
 
 Pedido do dono, nas palavras dele: "quero regra e politica para nao ocorrer mais de faltar revisor e revisoes na quantidade e qualidade correta". Sobre a escala de revisores: "MAS AS VEZES OCORRE DE UM AGENTE ESTAR SEM USO E DE AS VEZES ELE NAO PODER SER POR MOTIVO TECNICO". Aprovação da proposta do coordenador (Claude 5): "faça o correto". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. Motivo: na noite de 20 para 21/11/2026, o #4984 e o #4999, de imposto, ficaram prontos sem revisor; o gargalo era revisor, não código. Esta seção completa a FQ (2) e não a substitui.

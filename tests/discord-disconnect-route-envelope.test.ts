@@ -5,13 +5,14 @@
  * DROP_SERVER_IF_EMPTY (EVAL, HLEN, DEL) in place of the plain DEL (and, with nobody kept, of HLEN and DEL).
  *
  * Every command is billed as Upstash bills it: a plain command is one, and a script is its EVAL plus every call written
- * in it (a bound on its worst branch), except FORGET_PEOPLE, whose loop is counted per person it names, from the script's
- * own text: its EVAL and the calls outside its loop once, and the calls inside its loop once a person (Claude 6 jAAv7's
- * MEDIO on #5380: the per-person figure is read from the script, never from DISCONNECT_COMMANDS_PER_PERSON, so a call
- * added to the loop makes this test fail until the figure and its registry line follow). The first press is not measured (it starts the store's windows). The request with
- * nobody kept must stay inside one studio unit's envelope (20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS); each
- * person kept adds exactly DISCONNECT_COMMANDS_PER_PERSON, the calls FORGET_PEOPLE makes for them, priced on its own
- * in the registry (NOT_A_COST.DISCONNECT_COMMANDS_PER_PERSON).
+ * in it (a bound on its worst branch), except FORGET_PEOPLE, whose loop is counted per person it names, from the
+ * script's own text: its EVAL and the calls outside its loop once, and the calls inside its loop once a person
+ * (Claude 6 jAAv7's MEDIO on #5380: the per-person figure is read from the script, never from
+ * DISCONNECT_COMMANDS_PER_PERSON, so a call added to the loop makes this test fail until the figure and its registry
+ * line follow). The first press is not measured (it starts the store's windows). The request with nobody kept must stay
+ * inside one studio unit's envelope (20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS); each person kept adds exactly
+ * DISCONNECT_COMMANDS_PER_PERSON, the calls FORGET_PEOPLE makes for them, priced on its own in the registry
+ * (NOT_A_COST.DISCONNECT_COMMANDS_PER_PERSON).
  *
  * Synthetic store, Redis stand-in and a stand-in fetch for Discord's leave (no network).
  */

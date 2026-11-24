@@ -82,6 +82,8 @@ import { revokeAllKeys } from "@/lib/api-keys";
 import { forgetBoth, queueStoreForget, queueUnseenFiles } from "@/lib/store-forget-retry";
 import { forgetStoreWebhooks } from "@/lib/webhooks";
 import { forgetStoreSync } from "@/lib/email-sync";
+import { giveBackForClosing } from "@/lib/meet-connect";
+import { giveMetaBackForClosing } from "@/lib/meta-ads";
 import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
 import { forgetOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
 import { forgetStorePhones } from "@/lib/phone-alerts";
@@ -501,6 +503,17 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     // for the next (clearClaims, Claude 4 on #3660). The key of that place goes with the store's other keys below.
     const claimsPlace = await clearClaims(store, hosts.map(hostId), own, keep, apply);
     await keep();
+    // Its meeting and Meta grants given back at the provider before their connections go with its keys (issue #4012),
+    // each only when no other connection here uses the same account. After the erasing mark, so no plan starts on this
+    // store any more; it reads and renews the lock (CLOSING_GIVE_BACK_COMMANDS) and writes nothing else here, and a
+    // give-back that fails is only logged, as a disconnect's is, never a reason to keep the store's data.
+    // The store's lock is made to last after each give-back (keep), since each provider call can take most of the lock's
+    // time (Claude 5 icRk's LEVE on #5477): slow providers never put the store's erasure off to the next walk.
+    if (store.statsId) {
+      await giveBackForClosing(store.statsId, keep);
+      await giveMetaBackForClosing(store.statsId);
+      await keep();
+    }
     await dropTeam(store, apply);
     if (store.sid) await revokeAllKeys(store.sid, apply);
     await forgetStoreWebhooks(store.statsId, apply);

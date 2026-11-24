@@ -369,6 +369,31 @@ async function giveBackUnlessShared(
   if (used !== false) return { removed: false, shared: used === true };
   return { removed: await giveBack(statsId, c, host), shared: false };
 }
+
+/**
+ * Issue #4012: a closing store gives back its meeting grants at Google and Zoom before the walk deletes its connections
+ * (lib/closed-store-data.ts, forgetLive, after its erasing mark): each only when nothing else here uses its account
+ * (giveBackUnlessShared, #4011), so a store that is gone never ends a live store's or a host's access. Nothing is
+ * deleted here (the walk deletes the keys); a connection or an index that does not read keeps the grant, and a
+ * provider that does not confirm is only logged, as a disconnect's give-back is: the closing goes on either way. The
+ * count of grants given back, for the walk's log.
+ */
+export async function giveBackForClosing(statsId: string, after: () => Promise<void> = async () => {}): Promise<number> {
+  let given = 0;
+  for (const provider of ["google", "zoom"] as const) {
+    try {
+      const c = await readConnection(statsId, provider);
+      if (c && (await giveBackUnlessShared(statsId, c)).removed) given++;
+    } catch (error) {
+      console.error(`giving a closing store's ${provider} grant back failed`, error);
+    }
+    // The caller's lock made to last after each provider (forgetLive's keep, Claude 5 icRk's LEVE on #5477): a provider
+    // call takes at most its own limit, under the lock's time. A lock that ran out throws here, as keep does.
+    await after();
+  }
+  return given;
+}
+
 /** When the provider last told us this account removed the app (forgetUser), a day: a consent flow begun before keeps nothing. */
 const goneKey = (provider: MeetProvider, id: string) => `nl:meet:gone:${provider}:${hash(`meet-gone:${provider}:${id}`)}`;
 const logKey = (statsId: string) => `nl:meet:log:${statsId}`;

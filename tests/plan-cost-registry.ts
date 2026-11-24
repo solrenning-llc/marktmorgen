@@ -3529,7 +3529,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     feature: "Closing the store (18 October 2026): its records deleted, its followers read, its whole exports and list downloads after its plan ended, its last steps",
     monthlyUsd: (tier) => closureCost(tier).total,
     sources: [
-      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "decideCalendars", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "dueForErasure", "CLOSING_UNHELD", "fencedBy", "ownsAnother", "CLAIM_PAGES", "clearClaims", "servesAnother", "claimsLeft"] },
+      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "decideCalendars", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "dueForErasure", "CLOSING_UNHELD", "fencedBy", "ownsAnother", "CLAIM_PAGES", "clearClaims", "servesAnother", "claimsLeft", "CLOSING_GIVE_BACK_COMMANDS", "giveBackForClosing", "giveMetaBackForClosing"] },
       { file: "lib/redis-lock.ts", names: ["applyIfHeld", "CLOSING_FENCED", "FENCED_KEYS"] },
       { file: "lib/closed-store-data.ts", names: ["queueDeleted", "admitDeleted", "BATCH_SWAP", "DELETE_SETTLES_MS", "if (!entry.deleted) await finish(entry, now)", "settleDeletedStore({ ref, sid: entry.sid, email: entry.email, holds: entry.holds ?? [entry.handle] })", "await forgetBoth(entry.statsId ?? null, entry.sid)", "await queueStoreForget(entry.statsId ?? null, entry.sid, Date.now(), typeof entry.community === \"string\" ? entry.community : null)", "await queueUnseenFiles(entry.statsId ?? null, entry.sid, Date.now(), typeof entry.community === \"string\" ? entry.community : null)"] },
       { file: "lib/team.ts", names: ["memberStoresExact", "MEMBER_STORES_READ", "dropTeam", "KeysNotSwept"] },
@@ -3687,7 +3687,15 @@ export const STALE_ID_COMMANDS = Math.ceil((SERVED_COMMANDS + 2) / (MEMBER_STORE
  * Carried, as STALE_ID_COMMANDS is, by the closing store for each of its team places (PREPARE in closureCost).
  */
 export const STALE_ID_WIRE_BYTES = (MAX_TEAM + 10) * 1024;
-export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS) + CLAIMS_LEFT_COMMANDS + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS + DUE_READ_COMMANDS + ERASING_MARK_COMMANDS + FENCED_PREPARE_COMMANDS + MAX_TEAM * STALE_ID_COMMANDS;
+/**
+ * What giving a closing store's grants back reads at the most (issue #4012, lib/closed-store-data.ts forgetLive,
+ * giveBackForClosing and giveMetaBackForClosing): for Google and for Zoom its connection (GET) and its account's index
+ * (SMEMBERS), and for Meta the same two; and the store's lock made to last after each of the three give-backs
+ * (holdLock: EVAL, GET, EXPIRE; Claude 5 icRk's LEVE on #5477). It writes nothing else here; the provider's own revoke
+ * is a call to it, not a command.
+ */
+export const CLOSING_GIVE_BACK_COMMANDS = 2 * 2 + 2 + 3 * 3;
+export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS) + CLAIMS_LEFT_COMMANDS + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS + DUE_READ_COMMANDS + ERASING_MARK_COMMANDS + FENCED_PREPARE_COMMANDS + MAX_TEAM * STALE_ID_COMMANDS + CLOSING_GIVE_BACK_COMMANDS;
 
 /**
  * Commands one daily visit of a closing store sends at the most (lib/plan-closing.ts, closeOne), outside what a

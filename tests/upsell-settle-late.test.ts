@@ -47,6 +47,12 @@ const realNow = Date.now.bind(Date);
 let ahead = 0;
 Date.now = () => realNow() + ahead;
 const DAY = 24 * 60 * 60 * 1000;
+/**
+ * Commands as Upstash bills them: a script is the EVAL itself plus each command it runs (Claude 3 yaQt's MÉDIO on
+ * #5482: the first look's PENDING_SWAP is 1 + ZREM + ZADD, three, where counting the list's length gave one).
+ */
+const billed = (list: (string | number)[][]): number =>
+  list.reduce((n, command) => n + (String(command[0]).toUpperCase() === "EVAL" ? 1 + (String(command[1]).match(/redis\.call\(/g) ?? []).length : 1), 0);
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -173,7 +179,7 @@ async function main(): Promise<void> {
   const plain = redis.pipeline.bind(redis);
   let commands = 0;
   redis.pipeline = async (list: (string | number)[][]) => {
-    commands += list.length;
+    commands += billed(list);
     return plain(list);
   };
   await settlePendingOffers(storeForHandle, Date.now() + 60_000);
@@ -193,7 +199,7 @@ async function main(): Promise<void> {
   const plainTake = redis.pipeline.bind(redis);
   let taking = 0;
   redis.pipeline = async (list: (string | number)[][]) => {
-    taking += list.length;
+    taking += billed(list);
     return plainTake(list);
   };
   is("taken: checking", (await take("cs_test_settlelate000005", "kit001", "yes")).kind, "checking");
@@ -205,7 +211,7 @@ async function main(): Promise<void> {
     const seen = lookedAt();
     let run = 0;
     redis.pipeline = async (list: (string | number)[][]) => {
-      run += list.length;
+      run += billed(list);
       return plainTake(list);
     };
     await job();

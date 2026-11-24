@@ -19,7 +19,7 @@
  *   - the open route's commands, measured, stay inside ASSIST_REMIND_COMMANDS, the reminder's review ceiling.
  */
 import { claimHandle, closeStoreRecord, ensureListId, ensureStatsId, ERASING_KEY, erasingField, setAssistReminder, setAssistantPlan, setRecovery, setStripeAccount, setSubscription, storeForEmail, storeIdCommand, storeRef, type Store } from "@/lib/store";
-import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_VERSION, assistRemindKey } from "@/lib/assistant-reminder-rules";
+import { ASSIST_REMIND_AFTER_SECONDS, ASSIST_REMIND_COMMANDS, ASSIST_REMIND_VERSION, assistRemindKey } from "@/lib/assistant-reminder-rules";
 import { REQUEUE_IF_STORE_LIVE_COMMANDS, forgetAssistReminderPerson, keepAssistReminder, remindFromConsent } from "@/lib/assistant-reminder";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -102,21 +102,22 @@ function residue(session: string): { yes: Record<string, unknown> | null; member
   return { yes: typeof raw === "string" ? (JSON.parse(raw) as Record<string, unknown>) : null, members: queue.filter((m) => m.includes(session)).length };
 }
 
-/**
- * Each queue member naming this checkout, with its score: a ZADD that re-adds the same member keeps the count of
- * members, so a "no ZADD" check compares these before and after (Claude 6 jAAv7's NIT on #5372).
- */
+/** Each queue member naming this checkout, with its score. */
 function queued(session: string): [string, unknown][] {
   const queue = redis.run(["ZRANGEBYSCORE", QUEUE, "-inf", "+inf"]) as string[];
   return queue.filter((m) => m.includes(session)).sort().map((m) => [m, redis.run(["ZSCORE", QUEUE, m])]);
 }
 
 /**
- * The checkout's queue members moved to score 1, a time no requeue writes, and read back: a requeue's ZADD would
- * give them its own due time, which may be the score they already had, so only a score it could never write shows it.
+ * The checkout's queue entry made the very member a requeue of this open checkout would write (its due inside it,
+ * lib/assistant-reminder.ts remindFromConsent), at score 1, a time no requeue writes, and read back. A requeue's ZADD
+ * would then re-add the same member: the count of members stays 1, and only its score shows the ZADD (Claude 6
+ * jAAv7's NIT and Claude 5 ichw's LEVE on #5372).
  */
-function markedQueue(session: string): [string, unknown][] {
-  for (const [member] of queued(session)) redis.run(["ZADD", QUEUE, 1, member]);
+function sameMemberQueued(store: Store, session: string): [string, unknown][] {
+  for (const [member] of queued(session)) redis.run(["ZREM", QUEUE, member]);
+  const due = Number(sessions[session].expires_at) + ASSIST_REMIND_AFTER_SECONDS;
+  redis.run(["ZADD", QUEUE, 1, JSON.stringify([store.statsId, store.handle, session, due])]);
   return queued(session);
 }
 
@@ -181,7 +182,7 @@ async function main(): Promise<void> {
     during.read = async () => {
       redis.run(["SET", storeIdCommand(store.sid)[1], "moved-elsewhere@example.test"]);
     };
-    const before = markedQueue(session);
+    const before = sameMemberQueued(store, session);
     is("skip", await remindFromConsent(store, session, later), "skip");
     const after = residue(session);
     is("the yes not rewritten, and no new queue member", [after.yes?.r, after.members], [undefined, 1]);
@@ -197,7 +198,7 @@ async function main(): Promise<void> {
     during.read = async () => {
       await forgetAssistReminderPerson(store.statsId!, "fay@example.com");
     };
-    const before = markedQueue(session);
+    const before = sameMemberQueued(store, session);
     is("skip", await remindFromConsent(store, session, later), "skip");
     is("no yes, and only the member that was there", residue(session), { yes: null, members: 1 });
     is("and it is not added again: its score is unchanged (SET ... XX wrote nothing, so no ZADD)", queued(session), before);

@@ -13,7 +13,7 @@
  * Synthetic data, Stripe and PayPal stand-ins.
  */
 import * as rules from "@/lib/api-read-rules";
-import { BOOK_INVOICES_KEPT_BYTES, bookWork } from "@/lib/api-read-rules";
+import { BOOK_INVOICES_KEPT_BYTES, BOOK_KEPT_INVOICES_BYTES, BOOK_KEPT_INVOICES_MARK_BYTES, bookWork } from "@/lib/api-read-rules";
 import { readBook } from "@/lib/affiliates";
 import { affiliates as apiAffiliates } from "@/lib/api-read";
 import { affiliatesTool } from "@/lib/mcp-tools";
@@ -113,10 +113,15 @@ async function main(): Promise<void> {
   is("a whole number of studio requests, at least one", Number.isSafeInteger(units) && units >= 1, true);
   is("worth at least the five commands and both megabytes at a heavy request's price", units * UNIT_COST.studio >= cost, true);
   // Past the ceiling (Board #5285 row #3378): the GET, and the mark of it written in place of the invoices, its script
-  // sent twice when the first answer is not "kept": nine commands, the kept invoices one way and two marks the other.
+  // sent twice when the first answer is "unknown": nine commands, the kept invoices one way and two marks the other.
   // A mark is the record's fixed fields and the store's sale handles, which live in the store's own record: at most
   // MAX_STORE_BYTES, and a few hundred bytes for the rest (the account id, `since` and `over`).
   const MARK_BYTES = MAX_STORE_BYTES + 512;
+  // The readers' figure for one mark is at least this bound, and their bytes for the path cover the dearer of the write
+  // back and two marks (Claude 3 xvBY8's LEVE on #5384: two marks are past the write's bytes).
+  is("one mark's bytes, as the readers count them, cover a store record's handles and its JSON", BOOK_KEPT_INVOICES_MARK_BYTES >= MARK_BYTES, true);
+  is("the path's bytes cover the kept invoices read and the dearer of their write back and two marks",
+    BOOK_KEPT_INVOICES_BYTES >= BOOK_INVOICES_KEPT_BYTES + Math.max(BOOK_INVOICES_KEPT_BYTES, 2 * MARK_BYTES), true);
   const ceilingCost = request("heavy", 9, BOOK_INVOICES_KEPT_BYTES + 2 * MARK_BYTES) + perMegabyte(BOOK_INVOICES_KEPT_BYTES + 2 * MARK_BYTES);
   is("past the ceiling, worth at least the nine commands, the kept invoices read and two marks written", units * UNIT_COST.studio >= ceilingCost, true);
   // The API and MCP readers count the same path the same way (Claude 7 HHH's MEDIO on #5384, 7110143161): the GET and
@@ -125,6 +130,11 @@ async function main(): Promise<void> {
   const sizesWith = { kept: true, entries: 0, people: 1, leads: 0, paypalRefunds: 0, stripe: true, products: 0 };
   const keptPart = bookWork(sizesWith, 0).commands - bookWork({ ...sizesWith, stripe: false }, 0).commands;
   is("the API and MCP readers count the kept invoices' path as nine commands, as the studio does", keptPart, 9);
+  // And the same difference in trips and bytes: the GET, then the write back or the mark sent twice, three trips; and
+  // BOOK_KEPT_INVOICES_BYTES moved (Claude 3 xvBY8's LEVE on #5384: no check held roundTrips).
+  const withKept = bookWork(sizesWith, 0);
+  const withoutKept = bookWork({ ...sizesWith, stripe: false }, 0);
+  is("and three round trips, and the path's bytes", [withKept.roundTrips - withoutKept.roundTrips, withKept.bytes - withoutKept.bytes], [3, BOOK_KEPT_INVOICES_BYTES]);
   // And the affiliate's own page (affiliatePageRead, the model its units are held to in tests/plan-cost-registry.test.ts)
   // counts the same path the same way (Claude 3's LOW on #5384, 7113942268): never the two commands it counted before.
   // Computed, not read from the registry's text (Claude 6 jAAv7's NIT on #5384): a book so large that its kept copy is

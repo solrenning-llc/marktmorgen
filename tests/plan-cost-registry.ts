@@ -318,11 +318,12 @@ export const STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE = 0.12;
  * it adds no look (tests/upsell-pending-thrown-behind.test.ts). At most OFFER_WATCH_LOOKS_MOST looks an offer,
  * each at most OFFER_WATCH_LOOK_COMMANDS_MOST database commands as billed, a script counted as one plus every call inside
  * it (its record read twice, its next look written, the first time by PENDING_SWAP, 1 + ZREM + ZADD, after by one ZADD
- * XX; the store's record and the run's share of reading the list; Claude 3 yaQt's MÉDIO on #5482). The dearest look is an
- * orphan claim let go (only the claim written, no customer and no payment): ORPHAN_RELEASE, 1 + GET + DEL, then the
- * list's ZREM, 9 in all (Claude 5 icEJ's MÉDIO on #5482), and Stripe reads of the creator's account, which bill no API
- * call. Measured in tests/upsell-settle-late.test.ts and held to a declared share of ORDER_COMPUTE, an offer being its
- * own order (line orders); what is left of ORDER_COMPUTE is more than the offer's own answer takes, measured there too.
+ * XX; the store's record and the run's share of reading the list; Claude 3 yaQt's MÉDIO on #5482), and Stripe reads of
+ * the creator's account, which bill no API call. The dearest look is an orphan claim let go (only the claim written, no
+ * customer and no payment): ORPHAN_RELEASE, 1 + GET + DEL, then the list's ZREM, 9 database commands in all (Claude 5
+ * icEJ's MÉDIO on #5482; the clause's place, Claude 5 ichw's LEVE). Measured in tests/upsell-settle-late.test.ts and
+ * held to a declared share of ORDER_COMPUTE, an offer being its own order (line orders); what is left of ORDER_COMPUTE
+ * is more than the offer's own answer takes, measured there too.
  * The share is 0.7 since the orphan's 9 (Claude 5 icEJ on #5482): 11 x 9 = 99 commands inside 105 of ORDER_COMPUTE's
  * 150, the 45 left above the 23 the offer's own answer measures; ORDER_COMPUTE itself does not move.
  */

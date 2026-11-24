@@ -1333,7 +1333,11 @@ const RESSALVA = /\?|→|->|\b(?:not|once|if|unless|until|conditional\w*|pending
 const GRAU_RE = String.raw`(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL|findings?|achados?|issues?|defects?|defeitos?|notes?)s?`;
 const GRAU_CONTADO = new RegExp(String.raw`\b(?:[1-9]\d*|um|uma|one|two|three|several|some|dois|duas|tr[eê]s|alguns|algumas)\s+${GRAU_RE}\b`, "i");
 const GRAU = new RegExp(String.raw`\b${GRAU_RE}\b`, "i");
-const ZERO_RE = String.raw`(?:(?:0|zero|no|sem|nenhum|nenhuma|none)\s+${GRAU_RE}(?:\s+of\s+any\s+level)?(?:,?\s*${GRAU_RE}\s+included)*|no\s+defect\s+of\s+any\s+level(?:,?\s*${GRAU_RE}\s+included)*)`;
+// As frases do dono contam como declaração de zero achados (OWNER-20261124-0139 e -0340; LEVE 2 do Claude 3 wSUb3 no
+// #5408): "sem nenhum defeito, nem leve ou mínimo", "nenhum defeito encontrado, nem mesmo leve ou mínimo", "no defect
+// at all, not even LEVE or minimal".
+const NEM_LEVE = String.raw`(?:,?\s*(?:nem|not)\s+(?:mesmo\s+|even\s+)?(?:leve|LEVE|minor|NIT)\s+(?:ou|or)\s+(?:m[ií]nimo|minimal))`;
+const ZERO_RE = String.raw`(?:(?:(?:0|zero|no|sem|nenhum|nenhuma|none)\s+(?:nenhum\s+|nenhuma\s+|any\s+)?${GRAU_RE}(?:\s+(?:encontrados?|found))?(?:\s+of\s+any\s+level)?(?:\s+at\s+all)?|no\s+defect\s+of\s+any\s+level)${NEM_LEVE}?(?:,?\s*${GRAU_RE}\s+included)*)`;
 const ZERO_ACHADOS = new RegExp(String.raw`\b${ZERO_RE}\b`, "i");
 const ZERO_G = new RegExp(String.raw`\b${ZERO_RE}\b`, "gi");
 const LOGO_DEPOIS = new RegExp(String.raw`^\s*(?:$|\.(?:\s|$)|[,;:—–-]?\s*\(?\s*${ZERO_RE}\b|[,;:—–-]?\s*\([^()\n]*\b${ZERO_RE}\b[^()\n]*\))`, "i");
@@ -1346,15 +1350,16 @@ const LOGO_DEPOIS = new RegExp(String.raw`^\s*(?:$|\.(?:\s|$)|[,;:—–-]?\s*\(
 // "low fee", "leve"); só "nit"/"nits" vale também em minúsculas (LEVE do Claude 3 wSUb3 no #5408 @0aefb8aa0f).
 // ... e, em qualquer caixa, quando rotula algo: seguido de dois-pontos ou de um travessão entre espaços ("Grave: vaza a
 // sessão", "Leve — o nome", "Nit: typo"; MÉDIO do Claude 5 ichw no #5408 @044dca4bfa). "high-risk" e "low fee" não rotulam.
-const GRAU_MAIUSCULO = /\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)S?\b|\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)s\b|\b[Nn][Ii][Tt][Ss]?\b/;
-const GRAU_ROTULO = /\b(?:grave|alt[oa]|m[eé]di[oa]|leve|nit|low|medium|high|critical)s?(?:\s+(?:\d+|findings?|achados?))?\s*(?::|\s[—–-]\s)/i;
+const GRAU_MAIUSCULO = /\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)S?\b|\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)s\b|\b[Nn][Ii][Tt][Ss]?\b|\b(?:Grave|Alt[oa]|M[eé]di[oa]|Leve|Low|Medium|High|Critical)s\b/;
+// O travessão, com ou sem espaço, também rotula ("High—the lock"); o hífen só entre espaços ("high-risk" não rotula).
+const GRAU_ROTULO = /\b(?:grave|alt[oa]|m[eé]di[oa]|leve|nit|low|medium|high|critical)s?(?:\s+(?:\d+|findings?|achados?))?\s*(?::|[—–]|\s-\s)/i;
 // Na nota entre parênteses antes do READY, qualquer grau, em qualquer caixa, recusa: a nota é curta e um achado
 // numerado ("(Grave 1: leak)", "(cost, Leve 1 open)") não pode passar (MÉDIO do Claude 3 hujg no #5408 @14f645808f).
 const GRAU_NA_NOTA = /\b(?:grave|alt[oa]|m[eé]di[oa]|leve|nit|low|medium|high|critical)s?\b/i;
 const GRAU_NOMEADO = { test: (t) => GRAU_MAIUSCULO.test(t) || GRAU_ROTULO.test(t) };
 function abreAchado(texto) {
   const semZeros = String(texto ?? "").replace(ZERO_G, " ");
-  return RESSALVA.test(texto) || GRAU_CONTADO.test(semZeros) || GRAU_NOMEADO.test(semZeros);
+  return RESSALVA.test(semZeros) || GRAU_CONTADO.test(semZeros) || GRAU_NOMEADO.test(semZeros);
 }
 // As famílias que existem (Claude 1 a 7 e o Codex): "Claude 33" não é família (LEVE 1 do hed9).
 const FAM_RE = String.raw`(Claude [1-7]|Codex)\b(?!\s*\d)`;

@@ -7,6 +7,8 @@
  */
 import { readFileSync } from "node:fs";
 import { DELIVERY_LOOK_DAYS, GIVE_UP_HOURS } from "@/lib/auto-captions-rules";
+import * as captionRules from "@/lib/auto-captions-rules";
+const ORDER_LOOK_DAYS = (captionRules as { ORDER_LOOK_DAYS?: number }).ORDER_LOOK_DAYS;
 import { done, is, part } from "./check";
 
 const sources = {
@@ -48,10 +50,16 @@ for (const [name, text] of Object.entries(sources)) {
   // order for a person (ORDER_LOOKS_MS, unknownLook) and never refunds it on its own: no "in every case".
   is(`${name}: promises nothing "in every case", and names the case where nobody can tell us`,
     [/in\s+every\s+case/.test(text), /never\s+reaches\s+(our|the)\s+video\s+provider[^.]{0,260}cannot\s+tell\s+us\s+what\s+happened/.test(text)], [false, true]);
+  // Claude 3 woRu on #5456 @8141d717c2: when Stripe cannot say whether such a charge was paid, the code looks for
+  // ORDER_LOOK_DAYS from the order, then keeps it for a person (counted in the owner's report); the studio page does not
+  // show it, so no text sends that case to the page's notice.
+  is(`${name}: says Stripe's unknown case is checked for the order's days, then looked into by hand`,
+    /if\s+Stripe\s+cannot\s+tell\s+us\s+whether\s+it\s+was\s+paid[^.;]{0,120}(ORDER_LOOK_DAYS|14)\}?\s+days\s+after\s+the\s+order[^.;]{0,60}by\s+hand/.test(text), true);
   is(`${name}: promises no time in minutes for it`, /never\s+reaches\s+(our|the)\s+video\s+provider[^.;]{0,120}\d+\s+minutes/.test(text), false);
 }
 // "Usually within the hour" (Claude 5 ichw on #5456): the order settles at the first stream run after ORDER_SETTLE_MS,
 // owes the refund for LOOK_AGAIN_MS more, and the refund is made at the next run: about 25 to 30 minutes, inside the hour.
+is("the days Stripe's unknown case is looked at are the code's", [ORDER_LOOK_DAYS, /const ORDER_LOOKS_MS = ORDER_LOOK_DAYS \* 86_400_000;/.test(readFileSync("lib/auto-captions.ts", "utf8"))], [14, true]);
 {
   const code = readFileSync("lib/auto-captions.ts", "utf8");
   const settle = Number(/export const ORDER_SETTLE_MS = (\d+) \* 60_000;/.exec(code)?.[1]);

@@ -62,7 +62,9 @@ async function main(): Promise<void> {
   is("on: the invite page with the code, absolute on Marktmorgen", badgeHref("abcdefgh", true), `${SITE_URL}/invite/abcdefgh`);
   is("on: the store's own code, read back", await badgeInviteCode(SID, true), code);
   const href = badgeHref(code, true);
-  is("only the code is in it: no query, no fragment", new RegExp(`^${SITE_URL.replace(/[.]/g, "\\.")}/invite/[a-hj-km-np-z2-9]{8}$`).test(href), true);
+  // Read through URL, never a pattern built from SITE_URL by hand (CodeQL alert 262, Claude 3 ynux's LEVE on #5304).
+  const url = new URL(href);
+  is("only the code is in it: no query, no fragment", [url.origin === SITE_URL, /^\/invite\/[a-hj-km-np-z2-9]{8}$/.test(url.pathname), url.search, url.hash], [true, true, "", ""]);
   is("both links leave a creator's own domain for Marktmorgen's", [BADGE_HOME, href].every((link) => new URL(link).origin === SITE_URL), true);
 
   part("3. A code that is not a valid one is never put in it");

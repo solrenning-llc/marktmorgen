@@ -5,12 +5,14 @@
  * waited their whole watch: the buyer's confirmation email and the affiliate credit came late. A thrown look now moves
  * the member behind, on the same schedule as an offer still pending (WATCH_AFTER_MS), so the next run reaches the
  * others. The no-store and no-Stripe cases already did so (d283d36307). A throw comes from the record read, the store
- * read or a write; settleOne answers every Stripe failure itself. Since Claude 5 ichw's review of #5482: the member
- * carries the offer's time ("|at:<ms>"), or, before the job rescheduled it, its score is that time, so a look whose
- * record does not read follows the offer's own schedule: a passing failure is looked at again minutes later, never a
- * day, and an offer whose record never reads, or stops reading after a rewrite, is let go when its watch is over,
- * inside OFFER_WATCH_LOOKS_MOST; a member another path took off is never put back. Synthetic data only; nothing is
- * charged.
+ * read or a write; settleOne answers every Stripe failure itself. Since Claude 5 ichw's reviews of #5482: the time
+ * an offer began is noted beside the list (nl:upsell:at:<checkout>, written by watchPending), or, for an entry listed
+ * before that, its score is noted once, so a look whose record does not read follows the offer's own schedule: a
+ * passing failure is looked at again minutes later, never a day, and an offer whose record never reads, or stops
+ * reading after a rewrite, is let go when its watch is over, inside OFFER_WATCH_LOOKS_MOST; a member another path took
+ * off is never put back; a look whose own reschedule threw sends no second one; and the list's members keep the format
+ * older code reads ("<store>|<checkout>|<slot>"), so rolling a deploy back leaves nothing it looks at every run.
+ * Synthetic data only; nothing is charged.
  */
 import { settlePendingOffers } from "@/lib/upsell";
 import type { Store } from "@/lib/store";
@@ -19,6 +21,18 @@ import { OFFER_WATCH_LOOKS_MOST } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
 const PENDING = "nl:upsell:pending";
+/** The offer's member, exactly as listed, and its score; null when it is not listed. */
+const listedAs = (member: string): { member: string; score: number } | null => {
+  const score = redis.run(["ZSCORE", PENDING, member]);
+  return score === null || score === undefined ? null : { member, score: Number(score) };
+};
+/** The time noted beside the list for an offer (lib/upsell.ts atKey); null when none. */
+const notedAt = (session: string): number | null => {
+  const value = redis.run(["GET", `nl:upsell:at:${session}`]);
+  return value === null || value === undefined ? null : Number(value);
+};
+/** Every member of the list keeps the three fields older code reads: "<store>|<checkout>|<slot>". */
+const oldFormat = () => (redis.run(["ZRANGE", PENDING, 0, -1]) as string[]).every((m) => m.split("|").length === 3);
 globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof fetch;
 console.error = () => {};
 
@@ -33,11 +47,6 @@ async function main(): Promise<void> {
   const healthy = "healthy|cs_test_healthyoffer001|";
   redis.run(["ZADD", PENDING, now - 5 * 60_000, healthy]);
   const front = () => (redis.run(["ZRANGEBYSCORE", PENDING, 0, Date.now() - 60_000, "LIMIT", 0, 50]) as string[]);
-/** The offer's member, plain or carrying its time, and its score; null when it is not listed. */
-const listedAs = (prefix: string): { member: string; score: number } | null => {
-  const member = (redis.run(["ZRANGE", PENDING, 0, -1]) as string[]).find((m) => m === prefix || m.startsWith(`${prefix}|at:`));
-  return member ? { member, score: Number(redis.run(["ZSCORE", PENDING, member])) } : null;
-};
 
   part("Control: before the run, the 50 offers whose look throws hold the job's front");
   is("the healthy offer is the 51st", front().includes(healthy), false);
@@ -50,8 +59,8 @@ const listedAs = (prefix: string): { member: string; score: number } | null => {
   const run = await settlePendingOffers(storeFor, Date.now() + 10_000);
   is("the run looked at the 50 at the front", run.checked, 50);
   is("none of them was dropped: each is still waiting", broken.every((s) => listedAs(`broken|${s}|`) !== null), true);
-  is("each is now due later than now, at its next look", broken.every((s) => (listedAs(`broken|${s}|`)?.score ?? 0) > Date.now() - 60_000), true);
-  is("each carries its offer's time", broken.every((s) => listedAs(`broken|${s}|`)?.member === `broken|${s}||at:${now - 10 * 60_000}`), true);
+  is("each is now due later than now, at its schedule's next look (eleven minutes after it began)", broken.every((s) => listedAs(`broken|${s}|`)?.score === now - 10 * 60_000 + 11 * 60_000 && (listedAs(`broken|${s}|`)?.score ?? 0) > Date.now()), true);
+  is("each keeps the member older code reads", oldFormat(), true);
   is("so the healthy offer is at the front of the next run", front()[0], healthy);
 
   part("An offer whose look throws past its whole watch is let go, as the other branches do");
@@ -113,15 +122,18 @@ const listedAs = (prefix: string): { member: string; score: number } | null => {
     await settlePendingOffers(async () => null, Date.now() + 10_000);
     redis.pipeline = reads;
     const after = listedAs(`quiet|${passing}|`);
-    is("the read failed once, and the offer is still listed, carrying its time", [failedOnce, after?.member], [true, `quiet|${passing}||at:${began}`]);
-    is("its next look is its schedule's next, within a quarter of an hour of its start, never a day", (after?.score ?? Infinity) - began <= 15 * 60_000, true);
+    is("the read failed once, and the offer is still listed, its time noted from its score", [failedOnce, after?.member, notedAt(passing)], [true, `quiet|${passing}|`, began]);
+    is("its next look is its schedule's next, eleven minutes after it began, never a day", after?.score, began + 11 * 60_000);
+    is("and it keeps the member older code reads", oldFormat(), true);
   }
 
   // Claude 5 ichw's LEVE 2 on #5482: a record read on early looks, then rewritten (its expiry renewed) and unreadable,
-  // is looked at on the offer's first time, never past its watch.
-  part("A record that reads, is rewritten, then stops reading: looked at inside the priced looks, then let go");
-  redis.clear();
-  {
+  // is looked at on the offer's first time, never past its watch. Listed as watchPending lists it (its time noted), and,
+  // for an entry listed before the time was noted (none today: PLANS_ON_SALE is false, so no offer is taken), from the
+  // score noted at its first unreadable look: later than its start, so at most twice the priced looks, once.
+  for (const listedBy of ["watchPending", "older code"] as const) {
+    part(`A record that reads, is rewritten, then stops reading (listed by ${listedBy}): looked at inside its looks, then let go`);
+    redis.clear();
     const shiftNow = Date.now;
     let shift = 0;
     Date.now = () => shiftNow() + shift;
@@ -130,6 +142,7 @@ const listedAs = (prefix: string): { member: string; score: number } | null => {
       const began = shiftNow();
       redis.run(["SET", `nl:upsell:${mixed}`, JSON.stringify({ state: "pending", product: "p1", pi: "pi_mixed", at: began }), "EX", 8 * 86_400]);
       redis.run(["ZADD", PENDING, began, `quiet|${mixed}|`]);
+      if (listedBy === "watchPending") redis.run(["SET", `nl:upsell:at:${mixed}`, began, "NX", "EX", 8 * 86_400]);
       let looks = 0;
       const reads = redis.pipeline.bind(redis);
       redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -143,8 +156,9 @@ const listedAs = (prefix: string): { member: string; score: number } | null => {
         await settlePendingOffers(async () => null, Date.now() + 10_000);
       }
       redis.pipeline = reads;
-      is(`looked at ${looks} times in fourteen days, inside the priced ${OFFER_WATCH_LOOKS_MOST}`, looks <= OFFER_WATCH_LOOKS_MOST, true);
-      is("and let go when its watch from its first time is over", listedAs(`quiet|${mixed}|`), null);
+      const most = listedBy === "watchPending" ? OFFER_WATCH_LOOKS_MOST : 2 * OFFER_WATCH_LOOKS_MOST;
+      is(`looked at ${looks} times in fourteen days, inside ${most}`, looks <= most, true);
+      is("and let go when its watch is over", listedAs(`quiet|${mixed}|`), null);
     } finally {
       Date.now = shiftNow;
     }
@@ -167,55 +181,37 @@ const listedAs = (prefix: string): { member: string; score: number } | null => {
     is("the offer is not listed again", listedAs(`broken|${settled}|`), null);
   }
 
-  // Claude 3 yUZf on #5482 @5a5b98139b: an entry that already carries the offer's time is moved only while it is listed
-  // (ZADD XX), so one the thanks page took off during the look is never put back either.
-  part("An entry carrying its time that another path takes off during a look is never put back");
+  // Claude 5 ichw's MÉDIO 1 on #5482 @a9eb1c0d34: a reschedule whose reply was lost was sent again by the catch, a look
+  // billed 11 commands against the 9 priced. A look whose own write threw now sends no second one.
+  part("A look whose reschedule's reply was lost sends no second write");
   redis.clear();
   {
-    const settled = "cs_test_settledtimed0001";
+    const lost = "cs_test_lostreschedule01";
     const began = Date.now() - 10 * 60_000;
-    const timed = `broken|${settled}||at:${began}`;
-    redis.run(["SET", `nl:upsell:${settled}`, JSON.stringify({ state: "pending", product: "p1", pi: "pi_settledtimed", at: began })]);
-    redis.run(["ZADD", PENDING, began, timed]);
-    const throwsAfterUnlisting = async (): Promise<Store | null> => {
-      redis.run(["ZREM", PENDING, timed]);
-      throw new Error("synthetic store read failure");
-    };
-    await settlePendingOffers(throwsAfterUnlisting, Date.now() + 10_000);
-    is("the offer is not listed again", listedAs(`broken|${settled}|`), null);
-  }
-
-  // Claude 3 yUZf on #5482 @5a5b98139b: no test runs the PENDING_SWAP Lua itself, only lib/redis-memory.ts's mirror of
-  // it, so the script Redis runs is held here line by line.
-  part("The swap script Redis runs is the one the in-memory mirror copies");
-  redis.clear();
-  {
-    const swapped = "cs_test_swapscript00001";
-    const began = Date.now() - 10 * 60_000;
-    redis.run(["SET", `nl:upsell:${swapped}`, JSON.stringify({ state: "pending", product: "p1", pi: "pi_swap", at: began })]);
-    redis.run(["ZADD", PENDING, began, `quiet|${swapped}|`]);
+    redis.run(["SET", `nl:upsell:${lost}`, JSON.stringify({ state: "pending", product: "p1", pi: "pi_lost", at: began })]);
+    redis.run(["ZADD", PENDING, began, `quiet|${lost}|`]);
     const writes = redis.pipeline.bind(redis);
-    const evals: (string | number)[][] = [];
+    let moves = 0;
+    let billed = 0;
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      evals.push(...commands.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:upsell-pending-swap:")));
-      return writes(commands);
+      for (const c of commands) billed += String(c[0]).toUpperCase() === "EVAL" ? 1 + (String(c[1]).match(/redis\.call\(/g) ?? []).length : 1;
+      const answer = await writes(commands);
+      if (commands.some((c) => c[0] === "ZADD" && c[1] === PENDING)) {
+        moves += 1;
+        // Made by Redis, its reply lost on the way back.
+        throw new Error("synthetic lost reply");
+      }
+      return answer;
     }) as typeof redis.pipeline;
     await settlePendingOffers(async () => null, Date.now() + 10_000);
     redis.pipeline = writes;
-    const [swap] = evals;
-    const lua = String(swap?.[1] ?? "").split("\n");
-    is("one swap, on the job's list alone, old entry first, then the new score and entry", [evals.length, swap?.[2], swap?.[3], swap?.[4], String(swap?.[6])], [1, 1, PENDING, `quiet|${swapped}|`, `quiet|${swapped}||at:${began}`]);
-    is(
-      "the new entry is written only when the old one was still listed and is taken off in the same step",
-      lua[1],
-      "if redis.call('ZREM', KEYS[1], ARGV[1]) == 1 then redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3]) return 1 end",
-    );
-    is("otherwise nothing is written", [lua.length, lua[2]], [3, "return 0"]);
+    is("one move sent, never a second from the catch", moves, 1);
+    is("the move was made: the offer is at its next look", listedAs(`quiet|${lost}|`)?.score, began + 11 * 60_000);
+    is(`the look bills ${billed} commands, inside OFFER_WATCH_LOOK_COMMANDS_MOST`, billed <= 9, true);
   }
 
-  // Claude 5 id8Ws on #5482 @6ce9cb447e: the entry's replacement by the one carrying its time is one step, so a write
-  // that fails never leaves a still-pending offer off the job's list.
-  part("A failed write while replacing an entry never takes a still-pending offer off the list");
+  // Claude 5 id8Ws on #5482: a write that fails never takes a still-pending offer off the job's list.
+  part("A reschedule that is refused leaves the offer listed and pending, looked at again by the next run");
   redis.clear();
   {
     const kept = "cs_test_keptonfailure001";
@@ -224,28 +220,55 @@ const listedAs = (prefix: string): { member: string; score: number } | null => {
     redis.run(["ZADD", PENDING, began, `quiet|${kept}|`]);
     const writes = redis.pipeline.bind(redis);
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      // The write that puts the entry carrying its time on the list fails, as Redis can (a timeout, a refused write).
-      if (commands.some((c) => (c[0] === "ZADD" && String(c.at(-1)).includes("|at:")) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:upsell-pending-swap:")))) {
-        throw new Error("synthetic refused write");
-      }
+      // The move is refused, as Redis can refuse a write (a timeout before it ran, a refused write).
+      if (commands.some((c) => c[0] === "ZADD" && c[1] === PENDING)) throw new Error("synthetic refused write");
       return writes(commands);
     }) as typeof redis.pipeline;
     await settlePendingOffers(async () => null, Date.now() + 10_000);
     redis.pipeline = writes;
-    is("the offer is still on the job's list, still pending", [listedAs(`quiet|${kept}|`) !== null, JSON.parse(String(redis.run(["GET", `nl:upsell:${kept}`]))).state], [true, "pending"]);
+    is("the offer is still on the job's list, still pending", [listedAs(`quiet|${kept}|`)?.score, JSON.parse(String(redis.run(["GET", `nl:upsell:${kept}`]))).state], [began, "pending"]);
   }
 
-  // Claude 5 iao9Ep's NIT on #5482: the thanks page takes off the plain entry only; one the job rescheduled carries its
-  // time and is let go at its next look, which reads the offer settled (one look, on its schedule).
-  part("An offer settled by the thanks page after the job rescheduled it leaves at its next look");
+  // Claude 5 ichw's MÉDIO 2 on #5482 @a9eb1c0d34: an entry carrying its time ("|at:<ms>") was rescheduled by older code
+  // as a new plain member while the timed one stayed due, looked at on every run (566 looks in 3 days). The list now
+  // keeps the older format through every path, the offer's time beside it.
+  part("Every path keeps the member older code reads, so a rolled-back deploy looks at nothing every run");
+  redis.clear();
+  {
+    const shiftNow = Date.now;
+    let shift = 0;
+    Date.now = () => shiftNow() + shift;
+    try {
+      const began = shiftNow();
+      const sessions = ["cs_test_formatplain00001", "cs_test_formatgarbled001", "cs_test_formatbroken0001"];
+      redis.run(["SET", `nl:upsell:${sessions[0]}`, JSON.stringify({ state: "pending", product: "p1", pi: "pi_f0", at: began })]);
+      redis.run(["SET", `nl:upsell:${sessions[1]}`, "{not json"]);
+      redis.run(["SET", `nl:upsell:${sessions[2]}`, JSON.stringify({ state: "pending", product: "p1", pi: "pi_f2", at: began })]);
+      redis.run(["ZADD", PENDING, began, `quiet|${sessions[0]}|`]);
+      redis.run(["ZADD", PENDING, began, `quiet|${sessions[1]}|`]);
+      redis.run(["ZADD", PENDING, began, `broken|${sessions[2]}|`]);
+      let always = true;
+      for (let t = 0; t <= 3 * 86_400_000; t += 5 * 60_000) {
+        shift = t;
+        await settlePendingOffers(async (handle) => storeFor(handle), Date.now() + 10_000);
+        always &&= oldFormat();
+      }
+      is("after three days of runs every member still has three fields", always, true);
+    } finally {
+      Date.now = shiftNow;
+    }
+  }
+
+  // Claude 5 iao9Ep's NIT on #5482: the thanks page takes off the offer's one entry.
+  part("An offer settled by the thanks page leaves the list at once, or at its next look if it was already read");
   redis.clear();
   {
     const paid = "cs_test_paidonthanks0001";
     const began = Date.now() - 10 * 60_000;
     redis.run(["SET", `nl:upsell:${paid}`, JSON.stringify({ state: "paid", product: "p1", pi: "pi_paid", at: began })]);
-    redis.run(["ZADD", PENDING, began, `quiet|${paid}||at:${began}`]);
+    redis.run(["ZADD", PENDING, began, `quiet|${paid}|`]);
     await settlePendingOffers(async () => null, Date.now() + 10_000);
-    is("the entry carrying its time leaves the list", listedAs(`quiet|${paid}|`), null);
+    is("a paid offer's entry leaves the list", listedAs(`quiet|${paid}|`), null);
   }
 
   // Claude 5 ichw's LEVE 4 on #5482: a record that has expired is let go at its next look.
@@ -253,7 +276,7 @@ const listedAs = (prefix: string): { member: string; score: number } | null => {
   redis.clear();
   {
     const gone = "cs_test_expiredrecord001";
-    redis.run(["ZADD", PENDING, Date.now() - 10 * 60_000, `quiet|${gone}||at:${Date.now() - 10 * 60_000}`]);
+    redis.run(["ZADD", PENDING, Date.now() - 10 * 60_000, `quiet|${gone}|`]);
     await settlePendingOffers(async () => null, Date.now() + 10_000);
     is("no record: the offer leaves the list", listedAs(`quiet|${gone}|`), null);
   }

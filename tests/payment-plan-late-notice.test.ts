@@ -348,7 +348,7 @@ async function main(): Promise<void> {
     is("counted owed, not a failure", runs.every((one) => one.owed >= 1 && one.failed === 0), true);
     is("the creator told once, PLAN_OWED_TELL_DAYS after", [toldOn, to(OWNER).length - ownerBefore], [[3], 1]);
     const note = to(OWNER).at(-1)?.text ?? "";
-    is("naming the checkout, saying the payments could not be read whole, and what to do", [note.includes(many.session), /could not read/i.test(note), /Stripe dashboard/i.test(note)], [true, true, true]);
+    is("naming the checkout, saying the payments could not be read whole, and what to do", [note.includes(many.session), /cannot read from Stripe the whole list/i.test(note), /Stripe dashboard/i.test(note)], [true, true, true]);
     is("nothing refunded on a part of the list, the buyer not told", [many.invoices.map((row) => (refunds[row.charge.payment_intent] ?? []).length), to("late-buyer-many@example.com").length], [[0, 0, 0, 0, 0], 0]);
     is("not due again within the same day (read again the next day)", sameDay, false);
     moreThanAPage.clear();

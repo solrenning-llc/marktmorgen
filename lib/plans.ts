@@ -341,11 +341,28 @@ export async function settlePlans(
         continue;
       }
     }
+    // A watched plan was settled and counted done when its watch began: an answer that is not good (its account
+    // refusing us, a list that does not read, Stripe down) never counts it toward PLAN_GIVE_UP_DAYS, never makes it
+    // stuck and never tells its creator it is stuck, which would be false for a plan ended and refunded (VR, item 2).
+    // Read again at its next look while it is watched, and let go once its watch is over (OWNER-20261124-0218, MEDIO 1).
+    if (entry.watch && state !== "done" && state !== "gone" && state !== "owed" && state !== "untold") {
+      if (now - entry.watch >= LATE_REFUND_WATCH_DAYS * DAY) {
+        await leave(member);
+        continue;
+      }
+      counts.watched += 1;
+      const at = now + LATE_REFUND_RECHECK_DAYS * DAY;
+      await moveTo(member, at, memberOf({ ...entry, since: at }));
+      continue;
+    }
     // An open checkout waits two days from when it was opened; one with no readable time does not wait.
     if (state === "done" || state === "gone" || (state === "open" && !(now - since < 2 * 86400))) {
-      // A watched plan was counted done when it first settled: its watch ending counts nothing more.
-      if (state !== "done") counts.dropped += 1;
-      else if (!entry.watch) counts.done += 1;
+      // A watched plan was counted done when it first settled: its watch ending, or its checkout read as gone since,
+      // counts nothing more (OWNER-20261124-0218, LEVE 2).
+      if (!entry.watch) {
+        if (state !== "done") counts.dropped += 1;
+        else counts.done += 1;
+      }
       await leave(member);
       continue;
     }

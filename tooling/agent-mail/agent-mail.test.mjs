@@ -1491,7 +1491,22 @@ console.log("strict to add, loose to take out: the READY the 3-READY gate counts
     [`Claude 3 X: I revoke my READY on #${N} @${h}`, "claude-3"], [`Claude 3 X: meu READY no #${N} @${h} fica retirado`, "claude-3"], [`Claude 3 X: I take back my review of #${N} @${h}`, "claude-3"],
     [`Claude 5 iZ — Codex X6 review #${N} @${h}: CHANGES`, "codex"], [`Claude 3 X: I retract my READY on @0000000aaa`, null], [`Claude 1 coord: #${N} @${h} — retiro o HOLD`, null],
     [`Claude 3 X\nsome text\n#${N} @${h}: CHANGES (head on line 3)`, "claude-3"]);
+  // Eighth round (Claude 5 ichw 7119507303 on 0d1fe3c549): Portuguese caveats and findings never add; Portuguese take-outs.
+  const n8 = soma.length;
+  soma.push([`Claude 3 review #${N} @${h}: READY, sem achados.`, "claude-3"], [`Claude 3 review #${N} @${h}: READY (0 achados; sem mudança de comportamento)`, "claude-3"],
+    [`Claude 3 review #${N} @${h}: READY, 0 LEVE, 0 NIT`, "claude-3"], [`Claude 3 review #${N} @${h}: READY, mas falta conferir o tsc`, null],
+    [`Claude 3 review #${N} @${h}: READY (ainda rodando os testes)`, null], [`Claude 3 review #${N} @${h}: READY, depois do conserto do LEVE`, null],
+    [`Claude 3 review #${N} @${h}: READY, exceto o NIT acima`, null], [`Claude 3 review #${N} @${h}: READY, com 1 LEVE`, null],
+    [`Claude 3 review #${N} @${h}: READY, 1 NIT`, null],
+    [`**Claude 3 review #${N} @${h}: READY, 0 findings (sem achados), no defect of any level, NIT included.** Claude 3 (cloud)`, "claude-3"],
+    [`Claude 5 review #${N} @${h}: READY, sem achados (0 findings). Scope: focal on \`a..b\` plus the ZA check of every earlier finding`, "claude-5"],
+    [`Claude 1 review #${N} @${h}: **READY** (apagamento/dados pessoais e custo; PR inteiro contra o main; sem achados). Conserto do Codex`, "claude-1"],
+    [`Claude 5 ia5d review #${N} @${h}: **READY, 0 findings, 0 notes, 0 NIT** — Claude 5 ia5d (cloud)`, "claude-5"],
+    [`Claude 3 review #${N} @${h}: READY, LEVE acima`, null], [`Claude 3 review #${N} @${h}: READY. Sorry, I meant CHANGES`, null], [`Claude 3 review #${N} @${h}: READY except the NIT above`, null], [`Claude 3 review #${N} @${h} (1 LEVE): READY`, null]);
+  tira.push([`Claude 3 nota #${N} @${h}: o READY acima fica retirado`, "claude-3"], [`Claude 3 #${N} @${h}: mudanças necessárias`, "claude-3"],
+    [`Claude 3 review #${N} @${h}: NÃO PRONTO`, "claude-3"], [`Claude 3 review #${N} @${h}: reprovado, 1 ALTO`, "claude-3"]);
   for (const [t, e] of tira) is(`takes out: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, (mod.tiraReady?.(t, N, H7)?.familia ?? null) === e, JSON.stringify(mod.tiraReady?.(t, N, H7)));
+  for (const [t, e] of soma.slice(n8)) is(`adds (ichw): "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.readyEstrito?.(t, N, H) === e, String(mod.readyEstrito?.(t, N, H)));
   is("takes out: a GitHub review in the CHANGES_REQUESTED state with no family named is '?' (NOT CHECKED)", mod.tiraReady?.("Looks good to me", N, H, "CHANGES_REQUESTED")?.familia === "?");
   is("takes out: a CHANGES_REQUESTED review of another head (commit_id) takes nothing out (MÉDIO 2 of hed9)", mod.tiraReady?.("", N, H, "CHANGES_REQUESTED", "0000000aaa0000000000000000000000000000aa") === null);
   is("LEVE 5 of hed9: a header that starts with the family is its own, though it names a sibling as 'by'",

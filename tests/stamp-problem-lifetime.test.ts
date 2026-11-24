@@ -1,6 +1,7 @@
 /**
  * A file's problem note (nl:stamp:problem:) is priced for as long as it can live (Claude 5 ygH4 and iao9Ep on #5360).
- * The stamp and the preview write the same key: a stamp's problem, the preview's once-note, then "unreadable". No write
+ * The stamp writes it, and the preview writes "unreadable" there on its second failure; the preview's once-mark is its
+ * own key (nl:preview:bad:, Claude 3 on #5360), priced and closed for its own longest life, below. No write
  * extends the note's time: a write to a note already there keeps its expiry (KEEPTTL), and only a new note takes
  * PROBLEM_NOTE_SECONDS. So one note lives at most PROBLEM_NOTE_SECONDS from its first write, however many failures
  * follow (a stamp note then the preview's two notes, or a PDF whose stamping fails on every download). The data
@@ -31,6 +32,17 @@ async function main(): Promise<void> {
   const closing = closingOf("nl:stamp:problem:stores/abc/file.pdf");
   is("the key's closing rule says it expires within at least its longest life",
     closing?.how === "expires" && (closing as { days: number }).days >= (r.PROBLEM_NOTE_LONGEST_DAYS ?? Infinity), true);
+
+  // The preview's own mark (Claude 3 and Claude 5 ygH4 on #5360): its once-mark, then "unreadable" fresh, each
+  // PREVIEW_MARK_SECONDS; priced and closed for both.
+  part("The preview's own mark is priced and closed for its longest life");
+  const m = rules as { PREVIEW_MARK_SECONDS?: number; PREVIEW_MARK_LONGEST_DAYS?: number };
+  is("its time and longest life are named (60 days, then 120)", [m.PREVIEW_MARK_SECONDS, m.PREVIEW_MARK_LONGEST_DAYS], [60 * DAY, (2 * (m.PREVIEW_MARK_SECONDS ?? 0)) / DAY]);
+  const markDays = (FAMILIES["nl:preview:bad:@lib/pdf-preview.ts"]?.parts ?? []).map((p) => ("days" in p ? Number((p as { days: number }).days) : 0));
+  is("the registry prices the mark per file for at least its longest life", markDays.length > 0 && markDays.every((d) => d >= (m.PREVIEW_MARK_LONGEST_DAYS ?? Infinity)), true);
+  const markClosing = closingOf("nl:preview:bad:0123456789abcdef");
+  is("its closing rule says it expires within at least its longest life",
+    markClosing?.how === "expires" && (markClosing as { days: number }).days >= (m.PREVIEW_MARK_LONGEST_DAYS ?? Infinity), true);
 
   part("Every write of the note goes through the one write that never extends it");
   for (const file of ["lib/pdf-stamp.ts", "lib/pdf-preview.ts"]) {

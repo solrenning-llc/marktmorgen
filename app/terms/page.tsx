@@ -557,10 +557,11 @@ export default function TermsPage() {
           provider refuses the request when it is made, what was paid is
           refunded at once. If a request that was charged never reaches our
           video provider, what was paid for it is refunded automatically,
-          usually within 15 minutes, and otherwise at our first check after
+          usually within the hour, and in every case at our first check after
           the hours below. If the lesson&apos;s video is deleted before its
           captions are delivered, what was paid for them is refunded without
-          waiting for the hours below. Otherwise, what was paid for a
+          waiting for the hours below. For a request that reached our video
+          provider, what was paid for a
           language whose captions are not delivered is refunded automatically
           once our video provider confirms what it delivered, no sooner than{" "}
           {GIVE_UP_HOURS} hours after the order. If our video provider does not

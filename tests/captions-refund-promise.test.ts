@@ -52,7 +52,7 @@ for (const [name, text] of Object.entries(sources)) {
     [/in\s+every\s+case/.test(text), /never\s+reaches\s+(our|the)\s+video\s+provider[\s\S]{0,400}?cannot\s+tell\s+us\s+whether\s+it\s+was\s+paid/.test(text)], [false, true]);
   // Claude 5 ichw on #5456 @defb20090d: the provider's unknown case is a whole sentence, the same in every text.
   is(`${name}: says what happens when the provider cannot tell us what it received`,
-    /if\s+our\s+video\s+provider\s+cannot\s+tell\s+us\s+what\s+it\s+received,\s+we\s+keep\s+asking\s+it\s+on\s+our\s+own/.test(text), true);
+    /[Ii]f\s+our\s+video\s+provider\s+cannot\s+tell\s+us\s+what\s+it\s+received,\s+we\s+keep\s+asking\s+it\s+on\s+our\s+own/.test(text), true);
   // Claude 3 woRu on #5456 @8141d717c2: when Stripe cannot say whether such a charge was paid, the code looks for
   // ORDER_LOOK_DAYS from the order, then keeps it for a person (counted in the owner's report); the studio page does not
   // show it, so no text sends that case to the page's notice.

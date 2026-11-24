@@ -560,8 +560,9 @@ export default function TermsPage() {
           usually within the hour, and otherwise at our first check after the
           hours below. If Stripe cannot tell us whether it was paid, we keep
           checking on our own for {ORDER_LOOK_DAYS} days after the order, then
-          look into it by hand; if our video provider cannot tell us what it
-          received, as described below. If the lesson&apos;s video is deleted before its
+          look into it by hand. If our video provider cannot tell us what it
+          received, we keep asking it on our own, as for any request, and the
+          next sentences say how long. If the lesson&apos;s video is deleted before its
           captions are delivered, what was paid for them is refunded without
           waiting for the hours below. For a request that reached our video
           provider, what was paid for a

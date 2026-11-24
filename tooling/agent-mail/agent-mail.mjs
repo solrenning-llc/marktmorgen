@@ -1347,7 +1347,10 @@ const LOGO_DEPOIS = new RegExp(String.raw`^\s*(?:$|\.(?:\s|$)|[,;:—–-]?\s*\(
 // ... e, em qualquer caixa, quando rotula algo: seguido de dois-pontos ou de um travessão entre espaços ("Grave: vaza a
 // sessão", "Leve — o nome", "Nit: typo"; MÉDIO do Claude 5 ichw no #5408 @044dca4bfa). "high-risk" e "low fee" não rotulam.
 const GRAU_MAIUSCULO = /\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)S?\b|\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)s\b|\b[Nn][Ii][Tt][Ss]?\b/;
-const GRAU_ROTULO = /\b(?:grave|alt[oa]|m[eé]di[oa]|leve|nit|low|medium|high|critical)s?\s*(?::|\s[—–-]\s)/i;
+const GRAU_ROTULO = /\b(?:grave|alt[oa]|m[eé]di[oa]|leve|nit|low|medium|high|critical)s?(?:\s+(?:\d+|findings?|achados?))?\s*(?::|\s[—–-]\s)/i;
+// Na nota entre parênteses antes do READY, qualquer grau, em qualquer caixa, recusa: a nota é curta e um achado
+// numerado ("(Grave 1: leak)", "(cost, Leve 1 open)") não pode passar (MÉDIO do Claude 3 hujg no #5408 @14f645808f).
+const GRAU_NA_NOTA = /\b(?:grave|alt[oa]|m[eé]di[oa]|leve|nit|low|medium|high|critical)s?\b/i;
 const GRAU_NOMEADO = { test: (t) => GRAU_MAIUSCULO.test(t) || GRAU_ROTULO.test(t) };
 function abreAchado(texto) {
   const semZeros = String(texto ?? "").replace(ZERO_G, " ");
@@ -1368,7 +1371,7 @@ export function readyEstrito(corpo, pr, sha) {
   if (new RegExp(FAM_RE, "i").test(m[2])) return null;
   const nota = m[4] ?? "", resto = m[5] ?? "";
   if (!LOGO_DEPOIS.test(resto)) return null;
-  if (DESDIZ.test(nota) || DESDIZ.test(resto) || abreAchado(nota) || abreAchado(resto)) return null;
+  if (DESDIZ.test(nota) || DESDIZ.test(resto) || abreAchado(nota) || GRAU_NA_NOTA.test(nota) || abreAchado(resto)) return null;
   return familia(m[1]);
 }
 

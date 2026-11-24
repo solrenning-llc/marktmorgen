@@ -187,7 +187,8 @@ async function main(): Promise<void> {
       let lost = 0;
       redis.pipeline = (async (batch: Batch) => {
         sent.push(...batch);
-        // Another change lands between this request's read and its write, `losses` times (changeConfig tries four).
+        // Another change lands between this request's read and its write, `losses` times (a registration goes through
+        // the fenced path, which tries PHONE_ADD_TRIES times).
         if (lost < losses && isConfigWrite(batch, cfg)) {
           lost += 1;
           await original([["SET", cfg, JSON.stringify({ handle: store.handle, devices: [], n: lost })]]);

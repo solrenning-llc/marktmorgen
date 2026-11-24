@@ -469,6 +469,18 @@ const STRIPE_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Stripe refused this try, and an earlier one may have opened your account",
     body: `An earlier try may already have opened a Stripe account with your email address, so we keep asking Stripe with the same details for up to ${STRIPE_CONNECT_REUSE_SECONDS / 86_400} days from your first try, so no second account is opened in this country in that time. Pressing again will most likely be refused the same way. Write to ${SUPPORT_EMAIL} and tell us your store's name, so we can look into it with you. Nothing was charged.`,
   },
+  // The last press, with other details (the sign-in address changed since) or past its 29 days, may still be opening an
+  // account (app/api/stripe/connect; OWNER-20261124-0350, items 2 and 5).
+  "attempt-held": {
+    title: "Your last try may still be opening your account",
+    body: "Your last try asked Stripe for an account with the details you had then, and Stripe may have opened it. So that no second account is opened, we don\u2019t ask again with other details until one day after your last try. Try again then. Nothing was changed.",
+  },
+  // The store's record is at its ceiling, so the try could not be written down (app/api/stripe/connect;
+  // OWNER-20261124-0350, item 3).
+  "store-full": {
+    title: "Your store record is full",
+    body: "We couldn\u2019t save this try, so nothing was asked of Stripe. Remove something you no longer need from your store, such as a product, a page or a saved block, and try again. Nothing was changed.",
+  },
   "country-unsupported": {
     title: "Stripe will not open an account in that country from here",
     body: "Nothing was charged and nothing was created. This is a limit on our side, not a judgment on you: Stripe does not yet let a platform registered in our country open accounts in yours. Write to us and we will tell you honestly whether that is changing.",

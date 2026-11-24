@@ -225,7 +225,7 @@ async function main(): Promise<void> {
     const store = await extraStore(owner, "connectreusefirst", "connectreuseextra");
     const twoDays = Date.now() - 2 * 24 * 60 * 60 * 1000;
     const first = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Reuse" }, twoDays);
-    const firstId = first && !("other" in first) ? first.id : "none";
+    const firstId = first && "id" in first ? first.id : "none";
     is("an attempt was written two days ago, its answer lost", firstId === "none", false);
     is("a press again now goes on to onboarding", await connect(owner, store.sid), "onboarding");
     is("asked with that attempt's key, so Stripe gives back the account it made", keys, [`connect-${store.sid}-${firstId}`]);
@@ -235,7 +235,7 @@ async function main(): Promise<void> {
     const late = await extraStore("connect-late@example.com", "connectlatefirst", "connectlateextra");
     const past = Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60) * 1000;
     const stale = await beginStripeConnect(storeRef(late), late.sid, { country: "us", email: "connect-late@example.com", name: "Late" }, past);
-    const staleId = stale && !("other" in stale) ? stale.id : "none";
+    const staleId = stale && "id" in stale ? stale.id : "none";
     is("past the reuse window (inside Stripe's 30 days, a day to spare) a press again", await connect("connect-late@example.com", late.sid), "onboarding");
     is("asks with a new key, never one Stripe may have forgotten", keys.length === 1 && keys[0] !== `connect-${late.sid}-${staleId}`, true);
     is("the reuse window stays inside Stripe's 30 days", STRIPE_CONNECT_REUSE_SECONDS < 30 * 24 * 60 * 60 && STRIPE_CONNECT_REUSE_SECONDS > STRIPE_CONNECT_HOLD_SECONDS, true);
@@ -307,7 +307,7 @@ async function main(): Promise<void> {
     const store = await extraStore(owner, "connectswitchfirst", "connectswitchextra");
     const old = Date.now() - (STRIPE_CONNECT_HOLD_SECONDS + 60) * 1000;
     const german = await beginStripeConnect(storeRef(store), store.sid, { country: "de", email: owner, name: "Switch" }, old);
-    const germanId = german && !("other" in german) ? german.id : "none";
+    const germanId = german && "id" in german ? german.id : "none";
     is("a press for France a day and a minute after the German one goes on", await connect(owner, store.sid, "FR"), "onboarding");
     is("asked with a new key, not the German attempt's", keys.length === 1 && keys[0] !== `connect-${store.sid}-${germanId}`, true);
   }
@@ -567,6 +567,10 @@ async function main(): Promise<void> {
     answer = "lost";
     const lost = await measure("connect-cost-lost@example.com", d.sid);
     is(`an answer lost, the attempt kept: ${lost.billed} within ${bound}`, [lost.said, lost.billed <= bound], ["error", true]);
+    const e = await extraStore("connect-cost-held@example.com", "connectcostheldfirst", "connectcostheldextra");
+    await beginStripeConnect(storeRef(e), e.sid, { country: "us", email: "an-old-address@example.com", name: "Held" });
+    const heldCost = await measure("connect-cost-held@example.com", e.sid);
+    is(`an attempt held (other details, its day not over), nothing asked: ${heldCost.billed} within ${bound}`, [heldCost.said, heldCost.billed <= bound], ["attempt-held", true]);
   }
 
   done();

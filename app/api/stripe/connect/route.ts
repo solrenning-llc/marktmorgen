@@ -9,6 +9,7 @@ import {
   normaliseCountry,
 } from "@/lib/stripe-connect";
 import { beginStripeConnect, clearStripeConnect, finishStripeConnect, storeForEmail } from "@/lib/store";
+import { StoreFullError } from "@/lib/store-full";
 import { limited } from "@/lib/request-guard";
 
 /**
@@ -17,7 +18,7 @@ import { limited } from "@/lib/request-guard";
  * The account is opened once and written down before the creator leaves. The
  * attempt is written on the store before Stripe is asked, and Stripe is asked
  * with its idempotency key (Codex L-20261120-0258): an answer lost on the way is
- * found again by pressing once more, two tabs get one account, and the store is
+ * found again by pressing once more, two tabs never get two accounts, and the store is
  * not deleted or closed for a day after each press. A store deleted later than
  * that, with an answer lost and never pressed again, leaves its account known
  * only to Stripe and the creator (a residue told in #5095).
@@ -51,6 +52,9 @@ export async function POST(request: NextRequest) {
       const attempt = await beginStripeConnect(ref, store.sid, { country, email: store.email, name: store.name || store.handle });
       // An account is still being opened in another country: never asked for in a country not chosen now.
       if (attempt && "other" in attempt) return away(origin, studio("stripe=attempt-country"));
+      // The last press, with other details (the sign-in address changed) or past its 29 days, may still be opening an
+      // account: nothing is asked until its day is over (OWNER-20261124-0350, items 2 and 5).
+      if (attempt && "held" in attempt) return away(origin, studio("stripe=attempt-held"));
       if (!attempt) {
         // Another tab finished first: the account it wrote is the store's; otherwise nothing is known.
         const now = await storeForEmail(ref);
@@ -80,8 +84,12 @@ export async function POST(request: NextRequest) {
           }
           throw error;
         }
-        // Written with the attempt closed, only while it is still the store's: when two tabs connect at once they ask
-        // with one key and get one account; the late tab finds it written and goes on with it.
+        // Written with the attempt closed, only while it is still the store's. Two tabs ask with one key: while the first
+        // request is still under way Stripe answers the second 409 ("another request with the same key is still
+        // executing", https://docs.stripe.com/error-low-level, read 24 November 2026; stated for API v1, nothing said for
+        // v2), so the late tab is told to try again and its press again gets the same account; a late tab whose own
+        // answer comes after the first one wrote the account finds it written and goes on with it (OWNER-20261124-0350,
+        // item 6).
         const saved = await finishStripeConnect(ref, store.sid, attempt.id, accountId);
         if (saved) {
           // Where sales are paid is the setting worth stealing a session for, so the creator is told at their
@@ -98,6 +106,9 @@ export async function POST(request: NextRequest) {
     return new Response(null, { status: 303, headers: { Location: link } });
   } catch (error) {
     console.error("stripe connect failed", error);
+    // The store's record is at its ceiling, so the attempt could not be written and nothing was asked of Stripe: the
+    // creator is told what to do, never a bare "try again" (OWNER-20261124-0350, item 3).
+    if (error instanceof StoreFullError) return away(origin, studio("stripe=store-full"));
     // Worth its own answer: nothing the creator does will fix this one, and a
     // vague "try again" would have them trying forever.
     if (error instanceof StripeConnectError && error.isCrossBorderRefusal) {

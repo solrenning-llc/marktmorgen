@@ -1315,15 +1315,16 @@ export function teamLogFenceUsd(tier: Tier): number {
  * The Stripe connect press's second turn of the store's lock (lib/store.ts beginStripeConnect, then finishStripeConnect
  * or clearStripeConnect; Codex L-20261120-0258 on #5095, the coordinator's df44): a press with no account yet writes
  * its attempt under the lock before Stripe is asked, then writes the account (or closes the attempt) under it again.
- * Measured in tests/stripe-connect-erasure-race.test.ts: 34 billed commands a press at the most (a script counted as
- * one plus every call inside it, as Upstash bills it), STRIPE_CONNECT_PRESS_EXTRA_COMMANDS more than the studio unit's
- * twenty plus TAKE_COMMANDS and LOCKED_UNTIL_STAR_COMMANDS, and the store's record read and written once more, at
- * MAX_STORE_BYTES each way. Priced on every studio request of the month as if each were such a press (the press is a
+ * Measured in tests/stripe-connect-erasure-race.test.ts on every branch of a press (OWNER-20261124-0350, item 7): 42
+ * billed commands a press at the most, when another tab wrote the account first and the store is read again (a script
+ * counted as one plus every call inside it, as Upstash bills it), STRIPE_CONNECT_PRESS_EXTRA_COMMANDS more than the
+ * studio unit's twenty plus TAKE_COMMANDS and LOCKED_UNTIL_STAR_COMMANDS, and the store's record read and written once
+ * more and read once again, at MAX_STORE_BYTES each. Priced on every studio request of the month as if each were such a press (the press is a
  * studio request, counted by studioAccess like any other).
  */
-export const STRIPE_CONNECT_PRESS_EXTRA_COMMANDS = 34 - (20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS);
+export const STRIPE_CONNECT_PRESS_EXTRA_COMMANDS = 42 - (20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS);
 export function stripeConnectPressUsd(tier: Tier): number {
-  return STORE_ALLOWANCES[tier].studio * (STRIPE_CONNECT_PRESS_EXTRA_COMMANDS * COMMAND + 2 * MAX_STORE_BYTES * DB_BYTE);
+  return STORE_ALLOWANCES[tier].studio * (STRIPE_CONNECT_PRESS_EXTRA_COMMANDS * COMMAND + 3 * MAX_STORE_BYTES * DB_BYTE);
 }
 
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
@@ -2940,7 +2941,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store.ts", names: ["beginStripeConnect", "finishStripeConnect", "clearStripeConnect"] },
       { file: "app/api/stripe/connect/route.ts", names: ["beginStripeConnect", "finishStripeConnect"] },
     ],
-    basis: "A press with no account yet: STRIPE_CONNECT_PRESS_EXTRA_COMMANDS more billed commands than the studio unit's twenty plus TAKE_COMMANDS and LOCKED_UNTIL_STAR_COMMANDS (34 a press at the most, measured in tests/stripe-connect-erasure-race.test.ts), and the store's record read and written once more at MAX_STORE_BYTES each way, priced on every studio request of the month as if each were such a press (the coordinator's df44 on #5095).",
+    basis: "A press with no account yet: STRIPE_CONNECT_PRESS_EXTRA_COMMANDS more billed commands than the studio unit's twenty plus TAKE_COMMANDS and LOCKED_UNTIL_STAR_COMMANDS (42 a press at the most, on its dearest branch, measured on each in tests/stripe-connect-erasure-race.test.ts; OWNER-20261124-0350, item 7), and the store's record read and written once more and read once again, at MAX_STORE_BYTES each, priced on every studio request of the month as if each were such a press (the coordinator's df44 on #5095).",
   },
   {
     id: "studio",

@@ -93,22 +93,29 @@ export class StripeConnectError extends Error {
   readonly stripeMessage: string;
   /** Stripe's error type, kept beside the code (which falls back to it): an idempotency_error is read from either. */
   readonly type: string;
+  /**
+   * Whether the answer carried Stripe's own error object ({ error: { ... } }): a 4xx without one (a proxy in the way,
+   * a body cut short) says nothing of what Stripe did (OWNER-20261124-0350, item 4).
+   */
+  readonly fromStripe: boolean;
 
-  constructor(status: number, code: string, stripeMessage: string, type = "") {
+  constructor(status: number, code: string, stripeMessage: string, type = "", fromStripe = true) {
     super(`Stripe request failed (${status} ${code}): ${stripeMessage}`);
     this.status = status;
     this.code = code;
     this.stripeMessage = stripeMessage;
     this.type = type;
+    this.fromStripe = fromStripe;
   }
 
   /**
    * Stripe refused the request itself, so no account was made: a 4xx other than a timeout (408), a conflict (409, a
-   * request with this key still under way), too many requests (429) or a key used with other parameters. Anything
-   * else (a 5xx, no answer, a body that is not one) may have made one (Codex L-20261120-0258).
+   * request with this key still under way), too many requests (429) or a key used with other parameters, and only when
+   * the answer is Stripe's own error object. Anything else (a 5xx, no answer, a 4xx whose body is not Stripe's) may have
+   * made one (Codex L-20261120-0258; OWNER-20261124-0350, item 4).
    */
   get madeNothing(): boolean {
-    return this.status >= 400 && this.status < 500 && ![408, 409, 429].includes(this.status) && this.code !== "idempotency_error" && this.type !== "idempotency_error";
+    return this.fromStripe && this.status >= 400 && this.status < 500 && ![408, 409, 429].includes(this.status) && this.code !== "idempotency_error" && this.type !== "idempotency_error";
   }
 
   /** The creator's country is one this platform may not open an account in. */
@@ -151,11 +158,13 @@ async function stripeRequest(
     const error = data.error as
       | { code?: string; type?: string; message?: string }
       | undefined;
+    const fromStripe = Boolean(error) && typeof error === "object" && !Array.isArray(error) && typeof error.type === "string";
     throw new StripeConnectError(
       response.status,
       error?.code ?? error?.type ?? "unknown",
       error?.message ?? "Stripe gave no reason.",
       error?.type ?? "",
+      fromStripe,
     );
   }
   return data;

@@ -22,17 +22,22 @@ import { MAX_STAMP_BYTES } from "@/lib/product-file";
 
 /** How long a file's shared problem note is kept: 60 days (lib/pdf-stamp.ts; the preview's "unreadable", lib/pdf-preview.ts). */
 export const PROBLEM_NOTE_SECONDS = 60 * 24 * 60 * 60;
+/** How long the preview's own mark about a path that failed to parse is kept (lib/pdf-preview.ts previewMarkKey). */
+export const PREVIEW_MARK_SECONDS = PROBLEM_NOTE_SECONDS;
 /**
  * The longest one path's problem note (nl:stamp:problem:) can live, in days: a note, which no stamp failure extends
- * (lib/pdf-stamp.ts problemNoteCommands), then the preview's second failure writing "unreadable" fresh for
+ * and none writes over "unreadable" (lib/pdf-stamp.ts problemNoteCommands), then the preview's second failure writing "unreadable" fresh for
  * PREVIEW_MARK_SECONDS just before it runs out, once a mark's life, so the studio says why as long as the preview
  * refuses the file (Claude 5 ygH4 and iao9Ep on #5360). The data registry prices the family for it
  * (tests/store-data-registry.ts) and its closing rule says it (lib/data-families.ts), both held in
  * tests/stamp-problem-lifetime.test.ts.
  */
-export const PROBLEM_NOTE_LONGEST_DAYS = (2 * PROBLEM_NOTE_SECONDS) / 86_400;
-/** How long the preview's own mark about a path that failed to parse is kept (lib/pdf-preview.ts previewMarkKey). */
-export const PREVIEW_MARK_SECONDS = PROBLEM_NOTE_SECONDS;
+export const PROBLEM_NOTE_LONGEST_DAYS = (PROBLEM_NOTE_SECONDS + PREVIEW_MARK_SECONDS) / 86_400;
+/**
+ * What one write of a file's problem note bills: the script (lib/pdf-stamp.ts PROBLEM_NOTE), its GET and its SET (Claude
+ * 3 xvBY8 on #5360: the note's write was priced nowhere). Counted in FLY_BASE (tests/plan-cost-registry.ts).
+ */
+export const PROBLEM_NOTE_WRITE_COMMANDS = 3;
 /**
  * The longest one path's preview mark (nl:preview:bad:) can live, in days: the once-mark (never written over, NX), then
  * "unreadable" written fresh for PREVIEW_MARK_SECONDS just before it runs out (Claude 5 ygH4 on #5360). Priced in the

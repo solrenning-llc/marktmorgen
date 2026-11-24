@@ -1219,6 +1219,15 @@ export class MemoryRedis {
           this.run(["HSET", members, field, claimed]);
           return 1;
         }
+        // lib/pdf-stamp.ts PROBLEM_NOTE: a file's problem note, its expiry kept, never written over "unreadable".
+        if (key.startsWith("-- marktmorgen:stamp-problem-note:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, note, value, seconds] = args;
+          const now = this.run(["GET", note]);
+          if (now === "unreadable") return 0;
+          if (now !== null && now !== undefined) this.run(["SET", note, value, "KEEPTTL"]);
+          else this.run(["SET", note, value, "EX", seconds]);
+          return 1;
+        }
         // lib/upsell.ts ORPHAN_RELEASE: an offer's orphan claim deleted only while it is still exactly the record read.
         if (key.startsWith("-- marktmorgen:upsell-orphan-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, record, read] = args;

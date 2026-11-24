@@ -47,6 +47,7 @@ import { loadFonts } from "@/lib/certificate-pdf";
 import { deleteFile, headFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { MAX_STAMP_BYTES, type ProductFile, isEpub, isStampable } from "@/lib/product-file";
 import { type EpubProblem, stampEpub } from "@/lib/epub-stamp";
@@ -158,14 +159,30 @@ export function wantsStamp(stamp: boolean, file: ProductFile): boolean {
 }
 
 /**
- * The stamp's one write of a file's problem note (Claude 5 iao9Ep on #5360): a new note takes PROBLEM_SECONDS, and a
- * note already there takes the new value but keeps its expiry (SET XX KEEPTTL), so no stamp failure extends it. The
- * preview's second failure writes "unreadable" fresh, once a mark's life (lib/pdf-preview.ts); together a note lives at
- * most PROBLEM_NOTE_LONGEST_DAYS (lib/stamp-cost-rules.ts). One trip, two commands.
+ * The stamp's one write of a file's problem note (Claude 5 iao9Ep and Claude 3 xvBY8 on #5360), in one script: a new
+ * note takes PROBLEM_SECONDS; a note already there takes the new value but keeps its expiry, so no stamp failure
+ * extends it; and the preview's "unreadable" is never written over, so the studio says why as long as the preview
+ * refuses the file. The preview's second failure writes "unreadable" fresh, once a mark's life (lib/pdf-preview.ts);
+ * together a note lives at most PROBLEM_NOTE_LONGEST_DAYS (lib/stamp-cost-rules.ts). Billed as the script and its two
+ * calls, PROBLEM_NOTE_WRITE_COMMANDS.
  */
+const PROBLEM_NOTE = `-- marktmorgen:stamp-problem-note:v1
+local now = redis.call('GET', KEYS[1])
+if now == 'unreadable' then return 0 end
+if now then redis.call('SET', KEYS[1], ARGV[1], 'KEEPTTL') else redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]) end
+return 1`;
 export function problemNoteCommands(pathname: string, value: string): (string | number)[][] {
-  const key = problemKey(pathname);
-  return [["SET", key, value, "NX", "EX", PROBLEM_SECONDS], ["SET", key, value, "XX", "KEEPTTL"]];
+  return [["EVAL", PROBLEM_NOTE, 1, problemKey(pathname), value, PROBLEM_SECONDS]];
+}
+
+/**
+ * A copy that found room again clears the studio's "the storage was full" note, only while it still says so (compare
+ * and delete, lib/claim-mark.ts releaseMark, which never throws): a reason written since, the preview's "unreadable"
+ * above all, stays (Claude 3 xvBY8 on #5360).
+ */
+export async function clearStorageNote(pathname: string): Promise<void> {
+  if (!isRedisConfigured()) return;
+  await releaseMark(problemKey(pathname), "storage");
 }
 
 async function noteProblem(pathname: string, problem: StampProblem): Promise<void> {
@@ -492,7 +509,7 @@ export async function stampedDelivery(
       console.error("a stamped copy's record could not be kept; the next download asks the file store for it", error);
     }
     // The storage has room again: the studio no longer says it ran out for this file.
-    if (storageNoted) await redisPipeline([["DEL", problemKey(file.pathname)]]).catch(() => {});
+    if (storageNoted) await clearStorageNote(file.pathname);
     // Copies left over by a removal the file store failed are tried again here too, a few at a time; the buyer's
     // copy is already made, and a failure leaves them on the list for the next try. This file's own folder is kept
     // for a later try: emptying it now would delete the copy handed over below.

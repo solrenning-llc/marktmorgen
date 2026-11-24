@@ -184,9 +184,11 @@ async function main(): Promise<void> {
 
     // Claude 3 vyDE's LEVE on #5360 @da3d7a4d02: the preview's own "unreadable" mark is what refuses the file once the
     // stamp writes another reason over the shared note.
-    part("The preview's own unreadable mark refuses the file after the stamp writes another reason");
+    part("The stamp never writes over the preview's unreadable, and the preview's own mark refuses without the note");
     await redis.pipeline(problemNoteCommands(ending.file.pathname, "storage"));
-    is("the shared note now says the stamp's reason", await note(ending.file), "storage");
+    is("the stamp's write leaves the studio's unreadable (Claude 3 xvBY8 on #5360)", await note(ending.file), "unreadable");
+    // The shared note gone by another way (a cleanup outside this path): the preview's own mark still refuses the file.
+    await redis.pipeline([["DEL", problemKey(ending.file.pathname)]]);
     is("a visit reads and parses nothing more: two parses in all", [await ask(ending.id), blobReads.get(ending.file.pathname)], [404, 2]);
 
     // Claude 3 vyDE's NIT 2: the once-mark never writes over a mark already there.

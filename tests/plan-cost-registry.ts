@@ -166,7 +166,7 @@ import {
 import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, readBeaconCost, readCeilingMarksCost, visitCost } from "./traffic-cost";
 import { SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS, SHORT_LINK_OFF_AFTER_MS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_RESTING_OWNER_MS, SHORT_LINK_PAID_BURST_COMMANDS, SHORT_LINK_PAID_FLIGHT_PER_STORE, SHORT_LINK_PAID_REFUSALS_PER_HOUR, SHORT_LINK_STORE_COUNT_COMMANDS, SHORT_LINK_STORE_READS_PER_HOUR, SHORT_LINK_STORE_REFUND_COMMANDS, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_USED_UP_PAUSE_MS } from "@/lib/short-link-open-rules";
 import { MAX_LINKS } from "@/lib/short-link-rules";
-import { FLY_HOLD_SECONDS, FLY_SHARE_COMMANDS, MEASURE_LIST_PAGES } from "@/lib/stamp-cost-rules";
+import { FLY_HOLD_SECONDS, FLY_SHARE_COMMANDS, MEASURE_LIST_PAGES, PROBLEM_NOTE_WRITE_COMMANDS } from "@/lib/stamp-cost-rules";
 import { ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, ASSISTANT_START_STRIPE_CALLS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -1215,13 +1215,14 @@ export const STORAGE_MEASURE_READ =
 /**
  * A copy stamped on the fly and sent without being kept (lib/pdf-stamp.ts stampedDelivery, "fly";
  * lib/stamp-cost-rules.ts flyUnits), in its three parts: the function held FLY_HOLD_SECONDS at 2 GB while it is
- * worked on and sent, its notes read (two commands), its connection's share of copies held, settled and given back
+ * worked on and sent, its notes read (two commands) and its problem note written (PROBLEM_NOTE_WRITE_COMMANDS, Claude 3
+ * xvBY8 on #5360), its connection's share of copies held, settled and given back
  * (FLY_SHARE_COMMANDS, lib/traffic.ts) and the original asked for once (the dearer of an R2 Class B read and twice
  * Blob's $0.40-per-million Simple Operation); a millisecond of CPU; and a byte read from the dearer file
  * store (BLOB_TRANSFER_PER_BYTE, itself a review ceiling) or sent on to the buyer (ORIGIN_PER_BYTE). Held under
  * FLY_BASE_UNITS, FLY_CPU_MS_PER_UNIT and FLY_BYTES_PER_UNIT in tests/plan-cost-registry.test.ts.
  */
-export const FLY_BASE = FLY_HOLD_SECONDS * MEMORY_SECOND + (2 + FLY_SHARE_COMMANDS) * COMMAND + Math.max(micro(R2_CLASS_B_MICRO_USD_PER_MILLION) / 1e6, 0.8 / 1e6);
+export const FLY_BASE = FLY_HOLD_SECONDS * MEMORY_SECOND + (2 + PROBLEM_NOTE_WRITE_COMMANDS + FLY_SHARE_COMMANDS) * COMMAND + Math.max(micro(R2_CLASS_B_MICRO_USD_PER_MILLION) / 1e6, 0.8 / 1e6);
 export const FLY_CPU_MS = CPU_SECOND / 1000;
 export const FLY_BYTE = Math.max(BLOB_TRANSFER_PER_BYTE, ORIGIN_PER_BYTE);
 /**

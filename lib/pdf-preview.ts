@@ -27,7 +27,8 @@
  *     yet, and is not measured again for an hour (noRoomKey), however many
  *     people ask for one.
  *   - A PDF pdf-lib cannot open (an owner password, damage) is read and
- *     parsed twice at most: a first failure is marked once in the preview's
+ *     parsed twice at most (save requests at the same moment before any mark
+ *     is written, each still one of the store's public requests): a first failure is marked once in the preview's
  *     own mark (previewMarkKey), a second an hour or more later marks it
  *     "unreadable" there and in the stamp's shared note (lib/pdf-stamp.ts,
  *     problemKey), which the studio shows; neither takes data room, and the
@@ -72,7 +73,8 @@ const MONTH_FIELD_BYTES = 64;
  * kept PREVIEW_MARK_SECONDS (so a failure asked hours later is still its second; Claude 2 lpgvy's LEVE on #5360), and
  * no new parse is tried for an hour after it: a passing failure (the function short of memory or time) never turns a
  * good PDF's preview off for 60 days. A failure past that hour marks it "unreadable" for PREVIEW_MARK_SECONDS, so a file
- * pdf-lib cannot open is parsed twice at most in that time (#5285 row #3351, the LOW of 6735389647), and writes
+ * pdf-lib cannot open is parsed twice at most in that time, save requests at the same moment before any mark is
+ * written, each still one of the store's public requests (#5285 row #3351, the LOW of 6735389647), and writes
  * "unreadable" in the file's shared problem note too, so the studio says why (lib/pdf-stamp.ts stampProblems). The mark
  * is the preview's own key, never the shared note: a stamp's reason ("storage", "too_big") stays shown after a first
  * failure (Claude 3 on #5360), and the mark's time is its own, never a stamp note's last minutes (Claude 5 ygH4 on #5360).

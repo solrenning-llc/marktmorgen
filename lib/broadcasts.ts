@@ -594,7 +594,8 @@ export async function measureBroadcastHeads(listId: string | null, limit: number
   const listed: unknown[] = index[0];
   if (listed.length > ask || listed.some((id) => typeof id !== "string" || !BROADCAST_ID.test(id)) || new Set(listed).size !== listed.length) throw new Error("Campaign index is incomplete");
   // The one id past `limit` is only sized, never measured as an email or read: whether its record is still kept says
-  // whether an older email exists (issue #4062; Claude 6's LEVE on #5431: a listed id whose record expired is none).
+  // whether the email just older than the newest `limit` is still there; -1 says only that that one is gone (issue
+  // #4062; Claude 6's and Claude 6 hsz3's LEVEs on #5431).
   const ids = listed.slice(0, limit) as string[];
   const past = options.more && listed.length > limit ? (listed[limit] as string) : null;
   if (!ids.length) return { ok: true, listId, ids: [], sizes: [], ...(options.more ? { more: false } : {}) };

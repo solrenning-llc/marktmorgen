@@ -3,8 +3,10 @@
  * emails and answered them as `emails` with nothing saying older ones were left out, so an assistant could not tell
  * "this store sent exactly 30" from "these are the newest 30 of more", and could take the omitted ones for none.
  *
- * Now the same LRANGE asks for one id more (no command added): when that id is there, the answer still shows the newest
- * 30 and says `emails_more: true`; otherwise `emails_more: false`. The tool's description says so too. Synthetic only.
+ * Now the same LRANGE asks for one id more, and its size is asked in the same call as the others (one GET more, paid with
+ * them): when that id's record is still kept, the answer still shows the newest 30 and says `emails_more: true`;
+ * otherwise `emails_more: false`, which says only that that one is gone; older ones may still be kept. The tool's
+ * description says so too. Synthetic only.
  */
 import { emailsTool } from "@/lib/mcp-tools";
 import { holdMoreApi, takeMoreApi } from "@/lib/api-guard";
@@ -29,7 +31,7 @@ async function main(): Promise<void> {
   is(`the newest ${EMAILS_BROADCASTS} are shown`, more.emails?.length, EMAILS_BROADCASTS);
   is("and emails_more says older ones were left out", more.emails_more, true);
 
-  part("The email past the newest has expired (Claude 6's LEVE on #5431): no older one can be shown, so emails_more is false");
+  part("The email past the newest has expired (Claude 6's LEVE on #5431): that one is gone, so emails_more is false");
   // The index is never trimmed and each record lives RECORD_DAYS from its last write: the id just older than the newest
   // shown is still listed after its record is gone. emails_more says only what that one id shows.
   const listed = idsFor(EMAILS_BROADCASTS + 1);
@@ -37,7 +39,7 @@ async function main(): Promise<void> {
   await redis.pipeline([["DEL", emailKey(listed[EMAILS_BROADCASTS])]]);
   const gone = await read(store);
   is(`the newest ${EMAILS_BROADCASTS} are shown`, gone.emails?.length, EMAILS_BROADCASTS);
-  is("and emails_more is false: never a promise of older emails no page or tool can show", gone.emails_more, false);
+  is("and emails_more is false: that one is gone (older ones may still be kept, next part)", gone.emails_more, false);
 
   part("An older email kept past the expired one (Claude 6 hsz3's LEVE on #5431): false is not 'none left', and the tool says so");
   // A record's 400 days restart at every write (a send step, a cancel; a send scheduled up to a year ahead), so an email
@@ -66,7 +68,8 @@ async function main(): Promise<void> {
   const described = MCP_TOOLS.find((t) => t.name === "get_emails")?.description ?? "";
   is("it names emails_more", /emails_more/.test(described), true);
   is("and says an email is kept 400 days after its last change", /400 days after its last change/.test(described), true);
-  is(`it says the newest ${EMAILS_BROADCASTS}`, new RegExp(`newest ${EMAILS_BROADCASTS}`).test(described), true);
+  is(`it says the ${EMAILS_BROADCASTS} most recently created, whatever their status`, new RegExp(`${EMAILS_BROADCASTS} most recently created, whatever their status`).test(described), true);
+  is("never that they are all sent or scheduled (Claude 3 xvBY8's LEVE 4 on #5431)", /sent or scheduled/.test(described), false);
 
   done();
 }

@@ -463,8 +463,8 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
   return {
     currency: store.currency,
     list: { people: counts.total, agreed_to_hear: counts.agreed, left: counts.left, can_be_emailed: counts.mailable },
-    // The newest EMAILS_BROADCASTS only: emails_more says older ones exist and are not shown, so they are never taken
-    // for none (issue #4062).
+    // The newest EMAILS_BROADCASTS only: emails_more is true when the email just older than these is still kept; false
+    // says only that that one is gone, not that every older one is (see the tool's description; issue #4062).
     emails_more: sizes.more === true,
     emails: broadcasts.map((b) => {
       const money = broadcastMoney(revenue, b.id);

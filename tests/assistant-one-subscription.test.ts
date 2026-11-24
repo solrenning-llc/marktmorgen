@@ -22,6 +22,7 @@
  * progress reads the open pages again instead of failing; an add-on whose payment failed is not told "Stripe has not
  * confirmed the payment yet".
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
@@ -520,6 +521,14 @@ async function main(): Promise<void> {
   await setAssistantPlan(OWNER, { subscriptionId: "sub_R23Assist0009", active: true, period, cancelsAtEnd: false, disputedAt: "" });
   store = (await storeForEmail(OWNER))!;
   is("refused, with no list read and no POST", [await outcome(store), lists.length, posts.length], ["refused", 0, 0]);
+
+  // Claude 5 iZdj's LEVE on #5379: the add-on's design document (named by AGENTS.md) says how a subscription names its
+  // store, so nobody following it matches add-ons by handle alone.
+  part("The design document says an add-on names its store by id");
+  const design = readFileSync("docs/store-assistant.md", "utf8");
+  const billing = design.slice(design.indexOf("## Billing"), design.indexOf("## Privacy"));
+  is("its Billing section names assistant_sid, the id rule and the handle kept for older ones",
+    [/assistant_sid/.test(billing), /only when the id is its own/.test(billing), /made before[^.]*handle/.test(billing)], [true, true, true]);
 
   done();
 }

@@ -10,12 +10,15 @@
  * a cache (Claude 3's LEVE on #5110: a fenced write with EX turned the key an upload kept for good into one that
  * expired 400 days after a visit).
  *
+ * Each writer is held after the erasure began and after the closing: a visit (recordVisit), a podcast app's day
+ * (recordListener) and the live room (recordParts).
+ *
  * Real code over the in-memory Redis; synthetic records only.
  */
 import { rememberFolderOwner, storeKeysOf } from "@/lib/delivery";
 import { ERASING_KEY, claimHandle, closeStoreRecord, ensureStatsId, ensureStoreId, erasingField, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { PARTS_PER_VISIT } from "@/lib/traffic-rules";
-import { recordParts, recordVisit } from "@/lib/traffic";
+import { recordListener, recordParts, recordVisit } from "@/lib/traffic";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -80,6 +83,36 @@ async function main() {
   is("cleared by the closing", await owner(closed.key), null);
   is("the live room still counts", await recordParts(before, 100 * PARTS_PER_VISIT), 100 * PARTS_PER_VISIT);
   is("and the owner is not written back", await owner(closed.key), null);
+  is("never by a plain SET", plainWrites, 0);
+
+  // A visit and a podcast app's day mark the month too, each through its own fence (Claude 3 xvBY8's LEVE 1 on
+  // #5110): the month's first count of a store whose erasure has begun, or that was closed, writes no owner back.
+  for (const [kind, count] of [
+    ["a visit", (store: Awaited<ReturnType<typeof shop>>["store"]) => recordVisit(store, "203.0.113.9")],
+    ["a podcast app's day", (store: Awaited<ReturnType<typeof shop>>["store"]) => recordListener(store, "feed-after-erasure")],
+  ] as const) {
+    part(`${kind}, the month's first count, after the store's erasure began: no owner written back`);
+    const erasing2 = await shop();
+    await original([["HSET", ERASING_KEY, erasing2.field, String(Date.now())], ["DEL", erasing2.key]]);
+    is(`${kind} still counts toward the month`, await count(erasing2.store), true);
+    is("but the owner is not written back", await owner(erasing2.key), null);
+    is("nor under the folder the store reads now", await owner(`nl:store:folder-owner:${await storeFolder(erasing2.ref)}`), null);
+    await original([["HDEL", ERASING_KEY, erasing2.field]]);
+
+    part(`${kind}, the month's first count, after the store was closed: no owner written`);
+    const closed2 = await shop();
+    const kept = closed2.store;
+    is("closed", await closeStoreRecord(closed2.store, [closed2.key]), true);
+    is(`${kind} still counts toward the month`, await count(kept), true);
+    is("and the owner is not written back", await owner(closed2.key), null);
+    is("nor under the folder the store reads now", await owner(`nl:store:folder-owner:${await storeFolder(closed2.ref)}`), null);
+
+    part(`Control: ${kind} on a live store writes the owner, with no expiry`);
+    const live2 = await shop();
+    is(`${kind} counts`, await count(live2.store), true);
+    is("the owner is remembered", await owner(live2.key), live2.ref.toLowerCase());
+    is("with no expiry", await ttl(live2.key), -1);
+  }
   is("never by a plain SET", plainWrites, 0);
   done();
 }

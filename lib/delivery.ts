@@ -108,14 +108,14 @@ const ownerKey = (folder: string) => `nl:store:folder-owner:${folder}`;
  * store's erasure began must not write its owner's address back under the folder (Codex L-20261120-0627), so "gone"
  * writes nothing. Written, it is kept with no expiry (KEEP_IF_STORE_LIVE), like every other write of it: it is the
  * creator's record, which the daily usage job reads to find the store, not a cache (Claude 3's LEVE on #5110); the
- * closing deletes it. Without a fence (an upload by the creator, a checkpoint), as before.
+ * closing deletes it. Without a fence (an upload by the creator, an order counted, the demo seed), as before.
  */
 export async function rememberFolderOwner(folder: string, email: string, fence?: StoreLiveFence): Promise<void> {
   if (!isRedisConfigured() || !folder || !email) return;
   try {
     if (fence) {
       const kept = await keepIfStoreLive(fence, ownerKey(folder), email.toLowerCase());
-      if (kept === "unknown") console.error("could not remember a folder's owner", "the fenced write's reply was not its own");
+      if (kept === "unknown") console.error("could not remember a folder's owner", "unknown: a store from before ids with no statsId, or a reply that was not the script's");
       return;
     }
     await redisPipeline([["SET", ownerKey(folder), email.toLowerCase()]]);

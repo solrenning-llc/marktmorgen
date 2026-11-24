@@ -49,7 +49,7 @@ Date.now = () => realNow() + ahead;
 const DAY = 24 * 60 * 60 * 1000;
 /**
  * Commands as Upstash bills them: a script is the EVAL itself plus each command it runs (Claude 3 yaQt's MÉDIO on
- * #5482: the first look's PENDING_SWAP is 1 + ZREM + ZADD, three, where counting the list's length gave one).
+ * #5482: the orphan's ORPHAN_RELEASE is 1 + GET + DEL, three, where counting the list's length gave one).
  */
 const billed = (list: (string | number)[][]): number =>
   list.reduce((n, command) => n + (String(command[0]).toUpperCase() === "EVAL" ? 1 + (String(command[1]).match(/redis\.call\(/g) ?? []).length : 1), 0);
@@ -144,12 +144,7 @@ async function main(): Promise<void> {
     takeUpsell({ headers: new Headers(), store, session, secret: browser.secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
 
   const job = () => settlePendingOffers(async (handle) => (handle === "harbor" ? store : null), Date.now() + 60_000);
-  // The offer's member, plain or carrying its time ("|at:<ms>", lib/upsell.ts AT_MARK), by its score; null when not listed.
-  const listed = async (session: string) => {
-    const all = ((await redis.pipeline([["ZRANGE", "nl:upsell:pending", 0, -1]]))[0] as string[] | null) ?? [];
-    const member = all.find((m) => m === `harbor|${session}|` || m.startsWith(`harbor|${session}||at:`));
-    return member ? (await redis.pipeline([["ZSCORE", "nl:upsell:pending", member]]))[0] : null;
-  };
+  const listed = async (session: string) => (await redis.pipeline([["ZSCORE", "nl:upsell:pending", `harbor|${session}|`]]))[0];
 
   part("RED: a bank payment still processing after two days stays on the job's list");
   nextCharge = "processing";

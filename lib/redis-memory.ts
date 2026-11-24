@@ -1224,13 +1224,6 @@ export class MemoryRedis {
           const [, record, read] = args;
           return this.run(["GET", record]) === read ? this.run(["DEL", record]) : 0;
         }
-        // lib/upsell.ts PENDING_SWAP: a waiting offer's entry replaced by one carrying its time, only while it is listed.
-        if (key.startsWith("-- marktmorgen:upsell-pending-swap:v1\n") && args[0] === "1" && args.length === 5) {
-          const [, list, entry, score, replacement] = args;
-          if (this.run(["ZREM", list, entry]) !== 1) return 0;
-          this.run(["ZADD", list, score, replacement]);
-          return 1;
-        }
         // lib/group-buy.ts PLACE_DONE: a place marked done once, and said so only to the open that did it.
         if (key.startsWith("-- marktmorgen:group-place-done:v1\n") && args[0] === "1" && args.length === 4) {
           const [, members, field, json] = args;

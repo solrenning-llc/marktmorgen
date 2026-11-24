@@ -233,7 +233,8 @@ async function main(): Promise<void> {
   part("Past the ceiling, a mark whose first write is not confirmed is written again, not left to the next reading");
   // Codex X6's LOW on #3378 @bca4245bf5 (Board #5285, row #3378): writeInvoiceKeep caught and ignored the failed write
   // of the mark of going past the ceiling and said "ceiling" all the same: the record read before stayed, and the
-  // readings that begin again were not told reloading will not help. A write that does not say "kept" is tried once more.
+  // readings that begin again were not told reloading will not help. A write whose answer is unknown (lost, or in
+  // another shape) is tried once more; a "gone" answer is not (the next part).
   const { product: p5 } = await setUp();
   const terms5 = { product: p5, via: SARA, via_rate: "30", via_months: String(RECURRING_ALWAYS), via_at: String(NOW - 300 * DAY) };
   all = [];

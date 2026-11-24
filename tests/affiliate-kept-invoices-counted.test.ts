@@ -143,6 +143,10 @@ async function main(): Promise<void> {
   const bigBook = { fields: 1_000_000, rows: 0, listings: 0, stripePages: 1 };
   const pagePart = affiliatePageWork(bigBook).commands - affiliatePageWork({ ...bigBook, stripePages: 0 }).commands;
   is("the affiliate's page counts the kept invoices' path as BOOK_KEPT_INVOICES_COMMANDS too", [pagePart, rules.BOOK_KEPT_INVOICES_COMMANDS], [9, 9]);
+  // And its bytes, the same way: on that book only the kept invoices' path differs, so exactly BOOK_KEPT_INVOICES_BYTES
+  // (Claude 3 xvBY8's LEVE on #5384 @0664391217: no test held them).
+  const pageBytes = affiliatePageWork(bigBook).bytes - affiliatePageWork({ ...bigBook, stripePages: 0 }).bytes;
+  is("and the kept invoices' path's bytes as BOOK_KEPT_INVOICES_BYTES", pageBytes, BOOK_KEPT_INVOICES_BYTES);
   // And nothing taken off the rest of the page: an empty book that reads no Stripe page counts the page's own commands,
   // the window's take, two commands for its one write of the kept book (WRITE_BYTES a write, lib/affiliate-book-snapshot.ts)
   // and the three refund marks, from the registry's figures.

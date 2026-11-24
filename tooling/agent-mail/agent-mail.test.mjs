@@ -1521,7 +1521,7 @@ console.log("strict to add, loose to take out: the READY the 3-READY gate counts
   soma.push(...["READY, 0 findings. HIGH: the lock", "READY, sem achados. ALTA: a trava", "READY, 0 findings, nits only"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, null]));
   // Twelfth round (Claude 5 ichw on 044dca4bfa): a severity in any case that labels something refuses.
   soma.push(...["READY, sem achados. Grave: vaza a sessão", "READY, sem achados. Leve: o nome", "READY, sem achados. Médio: a trava", "READY, 0 findings. Medium: the lock",
-    "READY, 0 findings. Low: a typo", "READY, 0 findings. High: the lock", "READY, 0 findings. Nit: typo", "READY, 0 findings. Leve — o nome"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, null]));
+    "READY, 0 findings. Low: a typo", "READY, 0 findings. High: the lock", "READY, 0 findings. Nit: typo", "READY, 0 findings. Leve — o nome", "READY, 0 findings. Nits remain", "READY, sem achados. Grave: o dinheiro"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, null]));
   for (const [t, e] of soma) is(`adds: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.readyEstrito?.(t, N, H) === e, String(mod.readyEstrito?.(t, N, H)));
   const tira9 = [[`Claude 3 review #${N} @${h}: Not ready`, "claude-3"], [`Claude 3 review #${N} @${h}: changes requested (1 ALTO)`, "claude-3"],
     [`Claude 3 review #${N} @${h}: Changes needed`, "claude-3"], [`Claude 3 review #${N} @${h}: needs changes`, "claude-3"], [`Claude 3 review #${N} @${h}: ALTO found, not ready`, "claude-3"],

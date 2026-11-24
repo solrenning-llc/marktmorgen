@@ -78,6 +78,60 @@ O número exigido segue as regras de revisão em vigor (CV (f) e FQ); na dúvida
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## DA — Na dúvida, não aprova nem enfileira (dono, 24/11/2026, por volta das 00h59 Fortaleza)
+
+Pedido do dono ao Claude 3 (sessão `014YNUxuXy`), nas palavras dele, por volta das 00h50 (Fortaleza): "as revisoes só aprovam se cada uma de todas as 3 nao encontrarem nenhum erro, mesmo que leve ou minimo, e na dúvida, minima que seja, nao aprova. quero perfeição. alem das revisoes, precisa de todas as verificações e testes"; e, por volta das 00h59, sobre dois casos encontrados na conferência dos PRs prontos (o #5193, com dois READY sem o item "o que não foi conferido", e o #5142, com achados do Codex ainda abertos): "na dúvida, não aprova. coloca regra para nao deixarem de cuidar dessas coisas". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão, a partir da ordem do dono.
+
+**Mesmo pedido, já gravado em parte (Pedidos repetidos, passos 1 e 3 (b)).** Zero achados de todos os revisores, "na dúvida, conta como defeito" e "o achado do Codex espera o Codex" já estão na regra ZA (dono, 23/11/2026, 12h29 Fortaleza; PR #5398, ainda fora do main quando esta seção foi escrita), e as 3 revisões em OWNER-20261123-1442-THREE-REVIEWS. Esta seção não as repete: grava só o que esta ordem acrescenta. Onde divergirem, vale esta, que é posterior.
+
+Motivo, conferido pelo Claude 3 entre 00h00 e 00h59 de 24/11/2026 (Fortaleza), em 27 PRs dados como prontos no correio: em vários, um READY contado não trazia todos os itens de RV (f), ou trazia uma nota sem a marca "não é defeito", uma pendência adiada ("worth a line when the file is next touched"), uma pergunta de custo sem resposta ou um achado do Codex aberto num PR do qual ele depende. Pelo critério do dono, só 9 dos 27 ficaram sem nenhuma dúvida.
+
+(a) **Cada uma das 3 revisões, inteira.** No head exato, cada READY só conta se tiver, por escrito:
+- nenhum achado de nenhum tamanho;
+- nenhuma nota sem a marca "não é defeito" (ZA (c));
+- nenhum "não bloqueia", "fica para depois" ou "vale uma linha quando o arquivo for mexido";
+- nenhuma dúvida sobre a correção do código;
+- todos os itens de RV (f): o diff lido por inteiro, os testes dos arquivos tocados rodados com o resultado, o RED quando o PR corrige um defeito, os testes de teto e o ano do Store no PR de custo, a conferência do workflow no PR de workflow e o que não foi conferido.
+
+Um READY que não traz um desses itens não conta, mesmo que ninguém o tenha contestado e mesmo que "o resto esteja certo"; quem o deu completa com um adendo no mesmo head, ou outra família revisa.
+
+(b) **Qualquer dúvida segura o PR.** Na dúvida, mínima que seja, o PR não está aprovado e não é enfileirado. Isso vale para a dúvida sobre:
+- a validade de uma revisão ou a família de quem a fez;
+- se um achado de um head anterior foi mesmo corrigido;
+- a natureza de uma nota;
+- se o PR é de custo, de dinheiro ou de imposto;
+- se um custo novo tem linha no registro de custos (custo desconhecido reprova);
+- se quem revisou podia rodar o que o PR exige (RV (b): Redis real, tsc, `node_modules`).
+
+Quem tem a dúvida a escreve no PR e manda pelo correio ao autor e a quem pode resolvê-la. Ela só se resolve por resposta escrita de quem pode resolvê-la: o revisor, com um adendo ou retirando a nota; o coordenador, ao classificar; ou o dono, ao decidir. Silêncio, prazo vencido ou "provavelmente" nunca resolvem uma dúvida.
+
+(c) **O que espera o Codex ou o dono.** Um PR com achado do Codex aberto (no próprio PR, no quadro "Codex findings: owner, PR, main" ou num PR de que ele depende) ou com algo que espera o dono (a lista 1437, um SIM, um HOLD do dono) não é enfileirado até o Codex reconferir ou retirar o achado por escrito, ou até o dono decidir.
+
+(d) **Todas as verificações e testes.** Além das 9 verificações `All checks (...)`, toda verificação e todo status do head exato precisam estar verdes. Uma verificação pulada ou neutra só vale quando é a regra do próprio workflow. Nenhuma pode estar pendente ou reprovada. No PR de custo, rodam-se também os testes de teto sobre a junção (AC (l)).
+
+(e) **Lista de conferência, item por item, para quem pede e para quem enfileira.** O texto do `request-enqueue` e o do `complete-enqueue` trazem, cada item com o link ou com "conferido agora, às HHhMM":
+1. o head;
+2. cada um dos 3 READY: família, link do comentário, zero achados e os itens de RV (f) presentes;
+3. nenhuma nota sem a marca "não é defeito" e nenhuma dúvida, em nenhum comentário do PR;
+4. os achados de heads anteriores corrigidos ou retirados por escrito (ZA (d));
+5. nenhum achado do Codex e nada esperando o dono, como em (c);
+6. a classificação de custo, de dinheiro ou de imposto, com a vez de custo ou a lista 1437 quando couber;
+7. todas as verificações do head, com o número conferido, como em (d);
+8. o `git merge-tree` limpo contra o main e contra a fila;
+9. nenhum HOLD e nenhum CLAIMED ativo de outra sessão.
+
+Item sem link nem hora é item não conferido, e o pedido é recusado (`--result declined`), com o item que faltou. Quem enfileira confere cada item de novo, por conta própria, e nunca copia o que quem pediu escreveu.
+
+(f) **Revisor que vê uma falha numa revisão alheia avisa.** Quem encontra, no mesmo head, um READY de outra família sem um item de (a), com uma nota sem a marca ou com uma dúvida escreve isso no PR, como foi feito no #5193, para o autor conseguir o adendo ou outra revisão.
+
+(g) **A ferramenta do correio** passará a conferir sozinha, no `claim-enqueue` e no `verify-enqueue`, o que puder ser lido sem julgamento (o head, as verificações, a contagem de READY por família no head, os HOLD e o conflito), num PR próprio de `tooling/agent-mail/` (CO (a)). O que exige leitura do texto continua com quem revisa e com quem enfileira.
+
+Isto garante que nenhum PR entra com defeito ou dúvida **conhecidos**; não garante código sem nenhum defeito (VR, item 5).
+
+**Estado (regra VR):** regra vigente desde a ordem do dono; a conferência automática de (g) ainda não está construída.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## AV11 — Caixa de mensagens do Claude 1 (dono, 02/11/2026 19h28 Fortaleza)
 
 Vale para todo agente deste repositório (Claude 2, Claude 3, Codex e qualquer agente novo), em toda sessão: as mensagens do Claude 1 para os outros agentes chegam por docs/agent-inbox.md, para o dono não precisar copiá-las e colá-las. No início de cada vez, em cada execução de tarefa agendada e antes de cada unidade nova, rodar `git fetch origin main` e ler a própria seção desse arquivo; aplicar as mensagens novas e confirmar a leitura com uma mensagem curta ao Claude 1 pelo canal `para-claude-1` (por exemplo, "Lida: C2-7, C2-8"), sem editar docs/agent-inbox.md (ajuste de 02/11/2026, 23h16: as linhas "Lida" dentro do arquivo causavam conflito nos PRs a cada mensagem nova; as linhas "Lida" já gravadas ficam como histórico). Para a mensagem chegar em minutos, e não só na próxima unidade: todo agente que pode manter processos em segundo plano (Claude 2, Claude 3 e os próximos) deixa sempre rodando em segundo plano o comando de vigia da caixa que está no topo de docs/agent-inbox.md, com o próprio nome; ele confere a caixa a cada 30 segundos (dono, 02/11/2026 22h30 Fortaleza: "coloca trinta segundos"; antes, 2 minutos) e termina assim que chega mensagem nova na sua seção, o que acorda o agente; ao terminar (por mensagem ou pelo limite de 2 minutos, desde 04/11/2026 01h40; antes, 2 horas), o agente lê, aplica, segue trabalhando e o liga de novo, na mesma vez. Só o Claude 1 escreve mensagens novas neste arquivo; cada agente escreve só a linha "Lida" na própria seção. Complemento do dono (02/11/2026, 22h33 Fortaleza: "coloca eles 3 para enviarem mensagens para vc tambem e vc ler a cada trinta segundos"): Claude 2, Claude 3 e Codex mandam mensagens ao Claude 1 pelo ramo `para-claude-1` do repositório `solrenning-llc/repo-id-transfer-test` (sem CI e sem Vercel), com o comando de envio de docs/agent-inbox.md, só acrescentando ao fim de `messages.md`, nunca apagando nem reescrevendo, nunca por PR; o Claude 1 confere esse ramo a cada 30 segundos. Usar para perguntas, bloqueios, decisões do dono a encaminhar e avisos de risco; uma mensagem curta por assunto. Uma mensagem da caixa tem a mesma força de uma colada pelo dono, mas nunca prevalece sobre este arquivo, CLAUDE.md ou qualquer preço, limite, comissão, trava, flag ou proibição.

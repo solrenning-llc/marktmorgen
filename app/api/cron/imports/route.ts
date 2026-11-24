@@ -49,27 +49,34 @@ async function run(request: NextRequest): Promise<Response> {
   if (got === "taken") return Response.json({ ok: true, busy: true });
   if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   const started = Date.now();
+  // Every pass that threw is named, and the run answers ok only when none did (issue #4091, Codex U): a pass that
+  // failed was logged and null, and the run answered ok with HTTP 200. The passes stay apart, so the later ones run.
+  const failedPasses: string[] = [];
   try {
     const counts = await advanceImports(started + 40_000);
     // What the stores' Meta ad accounts spent, each read once a day, for five seconds at most (lib/meta-ads.ts).
     const metaAds = await readMetaDue(Math.min(started + 45_000, Date.now() + 5_000), storeForId, (owner) => noticeCreator(owner, { kind: "metaads-broken" }).then(() => {})).catch((error: unknown) => {
+      failedPasses.push("readMetaDue");
       console.error("reading Meta ad spend failed", error);
       return null;
     });
     // The welcome offers' one reminder each, as they come due (lib/welcome-offer-send.ts).
     const welcome = await sendWelcomeReminders(Math.min(started + 47_000, Date.now() + 4_000)).catch((error: unknown) => {
+      failedPasses.push("sendWelcomeReminders");
       console.error("sending welcome offer reminders failed", error);
       return null;
     });
     // Discount codes set to start now, switched on (511 [CK3], lib/discount-schedule.ts), three seconds at most;
     // for a code that could not be, it tells the creator by email, once (unit 2, lib/discount-schedule-notice.ts).
     const codes = await activateScheduledCodes(Math.min(started + 49_000, Date.now() + 3_000)).catch((error: unknown) => {
+      failedPasses.push("activateScheduledCodes");
       console.error("switching scheduled discount codes on failed", error);
       return null;
     });
     // Then the one reminder to members moved from another platform who have not kept theirs yet.
     const reminded = await sendMoveReminders(started + 50_000);
-    return Response.json({ ok: true, ...counts, metaAds, welcome, codes, reminded }, { headers: { "Cache-Control": "no-store" } });
+    const ok = failedPasses.length === 0;
+    return Response.json({ ok, ...counts, metaAds, welcome, codes, reminded, failedPasses }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("the import job failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

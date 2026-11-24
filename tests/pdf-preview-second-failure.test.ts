@@ -12,7 +12,7 @@
 import { NextRequest } from "next/server";
 import { PDFDocument } from "pdf-lib";
 import { addProduct, claimHandle, ensureStatsId, setProductFile, setProductPreview, setStripeAccount, setSubscription, storeFolder } from "@/lib/store";
-import { problemKey, stampProblems } from "@/lib/pdf-stamp";
+import { problemKey, problemNoteCommands, stampProblems } from "@/lib/pdf-stamp";
 import type { ProductFile } from "@/lib/product-file";
 import { GET } from "@/app/api/store/preview/route";
 import { previewMarkKey } from "@/lib/pdf-preview";
@@ -161,6 +161,63 @@ async function main(): Promise<void> {
     is("past the hour, the second failure: two parses, unreadable", [await ask(ending.id), blobReads.get(ending.file.pathname), await mark(ending.file)], [404, 2, "unreadable"]);
     shift = 9 * 3_600_000;
     is("hours on, read no more: two parses in all", [await ask(ending.id), blobReads.get(ending.file.pathname)], [404, 2]);
+    // Claude 5 ygH4 on #5360 @da3d7a4d02: the studio says why as long as the preview refuses the file, never only for
+    // what was left of the stamp note.
+    is("hours on, the studio still says why: unreadable", (await stampProblems([ending.file])).get(ending.file.pathname), "unreadable");
+
+    // Claude 5 ygH4 on #5360 @da3d7a4d02: a stamp note with two hours left, then the preview's second failure: the
+    // studio's "unreadable" lives as long as the preview's mark, not for what was left of the stamp note.
+    part("A stamp note with two hours left: after the second failure the studio says why as long as the preview refuses");
+    shift = 0;
+    const twoHours = await product("Two-hours ebook", await encryptedPdf());
+    await redis.pipeline([["SET", problemKey(twoHours.file.pathname), "storage", "EX", 7_200]]);
+    await ask(twoHours.id);
+    shift = 66 * 60_000;
+    is("the second failure, past the hour", [await ask(twoHours.id), blobReads.get(twoHours.file.pathname)], [404, 2]);
+    shift = 3 * 3_600_000;
+    is("three hours on (the stamp note's time is over), the studio still says unreadable", (await stampProblems([twoHours.file])).get(twoHours.file.pathname), "unreadable");
+    shift = 9 * 3_600_000;
+    is("and the preview still refuses it: two parses in all", [await ask(twoHours.id), blobReads.get(twoHours.file.pathname)], [404, 2]);
+
+    // Claude 3 vyDE's LEVE on #5360 @da3d7a4d02: the preview's own "unreadable" mark is what refuses the file once the
+    // stamp writes another reason over the shared note.
+    part("The preview's own unreadable mark refuses the file after the stamp writes another reason");
+    await redis.pipeline(problemNoteCommands(ending.file.pathname, "storage"));
+    is("the shared note now says the stamp's reason", await note(ending.file), "storage");
+    is("a visit reads and parses nothing more: two parses in all", [await ask(ending.id), blobReads.get(ending.file.pathname)], [404, 2]);
+
+    // Claude 3 vyDE's NIT 2: the once-mark never writes over a mark already there.
+    part("A first failure never writes its once-mark over a mark another request wrote meanwhile");
+    shift = 0;
+    const raceOnce = await product("Race-once ebook", await encryptedPdf());
+    const pipeOnce = redis.pipeline.bind(redis);
+    let wroteMeanwhile = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!wroteMeanwhile && commands.some((c) => c[0] === "SET" && c[1] === previewMarkKey(raceOnce.file.pathname))) {
+        wroteMeanwhile = true;
+        await pipeOnce([["SET", previewMarkKey(raceOnce.file.pathname), "unreadable", "EX", 3_600]]);
+      }
+      return pipeOnce(commands);
+    }) as typeof redis.pipeline;
+    await ask(raceOnce.id);
+    redis.pipeline = pipeOnce;
+    is("the mark written meanwhile stays unreadable", [wroteMeanwhile, await mark(raceOnce.file)], [true, "unreadable"]);
+
+    // Claude 3 vyDE's NIT 3: the mark is read exactly (rule 24): a reply out of shape, or a mark in no known shape, is
+    // refused before the file is read.
+    part("A mark read in an unknown shape, or holding no known value, refuses before the file is read");
+    for (const [label, value] of [["a number", 5], ["a list", ["unreadable"]]] as [string, unknown][]) {
+      const odd = await product(`Odd-reply ebook ${label}`, await readablePdf());
+      const pipeOdd = redis.pipeline.bind(redis);
+      redis.pipeline = (async (commands: (string | number)[][]) =>
+        commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === previewMarkKey(odd.file.pathname) ? [value] : pipeOdd(commands)) as typeof redis.pipeline;
+      const status = await ask(odd.id);
+      redis.pipeline = pipeOdd;
+      is(`the mark answered ${label}: no preview, the file not read`, [status, blobReads.get(odd.file.pathname) ?? 0], [404, 0]);
+    }
+    const garbled = await product("Garbled-mark ebook", await readablePdf());
+    await redis.pipeline([["SET", previewMarkKey(garbled.file.pathname), "neither-once-nor-unreadable", "EX", 3_600]]);
+    is("a mark in no known shape: no preview, the file not read", [await ask(garbled.id), blobReads.get(garbled.file.pathname) ?? 0], [404, 0]);
   } finally {
     console.error = quiet;
     Date.now = realNow;

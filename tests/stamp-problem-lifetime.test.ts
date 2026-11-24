@@ -23,7 +23,9 @@ const write = (stamp as { problemNoteCommands?: (pathname: string, value: string
 async function main(): Promise<void> {
   part("The longest life of a path's problem note is named, from the note's own time");
   is("the note's time is named once (PROBLEM_NOTE_SECONDS, 60 days)", r.PROBLEM_NOTE_SECONDS, 60 * DAY);
-  is("its longest life is that time, since no write extends it", r.PROBLEM_NOTE_LONGEST_DAYS, (r.PROBLEM_NOTE_SECONDS ?? 0) / DAY);
+  // The preview's second failure writes "unreadable" fresh, once, so the studio says why as long as the preview refuses
+  // the file (Claude 5 ygH4 on #5360): a stamp note, then that write just before it runs out.
+  is("its longest life is twice that time: a note, then the preview's fresh unreadable", r.PROBLEM_NOTE_LONGEST_DAYS, (2 * (r.PROBLEM_NOTE_SECONDS ?? 0)) / DAY);
 
   part("The data registry and the closing rule cover that longest life");
   const family = FAMILIES["nl:stamp:problem:@lib/pdf-stamp.ts"];

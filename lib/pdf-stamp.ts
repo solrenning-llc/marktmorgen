@@ -157,9 +157,20 @@ export function wantsStamp(stamp: boolean, file: ProductFile): boolean {
   return stamp && isStampable(file);
 }
 
+/**
+ * The one write of a file's problem note, the stamp's and the preview's alike (Claude 5 iao9Ep on #5360): a new note
+ * takes PROBLEM_SECONDS, and a note already there takes the new value but keeps its expiry (SET XX KEEPTTL), so no
+ * failure extends it and a note lives at most PROBLEM_SECONDS from its first write (PROBLEM_NOTE_LONGEST_DAYS,
+ * lib/stamp-cost-rules.ts). One trip, two commands.
+ */
+export function problemNoteCommands(pathname: string, value: string): (string | number)[][] {
+  const key = problemKey(pathname);
+  return [["SET", key, value, "NX", "EX", PROBLEM_SECONDS], ["SET", key, value, "XX", "KEEPTTL"]];
+}
+
 async function noteProblem(pathname: string, problem: StampProblem): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([["SET", problemKey(pathname), problem, "EX", PROBLEM_SECONDS]]).catch(() => {});
+  await redisPipeline(problemNoteCommands(pathname, problem)).catch(() => {});
 }
 
 /** What writeWithinStorage did: kept the copy, found no room, could not pay for the measurement, or failed to write. */

@@ -40,9 +40,9 @@ import { carryTags } from "@/lib/pdf-preview-tags";
 import { readFileWhole } from "@/lib/file-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
-import { copyFolder, dropWrittenCopy, problemKey, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
+import { copyFolder, dropWrittenCopy, problemKey, problemNoteCommands, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
 import { releaseMark } from "@/lib/claim-mark";
-import { type CopyMeter, PROBLEM_NOTE_SECONDS } from "@/lib/stamp-cost-rules";
+import type { CopyMeter } from "@/lib/stamp-cost-rules";
 import { type DataStore, dataUsed, keepFor } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -64,13 +64,12 @@ const PREVIEW_SECONDS = 400 * 24 * 60 * 60;
 export const PREVIEW_RECORD_BYTES = 1_024;
 /** The room's own field for the month a record expires in (lib/store-data.ts, TAKE_DATA). */
 const MONTH_FIELD_BYTES = 64;
-/** As long as lib/pdf-stamp.ts keeps its note about a file that could not be stamped. */
-const UNREADABLE_SECONDS = PROBLEM_NOTE_SECONDS;
 /**
  * A first failure to cut a preview is noted only "unreadable-once:<ms>", kept as long as an unreadable note (so a
  * failure asked hours later is still its second; Claude 2 lpgvy's LEVE on #5360), and no new parse is tried for an hour
  * after it: a passing failure (the function short of memory or time) never turns a good PDF's preview off for
- * 60 days. A failure past that hour notes "unreadable" for UNREADABLE_SECONDS, as before, so a file pdf-lib cannot open
+ * 60 days. A failure past that hour notes "unreadable" until the note's PROBLEM_NOTE_SECONDS from its first write run
+ * out (lib/stamp-cost-rules.ts; no write extends a note, lib/pdf-stamp.ts problemNoteCommands), so a file pdf-lib cannot open
  * is parsed twice at most (#5285 row #3351, the LOW of 6735389647). The stamp reads only its own exact notes.
  */
 export const PREVIEW_RETRY_SECONDS = 3_600;
@@ -152,12 +151,12 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
       bytes = await firstPages(original, pages);
     } catch (error) {
       // What it answers decides nothing: there is no preview either way. A first failure is noted once (kept 60 days); one
-      // past its hour is noted unreadable for 60 days.
+      // past its hour is noted unreadable for what is left of them.
       if (isRedisConfigured()) {
-        const command = failedOnce
-          ? ["SET", problemKey(file.pathname), "unreadable", "EX", UNREADABLE_SECONDS]
-          : ["SET", problemKey(file.pathname), `${ONCE}${Date.now()}`, "EX", UNREADABLE_SECONDS];
-        await redisPipeline([command]).catch(() => {});
+        // The note's one write (lib/pdf-stamp.ts problemNoteCommands): a note already there, the stamp's or this
+        // once-note, keeps its expiry, so "unreadable" lasts until the first note's PROBLEM_NOTE_SECONDS run out, never
+        // longer (Claude 5 iao9Ep on #5360).
+        await redisPipeline(problemNoteCommands(file.pathname, failedOnce ? "unreadable" : `${ONCE}${Date.now()}`)).catch(() => {});
       }
       throw error;
     }

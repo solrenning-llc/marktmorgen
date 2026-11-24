@@ -3,10 +3,11 @@
  * into a legitimate zero. A failed video settlement, a failed read of the stores visited or of the stores with orders
  * each became "no store", and the run could still answer ok with HTTP 200. Each inventory is now said as unread: the
  * run still does every other part, then answers an error at the end that names the part (`unread`), never a zero.
- * Since then (#5466 reviews): each inventory also in another reply shape (Claude 3 ykH), never logged as "every store
- * inside" (Claude 3 ivvh); each of the three delivery reads unknown together with an inventory, both named; the last
- * answer, a store over the delivery allowance, with an inventory unread; the two reads of the watched stores, the
- * settlement's and the notices', failed apart; every error answer never kept by a cache (Claude 3 xvBY8).
+ * Since then, from the reviews of #5466: each inventory also in another reply shape (Claude 3 ykH); never logged as
+ * "every store inside", and logged as unread, the orders part too (Claude 3 ivvh, Claude 5 id8Ws and ichw); each of
+ * the three delivery reads unknown together with an inventory, both named (Claude 3 xvBY8); the last answer, a store
+ * over the delivery allowance, with an inventory unread (xvBY8); the two reads of the watched stores, the settlement's
+ * and the notices', failed apart, each logged by name (xvBY8, ichw); every error answer never kept by a cache (xvBY8).
  * Synthetic Redis only.
  */
 import { GET } from "@/app/api/cron/usage/route";
@@ -87,6 +88,7 @@ async function main(): Promise<void> {
     is("its own result says unread, never a count of zero stores", (got.body[name] as { unread?: boolean } | undefined)?.unread, true);
     is("the other parts still ran", others.every((other) => askedFor(got.from, other)), true);
     is(`the log never says every store is inside for the ${name} part`, logged.some((line) => line.startsWith(`${name}-watch: every store inside`)), false);
+    is(`and it says the ${name} part is unread`, logged.some((line) => line.startsWith(`${name}-watch: unread`)), true);
   }
 
   part("Control: every inventory read: ok, as before");
@@ -113,8 +115,8 @@ async function main(): Promise<void> {
     is("the run answers an error naming the delivery part and the orders part, never kept by a cache", [got.status, got.body.ok, got.body.unread, got.cache], [503, false, ["delivery", "orders"], "no-store"]);
   }
 
-  // The run's last answer (a store over the delivery allowance, written to this run) with an inventory unread (Claude 3
-  // xvBY8 on #5466): still the error naming the part, never ok. The store's owner is read; the told list is new.
+  // The run's last answer (a store over the delivery allowance, its owner read; no sender is set here, so nobody is
+  // written to) with an inventory unread (Claude 3 xvBY8 on #5466): still the error naming the part, never ok.
   part("A store over the delivery allowance and the orders inventory unread: the last answer names the part");
   {
     await redis.pipeline([["DEL", `nl:usage-watch:told:${new Date().toISOString().slice(0, 7)}`]]);
@@ -130,12 +132,15 @@ async function main(): Promise<void> {
   part("Only the video settlement's read fails: the video part is unread, and the notices still read their stores");
   {
     only = { pattern: /watch/, first: 1, last: 1 };
+    logged.length = 0;
     const got = await run();
     only = null;
     is("the settlement's failure is what was logged, not the notices'",
       [errors.some((e) => e.startsWith("settling video hours failed")), errors.some((e) => e.startsWith("could not read the stores whose video was watched"))], [true, false]);
     is("the run answers an error naming the video part", [got.status, (got.body.unread as string[] | undefined)?.includes("video"), (got.body.video as { unread?: boolean }).unread], [503, true, true]);
-    is("the notices still read the watched stores after it", askedFor(got.from, /watch/) && seenOnly > 1, true);
+    // seenOnly counts the reads of the watched stores this run: the settlement's, which failed, then the notices'.
+    is("the notices still read the watched stores after it", seenOnly > 1, true);
+    is("never kept by a cache, and the log names the settlement's read", [got.cache, logged.some((line) => line.startsWith("video-watch: unread, the settlement's stores are unknown"))], ["no-store", true]);
   }
   part("Only the notices' read of the watched stores fails: the video part is unread, the settlement ran");
   {
@@ -149,11 +154,13 @@ async function main(): Promise<void> {
     }
     is("a read past the settlement's can be failed alone", from > 1, true);
     only = { pattern: /watch/, first: from, last: 99 };
+    logged.length = 0;
     const got = await run();
     only = null;
     is("the notices' failure is what was logged, not the settlement's",
       [errors.some((e) => e.startsWith("settling video hours failed")), errors.some((e) => e.startsWith("could not read the stores whose video was watched"))], [false, true]);
     is("the run answers an error naming the video part", [got.status, (got.body.unread as string[] | undefined)?.includes("video"), (got.body.video as { unread?: boolean }).unread], [503, true, true]);
+    is("never kept by a cache, and the log names the notices' read", [got.cache, logged.some((line) => line.startsWith("video-watch: unread, the notices' stores are unknown"))], ["no-store", true]);
   }
 
   console.error = quiet;

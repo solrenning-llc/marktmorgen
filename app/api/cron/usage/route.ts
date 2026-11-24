@@ -174,7 +174,7 @@ async function videoRun(): Promise<VideoRun> {
   const noticeWords = `${out.paused} playback paused, ${out.told} written to`;
   const unreadWords = (parts: ("settlement" | "notices")[]) =>
     parts.length === 2
-      ? "video-watch: unread, the settlement's and the notices' stores are unknown; nothing was settled or written to"
+      ? "video-watch: unread, the settlement's and the notices' stores are unknown; what was settled today is unknown, and nobody was written to"
       : parts[0] === "settlement"
       ? `video-watch: unread, the settlement's stores are unknown, so what it settled today is unknown; the notices read theirs: ${noticeWords}`
       : `video-watch: unread, the notices' stores are unknown; the settlement read its own: ${settlementWords}`;

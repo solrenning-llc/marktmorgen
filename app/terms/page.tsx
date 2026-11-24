@@ -557,8 +557,9 @@ export default function TermsPage() {
           provider refuses the request when it is made, what was paid is
           refunded at once. If a request that was charged never reaches our
           video provider, what was paid for it is refunded automatically,
-          usually within the hour, and in every case at our first check after
-          the hours below. If the lesson&apos;s video is deleted before its
+          usually within the hour, and otherwise at our first check after the
+          hours below; if Stripe or our video provider cannot tell us what
+          happened, we keep checking as described below. If the lesson&apos;s video is deleted before its
           captions are delivered, what was paid for them is refunded without
           waiting for the hours below. For a request that reached our video
           provider, what was paid for a

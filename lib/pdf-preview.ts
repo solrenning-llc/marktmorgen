@@ -27,12 +27,15 @@
  *     yet, and is not measured again for an hour (noRoomKey), however many
  *     people ask for one.
  *   - A PDF pdf-lib cannot open (an owner password, damage) is read and
- *     parsed once: it is noted "unreadable" in the stamp's own note
- *     (lib/pdf-stamp.ts, problemKey), which takes no data room and which the
- *     studio shows, and is not read again for any visitor while the note is
- *     kept. A failure takes nothing from the store's data room (R30).
+ *     parsed twice at most: a first failure is marked once in the preview's
+ *     own mark (previewMarkKey), a second an hour or more later marks it
+ *     "unreadable" there and in the stamp's shared note (lib/pdf-stamp.ts,
+ *     problemKey), which the studio shows; neither takes data room, and the
+ *     file is not read again for any visitor while they are kept. A failure
+ *     takes nothing from the store's data room (R30).
  *
  *   nl:preview:<sha(pathname|addedAt|pages)>   the preview's ProductFile, JSON
+ *   nl:preview:bad:<sha(pathname)>             the preview's mark, below
  */
 import { createHash } from "node:crypto";
 import { PDFDocument } from "pdf-lib";
@@ -42,7 +45,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
 import { copyFolder, dropWrittenCopy, problemKey, problemNoteCommands, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
 import { releaseMark } from "@/lib/claim-mark";
-import type { CopyMeter } from "@/lib/stamp-cost-rules";
+import { type CopyMeter, PREVIEW_MARK_SECONDS } from "@/lib/stamp-cost-rules";
 import { type DataStore, dataUsed, keepFor } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -65,18 +68,22 @@ export const PREVIEW_RECORD_BYTES = 1_024;
 /** The room's own field for the month a record expires in (lib/store-data.ts, TAKE_DATA). */
 const MONTH_FIELD_BYTES = 64;
 /**
- * A first failure to cut a preview is noted only "unreadable-once:<ms>", kept as long as an unreadable note (so a
- * failure asked hours later is still its second; Claude 2 lpgvy's LEVE on #5360), and no new parse is tried for an hour
- * after it: a passing failure (the function short of memory or time) never turns a good PDF's preview off for
- * 60 days. A failure past that hour notes "unreadable" until the note's PROBLEM_NOTE_SECONDS from its first write run
- * out (lib/stamp-cost-rules.ts; no write extends a note, lib/pdf-stamp.ts problemNoteCommands), so a file pdf-lib cannot open
- * is parsed twice at most (#5285 row #3351, the LOW of 6735389647). The stamp reads only its own exact notes.
+ * A first failure to cut a preview is noted only "unreadable-once:<ms>", in the preview's own mark (previewMarkKey),
+ * kept PREVIEW_MARK_SECONDS (so a failure asked hours later is still its second; Claude 2 lpgvy's LEVE on #5360), and
+ * no new parse is tried for an hour after it: a passing failure (the function short of memory or time) never turns a
+ * good PDF's preview off for 60 days. A failure past that hour marks it "unreadable" for PREVIEW_MARK_SECONDS, so a file
+ * pdf-lib cannot open is parsed twice at most in that time (#5285 row #3351, the LOW of 6735389647), and writes
+ * "unreadable" in the file's shared problem note too, so the studio says why (lib/pdf-stamp.ts stampProblems). The mark
+ * is the preview's own key, never the shared note: a stamp's reason ("storage", "too_big") stays shown after a first
+ * failure (Claude 3 on #5360), and the mark's time is its own, never a stamp note's last minutes (Claude 5 ygH4 on #5360).
  */
 export const PREVIEW_RETRY_SECONDS = 3_600;
 const ONCE = "unreadable-once:";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 export const previewKey = (file: Pick<ProductFile, "pathname" | "addedAt">, pages: number) => `nl:preview:${sha(`${file.pathname}|${file.addedAt}|${pages}`).slice(0, 40)}`;
+/** The preview's own mark about a path that failed to parse: "unreadable-once:<ms>", then "unreadable" (above). */
+export const previewMarkKey = (pathname: string) => `nl:preview:bad:${sha(pathname).slice(0, 40)}`;
 
 /** Whether this file can have a preview at all. */
 export function previewable(file: ProductFile | null): file is ProductFile {
@@ -130,12 +137,16 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
       // a new file is a new path. Only "unreadable" is trusted: a size note is
       // written for a failed read too, and the others are an EPUB's.
       if (noted === "unreadable") return null;
-      // Failed once: not parsed again until its hour is past; a note in no known shape after the mark is unknown.
-      if (typeof noted === "string" && noted.startsWith(ONCE)) {
-        const at = Number(noted.slice(ONCE.length));
+      // The preview's own mark, read only now, when a preview may be made: "unreadable" is refused; failed once, it is
+      // not parsed again until its hour is past; a mark in no known shape is unknown, refused the same way.
+      const mark = repliesFor(await redisPipeline([["GET", previewMarkKey(file.pathname)]]), 1)?.[0];
+      if (mark === undefined || (mark !== null && typeof mark !== "string")) throw new UnknownReplyError("a preview's mark");
+      if (mark === "unreadable") return null;
+      if (typeof mark === "string") {
+        const at = mark.startsWith(ONCE) ? Number(mark.slice(ONCE.length)) : NaN;
         if (!Number.isSafeInteger(at) || Date.now() < at + PREVIEW_RETRY_SECONDS * 1000) return null;
         failedOnce = true;
-        onceNote = noted;
+        onceNote = mark;
       }
       // A store whose room is full makes no new preview: the file is not read
       // for one that could not be kept. Unknown is refused the same way.
@@ -150,21 +161,23 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
     try {
       bytes = await firstPages(original, pages);
     } catch (error) {
-      // What it answers decides nothing: there is no preview either way. A first failure is noted once (kept 60 days); one
-      // past its hour is noted unreadable for what is left of them.
+      // What it answers decides nothing: there is no preview either way. A first failure marks it once, never over a
+      // mark already there (NX), for PREVIEW_MARK_SECONDS; one past its hour marks it unreadable for PREVIEW_MARK_SECONDS
+      // and writes "unreadable" in the shared problem note, through its one write that never extends it
+      // (lib/pdf-stamp.ts problemNoteCommands).
       if (isRedisConfigured()) {
-        // The note's one write (lib/pdf-stamp.ts problemNoteCommands): a note already there, the stamp's or this
-        // once-note, keeps its expiry, so "unreadable" lasts until the first note's PROBLEM_NOTE_SECONDS run out, never
-        // longer (Claude 5 iao9Ep on #5360).
-        await redisPipeline(problemNoteCommands(file.pathname, failedOnce ? "unreadable" : `${ONCE}${Date.now()}`)).catch(() => {});
+        const mark = previewMarkKey(file.pathname);
+        await redisPipeline(failedOnce
+          ? [["SET", mark, "unreadable", "EX", PREVIEW_MARK_SECONDS], ...problemNoteCommands(file.pathname, "unreadable")]
+          : [["SET", mark, `${ONCE}${Date.now()}`, "NX", "EX", PREVIEW_MARK_SECONDS]]).catch(() => {});
       }
       throw error;
     }
     // The PDF is proved good: its once-note goes, so a later passing failure on the same path (its preview pages
     // changed, or no preview was kept for room) is a first failure again, never "unreadable" for 60 days at once
-    // (Claude 3 vyDE's LEVE on #5360). Only the note as read: a stamp note written meanwhile stays (compare and delete,
-    // lib/claim-mark.ts releaseMark, which never throws; a note it could not clear only makes the next failure the second).
-    if (onceNote !== null) await releaseMark(problemKey(file.pathname), onceNote);
+    // (Claude 3 vyDE's LEVE on #5360). Only the mark as read: one written meanwhile stays (compare and delete,
+    // lib/claim-mark.ts releaseMark, which never throws; a mark it could not clear only makes the next failure the second).
+    if (onceNote !== null) await releaseMark(previewMarkKey(file.pathname), onceNote);
     // Room for its record only once there is a preview to keep: a failure takes none.
     if (isRedisConfigured() && !(await keepFor(store, PREVIEW_RECORD_BYTES, PREVIEW_SECONDS))) return null;
     const base = file.name.replace(/\.pdf$/i, "") || "preview";

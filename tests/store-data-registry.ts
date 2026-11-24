@@ -60,7 +60,7 @@ import { MAX_REMOVED_COURSES } from "@/lib/removed-courses";
 import { MAX_LESSONS, MAX_MODULES } from "@/lib/course";
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
-import { PROBLEM_NOTE_LONGEST_DAYS } from "@/lib/stamp-cost-rules";
+import { PREVIEW_MARK_LONGEST_DAYS, PROBLEM_NOTE_LONGEST_DAYS } from "@/lib/stamp-cost-rules";
 import { ERASED_MARK_SECONDS, TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
 import { MAIL_GAP_CHECKS_PER_EMAIL } from "@/lib/mail-frequency";
@@ -984,6 +984,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rcpt:n:@lib/receipt-number.ts": room("A store's receipt numbers, one field a sale given one: taken from the room in the same script that writes it (RECEIPT_NUMBER_BYTES), a re-download taking nothing", "lib/receipt-number.ts"),
   "nl:rcpt:seq:@lib/receipt-number.ts": room("A store's last receipt number: its key taken with its first number (RECEIPT_KEYS_BYTES)", "lib/receipt-number.ts"),
   "nl:preview:@lib/pdf-preview.ts": room("A PDF's preview, kept a year only while it fits", "lib/pdf-preview.ts"),
+  "nl:preview:bad:@lib/pdf-preview.ts": { what: "A PDF that failed to parse for its preview", parts: [per("upload", PREVIEW_MARK_LONGEST_DAYS, MARK, "Per file: the once-mark, then \"unreadable\" written fresh just before it runs out, PREVIEW_MARK_SECONDS each (PREVIEW_MARK_LONGEST_DAYS, lib/stamp-cost-rules.ts; Claude 5 ygH4 and Claude 3 on #5360).")] },
   "nl:stamp:copy:@lib/pdf-stamp.ts": room("A stamped copy's record, kept only while it fits", "lib/pdf-stamp.ts"),
   "nl:stamp:problem:@lib/pdf-stamp.ts": { what: "A file that could not be stamped or previewed", parts: [per("upload", PROBLEM_NOTE_LONGEST_DAYS, KB, "Per file: PROBLEM_NOTE_SECONDS from the note's first write, which no later failure extends, the stamp's or the preview's (PROBLEM_NOTE_LONGEST_DAYS, lib/stamp-cost-rules.ts; lib/pdf-stamp.ts problemNoteCommands; Claude 5 ygH4 and iao9Ep on #5360).")] },
   "nl:stamp:noroom:@lib/pdf-stamp.ts": { what: "A store found without room for a new stamped copy or preview", parts: [capped(KEY + MARK, "One mark a store, kept NO_ROOM_NOTE_SECONDS (an hour).", src("lib/stamp-cost-rules.ts", "NO_ROOM_NOTE_SECONDS"))] },

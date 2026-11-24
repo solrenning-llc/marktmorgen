@@ -20,7 +20,7 @@
  */
 import { MAX_STAMP_BYTES } from "@/lib/product-file";
 
-/** How long a file's problem note is kept, the stamp's and the preview's alike: 60 days (lib/pdf-stamp.ts, lib/pdf-preview.ts). */
+/** How long a file's shared problem note is kept: 60 days (lib/pdf-stamp.ts; the preview's "unreadable", lib/pdf-preview.ts). */
 export const PROBLEM_NOTE_SECONDS = 60 * 24 * 60 * 60;
 /**
  * The longest one path's problem note (nl:stamp:problem:) can live, in days: PROBLEM_NOTE_SECONDS from its first write,
@@ -29,6 +29,14 @@ export const PROBLEM_NOTE_SECONDS = 60 * 24 * 60 * 60;
  * (lib/data-families.ts), both held in tests/stamp-problem-lifetime.test.ts.
  */
 export const PROBLEM_NOTE_LONGEST_DAYS = PROBLEM_NOTE_SECONDS / 86_400;
+/** How long the preview's own mark about a path that failed to parse is kept (lib/pdf-preview.ts previewMarkKey). */
+export const PREVIEW_MARK_SECONDS = PROBLEM_NOTE_SECONDS;
+/**
+ * The longest one path's preview mark (nl:preview:bad:) can live, in days: the once-mark (never written over, NX), then
+ * "unreadable" written fresh for PREVIEW_MARK_SECONDS just before it runs out (Claude 5 ygH4 on #5360). Priced in the
+ * data registry and said by the closing rule, held in tests/stamp-problem-lifetime.test.ts.
+ */
+export const PREVIEW_MARK_LONGEST_DAYS = (2 * PREVIEW_MARK_SECONDS) / 86_400;
 
 /** Pages each file store's listing reads at the most when a store's storage is measured. */
 export const MEASURE_LIST_PAGES = 20;

@@ -114,7 +114,7 @@ Decisão do dono OWNER-20261124-0340-CHECKED-NOT-CHECKED-RULE (substitui as vers
    (b) uma revisão focal dada antes desta regra vale só para o trecho dela (item 4);
    (c) num PR de dinheiro, custo, imposto ou dados pessoais, ao menos uma das 3 revisões precisa ter as duas listas antes do "pronto"; se nenhuma tiver, um dos revisores acrescenta o adendo, ou outra família faz uma revisão completa nova.
 
-"Meu" e "mim" nos itens 3 e 9 são o dono. "As regras de zero achados (ZA) e de dúvida (DA)" estão no correio, nas mensagens do dono que as criaram; ainda não estão gravadas neste arquivo.
+"Meu", no item 3 ("o meu SIM"), é o dono. "As regras de zero achados (ZA) e de dúvida (DA)" estão no correio, nas mensagens do dono que as criaram; ainda não estão gravadas neste arquivo.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 

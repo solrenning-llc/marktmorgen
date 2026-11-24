@@ -66,6 +66,13 @@ export default async function DiscordPage({ params, searchParams }: Params) {
             <>
               <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{notice.title}</h1>
               <p className="st-muted mt-4 text-lg">{notice.body}</p>
+              {status === "link" ? (
+                // The notice's next step, one press away: the orders page, where a new link is asked for (Claude 2
+                // Pfn2k's LEVE on #5369).
+                <Link href={`/@${store.handle}/orders`} className="btn st-btn btn-block mt-7" data-discord-next="orders">
+                  {w.newOrderLink}
+                </Link>
+              ) : null}
             </>
           ) : null}
           <p className="mt-7 text-center text-sm">

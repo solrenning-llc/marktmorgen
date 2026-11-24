@@ -171,8 +171,14 @@ async function main(): Promise<void> {
   part("The server-rendered mark must not invent missing mail evidence");
   const html = renderToStaticMarkup(createElement(MarkShipped, { session: input.session, to: null, shipped: input.shipped }));
   is("until a server status confirms it, missing acceptance is not asserted", html.includes("acceptance was not recorded"), false);
-  const status = html.match(/<p\b[^>]*role="status"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? "";
-  is("the shipment status region excludes the email detail line", /acceptance|email/i.test(status), false);
+  // The status region is the mark's <div role="status">; the old check looked for a <p role="status"> that is never
+  // drawn, so it passed without reading anything (LEVE on #2544, board #5285). It reads the real region now.
+  const region = html.match(/<div\b[^>]*role="status"[^>]*>([\s\S]*?)<\/div>/)?.[1];
+  is("the shipment status region is drawn", typeof region, "string");
+  const status = (region ?? "").replace(/<[^>]+>/g, " ");
+  is("it says the order was marked as shipped", /Marked as shipped on /.test(status), true);
+  is("it never says an email was sent or accepted that no server status confirmed", /\bwas sent\b|\baccepted\b/i.test(status), false);
+  is("it says the email's status is not confirmed yet", /status has not been confirmed/.test(status.replace(/&#x27;/g, "'")), true);
   // "not_recorded" also covers a full pool and a missing buyer address, where
   // nothing was queued: its sentence must not imply that a send happened.
   const markSource = readFileSync("components/mark-shipped.tsx", "utf8");

@@ -1,5 +1,7 @@
 import { CHAT_ADDRESS_FENCE_EXTRA_COMMANDS, CHAT_ADDRESS_FENCE_EXTRA_BYTES } from "@/lib/chat-summary";
 import { CONTACT_LIVE_COMMANDS, INBOX_LIVE_BYTES, INBOX_OPEN_FENCE_COMMANDS } from "@/lib/inbox";
+import { INDEXNOW_BATCH, sitemapUrls } from "@/lib/indexnow";
+import { RELEASE } from "@/lib/redis-lock";
 import { MAX_PER_DAY as CONTACTS_PER_DAY } from "@/lib/store-contact";
 import { HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS, HELD_MONTH_COUNT_SECONDS, heldRecheckMemoryUsd } from "@/lib/held-store-rules";
 import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
@@ -72,6 +74,7 @@ import { MAIL_GAP_COMMANDS_PER_CHECK, MAIL_GAP_TRIAL_CHECKS, mailGapCheckLimit }
 /** A gap mark moved: its key (the gate's, the longest, is 92 characters with a 32-character store id: nl:mgap:gate:{32}:{32}:{13}) with a time or a claim value (23), rounded up (tests/store-data-registry.ts, MARK). */
 const MAIL_GAP_MARK_BYTES = 160;
 import { BESIDE_SAVE_COMMANDS } from "@/lib/store-data";
+import { STORE_KEEP_LIVE_COMMANDS } from "@/lib/live-fence";
 import { WINBACK_OFFER_COMMANDS } from "@/lib/winback";
 import { MAX_DOOR_BYTES } from "@/lib/upload-door";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
@@ -1384,6 +1387,22 @@ export function teamLogFenceUsd(tier: Tier): number {
   // And on every essential request of the month (Claude 6 i51q on #4988), counted apart from the studio figure: a
   // teammate's export goes through studioAccess, a teammate leaving through the team route.
   return (STORE_ALLOWANCES[tier].studio + ESSENTIAL_PER_DAY * DAY_WINDOWS) * TEAM_LOG_LINES_PER_STUDIO_REQUEST * TEAM_LOG_FENCE_COMMANDS * COMMAND;
+}
+
+/**
+ * An after-payment thanks note written fenced by the store's erasure (lib/thanks-note-store.ts writeThanksNote,
+ * lib/live-fence.ts keepIfStoreLive; Codex X4-20261119-1743, #5010 row 134): STORE_KEEP_LIVE_COMMANDS in place of the
+ * plain SET's one, so STORE_KEEP_LIVE_COMMANDS - 1 more, which take a note save past the studio request's priced
+ * commands (28 against 27, Claude 7 fdy on #5164; tests/thanks-note-fence-cost.test.ts holds the count and this line). A note can be saved again and again,
+ * so saves are bounded only by the studio figure: priced on every studio request of the month (coordinator 00:53 on
+ * #5164). A store in its trial can save notes too (the route is open to it): nonPayingWorst prices its saves with the
+ * same helper at the trial's own studio figure (Claude 4 3Kc on #5164 @587c97e836).
+ */
+export function thanksNoteFenceCost(allowances: Record<AllowanceKind, number>): number {
+  return allowances.studio * (STORE_KEEP_LIVE_COMMANDS - 1) * COMMAND;
+}
+export function thanksNoteFenceUsd(tier: Tier): number {
+  return thanksNoteFenceCost(STORE_ALLOWANCES[tier]);
 }
 
 /**
@@ -3070,7 +3089,7 @@ export const COST_LINES: CostLine[] = [
     feature: "The studio's own reads and writes: every page of it drawn (STUDIO_PAGE_UNITS each), every save and read, its refreshing; and the never-paused plan, cancel, delete and data-download requests (17 October 2026)",
     // And the beside pool's read, take and give-back on a product save while the store pays, priced on every studio
     // request (besideSaveUsd; TAKE_DATA's inner commands, as Upstash bills them).
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier) + aboutFenceUsd(tier) + newFeedFenceUsd(tier) + teamLogFenceUsd(tier),
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier) + aboutFenceUsd(tier) + newFeedFenceUsd(tier) + teamLogFenceUsd(tier) + thanksNoteFenceUsd(tier),
     sources: [
       // A product's long description written fenced by the store's erasure (aboutFenceUsd).
       { file: "lib/product-about-live.ts", names: ["ABOUT_FENCE_EXTRA_COMMANDS", "ABOUT_WRITE_IF_STORE_LIVE"] },
@@ -3091,6 +3110,9 @@ export const COST_LINES: CostLine[] = [
       // The activity log's fence, priced on every studio request (teamLogFenceUsd).
       { file: "lib/team.ts", names: ["TEAM_LOG_COMMANDS", "TEAM_LOG_FENCE_COMMANDS", "KEEP_LOG_IF_LIVE"] },
       { file: "lib/studio-route.ts", names: ["logTeam(access.store.sid"] },
+      // An after-payment thanks note kept only while its store is live, priced on every studio request (thanksNoteFenceUsd).
+      { file: "lib/live-fence.ts", names: ["KEEP_IF_STORE_LIVE", "STORE_KEEP_LIVE_COMMANDS", "keepIfStoreLive"] },
+      { file: "lib/thanks-note-store.ts", names: ["keepIfStoreLive(await storeLiveFence(room)"] },
       // A product's removal admits its ordinary request and WAITLIST_DROP_UNITS together before anything goes, for its
       // waitlist's hold and drop (or its drop finished when asked again): at most WAITLIST_DROP_COMMANDS commands and
       // WAITLIST_DROP_BYTES bytes inside the additional unit (#4462; tests/waitlist-removed-drop-pending.test.ts).
@@ -3876,6 +3898,8 @@ export function nonPayingWorst(): number {
     + studioBlobMonthly(allowances.studio)
     // Its business-card saves and removals' store fence, at its own studio figure (line creator-card-erasure-fence).
     + creatorCardFenceCost(allowances)
+    // Its after-payment thanks-note saves' store fence, at its own studio figure (thanksNoteFenceCost, Claude 4 3Kc on #5164).
+    + thanksNoteFenceCost(allowances)
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.
@@ -4070,6 +4094,51 @@ export const PAYPAL_WATCH_RANGES = { rangeReadsPerStoreRun: 2, ordersPerRangeRea
 export const GROUP_REFUND_RUN = { jobCommands: 23, chargeLookups: 10, commandsPerLookup: 2, lostDisputePages: 3, commandsPerOtherRow: 4 } as const;
 
 /**
+ * One run of the daily IndexNow job, for the whole site (app/api/cron/indexnow/route.ts; lib/indexnow.ts,
+ * announceNewPages; Claude 3 xuXy's doubt on #5434, OWNER-20261124-0059-DOUBT-NOT-APPROVED (b)), in Redis commands, as
+ * Upstash bills a script (its EVAL and every redis.call inside it), held to the schedule, the route, the release
+ * script's own text and to what the real job sends in its worst run by tests/indexnow-run-cost.test.ts:
+ * - runsPerMonth: once a UTC day (vercel.json, /api/cron/indexnow), DAY_WINDOWS of them a month; only Vercel's
+ *   scheduled call and the company's own hand carry the secret (cronAllowed): a run started by hand is one run more
+ *   at commandsPerRunMost, and one that meets a run still going is busyRunCommandsMost;
+ * - addressesPerRun: the sitemap's own addresses (sitemapUrls), written from the site's arrays (app/sitemap.ts), never
+ *   from a store or a customer, so it grows only with a code change; addressBytes are theirs, kept for good in the
+ *   sent set (nl:indexnow:sent, tests/store-data-registry.ts), and moved at most twice a run (the reads and the marks);
+ * - claimCommandsMost: the claim of #5434 (lib/claim-mark.ts claimMark: SET NX EX, and one GET when its answer comes
+ *   in another shape);
+ * - readCommands: one SISMEMBER an address, every run, announced or not;
+ * - markCommandsMost: one SADD a batch of at most INDEXNOW_BATCH addresses the engines took (200 or 202), and
+ *   postsPerRunMost the POSTs to api.indexnow.org, one a batch, each inside its own timeout;
+ * - releaseCommands: the claim let go (lib/redis-lock.ts RELEASE: its EVAL, GET and DEL);
+ * - commandsPerRunMost: all of them; commandsPerMonthMost: runsPerMonth of those;
+ * - routeSecondsMost: one Vercel call a run, at most the route's maxDuration.
+ * Not counted in dollars here yet, never zero: the function's call and seconds, the bytes moved and kept, and the
+ * POSTs (no dated source here gives IndexNow's price; the engines bill nothing we know of, which is not a source).
+ * Why it is the company's, not a plan's: NOT_A_COST.INDEXNOW_BATCH.
+ */
+export const INDEXNOW_RUN = (() => {
+  const addressesPerRun = sitemapUrls().length;
+  const claimCommandsMost = 2;
+  const markCommandsMost = Math.ceil(addressesPerRun / INDEXNOW_BATCH);
+  const releaseCommands = 1 + (RELEASE.match(/redis\.call\(/g) ?? []).length;
+  const commandsPerRunMost = claimCommandsMost + addressesPerRun + markCommandsMost + releaseCommands;
+  return {
+    runsPerMonth: DAY_WINDOWS,
+    addressesPerRun,
+    addressBytes: sitemapUrls().reduce((sum, url) => sum + Buffer.byteLength(url), 0),
+    claimCommandsMost,
+    readCommands: addressesPerRun,
+    markCommandsMost,
+    releaseCommands,
+    busyRunCommandsMost: claimCommandsMost,
+    commandsPerRunMost,
+    commandsPerMonthMost: DAY_WINDOWS * commandsPerRunMost,
+    postsPerRunMost: markCommandsMost,
+    routeSecondsMost: 60,
+  } as const;
+})();
+
+/**
  * The PayPal watch of a store whose creator disconnected PayPal (lib/store.ts, paypalPast; lib/paypal-delivery.ts,
  * sweepPayPal; Claude 7, 12 November 2026), held to what the real sweep sends by
  * tests/paypal-disconnected-window.test.ts:
@@ -4112,8 +4181,8 @@ export const PAYPAL_WATCH_LOOKS = { looksPerOrderWatched: 410, lateLookSeconds: 
  * notice at its most:
  * - guardCommands: the route's own guard, withinLimit's INCR and EXPIRE, claimMark's SET NX and its read back, and
  *   releaseMark's script (EVAL, GET, DEL) when the notice is let go for Zoom's retry;
- * - forgetFixedCommands: the deletion's mark (SET ... EX GONE_SECONDS) and the read of the user's stores (SMEMBERS),
- *   one pipeline;
+ * - forgetFixedCommands: the deletion's mark, never lowered (MARK_GONE: EVAL, GET, SET ... EX GONE_SECONDS; Claude 3's
+ *   LEVE on #5368), and the read of the user's stores (SMEMBERS), one pipeline;
  * - for each of at most storesPerPass (FORGET_PASS) stores: its renewal lock tried lockTries times in lockWaitMs
  *   (lib/redis-lock.ts takeLock, waits of 20 ms doubling to 250 ms), then storeCommandsAfterLock: the connection's
  *   GET, its DEL, the test mark's DEL and the store's SREM from the index, and the lock let go (EVAL, GET, DEL);
@@ -4127,7 +4196,7 @@ export const PAYPAL_WATCH_LOOKS = { looksPerOrderWatched: 410, lateLookSeconds: 
 export const ZOOM_NOTICE_FORGET = {
   noticesPerAddressMinute: 120,
   guardCommands: 7,
-  forgetFixedCommands: 2,
+  forgetFixedCommands: 4,
   storesPerPass: 50,
   lockWaitMs: 9_000,
   lockTries: 39,
@@ -4199,6 +4268,7 @@ export const NOT_A_COST: Record<string, string> = {
   PICTURE_READS_PER_MINUTE: "A pace on how often one picture is read by a function (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses.",
   PICTURE_DOORS_PER_HOUR: "A pace on the studio's picture doors a store opens in an hour (lib/picture-door.ts, pictureDoorHour; rule 24 inventory A1), counted before the file store is asked or anything is signed: it only refuses, and each door it lets through has already taken a studio request (line studio). What a door writes is not priced by it: a picture never put on anything stays in the file store, at most PICTURE_DOOR_MAX fresh ones a store at a time, each at most MAX_IMAGE_BYTES (lib/product-image.ts), and is not deleted once its note is a day old. That retained storage and the file store's per-write charge have no line yet, so they are not certified, never zero.",
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
+  INDEXNOW_BATCH: "Addresses the daily IndexNow job announces in one POST to api.indexnow.org (lib/indexnow.ts, announceNewPages; the protocol takes at most 10,000 a request), for the whole site: one run a UTC day (vercel.json), DAY_WINDOWS a month, of the sitemap's own addresses only (app/sitemap.ts, never a store's or a customer's, so as many as the site's pages and growing only with a code change). What a run sends is INDEXNOW_RUN (commandsPerRunMost: the claim of #5434, one SISMEMBER an address, one SADD a batch the engines took and the release script), held by tests/indexnow-run-cost.test.ts; a run that finds the claim held sends the claim only. A scheduled job, bounded by its schedule, the sitemap and the batch, a company fixed cost like HAND_OVER_BATCH, not a plan's allowance; its dollar figure (the commands, the function's call and seconds, the bytes moved and the sent set kept, and the POSTs, for which no dated source here gives a price) is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   LAUNCH_HOLD_SECONDS: "How long a waitlist launch may wait, from its start, while its store is switched off after notices (lib/waitlist.ts, runLaunches and holdLaunch): a scheduled job, bounded by its schedule (a company fixed cost), adding no email (nothing is reserved or sent while held). Each held run takes, beyond the GET of the launch's record and the store read it already made, one pipeline of two EXPIRE (its send list and its record), read exactly; once the bound passes (or a renewal reads in another shape in the hold's last week), one LRANGE of the addresses already handled and one pipeline of SET, HDEL, DEL and SREM, once a launch. While a launch sends, every batch after a run's first reads the store again (storeForHandle, two GET), so a switch-off stops the rest of the run: at most one read per LAUNCH_BATCH emails, inside the same deadline; each batch's record write renews its send list in the same pipeline (one EXPIRE per LAUNCH_BATCH emails), so the list never lapses while the record lives. Like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   MAX_PAGES_PER_STORE: "Pages of Stripe Checkout Sessions (GET /checkout/sessions, up to 100 each) the five-minute job reads per store per run in each of its two walks of the last day (lib/checkout-sweep.ts, walkDay; audit A2, 9 November 2026): the completed checkouts on every store it sweeps, and the expired ones (of the last OPEN_HOURS, 25 hours) on a store with reminders, a list or counted orders, never the open ones. On a store whose orders are counted, each page of expired checkouts also gives back the order place of each one that closed unpaid and that we recorded as holding one when it opened (lib/order-admission.ts, releaseExpiredHolds and holdCheckout, #3970): one MGET a page when any row names an hour still in the window, then one GETDEL and one EVAL (SETTLE_ADMITTED) once a checkout whose record matches, never again for it (the record, nl:orders:held:, is taken; tests/store-data-registry.ts); so at most 3 store commands a sweep for the pages plus 2 a checkout once, besides the walk keys below. So at most 2 x 3 = 6 list calls each time a store is swept; a run sweeps a store once, unless Redis's SCAN hands its key back on another page (#3064 makes that once a run too), so with one sweep a run 2 x 3 x 288 = 1,728 a UTC day, 55,296 a billing month of 32 UTC days; Stripe bills no API call, and each run stops at its deadline. Each walk keeps its place for the next run (nl:sweep:walk:, tests/store-data-registry.ts): one GET a walk and at most one SET or DEL, so at most 4 store commands each time a store is swept, with one sweep a run 1,152 a UTC day, 36,864 a billing month, and only 2 a sweep (the GETs) for a store whose day of checkouts fits in one run; each value at most 220 bytes, kept a day. Held by tests/checkout-sweep-complete.test.ts. On a store with affiliates on, each page of completed checkouts also asks which of its paid ones already had their affiliate step settled (nl:sweep:aff:, one ZMSCORE a page) and writes the ones settled that run (one EVAL a page, KEEP_AFFILIATE_SETTLED: its one ZADD, one ZREMRANGEBYSCORE and one EXPIRE together, so the mark never outlives its expiry; only when any were), so a settled checkout is never passed to noteSession again: its bond, contact, code and partner reads are made once a checkout, not once a run (#4413, Claude 4 cloud X and Codex G); held by tests/affiliate-bond-sweep.test.ts. Past 3 pages a run, a walk carries on next run instead of reading the same newest pages again, so every session of the day is read in turn; a walk that takes more than an hour to reach the end of the day is said in the log every run it goes on. A scheduled job, bounded by its schedule (a company fixed cost), not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   PENDING_LINK_SECONDS: "How long the five-minute job reads again a paid order whose affiliate link could not be read at checkout (lib/affiliates.ts notePendingLinks, owner's decision 6, 9 November 2026) before the creator is told: a span, not a figure; the reads it allows are PENDING_LINK_COMMANDS each run, and it ends well inside the day the job reads a store's checkouts (CONFIRM_WITHIN_SECONDS).",

@@ -40,7 +40,7 @@
  * a community event, later — calls, with a scope of its own.
  */
 import { whereOf } from "@/lib/call-place";
-import { type MeetProvider, type CallSetup, isGroup } from "@/lib/call-setup";
+import { type MeetProvider, type CallSetup, isGroup, keepsMeetingLink } from "@/lib/call-setup";
 import {
   type MeetRecord,
   MEET_QUEUE,
@@ -161,6 +161,16 @@ export type MeetingAsk = {
   alsoInvite?: string[];
 };
 
+/**
+ * The link people get when the meeting cannot be made, as a record can keep it: a fallback a record could not read back
+ * (keepsMeetingLink: a creator's own link that grows past MEET_LINK_MAX once encoded) is not given in the record, and
+ * the pages show the creator's own link from the setup as before (lib/call-rooms.ts roomsFor). Codex X6's LOW on #2514.
+ */
+async function fallbackLink(ask: Pick<MeetingAsk, "fallback">): Promise<string> {
+  const link = (await ask.fallback().catch(() => null)) ?? "";
+  return keepsMeetingLink(link) ? link : "";
+}
+
 async function create(
   ask: Pick<MeetingAsk, "store" | "provider" | "title" | "description" | "start" | "end" | "tz" | "group" | "scope"> & { host?: string; calendar?: string },
   guests: string[],
@@ -246,7 +256,7 @@ export async function meetingFor(ask: MeetingAsk): Promise<MeetRecord> {
     } catch (error) {
       const words = problemWords(error, ask.provider);
       await logProblem(base.statsId, ask.provider, `Making the ${ask.provider === "google" ? "Google Meet" : "Zoom"} link for "${ask.title}"`, words);
-      const fallback = (await ask.fallback().catch(() => null)) ?? "";
+      const fallback = await fallbackLink(ask);
       record = { ...base, link: fallback, error: words };
       // Worth trying again only while a new link would still reach people in time.
       if (ask.start - now > SWITCH_BEFORE_MS) record = nextTry({ ...record, todo: "create" }, now);
@@ -255,7 +265,7 @@ export async function meetingFor(ask: MeetingAsk): Promise<MeetRecord> {
     return record;
   };
   if (!isRedisConfigured() || !ask.store.statsId) {
-    return { ...emptyRecord(ask), link: (await ask.fallback().catch(() => null)) ?? "" };
+    return { ...emptyRecord(ask), link: await fallbackLink(ask) };
   }
   try {
     return await withLock(lockKey(ask.scope), 45, lockWait(15_000), work);
@@ -266,7 +276,7 @@ export async function meetingFor(ask: MeetingAsk): Promise<MeetRecord> {
     // place and the read's error goes to the caller, which keeps the booking or the event without a meeting record
     // (CX-123 rule 24; Codex X6's LOW on #2619, 6952486935).
     const there = await readRecord(ask.scope);
-    return there ?? { ...emptyRecord(ask), link: (await ask.fallback().catch(() => null)) ?? "" };
+    return there ?? { ...emptyRecord(ask), link: await fallbackLink(ask) };
   }
 }
 

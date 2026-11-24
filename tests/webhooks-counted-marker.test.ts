@@ -262,6 +262,11 @@ async function main(): Promise<void> {
   const first5 = await deliveryOf(statsId5, id5);
   is("its first try is counted as a try and waits; marked as maybe counted by the month (the count's reply was unknown), so its message is never dropped on a guess",
     [first5.delivery?.state, first5.delivery?.attempts, first5.delivery?.counted, first5.queued], ["retrying", 1, true, true]);
+  // #5285 row #3096 (the LEVE of 6717818567): nothing can be tried by hand while it waits, and the next try can be a
+  // day away, so its words never ask the creator to try again in a minute; they say it is tried again on its own.
+  const waiting5 = first5.delivery?.lastError ?? "";
+  is("while it waits, its words never ask the creator to try again in a minute", /try again in a minute/i.test(waiting5), false);
+  is("they say why it was not sent and that it will be tried again on its own", [/could not be counted/i.test(waiting5), /will be tried again/i.test(waiting5)], [true, true]);
   const tried5 = await quietly(() => run(7 * 24 * 60));
   const after5 = await deliveryOf(statsId5, id5);
   is(`the job takes it at most once per try left (${MAX_ATTEMPTS - 1}), not every five minutes for seven days`, tried5 <= MAX_ATTEMPTS - 1, true);

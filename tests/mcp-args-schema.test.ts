@@ -74,6 +74,18 @@ async function main(): Promise<void> {
   const unknown = await call(reader.key, "no_such_tool", {});
   is("an unknown tool is not answered as Invalid params", unknown.answer.error?.code === -32602, false);
 
+  part("null is read as left out (Claude 1's NIT and Claude 5 ibuF's LOW on #5228)");
+  const nullArgs = await call(reader.key, "list_products", null);
+  is("arguments: null on a tool without arguments answers", [nullArgs.answer.error ?? null, nullArgs.answer.result?.isError ?? null], [null, false]);
+  const nullDays = await call(reader.key, "get_revenue_by_channel", { days: null });
+  is("a known argument sent as null answers (the default window)", [nullDays.answer.error ?? null, nullDays.answer.result?.isError ?? null], [null, false]);
+  const nullVersion = await call(reader.key, "get_page_versions", { product: product.product.id, version: null });
+  is("version: null is the list again, never Invalid params", nullVersion.answer.error?.code === -32602, false);
+  const nullRequired = await call(drafter.key, "propose_product_title", { product: product.product.id, title: null });
+  is("a required argument sent as null is still required", [nullRequired.answer.error?.code, nullRequired.commands], [-32602, 0]);
+  const nullExtra = await call(reader.key, "list_products", { more: null });
+  is("an argument the tool does not take is refused even as null", [nullExtra.answer.error?.code, nullExtra.commands], [-32602, 0]);
+
   done();
 }
 main().catch((error) => {

@@ -244,6 +244,12 @@ async function main(): Promise<void> {
     const unread = panel.slice(panel.indexOf("export function PayPalUnread"));
     is("the studio shows the unread notice, not the connect form, when the link cannot be read", /paypal === undefined \? \(\s*<PayPalUnread \/>/.test(page), true);
     is("and that notice offers Disconnect", [unread.includes('op: "disconnect"'), unread.includes("Disconnect PayPal")], [true, true]);
+    // Claude 1's LOW 2 on #2844: the notice is drawn with the page, so it is plain text, never an alert announced as an
+    // interruption on every load (AX274 2.2.4); only the button's own error, which answers a press, stays an alert.
+    const said = unread.indexOf("could not be read just now");
+    const notice = unread.slice(unread.lastIndexOf("<p", said), said);
+    const failure = unread.slice(unread.indexOf("{error ? ("), unread.indexOf("{error}"));
+    is("the notice drawn with the page is not an alert, and the press's error still is", [/\brole=/.test(notice), failure.includes('role="alert"')], [false, true]);
   }
 
   part("Controls: a healthy link and a confirmed absent one");

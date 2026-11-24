@@ -1322,22 +1322,22 @@ export const READY_EXIGIDAS = 3;
  * código (* _ `) e um "#" de título no começo saem antes da leitura.
  */
 const SITUACAO = /\b(?:needed|status|tally|asked|request\w*|waiting|still|pending|queue|fila)\b/i;
-// Depois do READY (LEVE 1 do Claude 5 hed9 e MÉDIO do Claude 5 ichw no #5408), em inglês e em português:
-//  - na linha inteira, o que desdiz o READY: CHANGES, NOT READY, BLOCKED, REJECT, "sorry", "meant", "scratch", "withdrawn",
-//    "retracted", "retirado", "desconsiderar", "não pronto";
-//  - na frase do veredito (até o primeiro ". " ou " — "), uma ressalva ("if", "but", "after", "except", "still", "waiting",
-//    "mas", "falta", "ainda", "depois", "exceto", "salvo", "se", "quando", "não"...) ou um achado: um grau com contagem
-//    acima de zero ("com 1 LEVE", "1 NIT") sempre; um grau sem contagem só quando a frase não diz zero achados ("0
-//    findings", "sem achados"). Assim "READY, 0 findings (sem achados), no defect of any level, NIT included." conta, e
-//    "READY, com 1 LEVE" não (ZA).
+// Depois do READY (LEVE 1 do Claude 5 hed9, MÉDIO do Claude 5 ichw e MÉDIO 1 e 2 do hed9 no #5408 @a1818c8b0b):
+//  - lista do que pode vir logo depois do READY, e nada mais: o fim da linha, um ponto, ou uma frase de zero achados
+//    ("0 findings", "(sem achados)", "0 LEVE", "no defect of any level", "NIT included" depois de um zero). "READY,
+//    assuming CI passes", "READY, 2 LEVEs", "READY — 2 MÉDIO", "READY-ish" e "READY, nits only" não somam;
+//  - e, em todo o resto da linha (e na nota antes dos dois-pontos), o que desdiz ou deixa em aberto, em inglês e em
+//    português, e qualquer achado com contagem acima de zero; um grau sem contagem só com zero achados dito.
 const DESDIZ = /\b(?:CHANGES|NOT\s+READY|BLOCKED|REJECT\w*|sorry|meant|scratch|withdrawn|retracted|retirad\w*|desconsider\w*)\b|\bn[aã]o\s+pronto\b/i;
-const RESSALVA = /\?|→|->|\b(?:not|once|if|unless|until|conditional\w*|pending|provided|after|but|except\w*|still|running|waiting|mas|por[eé]m|contudo|falt\w*|ainda|depois|exceto|salvo|se|quando|at[eé]|enquanto|pendente\w*|condiciona\w*|rodando|esperando|aguardando|n[aã]o)\b|\b\d+\s+(?:of|de)\s+\d+\b/i;
-const GRAU_RE = String.raw`(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL|findings?|achados?|issues?|defects?|defeitos?)`;
-const GRAU_CONTADO = new RegExp(String.raw`\b(?:[1-9]\d*|um|uma|one|two|three|dois|duas|tr[eê]s)\s+${GRAU_RE}\b`, "i");
+const RESSALVA = /\?|→|->|\b(?:not|once|if|unless|until|conditional\w*|pending|provided|after|but|except\w*|still|running|waiting|assuming|however|though|although|apart|as\s+long\s+as|mas|por[eé]m|contudo|falt\w*|ainda|depois|exceto|salvo|se|quando|at[eé]|enquanto|pendente\w*|condiciona\w*|rodando|esperando|aguardando|n[aã]o|desde\s+que|caso|contanto|ressalva\w*|embora)\b|\b\d+\s+(?:of|de)\s+\d+\b|\b\d+\s*\/\s*\d+\b/i;
+const GRAU_RE = String.raw`(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL|findings?|achados?|issues?|defects?|defeitos?|notes?)s?`;
+const GRAU_CONTADO = new RegExp(String.raw`\b(?:[1-9]\d*|um|uma|one|two|three|several|some|dois|duas|tr[eê]s|alguns|algumas)\s+${GRAU_RE}\b`, "i");
 const GRAU = new RegExp(String.raw`\b${GRAU_RE}\b`, "i");
-const ZERO_ACHADOS = new RegExp(String.raw`\b(?:0|zero|no|sem|nenhum|nenhuma|none)\s+${GRAU_RE}\b`, "i");
-function abreAchado(frase) {
-  return RESSALVA.test(frase) || GRAU_CONTADO.test(frase) || (GRAU.test(frase) && !ZERO_ACHADOS.test(frase));
+const ZERO_RE = String.raw`(?:(?:0|zero|no|sem|nenhum|nenhuma|none)\s+${GRAU_RE}(?:\s+of\s+any\s+level)?|no\s+defect\s+of\s+any\s+level)`;
+const ZERO_ACHADOS = new RegExp(String.raw`\b${ZERO_RE}\b`, "i");
+const LOGO_DEPOIS = new RegExp(String.raw`^\s*(?:$|\.(?:\s|$)|[,;:—–-]?\s*\(?\s*${ZERO_RE}\b|[,;:—–-]?\s*\([^()\n]*\b${ZERO_RE}\b[^()\n]*\))`, "i");
+function abreAchado(texto) {
+  return RESSALVA.test(texto) || GRAU_CONTADO.test(texto) || (GRAU.test(texto) && !ZERO_ACHADOS.test(texto));
 }
 // As famílias que existem (Claude 1 a 7 e o Codex): "Claude 33" não é família (LEVE 1 do hed9).
 const FAM_RE = String.raw`(Claude [1-7]|Codex)\b(?!\s*\d)`;
@@ -1352,52 +1352,77 @@ export function readyEstrito(corpo, pr, sha) {
   if (!m || SITUACAO.test(m[2]) || !cheio.startsWith(m[3].toLowerCase())) return null;
   // Outra família no rótulo ("Claude 5 iZ — Codex X6 review"): não se sabe de quem é o READY (LEVE 2 do hed9).
   if (new RegExp(FAM_RE, "i").test(m[2])) return null;
-  const nota = m[4] ?? "", resto = m[5];
-  if (resto && !/^\s*(?:$|[,.;(—–-])/.test(resto)) return null;
-  if (DESDIZ.test(nota) || DESDIZ.test(resto) || abreAchado(nota)) return null;
-  const frase = resto.split(/\.\s|\s[—–]\s/)[0];
-  if (abreAchado(frase)) return null;
+  const nota = m[4] ?? "", resto = m[5] ?? "";
+  if (!LOGO_DEPOIS.test(resto)) return null;
+  if (DESDIZ.test(nota) || DESDIZ.test(resto) || abreAchado(nota) || abreAchado(resto)) return null;
   return familia(m[1]);
 }
 
-/**
- * Se um comentário tira o READY de uma família neste head (largo para tirar; sétima volta, revisões do Claude 5 hed9 e do
- * Claude 3 no #5408 @ab697952b5). Devolve { familia, retirada } ou { familia: "?" } (só para uma revisão do GitHub
- * CHANGES_REQUESTED deste head que não diz de quem é: NÃO CONFERIDO), ou null. Lê as três primeiras linhas com texto:
- *  - o head: um "@<hex>" ou um SHA de 40 caracteres; um número de comentário não é head (MÉDIO 1 do hed9). Tira quando cita
- *    este head; sem head nenhum, só uma retirada de revisão ("I retract the READY above"); citando só outro head, nada;
- *  - o que tira: CHANGES, NOT READY, "READY?", BLOCKED, REJECT, "do not merge", ou a retirada de uma revisão (withdraw,
- *    retract, revoke, take back, cancel, retiro, retira, retirado, perto de READY, approval, aprovação, review ou revisão;
- *    "WITHDRAWN"; "correction to my READY"). A retirada de um pedido de fila não tira (MÉDIO do Claude 3) (MÉDIO 3 do hed9);
- *  - a família: a do cabeçalho "<família> [rótulo] review #N @<head>: ..." (a última antes de "review", LEVE 2 do hed9),
- *    ou a que a leitura larga dos pedidos lê, ou a primeira citada na primeira linha. Sem família, não tira (MÉDIO 2).
- */
-const PALAVRA_TIRA = /\bCHANGES\b|\bNOT\s+READY\b|\bREADY\s*\?|\bBLOCKED\b|\bREJECT\w*\b|\bdo\s+not\s+merge\b/;
-// Em português, sem distinguir maiúsculas (LEVE do Claude 5 ichw no #5408 @0d1fe3c549).
-const PALAVRA_TIRA_I = /\bdo\s+not\s+merge\b|\bn[aã]o\s+pronto\b|\bmudan[cç]as\s+(?:necess[aá]rias|pedidas|solicitadas)\b|\breprovad\w*|\bbloquead\w*|\bn[aã]o\s+(?:incorporar|enfileirar|juntar)\b/i;
+const PALAVRA_TIRA = /\bCHANGES\b|\bREADY\s*\?|\bREJECT\w*\b/;
+// Sem distinguir maiúsculas (MÉDIO 3 do hed9 no #5408 @a1818c8b0b; LEVE do Claude 5 ichw).
+const PALAVRA_TIRA_I = /\bnot\s+ready\b|\bblocked\b|\bchanges\s+(?:requested|needed|required)\b|\bneeds?\s+changes\b|\bdo\s+not\s+merge\b|\bn[aã]o\s+pronto\b|\bmudan[cç]as\s+(?:necess[aá]rias|pedidas|solicitadas)\b|\breprovad\w*|\bbloquead\w*|\bn[aã]o\s+(?:incorporar|enfileirar|juntar)\b/i;
 // A retirada de uma revisão: o verbo antes de READY/approval/review ("I withdraw my READY", "retiro o READY"), ou o
-// próprio veredito retirado ("my READY ... withdrawn", "meu READY ... retirado", "READY withdrawn"). Um READY que só
-// menciona um achado ou um pedido retirado ("READY (the earlier finding was retirado after the fix)") não é retirada
-// (MÉDIO 2 do hed9 em c615434258).
+// próprio veredito retirado ("my READY ... withdrawn", "o READY ... retirado", "READY withdrawn"). Um READY que só
+// menciona um achado ou um pedido retirado não é retirada (MÉDIO 2 do hed9 em c615434258).
 const RETIRA = new RegExp(String.raw`\b(?:withdr[ae]w\w*|retract\w*|revok\w*|take\s+back|cancel\w*|retir\w*)\b[^\n]{0,40}\b(?:READY|approval|aprova\w*|review|revis\w*)\b|\b(?:my|our|meu|o meu|nosso|o|the|este|esse|this)\s+(?:READY|approval|aprova\w*|review|revis\w*)\b[^\n]{0,40}\b(?:withdrawn|retracted|revoked|taken\s+back|cancel\w*|retirad\w*)\b|\bREADY\s+(?:withdrawn|retracted|revoked|cancel\w*|retirad\w*)\b|\bcorrection\s+to\s+my\s+READY\b|^\s*WITHDRAWN\b`, "im");
-const DE_FILA = /\b(?:queue|fila|enqueue\w*)\b/i;
+// Uma linha sobre a fila ou sobre um pedido não é a retirada de uma revisão ("Queue request withdrawn", "cancel the
+// review request"; MÉDIO do Claude 3 e LEVE 4 do hed9).
+const DE_FILA = /\b(?:queue|fila|enqueue\w*|request\w*|pedido)\b/i;
+const FAM_G = new RegExp(FAM_RE, "gi");
+/**
+ * Se um comentário tira o READY de uma família neste head (largo para tirar; nona volta, revisão do Claude 5 hed9 no
+ * #5408 @a1818c8b0b). Devolve { familia, retirada } ou { familia: "?" } (só para uma revisão do GitHub CHANGES_REQUESTED
+ * deste head que não diz de quem é: NÃO CONFERIDO), ou null. Lê as três primeiras linhas com texto:
+ *  - o head: qualquer sequência hexadecimal de 7 a 40 caracteres com pelo menos uma letra (com ou sem "@" ou "head");
+ *    só números é o id de um comentário. Tira quando cita este head; sem head nenhum, só uma retirada de revisão; citando
+ *    só outro head, nada;
+ *  - o que tira: CHANGES, "READY?", REJECT, e, sem distinguir maiúsculas, "not ready", "blocked", "changes requested",
+ *    "needs changes", "do not merge" e as formas em português; ou a retirada de uma revisão (fora de uma linha sobre a
+ *    fila ou um pedido);
+ *  - a família: a última antes de "review #N" no cabeçalho (quem transcreve vem antes de quem revisou, MÉDIO 5); senão,
+ *    a mais próxima antes da palavra que tira (LEVE 3); senão, a leitura larga dos pedidos; senão, uma assinatura em
+ *    qualquer linha ("Reviewer: Claude 3 X", "— Claude 3 X", MÉDIO 4). Sem família, não tira.
+ */
 export function tiraReady(corpo, pr, sha, estado = "", commitId = "") {
   const cheio = String(sha ?? "").toLowerCase();
-  const tres = String(corpo ?? "").split(/\r?\n/).filter((l) => l.trim()).slice(0, 3).map((l) => l.replace(/[*_`]/g, ""));
+  const todas = String(corpo ?? "").split(/\r?\n/).filter((l) => l.trim()).map((l) => l.replace(/[*_`]/g, ""));
+  const tres = todas.slice(0, 3);
   const texto = tres.join("\n");
-  // "@<hex>" é head, mesmo só com dígitos; um número solto (o id de um comentário) não é; um SHA solto de 40 caracteres é.
-  const heads = [...texto.matchAll(/[@＠]\s*([0-9a-f]{7,40})\b|\b([0-9a-f]{40})\b/gi)].filter((x) => x[1] || /[a-f]/i.test(x[2])).map((x) => String(x[1] ?? x[2]).toLowerCase());
+  // "@<hex>" é head, mesmo só com dígitos; um hexadecimal solto só com uma letra (só números é o id de um comentário).
+  const heads = [...texto.matchAll(/([@＠]\s*)?\b([0-9a-f]{7,40})\b/gi)].filter((x) => x[1] || /[a-f]/i.test(x[2])).map((x) => x[2].toLowerCase());
   const citaEste = heads.some((h) => cheio.startsWith(h));
   const pedeMudanca = String(estado).toUpperCase() === "CHANGES_REQUESTED" && (!commitId || cheio.startsWith(String(commitId).toLowerCase().slice(0, 7)));
   const retirada = RETIRA.test(texto) && !DE_FILA.test(tres[0] ?? "");
-  const veredito = PALAVRA_TIRA.test(texto) || PALAVRA_TIRA_I.test(texto);
-  if (!pedeMudanca && !((citaEste && (veredito || retirada)) || (!heads.length && retirada))) return null;
-  const cab = new RegExp(String.raw`${FAM_RE}[^:#\n—–]{0,40}\breview\s+#${pr}\b`, "i").exec(tres[0] ?? "");
+  const palavra = PALAVRA_TIRA.exec(texto) ?? PALAVRA_TIRA_I.exec(texto);
+  if (!pedeMudanca && !((citaEste && (palavra || retirada)) || (!heads.length && retirada))) return null;
+  const l1 = tres[0] ?? "";
+  // Uma nota do autor ou um pedido ("This answers Claude 2's CHANGES", "Fixed ...", "re-review needed", CLAIMED, HOLD)
+  // não é veredito de ninguém, como na leitura larga (revisoraDoComentario; ce2d61).
+  if (!pedeMudanca && /^\s*(?:re-?review needed|review needed|claimed\b|unclaimed\b|hold\b|fila #|fix(?:ed|es)?\b|corrigid|resolved\b|this answers|answer\b|note on\b)/i.test(l1)) return null;
+  const rev = new RegExp(String.raw`\breview\s+#${pr}\b`, "i").exec(l1);
+  const noCabecalho = rev ? [...l1.slice(0, rev.index).matchAll(FAM_G)].pop() : null;
+  const antesDaPalavra = palavra ? [...texto.slice(0, palavra.index).matchAll(FAM_G)].pop() : null;
   const larga = revisoraDoComentario(corpo, cheio.slice(0, 10));
-  const primeira = new RegExp(FAM_RE, "i").exec(tres[0] ?? "");
-  const fam = cab ? familia(cab[1]) : larga ?? (primeira ? familia(primeira[1]) : null);
-  if (fam) return { familia: fam, retirada: retirada && !veredito };
-  return pedeMudanca && String(estado).toUpperCase() === "CHANGES_REQUESTED" ? { familia: "?" } : null;
+  const assinatura = todas.map((l) => new RegExp(String.raw`(?:^\s*(?:reviewer|revisor|por|by)\s*:?|[—–]|\bby)\s*${FAM_RE}`, "i").exec(l)).find(Boolean);
+  const primeira = new RegExp(FAM_RE, "i").exec(l1);
+  const achada = noCabecalho?.[1] ?? antesDaPalavra?.[1] ?? null;
+  const fam = achada ? familia(achada) : larga ?? (assinatura ? familia(assinatura[1]) : primeira ? familia(primeira[1]) : null);
+  if (fam) return { familia: fam, retirada: retirada && !palavra };
+  return pedeMudanca ? { familia: "?" } : null;
+}
+
+/** As famílias com veredito neste head no PR: a leitura do claim-enqueue (revisoresNoPr), quem tem READY estrito e quem tirou um READY citando o head (LEVE 2 do hed9). null = NÃO CONFERIDO. */
+export function familiasComVereditoNoHead(pr, sha) {
+  const noPr = revisoresNoPr(pr, sha);
+  if (noPr === null) return null;
+  const fams = new Set(noPr);
+  for (const t of textosNoPr.get(`${pr}@${String(sha).slice(0, 10)}`) ?? []) {
+    const soma = readyEstrito(t.corpo, pr, sha);
+    if (soma) { fams.add(soma); continue; }
+    const tira = tiraReady(t.corpo, pr, sha, t.estado, t.commitId);
+    if (tira && tira.familia !== "?" && !tira.retirada) fams.add(tira.familia);
+  }
+  return fams;
 }
 
 /**
@@ -1421,11 +1446,11 @@ export function readyQueContam(pr, sha, ramo = null) {
   const curto = String(sha).slice(0, 10), eventos = [], naoContados = new Map();
   const textos = textosNoPr.get(`${pr}@${curto}`);
   if (!textos) return { naoConferido: "os comentários do PR não foram lidos (sem o gh)" }; // NIT 2 do Claude 5 iYnra no #5408
-  const revisoras = new Set(noPr);
+  const revisoras = familiasComVereditoNoHead(pr, sha) ?? new Set(noPr);
   const linha1 = (t) => (String(t.corpo).split(/\r?\n/).find((l) => l.trim()) ?? "").trim().slice(0, 90);
   for (const t of textos) {
     const soma = readyEstrito(t.corpo, pr, sha);
-    if (soma) { revisoras.add(soma); eventos.push({ fam: soma, ready: true, em: t.em, ordem: 0, i: t.i }); continue; }
+    if (soma) { eventos.push({ fam: soma, ready: true, em: t.em, ordem: 0, i: t.i }); continue; }
     const tira = tiraReady(t.corpo, pr, sha, t.estado, t.commitId);
     if (tira?.familia === "?") return { naoConferido: `uma revisão do GitHub CHANGES_REQUESTED neste head não diz de que família é ("${linha1(t) || "sem texto"}")` };
     if (tira) { eventos.push({ fam: tira.familia, ready: false, em: tira.retirada && t.editado > t.em ? t.editado : t.em, ordem: 1, i: t.i, linha: linha1(t) }); continue; }
@@ -1601,7 +1626,8 @@ export function filaVedadaPara(alvo, eu) {
     if (!cm) return `os commits do #${alvo.pr} não puderam ser lidos agora, e o ramo não diz a família do autor (NÃO CONFERIDO); a fila espera; tente de novo`;
     if (cm.dominantes.includes(familia(eu))) return `o primeiro da fila, #${alvo.pr}, tem a maior parte dos commits da sua família, que conta como autora num ramo sem prefixo de família; outra família o enfileira (0410, 3 (b); dd03)`;
   }
-  const noPr = revisoresNoPr(alvo.pr, alvo.sha);
+  // A mesma leitura do verify-enqueue: quem deu veredito, tem READY estrito ou tirou um READY neste head (LEVE 2 do hed9).
+  const noPr = familiasComVereditoNoHead(alvo.pr, alvo.sha);
   if (noPr === null) return `as revisões escritas no #${alvo.pr} não puderam ser conferidas agora (NÃO CONFERIDO); a fila espera; tente de novo`;
   if (noPr.has(familia(eu))) return `o primeiro da fila, #${alvo.pr}, tem veredito da sua família neste head no PR; outra família o enfileira (FQ (1), ce2d)`;
   return null;

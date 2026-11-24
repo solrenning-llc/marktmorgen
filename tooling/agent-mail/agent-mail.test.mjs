@@ -1515,6 +1515,10 @@ console.log("strict to add, loose to take out: the READY the 3-READY gate counts
   soma.push(...["READY, no findings. NIT: typo", "READY (0 findings), LEVE: the name", "READY, sem achados. LEVE no teste", "READY, zero defects. MÉDIO: the lock leaks",
     "READY, 0 findings; one LOW below", "READY (sem achados) — ALTO no fluxo"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, null]));
   soma.push([`Claude 3 review #${N} @${h}: READY, 0 findings, 0 NIT, no defect of any level, NIT included.`, "claude-3"]);
+  // Eleventh round (Claude 3 wSUb3 on 0aefb8aa0f): ordinary lower-case words are no severity; several 'X included'.
+  soma.push(...["READY, 0 findings; alta cobertura dos testes", "READY, 0 findings, high-risk path covered", "READY, sem achados; low fee confirmed",
+    "READY, 0 findings, no defect of any level, NIT included, LEVE included", "READY, sem achados, teste leve e rápido"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, "claude-3"]));
+  soma.push(...["READY, 0 findings. HIGH: the lock", "READY, sem achados. ALTA: a trava", "READY, 0 findings, nits only"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, null]));
   for (const [t, e] of soma) is(`adds: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.readyEstrito?.(t, N, H) === e, String(mod.readyEstrito?.(t, N, H)));
   const tira9 = [[`Claude 3 review #${N} @${h}: Not ready`, "claude-3"], [`Claude 3 review #${N} @${h}: changes requested (1 ALTO)`, "claude-3"],
     [`Claude 3 review #${N} @${h}: Changes needed`, "claude-3"], [`Claude 3 review #${N} @${h}: needs changes`, "claude-3"], [`Claude 3 review #${N} @${h}: ALTO found, not ready`, "claude-3"],

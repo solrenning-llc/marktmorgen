@@ -42,8 +42,20 @@ is("the code refunds a charged order whose record was never confirmed, from the 
 // sweep refunds it only past GIVE_UP_HOURS (iaqyQ's probe: refunds 0 at T+2 h, 1 at T+49 h): no text promises less.
 for (const [name, text] of Object.entries(sources)) {
   is(`${name}: never promises a request that never reached the provider is refunded without waiting`, /never\s+reaches\s+(our|the)\s+video\s+provider[^.;]{0,160}without\s+waiting/.test(text), false);
-  is(`${name}: says it is refunded usually within 15 minutes, otherwise at the first check after the hours`,
-    /never\s+reaches\s+(our|the)\s+video\s+provider[^.;]{0,120}usually\s+within\s+15\s+minutes[^.;]{0,80}first\s+check\s+after/.test(text), true);
+  is(`${name}: says it is refunded usually within the hour, and in every case at the first check after the hours`,
+    /never\s+reaches\s+(our|the)\s+video\s+provider[^.;]{0,120}usually\s+within\s+the\s+hour[^.;]{0,80}first\s+check\s+after/.test(text), true);
+  is(`${name}: promises no time in minutes for it`, /never\s+reaches\s+(our|the)\s+video\s+provider[^.;]{0,120}\d+\s+minutes/.test(text), false);
+}
+// "Usually within the hour" (Claude 5 ichw on #5456): the order settles at the first stream run after ORDER_SETTLE_MS,
+// owes the refund for LOOK_AGAIN_MS more, and the refund is made at the next run: about 25 to 30 minutes, inside the hour.
+{
+  const code = readFileSync("lib/auto-captions.ts", "utf8");
+  const settle = Number(/export const ORDER_SETTLE_MS = (\d+) \* 60_000;/.exec(code)?.[1]);
+  const again = Number(/const LOOK_AGAIN_MS = (\d+) \* 60_000;/.exec(code)?.[1]);
+  const cron = JSON.parse(readFileSync("vercel.json", "utf8")).crons.find((c: { path: string }) => c.path === "/api/cron/stream")?.schedule as string;
+  const every = /^[\d,]+ \* \* \* \*$/.test(cron) ? 60 / cron.split(" ")[0].split(",").length : NaN;
+  is("the refund of a request that never reached the provider is made within the hour: two runs past both waits",
+    [Number.isFinite(settle + again + every), settle + again + 2 * every < 60], [true, true]);
 }
 
 part("The Terms and the help say what happens when the provider never confirms");

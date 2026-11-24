@@ -77,6 +77,39 @@ const CASES: Case[] = [
   keep("more keys than arguments is Redis's own error", [], [9, ...KEYS, "T"], "error"),
 ];
 
+// The disconnect's scripts (Claude 3 K9t's MEDIUM on #5476): FORGET_CONNECTION deletes a connection, takes it out of
+// its account's index and counts who is left in one step; LIST_KEPT lists connections only while each is still the
+// text read; LEAVE_ACCOUNT leaves the index and counts who is left. Each refuses a call of another shape with -1.
+const scriptOf = (name: string) => source.match(new RegExp(`export const ${name} = \`([\\s\\S]*?)\`;`))?.[1] ?? "";
+const F = scriptOf("FORGET_CONNECTION");
+const L = scriptOf("LIST_KEPT");
+const LEAVE = scriptOf("LEAVE_ACCOUNT");
+test("lib/meet-connect.ts defines the disconnect's scripts", () => {
+  assert.match(F, /^-- marktmorgen:meet-forget:v1\n/);
+  assert.match(L, /^-- marktmorgen:meet-list-kept:v1\n/);
+  assert.match(LEAVE, /^-- marktmorgen:meet-leave-account:v1\n/);
+});
+const INDEX: Arg[][] = [["GET", "conn"], ["GET", "test"], ["SISMEMBER", "idx", "s1"], ["SCARD", "idx"]];
+const listedAs: Arg[][] = [["SISMEMBER", "idx", "m1"], ["SISMEMBER", "idx", "m2"], ["TYPE", "idx"]];
+const listed = [["SET", "conn", "J"], ["SET", "test", "T"], ["SADD", "idx", "s1", "s2"]];
+const two: Arg[][] = [["SET", "c1", "J1"], ["SET", "c2", "J2"]];
+CASES.push(
+  { name: "forget: deletes the connection and its test meeting, leaves the index, counts who is left", setup: listed, run: ["EVAL", F, 3, "idx", "conn", "test", "s1"], reply: 1, after: INDEX, state: [null, null, 0, 1] },
+  { name: "forget: a host's connection alone, the last on its account", setup: [["SET", "conn", "J"], ["SADD", "idx", "s1"]], run: ["EVAL", F, 2, "idx", "conn", "s1"], reply: 0, after: INDEX, state: [null, null, 0, 0] },
+  { name: "forget: nothing there, still counted", setup: [["SADD", "idx", "s2"]], run: ["EVAL", F, 3, "idx", "conn", "test", "s1"], reply: 1, after: INDEX, state: [null, null, 0, 1] },
+  { name: "forget: one key only is refused", setup: listed, run: ["EVAL", F, 1, "idx", "s1"], reply: -1, after: INDEX, state: ["J", "T", 1, 2] },
+  { name: "forget: four keys are refused", setup: listed, run: ["EVAL", F, 4, "idx", "conn", "test", "more", "s1"], reply: -1, after: INDEX, state: ["J", "T", 1, 2] },
+  { name: "forget: an empty member is refused", setup: listed, run: ["EVAL", F, 3, "idx", "conn", "test", ""], reply: -1, after: INDEX, state: ["J", "T", 1, 2] },
+  { name: "forget: an argument too many is refused", setup: listed, run: ["EVAL", F, 3, "idx", "conn", "test", "s1", "x"], reply: -1, after: INDEX, state: ["J", "T", 1, 2] },
+  { name: "list kept: only those still the text read", setup: [["SET", "c1", "J1"], ["SET", "c2", "changed"]], run: ["EVAL", L, 3, "idx", "c1", "c2", "J1", "J2", "m1", "m2"], reply: 1, after: listedAs, state: [1, 0, "set"] },
+  { name: "list kept: all of them, in one SADD", setup: two, run: ["EVAL", L, 3, "idx", "c1", "c2", "J1", "J2", "m1", "m2"], reply: 2, after: listedAs, state: [1, 1, "set"] },
+  { name: "list kept: none still there, nothing listed", setup: [], run: ["EVAL", L, 3, "idx", "c1", "c2", "J1", "J2", "m1", "m2"], reply: 0, after: listedAs, state: [0, 0, "none"] },
+  { name: "list kept: no connection is refused", setup: two, run: ["EVAL", L, 1, "idx"], reply: -1, after: listedAs, state: [0, 0, "none"] },
+  { name: "list kept: a member short is refused", setup: two, run: ["EVAL", L, 3, "idx", "c1", "c2", "J1", "J2", "m1"], reply: -1, after: listedAs, state: [0, 0, "none"] },
+  { name: "leave: leaves and counts who is left", setup: listed, run: ["EVAL", LEAVE, 1, "idx", "s1"], reply: 1, after: INDEX, state: ["J", "T", 0, 1] },
+  { name: "leave: the last one, the index gone", setup: [["SADD", "idx", "s1"]], run: ["EVAL", LEAVE, 1, "idx", "s1"], reply: 0, after: INDEX, state: [null, null, 0, 0] },
+);
+
 function onStandIn(c: Case): { reply: unknown; state: unknown[] } {
   const store = new MemoryRedis();
   for (const command of c.setup) store.run(command);

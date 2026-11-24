@@ -84,11 +84,11 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
 const userKey = (account: string) => `nl:meet:user:google:${createHash("sha256").update(`meet-user:google:${account}`).digest("hex").slice(0, 40)}`;
 const storeKey = `nl:meet:conn:${A}:google`;
 const hostKey = (email: string) => `nl:meet:conn:hosts:google:h:${hostId(email)}`;
-function connection(host = "", damaged = false) {
+function connection(host = "", damaged = false, account = ACCOUNT) {
   const ctx = (which: string) => (host ? `meet|hosts|google|h:${host}|${which}` : `meet|${A}|google|${which}`);
   return JSON.stringify({
     provider: damaged ? "something-else" : "google",
-    account: { id: ACCOUNT, email: "shared-cost@example.test", name: "" },
+    account: { id: account, email: "shared-cost@example.test", name: "" },
     refresh: seal("synthetic-grant", ctx("refresh")),
     access: seal("synthetic-grant", ctx("access")),
     expires: 0,
@@ -105,12 +105,12 @@ function connection(host = "", damaged = false) {
  * The worst: every host a Google grant's read can find (the owner now, the owner the connection was kept for, the full
  * team) has a calendar on the account and none is listed; the store, when given, is the only member of its index.
  */
-async function seed(store: "" | "healthy" | "damaged", skip = "") {
+async function seed(store: "" | "healthy" | "damaged", skip = "", account = ACCOUNT) {
   redis.clear();
   const hosts = [OWNER, OWNER_THEN, ...TEAM].filter((e) => e !== skip);
   await real([
     ...(store ? [["SET", storeKey, connection("", store === "damaged")], ["SADD", userKey(ACCOUNT), A]] : []),
-    ...hosts.map((e) => ["SET", hostKey(e), connection(hostId(e))]),
+    ...hosts.map((e) => ["SET", hostKey(e), connection(hostId(e), false, account)]),
     ["SET", `nl:team:${SID}`, JSON.stringify({ members: TEAM.map((email) => ({ email, role: "editor", joinedAt: "" })), invites: [] })],
   ]);
 }
@@ -176,8 +176,8 @@ async function main() {
   is("the damaged text is still kept, and listed again", [typeof (await real([["GET", storeKey]]))[0], (await real([["SISMEMBER", userKey(ACCOUNT), A]]))[0]], ["string", 1]);
   is(`what it adds is within the figure (${damaged.billed} billed, ${DISCONNECT_BEFORE} before)`, damaged.billed - DISCONNECT_BEFORE <= EXTRA, true);
 
-  part("A consent that kept nothing (its flow expired while the code was traded), every possible host unlisted");
-  await seed("");
+  part("A consent that kept nothing (its flow expired while the code was traded), every possible host unlisted on its account");
+  await seed("", "", `sub-${NEW_EMAIL}`);
   const realNow = Date.now;
   afterTrade = () => {
     const later = realNow() + 3 * 600_000;
@@ -188,7 +188,7 @@ async function main() {
   );
   Date.now = realNow;
   afterTrade = () => {};
-  is("it keeps nothing", keptNothing.outcome, JSON.stringify("expired"));
+  is("it keeps nothing, and the grant the hosts use is kept for them", [keptNothing.outcome, (await real([["SCARD", userKey(`sub-${NEW_EMAIL}`)]]))[0]], [JSON.stringify("expired"), MAX_TEAM + 1]);
   is(`what it adds is within the figure (${keptNothing.billed} billed, ${KEPT_NOTHING_BEFORE} before)`, keptNothing.billed - KEPT_NOTHING_BEFORE <= EXTRA, true);
 
   part("A team host's account change, every other possible host unlisted on the old account");

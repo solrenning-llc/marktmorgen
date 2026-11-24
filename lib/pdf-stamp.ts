@@ -158,10 +158,10 @@ export function wantsStamp(stamp: boolean, file: ProductFile): boolean {
 }
 
 /**
- * The one write of a file's problem note, the stamp's and the preview's alike (Claude 5 iao9Ep on #5360): a new note
- * takes PROBLEM_SECONDS, and a note already there takes the new value but keeps its expiry (SET XX KEEPTTL), so no
- * failure extends it and a note lives at most PROBLEM_SECONDS from its first write (PROBLEM_NOTE_LONGEST_DAYS,
- * lib/stamp-cost-rules.ts). One trip, two commands.
+ * The stamp's one write of a file's problem note (Claude 5 iao9Ep on #5360): a new note takes PROBLEM_SECONDS, and a
+ * note already there takes the new value but keeps its expiry (SET XX KEEPTTL), so no stamp failure extends it. The
+ * preview's second failure writes "unreadable" fresh, once a mark's life (lib/pdf-preview.ts); together a note lives at
+ * most PROBLEM_NOTE_LONGEST_DAYS (lib/stamp-cost-rules.ts). One trip, two commands.
  */
 export function problemNoteCommands(pathname: string, value: string): (string | number)[][] {
   const key = problemKey(pathname);

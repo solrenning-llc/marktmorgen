@@ -43,7 +43,7 @@ import { carryTags } from "@/lib/pdf-preview-tags";
 import { readFileWhole } from "@/lib/file-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
-import { copyFolder, dropWrittenCopy, problemKey, problemNoteCommands, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
+import { copyFolder, dropWrittenCopy, problemKey, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
 import { releaseMark } from "@/lib/claim-mark";
 import { type CopyMeter, PREVIEW_MARK_SECONDS } from "@/lib/stamp-cost-rules";
 import { type DataStore, dataUsed, keepFor } from "@/lib/store-data";
@@ -163,12 +163,13 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
     } catch (error) {
       // What it answers decides nothing: there is no preview either way. A first failure marks it once, never over a
       // mark already there (NX), for PREVIEW_MARK_SECONDS; one past its hour marks it unreadable for PREVIEW_MARK_SECONDS
-      // and writes "unreadable" in the shared problem note, through its one write that never extends it
-      // (lib/pdf-stamp.ts problemNoteCommands).
+      // and writes "unreadable" in the shared problem note for the same time, fresh, so the studio says why as long as
+      // the preview refuses the file (Claude 5 ygH4 on #5360): the one write of that note that is not
+      // problemNoteCommands', once a mark's life (PROBLEM_NOTE_LONGEST_DAYS, lib/stamp-cost-rules.ts).
       if (isRedisConfigured()) {
         const mark = previewMarkKey(file.pathname);
         await redisPipeline(failedOnce
-          ? [["SET", mark, "unreadable", "EX", PREVIEW_MARK_SECONDS], ...problemNoteCommands(file.pathname, "unreadable")]
+          ? [["SET", mark, "unreadable", "EX", PREVIEW_MARK_SECONDS], ["SET", problemKey(file.pathname), "unreadable", "EX", PREVIEW_MARK_SECONDS]]
           : [["SET", mark, `${ONCE}${Date.now()}`, "NX", "EX", PREVIEW_MARK_SECONDS]]).catch(() => {});
       }
       throw error;

@@ -46,11 +46,10 @@ async function main(): Promise<void> {
   is("its closing rule says it expires within at least its longest life",
     markClosing?.how === "expires" && (markClosing as { days: number }).days >= (m.PREVIEW_MARK_LONGEST_DAYS ?? Infinity), true);
 
-  part("Every write of the note goes through the one write that never extends it");
-  for (const file of ["lib/pdf-stamp.ts", "lib/pdf-preview.ts"]) {
-    const text = readFileSync(file, "utf8");
-    is(`${file}: no SET of problemKey of its own`, /\["SET",\s*problemKey\(/.test(text), false);
-  }
+  part("Every stamp write of the note goes through the one write that never extends it; the preview writes it fresh once");
+  is("lib/pdf-stamp.ts: no SET of problemKey of its own", /\["SET",\s*problemKey\(/.test(readFileSync("lib/pdf-stamp.ts", "utf8")), false);
+  const previewSets = readFileSync("lib/pdf-preview.ts", "utf8").match(/\["SET",\s*problemKey\([^\]]*\]/g) ?? [];
+  is("lib/pdf-preview.ts: one SET of its own, \"unreadable\" for PREVIEW_MARK_SECONDS", previewSets, ['["SET", problemKey(file.pathname), "unreadable", "EX", PREVIEW_MARK_SECONDS]']);
   is("the write is shared", typeof write, "function");
 
   const ttl = async (key: string) => Number((await redis.pipeline([["TTL", key]]))[0]);

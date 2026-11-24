@@ -23,12 +23,14 @@ import { MAX_STAMP_BYTES } from "@/lib/product-file";
 /** How long a file's shared problem note is kept: 60 days (lib/pdf-stamp.ts; the preview's "unreadable", lib/pdf-preview.ts). */
 export const PROBLEM_NOTE_SECONDS = 60 * 24 * 60 * 60;
 /**
- * The longest one path's problem note (nl:stamp:problem:) can live, in days: PROBLEM_NOTE_SECONDS from its first write,
- * since no later write extends it, the stamp's or the preview's (lib/pdf-stamp.ts problemNoteCommands; Claude 5 ygH4 and
- * iao9Ep on #5360). The data registry prices the family for it (tests/store-data-registry.ts) and its closing rule says it
- * (lib/data-families.ts), both held in tests/stamp-problem-lifetime.test.ts.
+ * The longest one path's problem note (nl:stamp:problem:) can live, in days: a note, which no stamp failure extends
+ * (lib/pdf-stamp.ts problemNoteCommands), then the preview's second failure writing "unreadable" fresh for
+ * PREVIEW_MARK_SECONDS just before it runs out, once a mark's life, so the studio says why as long as the preview
+ * refuses the file (Claude 5 ygH4 and iao9Ep on #5360). The data registry prices the family for it
+ * (tests/store-data-registry.ts) and its closing rule says it (lib/data-families.ts), both held in
+ * tests/stamp-problem-lifetime.test.ts.
  */
-export const PROBLEM_NOTE_LONGEST_DAYS = PROBLEM_NOTE_SECONDS / 86_400;
+export const PROBLEM_NOTE_LONGEST_DAYS = (2 * PROBLEM_NOTE_SECONDS) / 86_400;
 /** How long the preview's own mark about a path that failed to parse is kept (lib/pdf-preview.ts previewMarkKey). */
 export const PREVIEW_MARK_SECONDS = PROBLEM_NOTE_SECONDS;
 /**

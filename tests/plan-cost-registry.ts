@@ -1003,6 +1003,14 @@ const stripePage = (bytes = STRIPE_PAGE_BYTES) => EXPORT_PAGE_SECONDS * MEMORY_S
  * so not again here.
  */
 export function affiliatePageRead(size: AffiliatePageSize): number {
+  const work = affiliatePageWork(size);
+  return request("heavy", work.commands, work.bytes) + perMegabyte(work.bytes) + size.stripePages * stripePage();
+}
+/**
+ * The commands and bytes affiliatePageRead prices for a book of that size, apart from its Stripe pages: exported so a
+ * test can compute what each path adds (Claude 6 jAAv7's NIT on #5384), never read from this file's text.
+ */
+export function affiliatePageWork(size: AffiliatePageSize): { commands: number; bytes: number } {
   const rows = Math.min(size.rows, AFFILIATE_ROW_CAP);
   // And the book's two questions about its PayPal payments (lib/affiliates.ts, readBook: an HMGET of the refunds kept
   // for good and a ZMSCORE of the set, in slices of BOOK_KEPT_SLICE), each field a ceiling of the payments: their
@@ -1021,8 +1029,10 @@ export function affiliatePageRead(size: AffiliatePageSize): number {
   // Every field could be an affiliate with a part of their own; every part its lines.
   const kept = Math.min(BOOK_SNAPSHOT_MAX_BYTES, (2 * size.fields + rows + size.stripePages * 100 + invoiceLines) * BOOK_LINE_BYTES + size.fields * BOOK_PART_BYTES);
   const writes = Math.ceil(kept / 512_000) + 1;
-  return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + asks + 2 * writes + (invoices ? BOOK_KEPT_INVOICES_COMMANDS : 0) + marks, bytes + kept + invoices) + perMegabyte(bytes + kept + invoices)
-    + size.stripePages * stripePage();
+  return {
+    commands: AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + asks + 2 * writes + (invoices ? BOOK_KEPT_INVOICES_COMMANDS : 0) + marks,
+    bytes: bytes + kept + invoices,
+  };
 }
 /** What one load of an approved affiliate's page costs at the most: the page, its own part of the kept book, its listings, and its codes when it reads them. */
 export function affiliateLoadRead(size: AffiliateLoadSize): number {

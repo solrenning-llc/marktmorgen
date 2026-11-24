@@ -12,8 +12,6 @@
  *
  * Synthetic data, Stripe and PayPal stand-ins.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import * as rules from "@/lib/api-read-rules";
 import { BOOK_INVOICES_KEPT_BYTES, bookWork } from "@/lib/api-read-rules";
 import { readBook } from "@/lib/affiliates";
@@ -22,7 +20,7 @@ import { affiliatesTool } from "@/lib/mcp-tools";
 import { connectPayPal, payWithPayPal, unsettledBook } from "@/lib/paypal-payouts";
 import { takeAllowance } from "@/lib/store-allowance";
 import { MAX_STORE_BYTES, type Store } from "@/lib/store";
-import { UNIT_COST, perMegabyte, request } from "./plan-cost-registry";
+import { AFFILIATE_PAGE_COMMANDS, TAKE_COMMANDS, UNIT_COST, affiliatePageWork, perMegabyte, request } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { markLive } from "./live-store";
 import { done, is, part } from "./check";
@@ -129,9 +127,17 @@ async function main(): Promise<void> {
   is("the API and MCP readers count the kept invoices' path as nine commands, as the studio does", keptPart, 9);
   // And the affiliate's own page (affiliatePageRead, the model its units are held to in tests/plan-cost-registry.test.ts)
   // counts the same path the same way (Claude 3's LOW on #5384, 7113942268): never the two commands it counted before.
-  const registry = readFileSync(join(process.cwd(), "tests/plan-cost-registry.ts"), "utf8");
-  const pageModel = registry.slice(registry.indexOf("export function affiliatePageRead("), registry.indexOf("export function affiliateLoadRead("));
-  is("the affiliate's page counts the kept invoices' path as BOOK_KEPT_INVOICES_COMMANDS too", [pageModel.includes("(invoices ? BOOK_KEPT_INVOICES_COMMANDS : 0)"), /\(invoices \? 2 : 0\)/.test(pageModel)], [true, false]);
+  // Computed, not read from the registry's text (Claude 6 jAAv7's NIT on #5384): a book so large that its kept copy is
+  // at BOOK_SNAPSHOT_MAX_BYTES with or without the invoices' lines, so the same writes either way, and only the kept
+  // invoices' path differs between reading Stripe or not.
+  const bigBook = { fields: 1_000_000, rows: 0, listings: 0, stripePages: 1 };
+  const pagePart = affiliatePageWork(bigBook).commands - affiliatePageWork({ ...bigBook, stripePages: 0 }).commands;
+  is("the affiliate's page counts the kept invoices' path as BOOK_KEPT_INVOICES_COMMANDS too", [pagePart, rules.BOOK_KEPT_INVOICES_COMMANDS], [9, 9]);
+  // And nothing taken off the rest of the page: an empty book that reads no Stripe page counts the page's own commands,
+  // the window's take, two commands for its one write of the kept book (WRITE_BYTES a write, lib/affiliate-book-snapshot.ts)
+  // and the three refund marks, from the registry's figures.
+  is("an empty book, no Stripe page: the page's commands, its take, one write and the three marks, nothing less",
+    affiliatePageWork({ fields: 0, rows: 0, listings: 0, stripePages: 0 }).commands, AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + 2 + 3);
 
   part("A studio or payout reading takes them before it reads, and reads whole");
   const before = await left(store);

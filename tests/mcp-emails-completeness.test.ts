@@ -70,6 +70,11 @@ async function main(): Promise<void> {
   is("and says an email is kept 400 days after its last change", /400 days after its last change/.test(described), true);
   is(`it says the ${EMAILS_BROADCASTS} most recently created, whatever their status`, new RegExp(`${EMAILS_BROADCASTS} most recently created, whatever their status`).test(described), true);
   is("never that they are all sent or scheduled (Claude 3 xvBY8's LEVE 4 on #5431)", /sent or scheduled/.test(described), false);
+  // The answer's status is the stored value (BroadcastStatus, "cancelled" among them): the description points to that
+  // field and never names a status another way, so an assistant never filters on a value no email has (Claude 3 yaQt's
+  // NIT on #5431).
+  is("it points to each email's status field", /each email's status field says which/.test(described), true);
+  is("and names no status spelled otherwise than the answer gives it", /\bcanceled\b/.test(described), false);
 
   done();
 }

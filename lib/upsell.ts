@@ -791,6 +791,15 @@ export async function findOfferCharge(
  * Deletes an offer's record only while it is still exactly the orphan claim that was read (ARGV[1]): a record
  * written since — naming the customer, a payment or an answer — is never taken off.
  */
+/**
+ * A waiting offer's entry replaced by the one carrying its time, in one step (Claude 5 id8Ws on #5482): only while the
+ * old entry is still listed, so an entry another path took off is never put back, and never removed without its
+ * replacement, so a still-pending offer never leaves the job's list on a failed second write. 1 when swapped.
+ */
+const PENDING_SWAP = `-- marktmorgen:upsell-pending-swap:v1
+if redis.call('ZREM', KEYS[1], ARGV[1]) == 1 then redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3]) return 1 end
+return 0`;
+
 const ORPHAN_RELEASE = `-- marktmorgen:upsell-orphan-release:v1
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
 return 0`;
@@ -909,17 +918,16 @@ export async function settlePendingOffers(
     if (Date.now() >= deadline) break;
     const [handle, session, slot = "", mark = ""] = entry.split("|");
     const drop = () => redisPipeline([["ZREM", PENDING_KEY, entry]]);
-    // The entry's next look, on the offer's own time `at`: the same entry when it already carries that time (XX: a
+    // The entry's next look, on the offer's own time `at`: the same entry when it already carries that time (XX: an
     // entry another path took off is never put back, Claude 5 ichw on #5482); otherwise it is replaced by the one that
-    // does, only if it is still listed.
+    // does in one step, only if it is still listed (PENDING_SWAP, Claude 5 id8Ws on #5482).
     const lookAgain = async (next: number, at: number): Promise<void> => {
       const timed = timedMember(handle, session, slot, at);
       if (timed === entry) {
         await redisPipeline([["ZADD", PENDING_KEY, "XX", next, entry]]);
         return;
       }
-      const [removed] = await redisPipeline([["ZREM", PENDING_KEY, entry]]);
-      if (removed === 1) await redisPipeline([["ZADD", PENDING_KEY, next, timed]]);
+      await redisPipeline([["EVAL", PENDING_SWAP, 1, PENDING_KEY, entry, next, timed]]);
     };
     const since = CREDIT_MARK.exec(mark)?.[1];
     if (since && handle && SESSION_ID.test(session ?? "") && (!slot || SLOT_PATTERN.test(slot))) {

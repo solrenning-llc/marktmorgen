@@ -170,9 +170,10 @@ for (const review of [true, false]) {
     await noteTaskUpload(first, 0);
     files.add(first);
     await sweepTaskUploads(removeFiles);
-    files.add(first);
+    // The second run deletes the file again (Claude 3 poda's NIT on #5350: the pair that put it back and took it out
+    // did nothing, since counted reads only Redis, and hid whether it was deleted).
+    assert.ok(!files.has(first), "the second run deletes it again");
     assert.equal(await counted(w), 1000, "a second run gives nothing back");
-    files.delete(first);
   });
 
   test(`a store closed before the daily job deletes the replaced file never has its room written again (${how})`, async () => {

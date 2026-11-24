@@ -19,9 +19,14 @@ import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
  *
  * Runs every hour on the 1st and the 2nd of the month, at most MAX_PER_RUN
  * stores a run, each claimed for the month before anything is read, so nobody
- * gets two. Only stores with a plan running, paid or in its trial. "Stop" in
- * any numbers email stops this one too; the channel is the creator's own
- * choice and is posted to still.
+ * gets two. It reads the month just ended and the month before it, oldest
+ * first (issue #3995): a month whose whole two-day window was missed, or whose
+ * stores the last runs did not reach, is sent in the next month's window
+ * instead, one month back at most (a month missed in two windows in a row is
+ * not caught up). Its claims (40 days) outlive the month between the two
+ * windows, so nothing sent goes twice. Only stores with a plan running, paid
+ * or in its trial. "Stop" in any numbers email stops this one too; the channel
+ * is the creator's own choice and is posted to still.
  *
  * The post and the email are each marked once for the month (lib/stats-report.ts,
  * sendPart); one that did not go lets the month go, so a later run sends what is
@@ -50,110 +55,115 @@ export async function GET(request: NextRequest) {
 
   const started = Date.now();
   const out = { looked: 0, sent: 0, posted: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0, unconfirmed: 0 };
-  const month = lastMonthOf(started);
-  // The folders decided this month, kept so no later run reads their stores again (lib/stats-report.ts readSeen). A
+  const latest = lastMonthOf(started);
+  // The month before the last too, oldest first (issue #3995).
+  const months = [lastMonthOf(Date.parse(`${latest}-01T00:00:00Z`)), latest];
+  // The folders decided each month, kept so no later run reads their stores again (lib/stats-report.ts readSeen). A
   // folder whose summary is to be tried again (tryPeriodAgain) is not decided, so a later run reaches it.
-  const decided: string[] = [];
+  const decidedIn = new Map(months.map((month) => [month, [] as string[]]));
   try {
-    // The stores that had visitors in the month just ended.
-    const folders = await visitedFolders(monthKey(new Date(`${month}-15T00:00:00Z`)));
-    const seen = await readSeen("monthly", month).catch(() => new Set<string>());
-    for (const folder of folders) {
-      if (seen.has(folder)) continue;
-      if (out.looked >= MAX_PER_RUN || Date.now() - started > TIME_BUDGET_MS) break;
-      // A store that could not be read is not decided: the next run reads it again.
-      const store = await storeOf(folder).catch(() => undefined);
-      if (store === undefined) continue;
-      if (!store) {
-        decided.push(folder);
-        continue;
-      }
-      const standing = standingOf(store);
-      if (standing !== "paid" && standing !== "trial") {
-        out.unpaid += 1;
-        decided.push(folder);
-        continue;
-      }
-      // Stopped, not stopped, or unknown (null): unknown sends no email, as before, but is never kept as decided.
-      const offState = await weeklyOffState(store.handle);
-      const emailOff = offState !== false;
-      // An address that could not be read is not "no channel" (rule 24): nothing is claimed, so a later run sends the email and the post together.
-      const chat = await chatAddress(store.statsId).catch(() => undefined);
-      if (chat === undefined) {
-        out.failed += 1;
-        continue;
-      }
-      if (emailOff && !chat) {
-        if (offState === null) {
+    for (const month of months) {
+      const decided = decidedIn.get(month)!;
+      // The stores that had visitors in that month.
+      const folders = await visitedFolders(monthKey(new Date(`${month}-15T00:00:00Z`)));
+      const seen = await readSeen("monthly", month).catch(() => new Set<string>());
+      for (const folder of folders) {
+        if (seen.has(folder)) continue;
+        if (out.looked >= MAX_PER_RUN || Date.now() - started > TIME_BUDGET_MS) break;
+        // A store that could not be read is not decided: the next run reads it again.
+        const store = await storeOf(folder).catch(() => undefined);
+        if (store === undefined) continue;
+        if (!store) {
+          decided.push(folder);
+          continue;
+        }
+        const standing = standingOf(store);
+        if (standing !== "paid" && standing !== "trial") {
+          out.unpaid += 1;
+          decided.push(folder);
+          continue;
+        }
+        // Stopped, not stopped, or unknown (null): unknown sends no email, as before, but is never kept as decided.
+        const offState = await weeklyOffState(store.handle);
+        const emailOff = offState !== false;
+        // An address that could not be read is not "no channel" (rule 24): nothing is claimed, so a later run sends the email and the post together.
+        const chat = await chatAddress(store.statsId).catch(() => undefined);
+        if (chat === undefined) {
           out.failed += 1;
           continue;
         }
-        out.stopped += 1;
-        decided.push(folder);
-        continue;
-      }
-      const claim = await monthClaim(store, month);
-      if (claim !== "ours") {
-        // Claimed already: decided. A claim whose answer is unknown is not (review of #4169): the next run claims
-        // again and reads "taken" if this write did land, so the store is never skipped for the rest of the month.
-        if (claim === "taken" || claim === "gone") decided.push(folder);
-        else out.failed += 1;
-        continue;
-      }
-      out.looked += 1;
-      const data = await readNumbers(store).catch(() => null);
-      if (!data) {
-        // Not read this time: the month is let go, so a later run tries again.
-        await releaseMonth(store.handle, month).catch(() => undefined);
-        out.failed += 1;
-        continue;
-      }
-      const token = weeklyToken(store.handle);
-      const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
-      // Only a goal set by the month being reported is measured: one set on the 1st is for the month ahead.
-      const kept = await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS, since: "" }));
-      const goal = goalForMonth(kept, month);
-      const message = withGoalAvailability(token ? monthlyMessage(store, data, month, stopUrl, goal) : null, goal);
-      if (!message) {
-        out.quiet += 1;
-        decided.push(folder);
-        continue;
-      }
-      const period = monthPeriod(store, month);
-      let missed = false;
-      let unconfirmed = false;
-      if (chat) {
-        const post = await sendPart(period, "posted", () => postToChat(chat, `${message.subject}\n\n${forChat(message.text)}`));
-        if (post === "sent") out.posted += 1;
-        if (post === "gone") { decided.push(folder); continue; }
-        if (post === "missed") missed = true;
-        if (post === "unconfirmed") unconfirmed = true;
-      }
-      if (!emailOff) {
-        const email = await sendPart(period, "emailed", () => sendEmailPinned({ meter: { by: "company" },
-          from: NIMBUS_FROM,
-          to: store.email,
-          subject: message.subject,
-          text: message.text,
-          headers: { "List-Unsubscribe": `<${stopUrl}>` },
-          // One key for the period, kept with its sender (sendEmailPinned): a try whose answer was lost is never sent
-          // again by a later try, by the same sender or by the other one, which never saw the key (#3297).
-          idempotencyKey: `numbers-summary:${period.key}`,
-        }), { keyHoldsMs: EMAIL_KEY_HOLDS_MS });
-        if (email === "sent") out.sent += 1;
-        if (email === "gone") { decided.push(folder); continue; }
-        if (email === "missed") missed = true;
-        if (email === "unconfirmed") unconfirmed = true;
-      }
-      if (missed) {
-        // What did not go is sent by a later run, a bounded number of times; what went, or may have gone, is not sent again.
-        // Only a month let go for another try is left undecided (decided.push below otherwise), so the next run reaches it.
-        out.failed += 1;
-        if (!(await tryPeriodAgain(period))) decided.push(folder);
-      } else {
-        decided.push(folder);
-        // Only what may have gone is left, and it is never sent blind: the month stays claimed, and no run reads it again.
-        if (unconfirmed) out.unconfirmed += 1;
+        if (emailOff && !chat) {
+          if (offState === null) {
+            out.failed += 1;
+            continue;
+          }
+          out.stopped += 1;
+          decided.push(folder);
+          continue;
+        }
+        const claim = await monthClaim(store, month);
+        if (claim !== "ours") {
+          // Claimed already: decided. A claim whose answer is unknown is not (review of #4169): the next run claims
+          // again and reads "taken" if this write did land, so the store is never skipped for the rest of the month.
+          if (claim === "taken" || claim === "gone") decided.push(folder);
+          else out.failed += 1;
+          continue;
+        }
+        out.looked += 1;
+        const data = await readNumbers(store).catch(() => null);
+        if (!data) {
+          // Not read this time: the month is let go, so a later run tries again.
+          await releaseMonth(store.handle, month).catch(() => undefined);
+          out.failed += 1;
+          continue;
+        }
+        const token = weeklyToken(store.handle);
+        const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
+        // Only a goal set by the month being reported is measured: one set on the 1st is for the month ahead.
+        const kept = await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS, since: "" }));
+        const goal = goalForMonth(kept, month);
+        const message = withGoalAvailability(token ? monthlyMessage(store, data, month, stopUrl, goal) : null, goal);
+        if (!message) {
+          out.quiet += 1;
+          decided.push(folder);
+          continue;
+        }
+        const period = monthPeriod(store, month);
+        let missed = false;
+        let unconfirmed = false;
+        if (chat) {
+          const post = await sendPart(period, "posted", () => postToChat(chat, `${message.subject}\n\n${forChat(message.text)}`));
+          if (post === "sent") out.posted += 1;
+          if (post === "gone") { decided.push(folder); continue; }
+          if (post === "missed") missed = true;
+          if (post === "unconfirmed") unconfirmed = true;
+        }
+        if (!emailOff) {
+          const email = await sendPart(period, "emailed", () => sendEmailPinned({ meter: { by: "company" },
+            from: NIMBUS_FROM,
+            to: store.email,
+            subject: message.subject,
+            text: message.text,
+            headers: { "List-Unsubscribe": `<${stopUrl}>` },
+            // One key for the period, kept with its sender (sendEmailPinned): a try whose answer was lost is never sent
+            // again by a later try, by the same sender or by the other one, which never saw the key (#3297).
+            idempotencyKey: `numbers-summary:${period.key}`,
+          }), { keyHoldsMs: EMAIL_KEY_HOLDS_MS });
+          if (email === "sent") out.sent += 1;
+          if (email === "gone") { decided.push(folder); continue; }
+          if (email === "missed") missed = true;
+          if (email === "unconfirmed") unconfirmed = true;
+        }
+        if (missed) {
+          // What did not go is sent by a later run, a bounded number of times; what went, or may have gone, is not sent again.
+          // Only a month let go for another try is left undecided (decided.push below otherwise), so the next run reaches it.
+          out.failed += 1;
+          if (!(await tryPeriodAgain(period))) decided.push(folder);
+        } else {
+          decided.push(folder);
+          // Only what may have gone is left, and it is never sent blind: the month stays claimed, and no run reads it again.
+          if (unconfirmed) out.unconfirmed += 1;
+        }
       }
     }
     console.log(`monthly: ${JSON.stringify(out)}`);
@@ -162,7 +172,9 @@ export async function GET(request: NextRequest) {
     console.error("monthly emails failed", error);
     return Response.json({ ok: false, error: "failed", ...out }, { status: 500 });
   } finally {
-    await noteSeen("monthly", month, decided).catch((error) => console.error("monthly: keeping the stores decided failed", error));
+    for (const [month, decided] of decidedIn) {
+      await noteSeen("monthly", month, decided).catch((error) => console.error("monthly: keeping the stores decided failed", error));
+    }
     await releaseMark("nl:monthly:lock", lock);
   }
 }

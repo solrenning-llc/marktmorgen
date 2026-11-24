@@ -16,7 +16,14 @@ export async function sendEmail(message: { to: string; subject: string }): Promi
 // The owner's email goes through sendEmailPinned (lib/email.ts, #3297): in this one-sender world it is the same stand-in.
 export const sendEmailPinned = (message: Parameters<typeof sendEmail>[0]) => sendEmail(message);
 export async function cronAllowed(): Promise<boolean> { return true; }
-export async function visitedFolders(): Promise<string[]> { return [...control.folders]; }
+export async function visitedFolders(month?: string): Promise<string[]> {
+  // The monthly route also reads the month before the last (issue #3995): in this world no store had visitors then,
+  // so each store is looked at once a run, as before; the weekly and quiet routes read this month and the last.
+  const now = new Date();
+  const beforeLast = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 15)).toISOString().slice(0, 7);
+  if (month === beforeLast) return [];
+  return [...control.folders];
+}
 export async function storeOf(folder: string) {
   return { handle: folder, name: "Fixture Store", email: "owner@example.test", statsId: "b".repeat(32), sid: "f".repeat(32), currency: "usd", weeklyAi: false, subscriptionActive: true, trialEnds: 0 };
 }

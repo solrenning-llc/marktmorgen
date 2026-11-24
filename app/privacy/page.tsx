@@ -359,9 +359,11 @@ export default function PrivacyPage() {
           country, the email address and the store&apos;s name we ask Stripe to
           open the account with, so a lost answer never leaves an account
           nobody here knows of. They stay with the store until the account is
-          written, or until the try is no longer used: 29 days after the first
-          try, or one day after the last press when that press came later.
-          Then only the try&apos;s id, country and dates stay with the store.
+          written. A try is no longer used 29 days after the first press, or
+          one day after the last press when that press came later; its email
+          address and name are then removed the next time the store is saved.
+          After that only the try&apos;s id, country and dates stay with the
+          store.
           If the creator changes their sign-in address meanwhile, the address
           of that try is kept as it was and never asked with again. All of it
           is deleted with the store.

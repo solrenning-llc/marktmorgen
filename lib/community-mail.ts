@@ -372,6 +372,12 @@ async function keptOnList(listId: string, members: Member[]): Promise<Member[]> 
     }
     if (!row || typeof row !== "object" || Array.isArray(row)) throw new UnknownReplyError("a store's list row");
     const { unsub, gone } = row as { unsub?: unknown; gone?: unknown };
+    // Rows are written with unsub as true or false: another shape ("true" as text, 1, null) is unknown, never "still on
+    // the list" (#5285 row #4566, Claude 2's LEVE; as lib/checkout-recovery.ts contactExact reads it).
+    if (Object.hasOwn(row, "unsub") && typeof unsub !== "boolean") throw new UnknownReplyError("a store's list row");
+    // gone is written only as one of GONE, or not at all (lib/contacts.ts): a gone in another shape ("Bounced", 1, null)
+    // is unknown too, never "still on the list" (Claude 1's NIT 2 on #5355).
+    if (Object.hasOwn(row, "gone") && !(typeof gone === "string" && GONE.has(gone))) throw new UnknownReplyError("a store's list row");
     return !(unsub === true && typeof gone === "string" && GONE.has(gone));
   });
 }

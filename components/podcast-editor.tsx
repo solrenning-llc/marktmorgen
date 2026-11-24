@@ -15,6 +15,7 @@ const MESSAGES: Record<string, string> = {
   title: "Give the episode a title.",
   too_many: `A podcast holds up to ${MAX_EPISODES} episodes.`,
   not_empty: "Delete its episodes first.",
+  last_delivery: "This podcast is on your store, and this is its last episode. Put out another episode first, or unpublish it.",
   busy: "The podcast is being changed right now. Try again in a moment.",
   unknown: "That episode is no longer there. Reload the page.",
   // The same audio is another episode's already, or the product's own file (app/api/store/podcast).

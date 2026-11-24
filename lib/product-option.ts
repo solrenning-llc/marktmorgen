@@ -284,11 +284,23 @@ export function handsOver(product: Listing): boolean {
  * or a product that already handed nothing over, is never held up by this.
  */
 export function takesLastDelivery(product: Listing, id: string, what: "file" | "link"): boolean {
-  if (product.hidden || !handsOver(product)) return false;
   const off = <T extends { file: unknown; link: unknown }>(holder: T): T => ({ ...holder, [what]: null });
   const after: Listing =
     product.id === id ? off(product) : { ...product, options: product.options.map((option) => (option.id === id ? off(option) : option)) };
-  return !handsOver(after);
+  return leavesNothingToHandOver(product, after);
+}
+
+/**
+ * Whether a change would leave a product that is on the store handing over
+ * nothing: `product` as it is now, `after` as the change would leave it. A
+ * draft is never held up, nor a product that already handed over nothing.
+ * The file and link routes ask it through takesLastDelivery; the course route
+ * asks it before a lesson or a module goes, and the podcast route before an
+ * episode goes, so the last lesson or episode of a published course or
+ * podcast stays (#5285 row #3432).
+ */
+export function leavesNothingToHandOver(product: Listing, after: Listing): boolean {
+  return !product.hidden && handsOver(product) && !handsOver(after);
 }
 
 /**

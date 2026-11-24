@@ -1520,6 +1520,11 @@ console.log("strict to add, loose to take out: the READY the 3-READY gate counts
     "READY, 0 findings, no defect of any level, NIT included, LEVE included", "READY, sem achados, teste leve e rápido"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, "claude-3"]));
   soma.push(...["READY, 0 findings. HIGH: the lock", "READY, sem achados. ALTA: a trava", "READY, 0 findings, nits only"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, null]));
   // Twelfth round (Claude 5 ichw on 044dca4bfa): a severity in any case that labels something refuses.
+  // Thirteenth round (Claude 3 hujg on 14f645808f): a severity in the note before READY, numbered or worded, refuses.
+  soma.push(...["(Grave 1: leak): READY", "(Medium 1: the lock): READY", "(Alto 1: x): READY", "(Leve 1: typo): READY", "(Leve 2 — typo): READY", "(Low 3: typo): READY",
+    "(a Leve finding: typo): READY", "(Leve finding — typo): READY", "(cost, Leve 1 open): READY", "(Leve left: typo): READY"].map((r) => [`Claude 3 review #${N} @${h} ${r}`, null]));
+  soma.push(...["READY, 0 findings. Leve 1: typo", "READY, sem achados. Médio 2 — a trava", "READY, 0 findings. Low finding: typo"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, null]));
+  soma.push([`Claude 3 review #${N} @${h} (focal de imposto, transcribed by Claude 5): READY (0 achados).`, "claude-3"], [`Claude 3 review #${N} @${h}: READY, sem achados; low fee: confirmed`, "claude-3"]);
   soma.push(...["READY, sem achados. Grave: vaza a sessão", "READY, sem achados. Leve: o nome", "READY, sem achados. Médio: a trava", "READY, 0 findings. Medium: the lock",
     "READY, 0 findings. Low: a typo", "READY, 0 findings. High: the lock", "READY, 0 findings. Nit: typo", "READY, 0 findings. Leve — o nome", "READY, 0 findings. Nits remain", "READY, sem achados. Grave: o dinheiro"].map((r) => [`Claude 3 review #${N} @${h}: ${r}`, null]));
   for (const [t, e] of soma) is(`adds: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.readyEstrito?.(t, N, H) === e, String(mod.readyEstrito?.(t, N, H)));

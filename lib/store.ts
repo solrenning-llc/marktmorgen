@@ -401,6 +401,22 @@ export type Store = {
    */
   stripeAccountId: string | null;
   /**
+   * An account being opened at Stripe and not yet written here (Codex L-20261120-0258): written before Stripe is asked,
+   * with the very address, name and country it is asked with and the attempt's id, which makes its idempotency key. A
+   * press again reuses it while Stripe keeps its key (STRIPE_CONNECT_REUSE_SECONDS) and gets the same account back; the
+   * store is not deleted or closed for a day after each press (STRIPE_CONNECT_HOLD_SECONDS). Past that day the record
+   * may go, and an account Stripe made with an answer lost is then known only to Stripe and the creator (#5095).
+   */
+  stripeConnecting?: StripeConnecting;
+  /**
+   * The attempts to open the creator's Stripe account that were replaced (past STRIPE_CONNECT_REUSE_SECONDS, or by a
+   * press in another country or with another address a day after the last one) or lapsed, newest last, at most STRIPE_CONNECT_REPLACED_KEPT:
+   * an account Stripe made with a lost answer can be found only by its idempotency key, which holds the attempt's id
+   * (Claude 1 2as's LOW 2 on #5095). Only the id, the country and the times: never the address or the name it was asked
+   * with. Kept with the store's record and gone with it.
+   */
+  stripeConnectReplaced?: StripeConnectReplaced[];
+  /**
    * Whether Stripe last told us that account can take a payment, and when we
    * asked. Kept as a snapshot so the studio does not have to call Stripe on
    * every page load, and shown with its date so it is never read as a promise
@@ -898,6 +914,108 @@ export function syncTakesBuyer(store: Pick<Store, "emailSync">, productId: strin
 /** The shape Stripe gives a connected account: acct_ and then base62. */
 export const STRIPE_ACCOUNT_PATTERN = /^acct_[A-Za-z0-9]{8,64}$/;
 
+/**
+ * An attempt to open the creator's Stripe account (Store.stripeConnecting). `at` is when it was first written, which
+ * starts the window its idempotency key is reused in; `pressedAt` the last press that asked Stripe with it, which starts
+ * the day it holds the store (Claude 1 coordinator's MEDIUM 2 on #5095, 20261122T200809Z-claude-1-coord-b0d3); `sends`
+ * how many presses have asked Stripe with its key, counted before each one, so it is closed after a refusal only when
+ * the key had never been sent before (MEDIUM 1, 20261122T200746Z-claude-1-coord-305c).
+ */
+export type StripeConnecting = { id: string; country: string; email: string; name: string; at: string; pressedAt: string; sends: number };
+/** A replaced or lapsed attempt (Store.stripeConnectReplaced): its id, its country, when it was first written and when it stopped being used. */
+export type StripeConnectReplaced = { id: string; country: string; at: string; until: string };
+/** How many replaced or lapsed attempts a store keeps: the newest, a few hundred bytes of its record at the most. */
+export const STRIPE_CONNECT_REPLACED_KEPT = 5;
+/**
+ * How long an open attempt holds the store against its deletion and its closing (deleteStore, lib/closed-store-data.ts
+ * prepareStore), from its last press: one day, the coordinator's choice on #5095 (20261122T070141Z-claude-1-coord-ce9a),
+ * so a store is not kept from its owner's deletion longer than a lost answer needs to be pressed again. The same day
+ * keeps a press in another country from replacing it (20261122T200809Z-claude-1-coord-b0d3).
+ */
+export const STRIPE_CONNECT_HOLD_SECONDS = 24 * 60 * 60;
+/**
+ * How long an open attempt is reused, from when it was first written: inside the 30 days Stripe keeps an API v2
+ * idempotency key ("they occur within 30 days of each other", https://docs.stripe.com/api-v2-overview, read 22 November
+ * 2026), with a day to spare, so a press again in the same country always asks with a key Stripe still knows and gets
+ * back the account it made. Past that, asking with it may make a second account, so a new attempt replaces it.
+ */
+export const STRIPE_CONNECT_REUSE_SECONDS = 29 * 24 * 60 * 60;
+const CONNECT_ATTEMPT_ID = /^[0-9a-f]{32}$/;
+/**
+ * An attempt as kept on the record, or undefined. One past STRIPE_CONNECT_REUSE_SECONDS from its first write, and past
+ * the day its last press holds the store, is read as none (the coordinator's df44 on #5095; OWNER-20261124-0350, item
+ * 5): it no longer holds the store and is never reused, so the creator's address and name it was asked with go at the
+ * record's next save instead of staying for good. One past its 29 days but still inside that day is kept, never reused.
+ */
+function readConnecting(raw: unknown, now = Date.now(), anyAge = false): StripeConnecting | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.id !== "string" || !CONNECT_ATTEMPT_ID.test(v.id) || typeof v.country !== "string" || !/^[a-z]{2}$/.test(v.country) ||
+      typeof v.email !== "string" || !v.email || v.email.length > 320 || typeof v.name !== "string" || v.name.length > 200 ||
+      typeof v.at !== "string" || !Number.isFinite(Date.parse(v.at))) return undefined;
+  // A press and a count not written (or not readable) are read as the first press having sent the key: never as a key
+  // that never left, which would let a refusal close an attempt Stripe may hold an account for.
+  const pressedAt = typeof v.pressedAt === "string" && Number.isFinite(Date.parse(v.pressedAt)) ? v.pressedAt : v.at;
+  const sends = typeof v.sends === "number" && Number.isSafeInteger(v.sends) && v.sends >= 1 ? v.sends : 1;
+  // Kept while it is reused, and for the day its last press holds the store (OWNER-20261124-0350, item 5): a press just
+  // before the 29th day holds the store its whole day, and another save in that day keeps the attempt its answer needs.
+  if (!anyAge && now - Date.parse(v.at) >= STRIPE_CONNECT_REUSE_SECONDS * 1000 && now - Date.parse(pressedAt) >= STRIPE_CONNECT_HOLD_SECONDS * 1000) return undefined;
+  return { id: v.id, country: v.country, email: v.email, name: v.name, at: v.at, pressedAt, sends };
+}
+/**
+ * The store with the attempt kept on its record whatever its age, for the answer to a press (finishStripeConnect,
+ * clearStripeConnect) only: a press begun a moment before the attempt turned STRIPE_CONNECT_REUSE_SECONDS old and
+ * answered a moment after is still that attempt's answer (Claude 4 3Rj's NIT on #5095), so the account is written or
+ * the refusal closes it, never left for a press again with a new key. Both drop the attempt in the save they make, so
+ * one past its age is never written back.
+ */
+function withAttemptOfAnyAge(store: Store, raw: string): Store {
+  let kept: StripeConnecting | undefined;
+  try {
+    kept = readConnecting((JSON.parse(raw) as { stripeConnecting?: unknown }).stripeConnecting, Date.now(), true);
+  } catch {
+    kept = undefined;
+  }
+  return kept ? { ...store, stripeConnecting: kept } : store;
+}
+const REPLACED_DAY = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/;
+/** The replaced or lapsed attempts kept on a record, each read whole (an entry in another shape is not one), newest last. */
+function readReplaced(raw: unknown): StripeConnectReplaced[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((v): v is StripeConnectReplaced => Boolean(v) && typeof v === "object" && !Array.isArray(v) &&
+    typeof v.id === "string" && CONNECT_ATTEMPT_ID.test(v.id) && typeof v.country === "string" && /^[a-z]{2}$/.test(v.country) &&
+    typeof v.at === "string" && REPLACED_DAY.test(v.at) && typeof v.until === "string" && REPLACED_DAY.test(v.until))
+    .map((v) => ({ id: v.id, country: v.country, at: v.at, until: v.until }))
+    .slice(-STRIPE_CONNECT_REPLACED_KEPT);
+}
+/** `list` with `attempt` added as replaced or lapsed at `until` (once per id), the newest STRIPE_CONNECT_REPLACED_KEPT kept. */
+function withReplaced(list: StripeConnectReplaced[], attempt: Pick<StripeConnecting, "id" | "country" | "at">, until: string): StripeConnectReplaced[] {
+  if (list.some((r) => r.id === attempt.id)) return list;
+  return [...list, { id: attempt.id, country: attempt.country, at: attempt.at, until }].slice(-STRIPE_CONNECT_REPLACED_KEPT);
+}
+/**
+ * The replaced attempts a record keeps, with its own attempt added when it has lapsed (past STRIPE_CONNECT_REUSE_SECONDS,
+ * so read as none): the next save drops the attempt's address and name and keeps its id (Claude 1 2as's LOW 2 on #5095).
+ */
+function replacedOf(value: { stripeConnecting?: unknown; stripeConnectReplaced?: unknown }): StripeConnectReplaced[] {
+  const kept = readReplaced(value.stripeConnectReplaced);
+  const any = readConnecting(value.stripeConnecting, Date.now(), true);
+  if (!any || readConnecting(value.stripeConnecting)) return kept;
+  return withReplaced(kept, any, new Date(Date.parse(any.at) + STRIPE_CONNECT_REUSE_SECONDS * 1000).toISOString());
+}
+function sinceOf(when: string | undefined, now: number): number {
+  const at = when ? Date.parse(when) : NaN;
+  return Number.isFinite(at) ? now - at : Infinity;
+}
+/** Whether an attempt still holds the store: open, and pressed less than STRIPE_CONNECT_HOLD_SECONDS ago. */
+export function connectingHolds(store: Pick<Store, "stripeConnecting">, now = Date.now()): boolean {
+  return sinceOf(store.stripeConnecting?.pressedAt, now) < STRIPE_CONNECT_HOLD_SECONDS * 1000;
+}
+/** Whether an open attempt is still reused by a press again: written less than STRIPE_CONNECT_REUSE_SECONDS ago. */
+export function connectingReusable(store: Pick<Store, "stripeConnecting">, now = Date.now()): boolean {
+  return sinceOf(store.stripeConnecting?.at, now) < STRIPE_CONNECT_REUSE_SECONDS * 1000;
+}
+
 /** The same, for the customer and subscription that pay us. */
 export const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
 export const SUBSCRIPTION_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -1084,6 +1202,8 @@ function parseStore(raw: unknown): Store | null {
         STRIPE_ACCOUNT_PATTERN.test(value.stripeAccountId)
           ? value.stripeAccountId
           : null,
+      ...(readConnecting(value.stripeConnecting) ? { stripeConnecting: readConnecting(value.stripeConnecting) } : {}),
+      ...(replacedOf(value).length ? { stripeConnectReplaced: replacedOf(value) } : {}),
       stripeChargesEnabled: value.stripeChargesEnabled === true,
       stripeCheckedAt: value.stripeCheckedAt ?? "",
       stripeCustomerId:
@@ -2184,7 +2304,11 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
  * to product records first if it has not been yet, and hands `work` the store
  * and the way to save it. Returns null when the address has no store.
  */
-async function withStore<T>(email: string, work: (store: Store, save: Save, held: Held) => Promise<T>): Promise<T | null> {
+async function withStore<T>(
+  email: string,
+  work: (store: Store, save: Save, held: Held) => Promise<T>,
+  options: { attemptOfAnyAge?: boolean } = {},
+): Promise<T | null> {
   if (!email || !isRedisConfigured()) return null;
   const owner = await ownerKey(email);
   let held: Held;
@@ -2199,6 +2323,7 @@ async function withStore<T>(email: string, work: (store: Store, save: Save, held
     let store = parseStore(raw);
     if (!store) return null;
     if (!store.catalog.id) store = await moveToRecords(owner, store, raw as string, held);
+    else if (options.attemptOfAnyAge && !store.stripeConnecting) store = withAttemptOfAnyAge(store, raw as string);
     let current = store;
     const save: Save = async (next, change = {}) => {
       current = await commit(owner, held, current, next, change);
@@ -2475,7 +2600,7 @@ export async function settleDeletedStore(gone: { ref: string; sid: string; email
 export type DeleteResult =
   /** `unsure`: the record is gone, but its addresses' holds and its places' release were not confirmed (rule 24). */
   | { ok: true; store: Store; unsure?: true }
-  | { ok: false; reason: "none" | "first" | "products" | "paying" | "assistant" | "assistant_due" | "domain" | "closing" };
+  | { ok: false; reason: "none" | "first" | "products" | "paying" | "assistant" | "assistant_due" | "domain" | "closing" | "stripe_connecting" };
 
 /**
  * Deletes one of an account's other stores, while there is nothing in it to
@@ -2524,6 +2649,9 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
     const plan = store.assistantPlan;
     if (plan?.subscriptionId && !plan.active && !plan.cancelsAtEnd && plan.terminal !== true) return { ok: false, reason: "assistant_due" };
     if (store.domain) return { ok: false, reason: "domain" };
+    // Its Stripe account is being opened (Codex L-20261120-0258): Stripe may already hold an account with the creator's
+    // address that only this record can name. Held while the attempt can still be finished with its idempotency key.
+    if (connectingHolds(store)) return { ok: false, reason: "stripe_connecting" };
     // A store whose plan ended is closing: its members are held, then refunded what they paid for and lost, and
     // told, all found by its record. Deleted by hand, the daily runs dropped it as gone and its members stayed paused
     // at Stripe for good, unrefunded and never told (Claude 7's hunt). It is removed by its closing instead, as a
@@ -2800,6 +2928,99 @@ export type StripeAccountResult =
  * "moved". An account forgotten, or another one connected, while Stripe was
  * being asked is never written over (the studio's Stripe routes).
  */
+/**
+ * Writes down a press that asks Stripe to open the creator's account, before Stripe is asked (Codex L-20261120-0258),
+ * under the store's lock. The store's own attempt is reused while its key is (STRIPE_CONNECT_REUSE_SECONDS) and the press
+ * is for its country and its address (OWNER-20261124-0350, item 2), so a press again, or a second tab, asks with the same
+ * idempotency key and gets the same account. `{ held }` when the press has another address, or the attempt is past its
+ * 29 days, and its last press was less than a day ago (item 5): nothing is asked; past that day a new attempt replaces it.
+ * Each press is written on it first: its time (which starts the day it holds the store again) and its count of sends.
+ * `{ other }` when an open attempt for another country was pressed less than a day ago (Claude 7 xAF on #5095): an
+ * account's country is fixed for good, so nothing is asked of Stripe, and the creator is told. Past that day, a press
+ * in another country replaces it (the coordinator's decision, 20261122T200809Z-claude-1-coord-b0d3): an account Stripe
+ * may have made for the old one is then known only to Stripe and the creator, a residue told in #5095. Null when the
+ * store is gone, is another store, already has an account, or its erasure has begun (as lib/store.ts withLiveStore:
+ * a store left half erased is never held open by a new account; 20261122T200746Z-claude-1-coord-305c).
+ */
+export async function beginStripeConnect(
+  email: string,
+  sid: string,
+  ask: { country: string; email: string; name: string },
+  now = Date.now(),
+): Promise<StripeConnecting | { other: StripeConnecting } | { held: StripeConnecting } | null> {
+  return withStore(email, async (store, save) => {
+    if (store.sid !== sid || store.stripeAccountId) return null;
+    if ((await erasingSince(storeRef(store))) !== null) return null;
+    const pressed = new Date(now).toISOString();
+    const askEmail = ask.email.slice(0, 320);
+    const open = store.stripeConnecting;
+    let replaced = store.stripeConnectReplaced ?? [];
+    if (open) {
+      // Reused only for the same country and the same address it was asked with (OWNER-20261124-0350, item 2: after the
+      // sign-in address changed, an account is never asked for with the old one), and while Stripe keeps its key.
+      if (open.country === ask.country && open.email === askEmail && connectingReusable(store, now)) {
+        const again: StripeConnecting = { ...open, pressedAt: pressed, sends: open.sends + 1 };
+        await save({ ...store, stripeConnecting: again });
+        return again;
+      }
+      // Anything else waits the day its last press holds the store: Stripe may still be opening that account, and a
+      // new key now could open a second one. Another country is named to the creator; another address, or an attempt
+      // past its 29 days, is held (item 5: never a new key in the day a press past the 29th day holds the store).
+      if (connectingHolds(store, now)) return open.country !== ask.country ? { other: open } : { held: open };
+      console.error("a Stripe account attempt, pressed over a day ago, is replaced", store.sid);
+      // Its id stays on the record, the only way to its account's idempotency key (Claude 1 2as's LOW 2 on #5095).
+      replaced = withReplaced(store.stripeConnectReplaced ?? [], open, pressed);
+    }
+    const attempt: StripeConnecting = {
+      id: crypto.randomUUID().replace(/-/g, ""),
+      country: ask.country,
+      email: askEmail,
+      name: ask.name.slice(0, 200),
+      at: pressed,
+      pressedAt: pressed,
+      sends: 1,
+    };
+    await save({ ...store, stripeConnecting: attempt, ...(replaced.length ? { stripeConnectReplaced: replaced } : {}) });
+    return attempt;
+  });
+}
+
+/**
+ * Writes the account Stripe opened for an attempt and closes the attempt, in one save: only while the store is the same
+ * store, still has this attempt open and has no account (one written meanwhile is never written over). The store as it
+ * now is; null otherwise, the attempt then left open for a press again.
+ */
+export async function finishStripeConnect(email: string, sid: string, attemptId: string, accountId: string): Promise<Store | null> {
+  if (!STRIPE_ACCOUNT_PATTERN.test(accountId)) return null;
+  return withStore(email, async (store, save) => {
+    if (store.sid !== sid || store.stripeConnecting?.id !== attemptId || store.stripeAccountId) return null;
+    const { stripeConnecting: _done, ...rest } = store;
+    void _done;
+    return save({ ...rest, stripeAccountId: accountId, stripeChargesEnabled: false, stripeCheckedAt: new Date().toISOString() });
+  }, { attemptOfAnyAge: true });
+}
+
+/**
+ * Closes an attempt Stripe refused outright (no account made): only the same store's same attempt, and only while its
+ * key has been sent once, by the press that was refused (or, with whateverSends, for a cross-border refusal). A key sent before (a lost answer, then a refusal of the press
+ * again: a key rotated, a replay Stripe no longer makes) may hold an account at Stripe, so the attempt stays for a press
+ * again with the same key (MEDIUM 1, 20261122T200746Z-claude-1-coord-305c).
+ */
+export async function clearStripeConnect(email: string, sid: string, attemptId: string, options: { whateverSends?: boolean } = {}): Promise<boolean> {
+  const done = await withStore(email, async (store, save) => {
+    if (store.sid !== sid || store.stripeConnecting?.id !== attemptId) return false;
+    // A refusal that says no account can be made in that country (cross-border) proves no press ever made one, so it
+    // closes the attempt whatever its sends (the coordinator's df44 on #5095, optional point: a creator never holds the
+    // store from its closing by pressing once a day for a country Stripe refuses).
+    if (store.stripeConnecting.sends !== 1 && !options.whateverSends) return false;
+    const { stripeConnecting: _gone, ...rest } = store;
+    void _gone;
+    await save(rest as Store);
+    return true;
+  }, { attemptOfAnyAge: true });
+  return done === true;
+}
+
 export async function setStripeAccount(
   email: string,
   accountId: string,

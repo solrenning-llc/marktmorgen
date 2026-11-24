@@ -74,7 +74,7 @@ import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX, finalScoreOf } from "@/lib/closing-holds";
-import { MAX_STORES_PER_ACCOUNT, STORE_ID_PATTERN, STRIPE_ACCOUNT_PATTERN, type Store, accountStores, closeStoreRecord, ERASING_KEY, erasingField, erasingSince, handleLeadsToStore, saleHandles, settleDeletedStore, storeExactly, storeFolder, storeForEmailSeen, storeForRefExact, storeHandleKey, storeRecordAt, storeRef } from "@/lib/store";
+import { MAX_STORES_PER_ACCOUNT, STORE_ID_PATTERN, STRIPE_ACCOUNT_PATTERN, type Store, accountStores, closeStoreRecord, connectingHolds, ERASING_KEY, erasingField, erasingSince, handleLeadsToStore, saleHandles, settleDeletedStore, storeExactly, storeFolder, storeForEmailSeen, storeForRefExact, storeHandleKey, storeRecordAt, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStoresExact, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -278,6 +278,12 @@ export class EntryNotWithdrawnError extends UnknownReplyError {}
  * as lib/plan-closing.ts closeOne does for a plan that runs again ("running").
  */
 export class PlanRunsAgainError extends Error {}
+/**
+ * Its Stripe account is being opened (Codex L-20261120-0258, lib/store.ts connectingHolds): Stripe may hold an account
+ * with the creator's address that only this record can name, so the record is not closed while the attempt holds. The
+ * store waits a walk, untouched, as for anything not read (coordinator on #5095, 20261122T070141Z-claude-1-coord-ce9a).
+ */
+export class StripeConnectingError extends Error {}
 
 /** A plan that runs, as closeOne reads it: paid or in trial (standingOf). One ended, or never had, is not running. */
 function planRuns(store: Store, now: number): boolean {
@@ -444,6 +450,9 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   if (planRuns(store, now) && finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, ref]])) === null && (await erasingSince(ref)) === null) {
     throw new PlanRunsAgainError(`a closing store's plan runs again: ${ref}`);
   }
+  // An attempt to open its Stripe account that still holds keeps the store, read on the walk's record before anything
+  // of it is touched (no command), and again under the lock below on the record read there.
+  if (connectingHolds(store, now)) throw new StripeConnectingError(`a closing store's Stripe account is being opened: ${ref}`);
   const { marks } = await marksOf(store);
   const extra: string[] = [];
   // Read whole or not at all: a team not read is never "no teammates" (rule 24); it throws, and the walk waits.
@@ -564,6 +573,9 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     // the record is the one closeStoreRecord read again.
     // A store whose erasure began on an earlier walk (its mark there, read exactly under the lock) is erased to the end:
     // part of it is already gone, and it is never left open half erased (Codex N1's HIGH on #3156).
+    // An attempt to open its Stripe account written since the walk's read (lib/store.ts beginStripeConnect, under this
+    // same lock): the record stays and nothing of the live store goes; the store waits a walk.
+    if (fresh && connectingHolds(fresh, now)) throw new StripeConnectingError(`a closing store's Stripe account is being opened: ${ref}`);
     const began = (await erasingSince(ref)) !== null;
     if (fresh && planRuns(fresh, now) && finalGone !== 1 && !began) {
       if (finalGone === 0) throw new PlanRunsAgainError(`a closing store's plan runs again: ${ref}`);

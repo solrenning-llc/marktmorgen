@@ -8,15 +8,20 @@ import {
   isConnectConfigured,
   normaliseCountry,
 } from "@/lib/stripe-connect";
-import { setStripeAccount } from "@/lib/store";
+import { beginStripeConnect, clearStripeConnect, finishStripeConnect, storeForEmail } from "@/lib/store";
+import { StoreFullError } from "@/lib/store-full";
 import { limited } from "@/lib/request-guard";
 
 /**
  * Sends the creator into Stripe to open or attach their own account.
  *
- * The account is opened once and written down before the creator leaves, so a
- * trip that is abandoned halfway does not leave an account behind that nobody
- * here knows about.
+ * The account is opened once and written down before the creator leaves. The
+ * attempt is written on the store before Stripe is asked, and Stripe is asked
+ * with its idempotency key (Codex L-20261120-0258): an answer lost on the way is
+ * found again by pressing once more, two tabs never get two accounts, and the store is
+ * not deleted or closed for a day after each press. A store deleted later than
+ * that, with an answer lost and never pressed again, leaves its account known
+ * only to Stripe and the creator (a residue told in #5095).
  */
 export async function POST(request: NextRequest) {
   const creator = await creatorFrom(request, "payments");
@@ -43,24 +48,67 @@ export async function POST(request: NextRequest) {
   try {
     let accountId = store.stripeAccountId;
     if (!accountId) {
-      accountId = await createConnectedAccount({
-        email: store.email,
-        country,
-        displayName: store.name || store.handle,
-      });
-      // Written only while the store still has none: when two tabs connect at once, the first account written
-      // stays the store's, and the late tab is not sent to onboard one the store does not keep.
-      const saved = await setStripeAccount(ref, accountId, false, { expected: null });
-      if (!saved.ok) return away(origin, studio("stripe=error"));
-      // Where sales are paid is the setting worth stealing a session for, so
-      // the creator is told at their sign-in address (lib/account-notice.ts).
-      after(() => noticeCreator(store, { kind: "stripe-connected" }));
+      // The store's open attempt, or a new one written down first, with what Stripe is asked with.
+      const attempt = await beginStripeConnect(ref, store.sid, { country, email: store.email, name: store.name || store.handle });
+      // An account is still being opened in another country: never asked for in a country not chosen now.
+      if (attempt && "other" in attempt) return away(origin, studio("stripe=attempt-country"));
+      // The last press, with other details (the sign-in address changed) or past its 29 days, may still be opening an
+      // account: nothing is asked until its day is over (OWNER-20261124-0350, items 2 and 5).
+      if (attempt && "held" in attempt) return away(origin, studio("stripe=attempt-held"));
+      if (!attempt) {
+        // Another tab finished first: the account it wrote is the store's; otherwise nothing is known.
+        const now = await storeForEmail(ref);
+        if (now?.sid !== store.sid || !now.stripeAccountId) return away(origin, studio("stripe=error"));
+        accountId = now.stripeAccountId;
+      } else {
+        try {
+          accountId = await createConnectedAccount({
+            email: attempt.email,
+            country: attempt.country,
+            displayName: attempt.name,
+            idempotencyKey: `connect-${store.sid}-${attempt.id}`,
+          });
+        } catch (error) {
+          // Only a refusal that says nothing was made, of the first press that ever sent this key, closes the attempt
+          // (clearStripeConnect checks the count again under the lock); anything else keeps it for the next press: a
+          // refusal of a press again says nothing of what an earlier one may have made (20261122T200746Z-claude-1-coord-305c).
+          if (error instanceof StripeConnectError && error.madeNothing && attempt.sends === 1) await clearStripeConnect(ref, store.sid, attempt.id).catch(() => false);
+          // A cross-border refusal says no press could ever open an account in that country: closed whatever its sends.
+          else if (error instanceof StripeConnectError && error.isCrossBorderRefusal) await clearStripeConnect(ref, store.sid, attempt.id, { whateverSends: true }).catch(() => false);
+          // A refusal of a press again keeps the attempt, so the creator is asked the same until its key's window ends;
+          // they are told so, with a way out, never left pressing a button that is refused every time (Claude 7 xAF's
+          // LEVE on #5095 @f858eeffe9).
+          if (error instanceof StripeConnectError && error.madeNothing && attempt.sends !== 1 && !error.isCrossBorderRefusal) {
+            console.error("stripe connect refused on a press again; the attempt is kept", error);
+            return away(origin, studio("stripe=attempt-refused"));
+          }
+          throw error;
+        }
+        // Written with the attempt closed, only while it is still the store's. Two tabs ask with one key: while the first
+        // request is still under way Stripe answers the second 409 ("another request with the same key is still
+        // executing", https://docs.stripe.com/error-low-level, read 24 November 2026; stated for API v1, nothing said for
+        // v2), so the late tab is told to try again and its press again gets the same account; a late tab whose own
+        // answer comes after the first one wrote the account finds it written and goes on with it (OWNER-20261124-0350,
+        // item 6).
+        const saved = await finishStripeConnect(ref, store.sid, attempt.id, accountId);
+        if (saved) {
+          // Where sales are paid is the setting worth stealing a session for, so the creator is told at their
+          // sign-in address (lib/account-notice.ts), once: by the request that wrote the account.
+          after(() => noticeCreator(store, { kind: "stripe-connected" }));
+        } else {
+          const now = await storeForEmail(ref);
+          if (now?.sid !== store.sid || now.stripeAccountId !== accountId) return away(origin, studio("stripe=error"));
+        }
+      }
     }
 
     const link = await createOnboardingLink(accountId, origin, store.sid);
     return new Response(null, { status: 303, headers: { Location: link } });
   } catch (error) {
     console.error("stripe connect failed", error);
+    // The store's record is at its ceiling, so the attempt could not be written and nothing was asked of Stripe: the
+    // creator is told what to do, never a bare "try again" (OWNER-20261124-0350, item 3).
+    if (error instanceof StoreFullError) return away(origin, studio("stripe=store-full"));
     // Worth its own answer: nothing the creator does will fix this one, and a
     // vague "try again" would have them trying forever.
     if (error instanceof StripeConnectError && error.isCrossBorderRefusal) {

@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   part("Every offered country keeps the creator's full Stripe dashboard and Stripe responsibilities");
   for (const country of COUNTRIES) {
     const before = calls.length;
-    const id = await createConnectedAccount({ email: "creator@example.com", country: country.code, displayName: "Synthetic creator" });
+    const id = await createConnectedAccount({ email: "creator@example.com", country: country.code, displayName: "Synthetic creator", idempotencyKey: `connect-synthetic-${country.code}` });
     is(country.code + ": exactly one intercepted request", calls.length - before, 1);
     is(country.code + ": return the account Stripe confirmed", id, "acct_fixture004");
     const call = calls.at(-1)!;
@@ -47,11 +47,13 @@ async function main(): Promise<void> {
       call.headers.get("Stripe-Version"), call.headers.get("Authorization"), call.headers.get("Content-Type"),
     ], ["2026-08-26.dahlia", "Bearer sk_test_configuration_regression_only", "application/json"]);
     is(country.code + ": account creation is on the platform, without impersonating a connected account", call.headers.get("Stripe-Account"), null);
+    // Codex L-20261120-0258: the attempt's idempotency key goes with it, so a request made again gets the same account.
+    is(country.code + ": asked with the attempt's idempotency key", call.headers.get("Idempotency-Key"), `connect-synthetic-${country.code}`);
   }
   part("Unapproved countries never reach even the synthetic provider");
   for (const country of ["br", "", "unknown"]) {
     const before = calls.length;
-    await assert.rejects(createConnectedAccount({ email: "creator@example.com", country, displayName: "Synthetic creator" }), /country is needed/);
+    await assert.rejects(createConnectedAccount({ email: "creator@example.com", country, displayName: "Synthetic creator", idempotencyKey: "connect-synthetic-refused" }), /country is needed/);
     is(country + ": no account request", calls.length, before);
   }
   done();

@@ -1385,6 +1385,24 @@ export function teamLogFenceUsd(tier: Tier): number {
   return (STORE_ALLOWANCES[tier].studio + ESSENTIAL_PER_DAY * DAY_WINDOWS) * TEAM_LOG_LINES_PER_STUDIO_REQUEST * TEAM_LOG_FENCE_COMMANDS * COMMAND;
 }
 
+/**
+ * The Stripe connect press's second turn of the store's lock (lib/store.ts beginStripeConnect, then finishStripeConnect
+ * or clearStripeConnect; Codex L-20261120-0258 on #5095, the coordinator's df44): a press with no account yet writes
+ * its attempt under the lock before Stripe is asked, then writes the account (or closes the attempt) under it again.
+ * Measured in tests/stripe-connect-erasure-race.test.ts on every branch of a press (OWNER-20261124-0350, item 7; Claude 3
+ * xvBY8 on #5095), as Upstash bills them (a script counted as one plus every call inside it): the dearest is a press
+ * that opens the account or clears its attempt on a store whose first catalog page is full (each write of the record
+ * reads that page again, buildHead), 36, and 38 by reading with bump products on that page; another tab having written
+ * the account first, the store read again, 29. Priced at 42, above every branch: STRIPE_CONNECT_PRESS_EXTRA_COMMANDS
+ * more than the studio unit's twenty plus TAKE_COMMANDS and LOCKED_UNTIL_STAR_COMMANDS, and the store's record read and
+ * written once more and read once again, at MAX_STORE_BYTES each. Priced on every studio request of the month as if each were such a press (the press is a
+ * studio request, counted by studioAccess like any other).
+ */
+export const STRIPE_CONNECT_PRESS_EXTRA_COMMANDS = 42 - (20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS);
+export function stripeConnectPressUsd(tier: Tier): number {
+  return STORE_ALLOWANCES[tier].studio * (STRIPE_CONNECT_PRESS_EXTRA_COMMANDS * COMMAND + 3 * MAX_STORE_BYTES * DB_BYTE);
+}
+
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database, and lockedUntil's
@@ -3053,6 +3071,16 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/traffic.ts", names: ["noteReadStore(store.statsId, resting || store.suspended ? null : store, now, at)", "if (n <= limit) return { counted: \"all\", at: n - hold };"] },
     ],
     basis: "Readings have their own count in the store's window, apart from its public requests, so they never make its pages rest; it stops at one reading for every READ_SAMPLE requests the public pages may answer (readCeiling). The slot is reserved before a token is made (the review of #2571, 5 November 2026): a page gets a token only when its own request, counted by its page check, is the one place of its block of READ_SAMPLE drawn for readings (readSlot), and once for it, so a window's public requests carry at most its ceiling of tokens, every one priced here at readBeaconCost (tests/traffic-cost.ts, 10 commands at the worst, every billed command counted, the cost lane's CX-35; since Codex G's review of #2571 the mark and the count are one script, whose count's expiry is priced once a window), whether it is counted or refused, and none inside the visits line, with the window's ceiling mark once for each ceiling its tokens can carry (readCeilingMarksCost, #2571, the review at 5d245b24); held over a whole window, every page drawn, in tests/page-read-ceiling.test.ts. A token sent again costs no command on the server that spent it (spentHere) and, on another, its mark and one of the window's readings, after which that server asks nothing more of the window: sending one again anywhere, any number of times, stays inside the window's ceiling and one refusal a server (the review of #2571 at 59e575c0, tests/page-read-replay.test.ts).",
+  },
+  {
+    id: "stripe-connect-press",
+    feature: "The Stripe connect press's second turn of the store's lock: the attempt written before Stripe is asked, then the account written or the attempt closed (#5095)",
+    monthlyUsd: (tier) => stripeConnectPressUsd(tier),
+    sources: [
+      { file: "lib/store.ts", names: ["beginStripeConnect", "finishStripeConnect", "clearStripeConnect"] },
+      { file: "app/api/stripe/connect/route.ts", names: ["beginStripeConnect", "finishStripeConnect"] },
+    ],
+    basis: "A press with no account yet: STRIPE_CONNECT_PRESS_EXTRA_COMMANDS more billed commands than the studio unit's twenty plus TAKE_COMMANDS and LOCKED_UNTIL_STAR_COMMANDS (priced at 42 a press, above its dearest branch: 36 measured with a full first catalog page, 38 by reading with bump products; each branch measured in tests/stripe-connect-erasure-race.test.ts; OWNER-20261124-0350, item 7), and the store's record read and written once more and read once again, at MAX_STORE_BYTES each, priced on every studio request of the month as if each were such a press (the coordinator's df44 on #5095).",
   },
   {
     id: "studio",

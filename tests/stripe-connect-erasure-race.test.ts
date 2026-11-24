@@ -1,0 +1,704 @@
+/**
+ * Codex L-20261120-0258 (row 35 of #5010, MEDIUM): opening a creator's Stripe account (app/api/stripe/connect) created
+ * the account at Stripe, with the creator's address and the store's name, before anything here knew of it. A store
+ * deleted while that request was in flight was gone when the answer came back, the account id was thrown away, and
+ * an account holding the creator's data was left at Stripe with nothing here able to finish, disconnect or erase it.
+ * Two tabs, or a press again after a lost answer, each opened an account of their own.
+ *
+ * Now the attempt is written on the store before Stripe is asked (beginStripeConnect), with the very address, name
+ * and country it sends, and Stripe is asked with one idempotency key per attempt: a press again after a lost answer
+ * gets the same account back, never a second one, while Stripe keeps the key (29 days here, inside its 30). For a day
+ * after each press, the store is neither deleted ("stripe_connecting") nor closed by the walk. A refusal that says no
+ * account was made clears it only when the key had never been sent before; an answer that says nothing certain keeps
+ * it for the next press. A store deleted more than a day after its last press, with an answer lost and never pressed
+ * again, leaves its account known only to Stripe and the creator: a residue told in #5095, not covered here.
+ * Synthetic stores and sessions; Stripe mocked; MemoryRedis (tests/redis-stub.ts).
+ */
+import { NextRequest } from "next/server";
+import { POST as connectPOST } from "@/app/api/stripe/connect/route";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { addProduct, setStripeAccount, storeForEmail } from "@/lib/store";
+import { afterTasks } from "./next-server-after-world";
+import { ERASING_KEY, MAX_STORE_BYTES, STRIPE_CONNECT_HOLD_SECONDS, STRIPE_CONNECT_REPLACED_KEPT, STRIPE_CONNECT_REUSE_SECONDS, beginStripeConnect, claimHandle, clearStripeConnect, createStore, deleteStore as deleteWith, erasingField, finishStripeConnect, setCommunity, storeForId, storeRef } from "@/lib/store";
+import { BATCH_KEY, StripeConnectingError, prepareStore, queueDeleted } from "@/lib/closed-store-data";
+import { FINAL_INDEX } from "@/lib/closing-holds";
+import { LOCKED_UNTIL_STAR_COMMANDS, STRIPE_CONNECT_PRESS_EXTRA_COMMANDS, TAKE_COMMANDS } from "./plan-cost-registry";
+import { StripeConnectError } from "@/lib/stripe-connect";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+process.env.STRIPE_SECRET_KEY = "sk_test_connect_erasure_race_only";
+const deleteStore = (ref: string) => deleteWith(ref, queueDeleted);
+
+/** Stripe's side: one account per idempotency key, as Stripe replays a request made again with the same key. */
+const byKey = new Map<string, string>();
+let opened = 0;
+let keys: (string | null)[] = [];
+/** What happens while Stripe is creating the account, once. */
+let meanwhile: (() => Promise<void>) | null = null;
+/** How Stripe answers the next account creation. */
+let answer: "ok" | "lost" | "refused" | "down" | "idempotency" | "replay-gone" | "bodiless" | "invalid" = "ok";
+/**
+ * Keys whose request is still under way: a second request with one of them is answered 409, as Stripe documents for a
+ * request with the same key still executing ("If a 409 indicates that another request with the same key is still
+ * executing, wait and retry with that key and the same parameters", https://docs.stripe.com/error-low-level, read 24
+ * November 2026, for API v1; API v2 states nothing of it), never replayed at once (OWNER-20261124-0350, item 6).
+ */
+const inFlight = new Set<string>();
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  if (url.origin !== "https://api.stripe.com") throw new Error(`Unexpected synthetic provider request: ${url}`);
+  if (url.pathname === "/v2/core/accounts" && init?.method === "POST") {
+    const key = new Headers(init.headers).get("idempotency-key");
+    keys.push(key);
+    if (key && inFlight.has(key)) {
+      return Response.json({ error: { type: "idempotency_error", message: "Synthetic: a request with this key is still being processed." } }, { status: 409 });
+    }
+    if (answer === "bodiless") {
+      // A 4xx that is not Stripe's: no JSON error body (a proxy in the way), so nothing says Stripe refused it.
+      answer = "ok";
+      return new Response("Bad Request", { status: 400 });
+    }
+    if (answer === "invalid") {
+      answer = "ok";
+      return Response.json({ error: { type: "invalid_request_error", code: "parameter_invalid_empty", message: "Synthetic: a parameter is missing." } }, { status: 400 });
+    }
+    if (answer === "down") {
+      answer = "ok";
+      return Response.json({ error: { type: "api_error", message: "Synthetic outage." } }, { status: 503 });
+    }
+    if (answer === "replay-gone") {
+      // A plain 400 that by itself says nothing was made (a key rotated, a replay Stripe no longer makes): after an
+      // earlier send of the same key it proves nothing about what that send made (coordinator's MEDIUM 1 on #5095).
+      answer = "ok";
+      return Response.json({ error: { type: "invalid_request_error", message: "Synthetic: this request can no longer be replayed." } }, { status: 400 });
+    }
+    if (answer === "idempotency") {
+      // Stripe's own shape for a key it cannot replay: its type says so, its code is another word.
+      answer = "ok";
+      return Response.json({ error: { type: "idempotency_error", code: "idempotency_key_in_use", message: "Synthetic." } }, { status: 400 });
+    }
+    if (answer === "refused") {
+      answer = "ok";
+      return Response.json({ error: { code: "cross_border_connected_account_creation_not_allowed", message: "Not here." } }, { status: 400 });
+    }
+    let id = key ? byKey.get(key) : undefined;
+    if (!id) {
+      opened += 1;
+      id = `acct_1Synthetic${opened}`;
+      if (key) byKey.set(key, id);
+    }
+    const step = meanwhile;
+    meanwhile = null;
+    if (key) inFlight.add(key);
+    try {
+      if (step) await step();
+    } finally {
+      if (key) inFlight.delete(key);
+    }
+    if (answer === "lost") {
+      answer = "ok";
+      throw new TypeError("fetch failed: the answer was lost after Stripe made the account");
+    }
+    return Response.json({ id });
+  }
+  if (url.pathname === "/v2/core/account_links") return Response.json({ url: "https://connect.stripe.com/setup/synthetic" });
+  throw new Error(`Unexpected synthetic provider request: ${url}`);
+}) as typeof fetch;
+
+async function extraStore(owner: string, first: string, extra: string) {
+  await claimHandle(owner, first, `${first} store`, "");
+  const made = await createStore(owner, extra, `${extra} store`, "");
+  if (!made.ok) throw new Error(`no extra store: ${JSON.stringify(made)}`);
+  return made.store;
+}
+
+async function connect(owner: string, sid: string, country = "US") {
+  const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
+  const form = new FormData();
+  form.set("country", country);
+  const response = await connectPOST(new NextRequest("https://marktmorgen.com/api/stripe/connect", {
+    method: "POST", headers: { origin: "https://marktmorgen.com", host: "marktmorgen.com", cookie, "x-nimbus-store": sid }, body: form,
+  }));
+  const location = new URL(response.headers.get("location") ?? "", "https://marktmorgen.com");
+  // The host compared whole, never a prefix of the address (CodeQL js/incomplete-url-substring-sanitization).
+  return location.protocol === "https:" && location.host === "connect.stripe.com" ? "onboarding" : location.searchParams.get("stripe");
+}
+
+// Each part starts from an empty database: its own stores, and none of the studio's shared pools spent by the parts before.
+const reset = () => { redis.clear(); byKey.clear(); inFlight.clear(); opened = 0; keys = []; meanwhile = null; answer = "ok"; };
+
+async function main(): Promise<void> {
+  redis.clear();
+  console.error = () => {};
+
+  part("A store deleted while Stripe opens its account: refused, and the account is kept on the store");
+  {
+    reset();
+    const owner = "connect-race@example.com";
+    const store = await extraStore(owner, "connectracefirst", "connectraceextra");
+    let deleted: string = "not tried";
+    meanwhile = async () => {
+      const result = await deleteStore(storeRef(store));
+      deleted = result.ok ? "deleted" : result.reason;
+    };
+    const said = await connect(owner, store.sid);
+    is("the deletion that came in the middle is refused, saying why", deleted, "stripe_connecting");
+    const after = await storeForId(store.sid);
+    is("the store keeps the account Stripe made, so it can be finished, disconnected or erased", after?.stripeAccountId ?? null, "acct_1Synthetic1");
+    is("and the creator goes on to onboarding", said, "onboarding");
+    is("once written, the attempt no longer holds the store", (await deleteStore(storeRef(store))).ok, true);
+  }
+
+  part("An answer lost after Stripe made the account: the press again gets the same account, never a second one");
+  {
+    reset();
+    const owner = "connect-lost@example.com";
+    const store = await extraStore(owner, "connectlostfirst", "connectlostextra");
+    answer = "lost";
+    is("the first press says it failed", await connect(owner, store.sid), "error");
+    is("meanwhile the store cannot be deleted: Stripe may hold an account for it", (await deleteStore(storeRef(store))).ok ? "deleted" : "kept", "kept");
+    is("the second press goes on to onboarding", await connect(owner, store.sid), "onboarding");
+    is("one account at Stripe", opened, 1);
+    is("asked both times with one idempotency key", keys.length === 2 && keys[0] !== null && keys[0] === keys[1], true);
+    is("the store points at it", (await storeForId(store.sid))?.stripeAccountId ?? null, "acct_1Synthetic1");
+  }
+
+  part("A refusal that says no account was made clears the attempt");
+  {
+    reset();
+    const owner = "connect-refused@example.com";
+    const store = await extraStore(owner, "connectrefusedfirst", "connectrefusedextra");
+    answer = "refused";
+    is("the creator is told the country is not open", await connect(owner, store.sid), "country-unsupported");
+    is("nothing at Stripe", opened, 0);
+    is("and the store can be deleted", (await deleteStore(storeRef(store))).ok, true);
+  }
+
+  part("Two tabs at once open one account");
+  {
+    reset();
+    const owner = "connect-tabs@example.com";
+    const store = await extraStore(owner, "connecttabsfirst", "connecttabsextra");
+    let second: string | null = null;
+    meanwhile = async () => {
+      second = await connect(owner, store.sid);
+    };
+    const first = await connect(owner, store.sid);
+    // The late tab asks with the same key while the first request is still under way: Stripe answers 409, and the late
+    // tab is told to try again (OWNER-20261124-0350, item 6); its press again gets the same account, never a second.
+    is("the first tab goes on to onboarding; the late one is told to try again", [first, second], ["onboarding", "error"]);
+    is("one account at Stripe, with one key", [opened, new Set(keys).size], [1, 1]);
+    is("the store points at it", (await storeForId(store.sid))?.stripeAccountId ?? null, "acct_1Synthetic1");
+    is("the late tab's press again goes on with that account", await connect(owner, store.sid), "onboarding");
+    is("still one account", opened, 1);
+  }
+
+  part("A press again with another country is never asked for in the first one (Claude 7 xAF on #5095, MEDIUM)");
+  {
+    reset();
+    const owner = "connect-country@example.com";
+    const store = await extraStore(owner, "connectcountryfirst", "connectcountryextra");
+    answer = "down";
+    is("a German account is asked for and Stripe answers 503", await connect(owner, store.sid, "DE"), "error");
+    const asked = keys.length;
+    is("a press again choosing France is told an account is still being opened elsewhere", await connect(owner, store.sid, "FR"), "attempt-country");
+    is("and nothing is asked of Stripe for it", keys.length, asked);
+    is("the German attempt stays open", (await storeForId(store.sid))?.stripeConnecting?.country ?? null, "de");
+    is("choosing Germany again finishes it, with the same key", [await connect(owner, store.sid, "DE"), keys.length === asked + 1 && keys[asked] === keys[0]], ["onboarding", true]);
+  }
+
+  part("A Stripe idempotency_error keeps the attempt, whatever its code (coordinator on #5095, LEVE 2)");
+  {
+    reset();
+    is("an error whose type is idempotency_error is never read as nothing made", new StripeConnectError(400, "idempotency_key_in_use", "x", "idempotency_error").madeNothing, false);
+    const owner = "connect-idem@example.com";
+    const store = await extraStore(owner, "connectidemfirst", "connectidemextra");
+    answer = "idempotency";
+    is("the press says it failed", await connect(owner, store.sid), "error");
+    is("the attempt stays open for the press again", Boolean((await storeForId(store.sid))?.stripeConnecting), true);
+    is("and the store is still held against deletion", (await deleteStore(storeRef(store))).ok ? "deleted" : "kept", "kept");
+  }
+
+  part("An attempt is reused while Stripe keeps its v2 key (30 days), not only for the day it holds the store (LEVE 1)");
+  {
+    reset();
+    const owner = "connect-reuse@example.com";
+    const store = await extraStore(owner, "connectreusefirst", "connectreuseextra");
+    const twoDays = Date.now() - 2 * 24 * 60 * 60 * 1000;
+    const first = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Reuse" }, twoDays);
+    const firstId = first && "id" in first ? first.id : "none";
+    is("an attempt was written two days ago, its answer lost", firstId === "none", false);
+    is("a press again now goes on to onboarding", await connect(owner, store.sid), "onboarding");
+    is("asked with that attempt's key, so Stripe gives back the account it made", keys, [`connect-${store.sid}-${firstId}`]);
+    is("the store points at it", (await storeForId(store.sid))?.stripeAccountId ?? null, "acct_1Synthetic1");
+
+    reset();
+    const late = await extraStore("connect-late@example.com", "connectlatefirst", "connectlateextra");
+    const past = Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60) * 1000;
+    const stale = await beginStripeConnect(storeRef(late), late.sid, { country: "us", email: "connect-late@example.com", name: "Late" }, past);
+    const staleId = stale && "id" in stale ? stale.id : "none";
+    is("past the reuse window (inside Stripe's 30 days, a day to spare) a press again", await connect("connect-late@example.com", late.sid), "onboarding");
+    is("asks with a new key, never one Stripe may have forgotten", keys.length === 1 && keys[0] !== `connect-${late.sid}-${staleId}`, true);
+    is("the reuse window stays inside Stripe's 30 days", STRIPE_CONNECT_REUSE_SECONDS < 30 * 24 * 60 * 60 && STRIPE_CONNECT_REUSE_SECONDS > STRIPE_CONNECT_HOLD_SECONDS, true);
+  }
+
+  part("The closing walk does not close a store whose Stripe account is being opened (coordinator on #5095)");
+  {
+    reset();
+    const owner = "connect-closing@example.com";
+    const store = await extraStore(owner, "connectclosingfirst", "connectclosingextra");
+    const snapshot = await storeForId(store.sid);
+    if (!snapshot) throw new Error("no store");
+    await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Closing" });
+    const held = await storeForId(store.sid);
+    if (!held) throw new Error("no store");
+    let thrown: unknown = null;
+    try { await prepareStore(held); } catch (error) { thrown = error; }
+    is("prepared from a record with an open attempt: it waits, saying why", thrown instanceof StripeConnectingError, true);
+    is("and the record stays", Boolean(await storeForId(store.sid)), true);
+    thrown = null;
+    try { await prepareStore(snapshot); } catch (error) { thrown = error; }
+    is("prepared from a read taken before the attempt: seen under the lock, it waits", thrown instanceof StripeConnectingError, true);
+    is("and the record still stays, with the attempt on it", Boolean((await storeForId(store.sid))?.stripeConnecting), true);
+  }
+
+  part("A refusal of a press again never clears an attempt whose key was sent before (coordinator's MEDIUM 1 on #5095)");
+  {
+    reset();
+    const owner = "connect-twice@example.com";
+    const store = await extraStore(owner, "connecttwicefirst", "connecttwiceextra");
+    answer = "lost";
+    is("the first press: Stripe makes the account and the answer is lost", await connect(owner, store.sid), "error");
+    const first = (await storeForId(store.sid))?.stripeConnecting;
+    answer = "replay-gone";
+    is("the press again is refused, and the creator is told why, with a way out", await connect(owner, store.sid), "attempt-refused");
+    const kept = (await storeForId(store.sid))?.stripeConnecting;
+    is("the attempt stays, the same one, its key sent twice", [kept?.id === first?.id, kept?.sends], [true, 2]);
+    is("and the store is still held against deletion", (await deleteStore(storeRef(store))).ok ? "deleted" : "kept", "kept");
+    is("clearing it by hand is refused too: its key left more than once", await clearStripeConnect(storeRef(store), store.sid, first?.id ?? ""), false);
+    is("a third press finishes it with the same key", await connect(owner, store.sid), "onboarding");
+    is("one account at Stripe, the one the first press made", [opened, (await storeForId(store.sid))?.stripeAccountId ?? null, new Set(keys).size], [1, "acct_1Synthetic1", 1]);
+  }
+
+  part("Each press holds the store a day again, even on an attempt written days ago (coordinator's MEDIUM 2 on #5095)");
+  {
+    reset();
+    const owner = "connect-repress@example.com";
+    const store = await extraStore(owner, "connectrepressfirst", "connectrepressextra");
+    const threeDays = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Repress" }, threeDays);
+    let deleted = "not tried";
+    let walked: unknown = "not tried";
+    meanwhile = async () => {
+      const read = await storeForId(store.sid);
+      try { if (read) await prepareStore(read); walked = "prepared"; } catch (error) { walked = error; }
+      const result = await deleteStore(storeRef(store));
+      deleted = result.ok ? "deleted" : result.reason;
+    };
+    is("a press three days on goes on to onboarding", await connect(owner, store.sid), "onboarding");
+    is("while Stripe was asked, the deletion was refused", deleted, "stripe_connecting");
+    is("and the closing walk waited", walked instanceof StripeConnectingError, true);
+    is("the account is written on the store", (await storeForId(store.sid))?.stripeAccountId ?? null, "acct_1Synthetic1");
+  }
+
+  part("Another country is allowed a day after the last press, not 29 (coordinator's decision on #5095)");
+  {
+    reset();
+    const owner = "connect-switch@example.com";
+    const store = await extraStore(owner, "connectswitchfirst", "connectswitchextra");
+    const old = Date.now() - (STRIPE_CONNECT_HOLD_SECONDS + 60) * 1000;
+    const german = await beginStripeConnect(storeRef(store), store.sid, { country: "de", email: owner, name: "Switch" }, old);
+    const germanId = german && "id" in german ? german.id : "none";
+    is("a press for France a day and a minute after the German one goes on", await connect(owner, store.sid, "FR"), "onboarding");
+    is("asked with a new key, not the German attempt's", keys.length === 1 && keys[0] !== `connect-${store.sid}-${germanId}`, true);
+  }
+
+  part("A store whose erasure has begun opens no Stripe account (coordinator's LEVE 3 on #5095)");
+  {
+    reset();
+    const owner = "connect-erasing@example.com";
+    const store = await extraStore(owner, "connecterasingfirst", "connecterasingextra");
+    await redis.pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(store)), String(Date.now())]]);
+    is("the press is refused", await connect(owner, store.sid), "error");
+    is("nothing is asked of Stripe", keys.length, 0);
+    is("and no attempt is written to hold the half-erased store open", (await storeForId(store.sid))?.stripeConnecting ?? null, null);
+  }
+
+  part("The walk's first read of an open attempt touches nothing (coordinator's LEVE 3 on #5095)");
+  {
+    reset();
+    const owner = "connect-untouched@example.com";
+    const store = await extraStore(owner, "connectuntouchedfirst", "connectuntouchedextra");
+    await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Untouched" });
+    const ref = storeRef(store);
+    await redis.pipeline([["ZADD", FINAL_INDEX, 1, ref]]);
+    const read = await storeForId(store.sid);
+    if (!read) throw new Error("no store");
+    const sent: (string | number)[][] = [];
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = async (commands) => { sent.push(...commands); return real(commands); };
+    let thrown: unknown = null;
+    try { await prepareStore(read); } catch (error) { thrown = error; }
+    redis.pipeline = real;
+    is("it waits, saying why", thrown instanceof StripeConnectingError, true);
+    is("without a single command sent", sent.length, 0);
+    is("its closing day stays in the final line", (await redis.pipeline([["ZSCORE", FINAL_INDEX, ref]]))[0] !== null, true);
+    is("no walk entry is written for it", (await redis.pipeline([["HGET", BATCH_KEY, ref]]))[0], null);
+    is("and its record, with the attempt, is intact", Boolean((await storeForId(store.sid))?.stripeConnecting), true);
+  }
+
+  part("A press costs what the registry prices: the studio unit plus STRIPE_CONNECT_PRESS_EXTRA_COMMANDS (coordinator's df44 on #5095)");
+  {
+    reset();
+    const owner = "connect-cost@example.com";
+    const store = await extraStore(owner, "connectcostfirst", "connectcostextra");
+    const real = redis.pipeline.bind(redis);
+    const sent: (string | number)[][] = [];
+    redis.pipeline = (async (commands: (string | number)[][]) => { sent.push(...commands); return real(commands); }) as typeof redis.pipeline;
+    let said: string | null;
+    try { said = await connect(owner, store.sid); } finally { redis.pipeline = real; }
+    // Billed as Upstash bills a script: one, plus every call inside it; from the press's first read of the session on
+    // (the helper opens the session first, which is the sign-in's, not the press's).
+    const press = sent.slice(Math.max(0, sent.findIndex((c) => c[0] === "GET" && String(c[1]).startsWith("nl:auth:session:"))));
+    const billed = press.reduce((sum, c) => sum + (c[0] === "EVAL" ? 1 + (String(c[1]).match(/redis\.call\(/g) ?? []).length : 1), 0);
+    is("the press goes on to onboarding", said, "onboarding");
+    is(`its billed commands (${billed}) are within the studio unit and the press's own line`, billed <= 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS + STRIPE_CONNECT_PRESS_EXTRA_COMMANDS, true);
+    is("and the line is not idle: the second turn of the lock is really there", billed > 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, true);
+  }
+
+  part("An attempt past its 29 days is dropped, the creator's address with it (coordinator's df44 on #5095)");
+  {
+    reset();
+    const owner = "connect-expired@example.com";
+    const store = await extraStore(owner, "connectexpiredfirst", "connectexpiredextra");
+    await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Expired" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60) * 1000);
+    is("read back, the store holds no attempt any more", (await storeForId(store.sid))?.stripeConnecting ?? null, null);
+    const younger = await extraStore("connect-younger@example.com", "connectyoungerfirst", "connectyoungerextra");
+    await beginStripeConnect(storeRef(younger), younger.sid, { country: "us", email: "connect-younger@example.com", name: "Younger" }, Date.now() - 28 * 24 * 60 * 60 * 1000);
+    is("one younger than 29 days is still kept, for a press again", Boolean((await storeForId(younger.sid))?.stripeConnecting), true);
+  }
+
+  part("An answer that comes back just past the 29th day still finds its attempt (Claude 4 3Rj's NIT on #5095)");
+  {
+    // The press began a moment before the attempt turned 29 days old and Stripe answered a moment after: the attempt is
+    // read as none for reuse and holding, but the answer is for it, so the account is written (and a refusal closes it),
+    // never left for a press again with a new key, which could open a second account.
+    reset();
+    const owner = "connect-edge@example.com";
+    const store = await extraStore(owner, "connectedgefirst", "connectedgeextra");
+    const edge = Date.now() - STRIPE_CONNECT_REUSE_SECONDS * 1000 + 150;
+    const attempt = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Edge" }, edge);
+    is("the press writes its attempt just inside the 29 days", Boolean(attempt && "id" in attempt), true);
+    await new Promise((done) => setTimeout(done, 300));
+    const finished = attempt && "id" in attempt ? await finishStripeConnect(storeRef(store), store.sid, attempt.id, "acct_EdgeAnswer01") : null;
+    is("the answer just past the 29th day writes the account", finished?.stripeAccountId ?? null, "acct_EdgeAnswer01");
+    is("and closes the attempt", (await storeForId(store.sid))?.stripeConnecting ?? null, null);
+    const refusedOwner = "connect-edge-refused@example.com";
+    const refused = await extraStore(refusedOwner, "connectedgerefusedfirst", "connectedgerefusedextra");
+    const second = await beginStripeConnect(storeRef(refused), refused.sid, { country: "us", email: refusedOwner, name: "Edge" }, Date.now() - STRIPE_CONNECT_REUSE_SECONDS * 1000 + 150);
+    await new Promise((done) => setTimeout(done, 300));
+    is("a refusal just past the 29th day closes its attempt", second && "id" in second ? await clearStripeConnect(storeRef(refused), refused.sid, second.id) : false, true);
+    const other = await extraStore("connect-edge-other@example.com", "connectedgeotherfirst", "connectedgeotherextra");
+    const stale = await beginStripeConnect(storeRef(other), other.sid, { country: "us", email: "connect-edge-other@example.com", name: "Edge" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60) * 1000);
+    is("an answer for another attempt id still writes nothing", stale && "id" in stale ? await finishStripeConnect(storeRef(other), other.sid, "0".repeat(32), "acct_EdgeAnswer02") : null, null);
+    is("a stale attempt's own late answer is written too", stale && "id" in stale ? (await finishStripeConnect(storeRef(other), other.sid, stale.id, "acct_EdgeAnswer03"))?.stripeAccountId ?? null : null, "acct_EdgeAnswer03");
+  }
+
+  part("An attempt that is replaced or lapses leaves its id on the store's record, never only a log (Claude 1 2as's LOW 2 on #5095)");
+  {
+    // Past its 29 days, or another country a day after the last press, an attempt is replaced: an account Stripe made
+    // with its lost answer can then be found only by its idempotency key, which holds its id. The id, the country and
+    // its times stay on the record (never the address or the name), at most STRIPE_CONNECT_REPLACED_KEPT of them.
+    reset();
+    const owner = "connect-replaced@example.com";
+    const store = await extraStore(owner, "crepfirst", "crepextra");
+    const old = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Replaced" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60) * 1000);
+    const oldId = old && "id" in old ? old.id : "none";
+    const fresh = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Replaced" });
+    const kept = (await storeForId(store.sid))?.stripeConnectReplaced ?? [];
+    is("a press past the 29 days writes a new attempt", fresh && "id" in fresh && fresh.id !== oldId, true);
+    is("and the old attempt's id and country stay on the record", kept.map((r) => [r.id, r.country]), [[oldId, "us"]]);
+    is("without the creator's address or name", JSON.stringify(kept).includes(owner) || JSON.stringify(kept).includes("Replaced"), false);
+
+    const other = await extraStore("connect-replaced-other@example.com", "crepofirst", "crepoextra");
+    const ca = await beginStripeConnect(storeRef(other), other.sid, { country: "ca", email: "connect-replaced-other@example.com", name: "Other" }, Date.now() - (STRIPE_CONNECT_HOLD_SECONDS + 60) * 1000);
+    await beginStripeConnect(storeRef(other), other.sid, { country: "us", email: "connect-replaced-other@example.com", name: "Other" });
+    is("another country a day after the last press: the replaced one is kept", ((await storeForId(other.sid))?.stripeConnectReplaced ?? []).map((r) => [r.id, r.country]), [[ca && "id" in ca ? ca.id : "none", "ca"]]);
+
+    const lapsed = await extraStore("connect-replaced-lapsed@example.com", "creplfirst", "creplextra");
+    const gone = await beginStripeConnect(storeRef(lapsed), lapsed.sid, { country: "us", email: "connect-replaced-lapsed@example.com", name: "Lapsed" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60) * 1000);
+    await setCommunity(storeRef(lapsed), true);
+    const after = await storeForId(lapsed.sid);
+    is("a lapsed attempt dropped by any later save leaves its id, not its address", [after?.stripeConnecting ?? null, (after?.stripeConnectReplaced ?? []).map((r) => r.id), JSON.stringify(after?.stripeConnectReplaced ?? []).includes("connect-replaced-lapsed@")], [null, [gone && "id" in gone ? gone.id : "none"], false]);
+
+    const many = await extraStore("connect-replaced-many@example.com", "crepmfirst", "crepmextra");
+    const begun: string[] = [];
+    for (let i = 0; i < STRIPE_CONNECT_REPLACED_KEPT + 2; i += 1) {
+      const made = await beginStripeConnect(storeRef(many), many.sid, { country: "us", email: "connect-replaced-many@example.com", name: "Many" }, Date.now() - (STRIPE_CONNECT_REUSE_SECONDS + 60 + (STRIPE_CONNECT_REPLACED_KEPT + 2 - i) * 60) * 1000);
+      begun.push(made && "id" in made ? made.id : "none");
+    }
+    // Each attempt is replaced by the next, and the last one, past its 29 days too, lapses when the record is read: the
+    // newest STRIPE_CONNECT_REPLACED_KEPT of them stay, oldest first (Claude 6 i51q's NIT on #5095 @29adbe0bd7: a count alone also passes when the oldest are kept).
+    is(`at most ${STRIPE_CONNECT_REPLACED_KEPT} kept, the newest, in order`, ((await storeForId(many.sid))?.stripeConnectReplaced ?? []).map((r) => r.id), begun.slice(-STRIPE_CONNECT_REPLACED_KEPT));
+  }
+
+  part("A cross-border refusal closes the attempt even after an earlier send (coordinator's df44 on #5095, optional)");
+  {
+    reset();
+    const owner = "connect-border@example.com";
+    const store = await extraStore(owner, "connectborderfirst", "connectborderextra");
+    answer = "down";
+    is("a first press with no answer keeps the attempt", await connect(owner, store.sid), "error");
+    answer = "refused";
+    is("a press again refused across the border is told so", await connect(owner, store.sid), "country-unsupported");
+    is("and the attempt is gone: no account can exist in that country", (await storeForId(store.sid))?.stripeConnecting ?? null, null);
+    is("so the store is not held from its deletion", (await deleteStore(storeRef(store))).ok, true);
+  }
+
+  part("An attempt older than the day it holds the store no longer keeps it from deletion");
+  {
+    reset();
+    const owner = "connect-stale@example.com";
+    const store = await extraStore(owner, "connectstalefirst", "connectstaleextra");
+    const old = Date.now() - (STRIPE_CONNECT_HOLD_SECONDS + 60) * 1000;
+    // Still reused for a press again (above), but no longer a reason to keep the store from its owner's deletion.
+    const attempt = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Stale" }, old);
+    is("an attempt was written, a day and a minute ago", Boolean(attempt), true);
+    is("it no longer holds the store: the deletion goes through", (await deleteStore(storeRef(store))).ok, true);
+  }
+
+  part("A press after the sign-in address changed never asks with the old one (OWNER-20261124-0350, item 2)");
+  {
+    reset();
+    const owner = "connect-email@example.com";
+    const store = await extraStore(owner, "connectemailfirst", "connectemailextra");
+    const first = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: "old-address@example.com", name: "Email" });
+    const held = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: "new-address@example.com", name: "Email" });
+    is("RED: within a day of the last press it is held: the old attempt is not asked with, nor replaced", Boolean(held && "held" in held), true);
+    const later = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: "new-address@example.com", name: "Email" }, Date.now() + (STRIPE_CONNECT_HOLD_SECONDS + 60) * 1000);
+    const firstId = first && "id" in first ? first.id : "";
+    is("a day after the last press, a new attempt asks with the new address", later && "id" in later ? [later.email, later.id !== firstId] : null, ["new-address@example.com", true]);
+    const kept = await storeForId(store.sid);
+    is("the old address is no longer on the store's record", JSON.stringify(kept).includes("old-address@example.com"), false);
+    is("the old attempt's id stays among the replaced, the way to its key", (kept?.stripeConnectReplaced ?? []).some((r) => r.id === firstId), true);
+  }
+
+  part("A store whose record is full is told so, never a bare 'try again' (OWNER-20261124-0350, item 3)");
+  {
+    reset();
+    const owner = "connect-full@example.com";
+    const store = await extraStore(owner, "connectfullfirst", "connectfullextra");
+    // The store's record filled to a little under its ceiling, so the attempt's write is what passes it.
+    const [, found] = redis.run(["SCAN", "0", "MATCH", "*", "COUNT", "100000"]) as [string, string[]];
+    const key = found.find((k) => { let v: unknown; try { v = redis.run(["GET", k]); } catch { return false; } return typeof v === "string" && v.includes(`"sid":"${store.sid}"`) && v.includes('"handle"'); });
+    if (!key) throw new Error("no store record found");
+    const raw = JSON.parse(String(redis.run(["GET", key]))) as Record<string, unknown>;
+    raw.bio = "";
+    const room = MAX_STORE_BYTES - new TextEncoder().encode(JSON.stringify(raw)).byteLength - 120;
+    raw.bio = "a".repeat(room);
+    redis.run(["SET", key, JSON.stringify(raw)]);
+    is("RED: the creator is told the store is full", await connect(owner, store.sid), "store-full");
+    is("nothing was asked of Stripe", keys.length, 0);
+  }
+
+  part("A 4xx that is not Stripe's own error keeps the attempt (OWNER-20261124-0350, item 4)");
+  {
+    reset();
+    const owner = "connect-bodiless@example.com";
+    const store = await extraStore(owner, "connectbodilessfirst", "connectbodilessextra");
+    answer = "bodiless";
+    is("the press is told to try again", await connect(owner, store.sid), "error");
+    is("RED: the attempt is kept, since nothing says Stripe refused it", Boolean((await storeForId(store.sid))?.stripeConnecting), true);
+    answer = "invalid";
+    const other = await extraStore("connect-invalid@example.com", "connectinvalidfirst", "connectinvalidextra");
+    await connect("connect-invalid@example.com", other.sid);
+    is("Stripe's own refusal of a first send still closes it", (await storeForId(other.sid))?.stripeConnecting ?? null, null);
+  }
+
+  part("An attempt pressed just before its 29th day holds the store a whole day, and its answer finds it after another save (OWNER-20261124-0350, item 5)");
+  {
+    reset();
+    const owner = "connect-day29@example.com";
+    const store = await extraStore(owner, "connectday29first", "connectday29extra");
+    const ask = { country: "us", email: owner, name: "Day 29" };
+    const first = await beginStripeConnect(storeRef(store), store.sid, ask, Date.now() - STRIPE_CONNECT_REUSE_SECONDS * 1000 + 150);
+    const again = await beginStripeConnect(storeRef(store), store.sid, ask);
+    is("a press just inside the 29 days reuses it", again && "id" in again && first && "id" in first ? again.id === first.id : false, true);
+    await new Promise((done) => setTimeout(done, 300));
+    await setCommunity(storeRef(store), true);
+    is("RED: another save past the 29th day keeps the attempt a day after its last press", (await storeForId(store.sid))?.stripeConnecting?.id ?? null, again && "id" in again ? again.id : "");
+    const held = await beginStripeConnect(storeRef(store), store.sid, ask);
+    is("a press past the 29 days while it holds is held, never a new key that could open a second account", Boolean(held && "held" in held), true);
+    const written = again && "id" in again ? await finishStripeConnect(storeRef(store), store.sid, again.id, "acct_Day29Answer01") : null;
+    is("the late answer writes the account", written?.stripeAccountId ?? null, "acct_Day29Answer01");
+    const other = await extraStore("connect-day29b@example.com", "connectday29bfirst", "connectday29bextra");
+    const ask2 = { country: "us", email: "connect-day29b@example.com", name: "Day 29" };
+    await beginStripeConnect(storeRef(other), other.sid, ask2, Date.now() - STRIPE_CONNECT_REUSE_SECONDS * 1000 + 150);
+    await beginStripeConnect(storeRef(other), other.sid, ask2);
+    await new Promise((done) => setTimeout(done, 300));
+    is("RED: and it keeps the store from deletion for that day", (await deleteStore(storeRef(other))).ok, false);
+  }
+
+  part("Every branch of a press is within its priced commands, not only the one that opens the account (OWNER-20261124-0350, item 7)");
+  {
+    const bound = 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS + STRIPE_CONNECT_PRESS_EXTRA_COMMANDS;
+    const measure = async (owner: string, sid: string, country = "US") => {
+      const real = redis.pipeline.bind(redis);
+      const sent: (string | number)[][] = [];
+      redis.pipeline = (async (commands: (string | number)[][]) => { sent.push(...commands); return real(commands); }) as typeof redis.pipeline;
+      let said: string | null;
+      try { said = await connect(owner, sid, country); } finally { redis.pipeline = real; }
+      const press = sent.slice(Math.max(0, sent.findIndex((c) => c[0] === "GET" && String(c[1]).startsWith("nl:auth:session:"))));
+      return { said, billed: press.reduce((sum, c) => sum + (c[0] === "EVAL" ? 1 + (String(c[1]).match(/redis\.call\(/g) ?? []).length : 1), 0) };
+    };
+    reset();
+    const a = await extraStore("connect-cost-clear@example.com", "connectcostclearfirst", "connectcostclearextra");
+    answer = "invalid";
+    const cleared = await measure("connect-cost-clear@example.com", a.sid);
+    is(`a first send refused, the attempt cleared (clearStripeConnect): ${cleared.billed} within ${bound}`, [cleared.said, cleared.billed <= bound], ["error", true]);
+    const b = await extraStore("connect-cost-other@example.com", "connectcostotherfirst", "connectcostotherextra");
+    await beginStripeConnect(storeRef(b), b.sid, { country: "gb", email: "connect-cost-other@example.com", name: "Other" });
+    const other = await measure("connect-cost-other@example.com", b.sid, "US");
+    is(`an attempt in another country, nothing asked: ${other.billed} within ${bound}`, [other.said, other.billed <= bound], ["attempt-country", true]);
+    const c = await extraStore("connect-cost-late@example.com", "connectcostlatefirst", "connectcostlateextra");
+    // The other tab's own write is its press's, never this one's: not counted here (Claude 3 xvBY8 on #5095, LEVE 1).
+    const uncounted = redis.pipeline.bind(redis);
+    meanwhile = async () => {
+      const counting = redis.pipeline;
+      redis.pipeline = uncounted;
+      try {
+        await finishStripeConnect(storeRef(c), c.sid, (await storeForId(c.sid))?.stripeConnecting?.id ?? "", "acct_CostLateTab01");
+      } finally {
+        redis.pipeline = counting;
+      }
+    };
+    const late = await measure("connect-cost-late@example.com", c.sid);
+    is(`another tab wrote the account first, the store read again: ${late.billed} within ${bound}`, [late.billed <= bound], [true]);
+    const d = await extraStore("connect-cost-lost@example.com", "connectcostlostfirst", "connectcostlostextra");
+    answer = "lost";
+    const lost = await measure("connect-cost-lost@example.com", d.sid);
+    is(`an answer lost, the attempt kept: ${lost.billed} within ${bound}`, [lost.said, lost.billed <= bound], ["error", true]);
+    const e = await extraStore("connect-cost-held@example.com", "connectcostheldfirst", "connectcostheldextra");
+    await beginStripeConnect(storeRef(e), e.sid, { country: "us", email: "an-old-address@example.com", name: "Held" });
+    const heldCost = await measure("connect-cost-held@example.com", e.sid);
+    is(`an attempt held (other details, its day not over), nothing asked: ${heldCost.billed} within ${bound}`, [heldCost.said, heldCost.billed <= bound], ["attempt-held", true]);
+    // Each write of the store's record reads its catalog's first page again (buildHead): a full page is the dearest
+    // press (Claude 3 xvBY8 on #5095, LEVE 1).
+    const fullOwner = "connect-cost-full-page@example.com";
+    await claimHandle(fullOwner, "connectcostfullpage", "Full page", "");
+    for (let i = 0; i < 40; i += 1) {
+      const made = await addProduct(fullOwner, `Synthetic product ${i}`, "", "10", null);
+      if (!made.ok) throw new Error(`no product ${i}`);
+    }
+    const fullSid = (await storeForEmail(fullOwner))?.sid ?? "";
+    const opened = await measure(fullOwner, fullSid);
+    is(`a press that opens the account, a full first catalog page: ${opened.billed} within ${bound}`, [opened.said, opened.billed <= bound], ["onboarding", true]);
+  }
+
+  part("Branches a mutation could change unseen are held (Claude 3 xvBY8 on #5095, LEVE 3)");
+  {
+    // Another tab wrote the account between this press's first read and its attempt: begin answers null, the store is
+    // read again and the press goes on with that account; Stripe is not asked and no notice is sent by this press.
+    reset();
+    const owner = "connect-held-before@example.com";
+    const store = await extraStore(owner, "connectheldbeforefirst", "connectheldbeforeextra");
+    const real = redis.pipeline.bind(redis);
+    let wrote = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!wrote && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:store:lock:") && c.includes("NX"))) {
+        wrote = true;
+        redis.pipeline = real;
+        await setStripeAccount(storeRef(store), "acct_BeforeBegin01", false, { expected: null });
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const tasksBefore = afterTasks.length;
+    let said: string | null;
+    try { said = await connect(owner, store.sid); } finally { redis.pipeline = real; }
+    is("another tab wrote first: the press goes on with that account", [wrote, said, keys.length], [true, "onboarding", 0]);
+    is("and sends no notice of its own", afterTasks.length - tasksBefore, 0);
+
+    // This press's own answer comes after another tab (same key) wrote the account: it goes on with it, no notice.
+    reset();
+    const lateOwner = "connect-late-answer@example.com";
+    const late = await extraStore(lateOwner, "connectlateanswerfirst", "connectlateanswerextra");
+    meanwhile = async () => {
+      const attempt = (await storeForId(late.sid))?.stripeConnecting;
+      await finishStripeConnect(storeRef(late), late.sid, attempt?.id ?? "", "acct_1Synthetic1");
+    };
+    const lateBefore = afterTasks.length;
+    is("a late answer for the account another tab wrote goes on with it", await connect(lateOwner, late.sid), "onboarding");
+    is("and only the press that wrote the account sends the notice", afterTasks.length - lateBefore, 0);
+    const writerBefore = afterTasks.length;
+    reset();
+    const writer = await extraStore("connect-writer@example.com", "connectwriterfirst", "connectwriterextra");
+    is("(control) a press that writes the account", await connect("connect-writer@example.com", writer.sid), "onboarding");
+    is("sends the notice once", afterTasks.length - writerBefore, 1);
+
+    // What says nothing was made, and what does not.
+    const typed = (status: number, code = "parameter_invalid_empty", type = "invalid_request_error") => new StripeConnectError(status, code, "x", type, true);
+    is("a typed 400 says nothing was made", typed(400).madeNothing, true);
+    is("408, 409 and 429 never do", [typed(408).madeNothing, typed(409).madeNothing, typed(429).madeNothing], [false, false, false]);
+    is("nor an idempotency_error, by its code or its type", [typed(400, "idempotency_error", "invalid_request_error").madeNothing, typed(400, "x", "idempotency_error").madeNothing], [false, false]);
+    is("nor a 400 whose body is not Stripe's", new StripeConnectError(400, "unknown", "x", "", false).madeNothing, false);
+
+    // Writes only for the same store's same attempt, and an account id in Stripe's shape.
+    reset();
+    const fOwner = "connect-fences@example.com";
+    const f = await extraStore(fOwner, "connectfencesfirst", "connectfencesextra");
+    const other = await extraStore("connect-fences-other@example.com", "connectfencesotherfirst", "connectfencesotherextra");
+    const open = await beginStripeConnect(storeRef(f), f.sid, { country: "us", email: fOwner, name: "Fences" });
+    const id = open && "id" in open ? open.id : "";
+    is("another attempt's refusal clears nothing", await clearStripeConnect(storeRef(f), f.sid, "f".repeat(32)), false);
+    is("nor one asked with another store's id", await clearStripeConnect(storeRef(f), other.sid, id), false);
+    is("another store's id writes no account", await finishStripeConnect(storeRef(f), other.sid, id, "acct_FencesAnswer01"), null);
+    is("an id not in Stripe's shape writes nothing", await finishStripeConnect(storeRef(f), f.sid, id, "not-an-account"), null);
+    is("the attempt is still open after all of them", (await storeForId(f.sid))?.stripeConnecting?.id ?? null, id);
+
+    // A press and a count not written are read as the first press having sent the key.
+    const [, found] = redis.run(["SCAN", "0", "MATCH", "*", "COUNT", "100000"]) as [string, string[]];
+    const key = found.find((k) => { let v: unknown; try { v = redis.run(["GET", k]); } catch { return false; } return typeof v === "string" && v.includes(`"sid":"${f.sid}"`) && v.includes('"handle"'); });
+    if (!key) throw new Error("no store record found");
+    const raw = JSON.parse(String(redis.run(["GET", key]))) as { stripeConnecting: Record<string, unknown>; stripeConnectReplaced?: unknown };
+    delete raw.stripeConnecting.sends;
+    delete raw.stripeConnecting.pressedAt;
+    // The same attempt also listed as replaced (a record written by an older save): listed once, never twice.
+    raw.stripeConnectReplaced = [{ id, country: "us", at: String(raw.stripeConnecting.at), until: String(raw.stripeConnecting.at) }];
+    redis.run(["SET", key, JSON.stringify(raw)]);
+    const read = (await storeForId(f.sid))?.stripeConnecting;
+    is("with no count written, one send; with no press written, its first write", [read?.sends, read?.pressedAt === read?.at], [1, true]);
+
+    // An address longer than kept is cut, and a press again with it still reuses the attempt.
+    reset();
+    const long = `${"l".repeat(400)}@example.com`;
+    const g = await extraStore("connect-long@example.com", "connectlongfirst", "connectlongextra");
+    const first = await beginStripeConnect(storeRef(g), g.sid, { country: "us", email: long, name: "Long" });
+    const again = await beginStripeConnect(storeRef(g), g.sid, { country: "us", email: long, name: "Long" });
+    is("kept at 320 characters", first && "id" in first ? first.email.length : 0, 320);
+    is("and reused by a press again with the same address", again && "id" in again && first && "id" in first ? again.id === first.id : false, true);
+  }
+
+  part("An attempt replaced twice is listed once (Claude 3 xvBY8 on #5095, LEVE 3: withReplaced)");
+  {
+    reset();
+    const owner = "connect-dedup@example.com";
+    const store = await extraStore(owner, "connectdedupfirst", "connectdedupextra");
+    const old = Date.now() - (STRIPE_CONNECT_HOLD_SECONDS + 60) * 1000;
+    const first = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Dedup" }, old);
+    const firstId = first && "id" in first ? first.id : "";
+    // Listed as replaced already (an older save), and still the open attempt: a press in another country replaces it.
+    const [, found] = redis.run(["SCAN", "0", "MATCH", "*", "COUNT", "100000"]) as [string, string[]];
+    const key = found.find((k) => { let v: unknown; try { v = redis.run(["GET", k]); } catch { return false; } return typeof v === "string" && v.includes(`"sid":"${store.sid}"`) && v.includes('"handle"'); });
+    if (!key) throw new Error("no store record found");
+    const raw = JSON.parse(String(redis.run(["GET", key]))) as { stripeConnecting: Record<string, unknown>; stripeConnectReplaced?: unknown };
+    raw.stripeConnectReplaced = [{ id: firstId, country: "us", at: String(raw.stripeConnecting.at), until: String(raw.stripeConnecting.at) }];
+    redis.run(["SET", key, JSON.stringify(raw)]);
+    await beginStripeConnect(storeRef(store), store.sid, { country: "gb", email: owner, name: "Dedup" });
+    is("its id is listed once", ((await storeForId(store.sid))?.stripeConnectReplaced ?? []).filter((r) => r.id === firstId).length, 1);
+  }
+
+  done();
+}
+
+main().catch((error) => { console.log(error); process.exit(1); });

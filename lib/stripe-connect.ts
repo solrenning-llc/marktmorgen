@@ -91,12 +91,31 @@ export class StripeConnectError extends Error {
   readonly status: number;
   readonly code: string;
   readonly stripeMessage: string;
+  /** Stripe's error type, kept beside the code (which falls back to it): an idempotency_error is read from either. */
+  readonly type: string;
+  /**
+   * Whether the answer carried Stripe's own error object ({ error: { ... } }): a 4xx without one (a proxy in the way,
+   * a body cut short) says nothing of what Stripe did (OWNER-20261124-0350, item 4).
+   */
+  readonly fromStripe: boolean;
 
-  constructor(status: number, code: string, stripeMessage: string) {
+  constructor(status: number, code: string, stripeMessage: string, type = "", fromStripe = true) {
     super(`Stripe request failed (${status} ${code}): ${stripeMessage}`);
     this.status = status;
     this.code = code;
     this.stripeMessage = stripeMessage;
+    this.type = type;
+    this.fromStripe = fromStripe;
+  }
+
+  /**
+   * Stripe refused the request itself, so no account was made: a 4xx other than a timeout (408), a conflict (409, a
+   * request with this key still under way), too many requests (429) or a key used with other parameters, and only when
+   * the answer is Stripe's own error object. Anything else (a 5xx, no answer, a 4xx whose body is not Stripe's) may have
+   * made one (Codex L-20261120-0258; OWNER-20261124-0350, item 4).
+   */
+  get madeNothing(): boolean {
+    return this.fromStripe && this.status >= 400 && this.status < 500 && ![408, 409, 429].includes(this.status) && this.code !== "idempotency_error" && this.type !== "idempotency_error";
   }
 
   /** The creator's country is one this platform may not open an account in. */
@@ -109,6 +128,7 @@ async function stripeRequest(
   method: "GET" | "POST",
   path: string,
   body?: unknown,
+  options: { idempotencyKey?: string } = {},
 ): Promise<Record<string, unknown>> {
   const key = platformKey();
   if (!key) throw new Error("Stripe is not configured");
@@ -122,6 +142,10 @@ async function stripeRequest(
         "Stripe-Version": STRIPE_VERSION,
         // API v2 speaks JSON, unlike the form-encoded v1 endpoints.
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        // The same key asks for the same object: a request made again after a lost answer gets back what the first
+        // made, never a second one (Stripe keeps an API v2 key 30 days: https://docs.stripe.com/api-v2-overview, read
+        // 22 November 2026; lib/store.ts STRIPE_CONNECT_REUSE_SECONDS reuses an attempt's key inside that).
+        ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store",
@@ -134,10 +158,13 @@ async function stripeRequest(
     const error = data.error as
       | { code?: string; type?: string; message?: string }
       | undefined;
+    const fromStripe = Boolean(error) && typeof error === "object" && !Array.isArray(error) && typeof error.type === "string";
     throw new StripeConnectError(
       response.status,
       error?.code ?? error?.type ?? "unknown",
       error?.message ?? "Stripe gave no reason.",
+      error?.type ?? "",
+      fromStripe,
     );
   }
   return data;
@@ -237,6 +264,8 @@ export async function createConnectedAccount(options: {
   email: string;
   country: string;
   displayName: string;
+  /** One key per attempt written on the store (lib/store.ts beginStripeConnect, Codex L-20261120-0258). */
+  idempotencyKey: string;
 }): Promise<string> {
   const country = normaliseCountry(options.country);
   if (!country) throw new Error("A country is needed to open an account");
@@ -255,7 +284,7 @@ export async function createConnectedAccount(options: {
         losses_collector: "stripe",
       },
     },
-  });
+  }, { idempotencyKey: options.idempotencyKey });
 
   const id = account.id;
   if (typeof id !== "string" || !id) {

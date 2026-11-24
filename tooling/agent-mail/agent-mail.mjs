@@ -1197,12 +1197,15 @@ export function revisoresNoPr(pr, sha) {
     for (const rota of [`repos/solrenning-llc/marktmorgen/issues/${pr}/comments`, `repos/solrenning-llc/marktmorgen/pulls/${pr}/reviews`]) {
       // A data (created_at do comentário, submitted_at da revisão) põe os dois caminhos na ordem do tempo para a trava
       // de 3 READY (LEVE B do Claude 5 zr no #5408 @0cebe29a68).
-      const saida = execFileSync("gh", ["api", "--paginate", rota, "--jq", '.[] | [(.body // ""), (.author_association // ""), (.created_at // .submitted_at // "")] | @json'],
+      // O estado de uma revisão do GitHub (PENDING e DISMISSED não contam; CHANGES_REQUESTED tira) e a hora da última
+      // edição (uma retirada escrita editando um comentário antigo vale na hora da edição): MÉDIO 2 e LEVE 2 do Claude 5
+      // hed9 no #5408 @ca80774537.
+      const saida = execFileSync("gh", ["api", "--paginate", rota, "--jq", '.[] | [(.body // ""), (.author_association // ""), (.created_at // .submitted_at // ""), (.state // ""), (.updated_at // .submitted_at // .created_at // "")] | @json'],
         { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
       for (const linha of saida.split("\n").filter((l) => l.trim())) {
-        const [corpo, associacao, em = ""] = JSON.parse(linha);
+        const [corpo, associacao, em = "", estado = "", editado = ""] = JSON.parse(linha);
         if (!QUEM_TRABALHA.has(String(associacao))) continue;
-        textos.push({ corpo: String(corpo), em: String(em ?? ""), i: textos.length });
+        if (!/^(PENDING|DISMISSED)$/i.test(String(estado ?? ""))) textos.push({ corpo: String(corpo), em: String(em ?? ""), editado: String(editado ?? em ?? ""), estado: String(estado ?? "").toUpperCase(), i: textos.length });
         const quem = revisoraDoComentario(corpo, curto);
         if (quem) { f.add(quem); corpos.set(quem, [...(corpos.get(quem) ?? []), { corpo: String(corpo), veredito: vereditoDoCorpo(corpo) }]); }
       }
@@ -1212,7 +1215,7 @@ export function revisoresNoPr(pr, sha) {
   }
   vereditosNoPr.set(chaveCache, f);
   corposNoPr.set(chaveCache, corpos);
-  textosNoPr.set(chaveCache, textos.sort((a, b) => (a.em < b.em ? -1 : a.em > b.em ? 1 : a.i - b.i)));
+  textosNoPr.set(chaveCache, textos);
   return f;
 }
 
@@ -1299,74 +1302,63 @@ export function aprovadoresNoPr(pr, sha) {
 export const READY_EXIGIDAS = 3;
 
 /**
- * Uma revisão escrita no PR na forma de cabeçalho, a única que a trava de 3 READY conta (CO (l): o comentário no PR é a
- * única prova da revisão; ALTO do Claude 5 hed9 no #5408 @c615434258). Lê só a primeira linha com texto (e a segunda,
- * quando a primeira acaba no head), sem as marcas de markdown (* _ ` > #). Devolve { familia, veredito } com o veredito
- * READY, CHANGES ou RETIRADA, ou null. Formas aceitas, com o head citado sendo o começo (7 ou mais caracteres) do head
- * exato e o veredito logo depois, sem "from", "so far", "by", "of", "needed", "requested", "still" ou "pending" em seguida:
- *  - "<família> [rótulo] [focal] review #N @<head>: VERDICT" e "<família> [rótulo] #N @<head>: VERDICT", com o rótulo
- *    sem dois-pontos (os dois-pontos depois do nome marcam uma linha de situação: "Claude 1 coord: #N @h — 2 READY") e sem
- *    as palavras de situação ou pedido (needed, status, tally, asked, request, waiting, still, pending, queue, fila);
- *  - "<família> [rótulo] VERDICT #N @<head>" (a transcrição do Codex: "Codex X6 READY #N @h (transcribed by ...)");
- *  - "<família> [rótulo] #N @<head>" e, na segunda linha, o veredito sozinho ("READY: tests pass");
- *  - "VERDICT [(focal)] #N @<head> ...", com a família assinada em "by/por/— <família>" ou, sem isso, a primeira citada nas
- *    linhas 1 a 3 (sugestão dos Claude 5 L4qm e hed9);
- *  - "... review #N @<head> by <família> [rótulo]: VERDICT" ("Money focal review #N @h by Claude 2 upbeat: READY").
- * Uma retirada só nas formas explícitas, com o PR e o head citados nas duas primeiras linhas: "WITHDRAWN: my READY ...
- * — <família>", "<família> ...: I withdraw my READY/approval", "<família> ... my READY ... withdrawn/retracted/retirado",
- * "Correction to my READY". "Re:", linhas de situação, contagens, pedidos e "re-review needed" nunca contam (MÉDIO 1 e
- * MÉDIO 2 do hed9). Uma revisão em outra forma não conta: a trava fica do lado seguro, e quem revisou escreve a linha.
+ * O READY que a trava de 3 READY soma (CO (l): a prova é a revisão escrita no PR). Estrito para somar (sexto desenho,
+ * sugestão do Claude 5 hed9 no #5408 @ca80774537): só a primeira linha com texto, começando pelo nome da família, sem
+ * citação (">") nem marcador de lista, no formato
+ *   <família> [rótulo] [focal] review #N @<head> [(nota)]: READY [resto]
+ * com o head citado sendo o começo (7 ou mais caracteres) do head exato, o rótulo sem dois-pontos nem palavras de situação
+ * ou de pedido, e o resto sem "?", "not", "once", "if", "unless", "until", "conditional", "pending", "after", "but",
+ * "withdrawn", "retracted", uma seta ou uma contagem ("2 of 3"). Devolve a família, ou null. As marcas de negrito e de
+ * código (* _ `) e um "#" de título no começo saem antes da leitura.
  */
 const SITUACAO = /\b(?:needed|status|tally|asked|request\w*|waiting|still|pending|queue|fila)\b/i;
-export function revisaoCanonica(corpo, pr, sha) {
-  const limpa = (l) => l.replace(/[*_`]/g, "").replace(/^[\s>#-]+/, "").trim();
-  const linhas = String(corpo ?? "").split(/\r?\n/).filter((l) => l.trim()).slice(0, 3).map(limpa);
-  const [l1 = "", l2 = "", l3 = ""] = linhas;
+const RESTO_CONDICIONAL = /\?|→|->|\b(?:not|once|if|unless|until|conditional\w*|pending|provided|after|but|withdrawn|retracted)\b|\b\d+\s+(?:of|de)\s+\d+\b/i;
+export function readyEstrito(corpo, pr, sha) {
   const cheio = String(sha ?? "").toLowerCase();
   if (!/^\d+$/.test(String(pr ?? "")) || cheio.length < 7) return null;
-  const doHead = (h) => h.length >= 7 && cheio.startsWith(h.toLowerCase());
-  const FAM = String.raw`(Claude \d+|Codex)\b`, ROT = String.raw`([^:#\n]{0,60}?)`;
-  const REF = String.raw`#${pr}\s+@([0-9a-fA-F]{7,40})\b(?:\.{3}|…)?`;
-  const VER = String.raw`(READY|CHANGES)\b(?!\s+(?:from|so\s+far|by|of|needed|requested|still|pending)\b)`;
-  const nome = (t) => familia(t);
-  const rotuloOk = (r) => !SITUACAO.test(r ?? "");
-  let m;
-  if ((m = new RegExp(`^${FAM}${ROT}${REF}\\s*[:—–,-]?\\s*${VER}`, "i").exec(l1)) && rotuloOk(m[2]) && doHead(m[3])) return { familia: nome(m[1]), veredito: m[4].toUpperCase() };
-  if ((m = new RegExp(`^${FAM}${ROT}${VER}\\s+${REF}`, "i").exec(l1)) && rotuloOk(m[2]) && doHead(m[4])) return { familia: nome(m[1]), veredito: m[3].toUpperCase() };
-  if ((m = new RegExp(`^${FAM}${ROT}${REF}[\\s.:—–-]*$`, "i").exec(l1)) && rotuloOk(m[2]) && doHead(m[3])) {
-    const v = new RegExp(`^(?:verdict\\s*:?\\s*)?${VER}\\s*(?:$|[:(—–,.;-])`, "i").exec(l2);
-    if (v) return { familia: nome(m[1]), veredito: v[1].toUpperCase() };
-  }
-  if ((m = new RegExp(`^${VER}(?:\\s*\\([^)]{0,30}\\))?\\s+${REF}`, "i").exec(l1)) && doHead(m[2])) {
-    const resto = [l1.slice(m[0].length), l2, l3].join("\n");
-    const quem = new RegExp(`(?:\\bby|\\bpor|[—–])\\s+${FAM}`, "i").exec(resto) ?? new RegExp(FAM, "i").exec(resto);
-    if (quem) return { familia: nome(quem[1]), veredito: m[1].toUpperCase() };
-  }
-  if ((m = new RegExp(`\\breview\\s+${REF}\\s+by\\s+${FAM}[^:\\n]{0,40}:\\s*${VER}`, "i").exec(l1)) && doHead(m[1])) return { familia: nome(m[2]), veredito: m[3].toUpperCase() };
-  // Retirada: o PR e o head citados nas duas primeiras linhas, e uma das formas explícitas.
-  const cita = [...[l1, l2].join("\n").matchAll(new RegExp(REF, "gi"))].some((r) => doHead(r[1]));
-  if (!cita) return null;
-  const RET = [
-    [new RegExp(`^withdrawn\\b.*?\\bmy\\s+(?:READY|approval)\\b.*?(?:\\bby|[—–])\\s*${FAM}`, "i"), 1],
-    [new RegExp(`^${FAM}[^\\n]*?\\b(?:withdraw\\w*|withdrew|retract\\w*|retiro|retira)\\s+(?:my|our|meu|o meu|nosso)\\s+(?:READY|approval|aprova[cç][aã]o)\\b`, "i"), 1],
-    [new RegExp(`^${FAM}[^\\n]*?\\bmy\\s+READY\\b[^\\n]*?\\b(?:withdrawn|retracted|retirado)\\b`, "i"), 1],
-    [new RegExp(`^${FAM}[^\\n]*?\\bcorrection\\s+to\\s+my\\s+READY\\b`, "i"), 1],
-    [new RegExp(`^correction\\s+to\\s+my\\s+READY\\b.*?(?:\\bby|[—–])\\s*${FAM}`, "i"), 1],
-  ];
-  for (const [re, g] of RET) if ((m = re.exec(l1))) return { familia: nome(m[g]), veredito: "RETIRADA" };
-  return null;
+  const bruta = String(corpo ?? "").split(/\r?\n/).find((l) => l.trim()) ?? "";
+  if (/^\s*(?:>|[-+]\s|\d+[.)]\s)/.test(bruta)) return null;
+  const l1 = bruta.replace(/[*_`]/g, "").replace(/^\s*#+\s*/, "").trim();
+  const m = new RegExp(String.raw`^(Claude \d+|Codex)\b([^:#\n]{0,60}?)\breview\s+#${pr}\s+@([0-9a-fA-F]{7,40})\b(?:\.{3}|…)?(?:\s*\([^()\n]{0,160}\))?\s*:\s*READY\b(.*)$`, "i").exec(l1);
+  if (!m || SITUACAO.test(m[2]) || !cheio.startsWith(m[3].toLowerCase())) return null;
+  const resto = m[4];
+  if (resto && !/^\s*(?:$|[,.;(—–-])/.test(resto)) return null;
+  if (RESTO_CONDICIONAL.test(resto)) return null;
+  return familia(m[1]);
 }
 
 /**
- * As famílias cujo READY conta para enfileirar este head (OWNER-20261123-1442-THREE-REVIEWS). A prova é o comentário ou
- * a revisão no PR (CO (l)), lido em revisaoCanonica; o correio (complete-review, record-review) não acrescenta nenhum
- * READY, e serve só para tirar famílias dos pedidos (ALTO do Claude 5 hed9 no #5408 @c615434258). Vale o último veredito
- * de cada família neste head, na ordem do tempo dos comentários e revisões: um READY depois de um CHANGES conta (o autor
- * pode responder por escrito e pedir que a família olhe de novo o mesmo head; MÉDIO 1 do hed9), um CHANGES ou uma
- * retirada depois do READY o tiram. Ficam de fora a família autora (a do prefixo do ramo; num ramo sem prefixo de
- * família, a de mais commits, dd03) e toda família com commit no PR (CO (e), FQ (1)). NÃO CONFERIDO (naoConferido)
- * quando o PR ou os commits não puderam ser lidos agora, ou quando há commit de família desconhecida, junção sem trailer
- * inclusive (MÉDIO 3 do hed9; passo 4: nada NÃO CONFERIDO segue).
+ * A família cujo READY um comentário deste head tira (largo para tirar, MÉDIO e ALTO 2 do hed9): um comentário que cita
+ * o head nas duas primeiras linhas e não é um READY estrito tira o READY da família que a leitura larga dos pedidos
+ * (revisoraDoComentario) lê nele com CHANGES, ou da família que o assina ou é citada primeiro na primeira linha quando
+ * ele fala em CHANGES, NOT READY, "READY?", retirada (withdraw, retract, retiro, retira) ou correção do READY; uma
+ * revisão do GitHub com o estado CHANGES_REQUESTED também tira. Devolve a família, "?" quando o comentário tira mas não
+ * diz de quem (o chamador fica NÃO CONFERIDO), ou null. Até um READY estrito posterior da mesma família.
+ */
+const TIRA = /\b(?:CHANGES|NOT\s+READY|withdr[ae]w\w*|retract\w*|retiro|retira|correction\s+to\s+my\s+READY)\b|\bREADY\s*\?/i;
+export function tiraReady(corpo, pr, sha, estado = "") {
+  const curto = String(sha ?? "").slice(0, 10);
+  const duas = String(corpo ?? "").split(/\r?\n/).filter((l) => l.trim()).slice(0, 2);
+  const citaHead = duas.join("\n").toLowerCase().includes(String(sha ?? "").slice(0, 7).toLowerCase());
+  const pedeMudanca = String(estado).toUpperCase() === "CHANGES_REQUESTED";
+  if (!pedeMudanca && (!citaHead || !TIRA.test(duas.join("\n")))) return null;
+  const larga = revisoraDoComentario(corpo, curto);
+  if (larga) return larga;
+  const primeira = /\b(Claude \d+|Codex)\b/i.exec(duas[0] ?? "") ?? /\b(Claude \d+|Codex)\b/i.exec(duas[1] ?? "");
+  return primeira ? familia(primeira[1]) : "?";
+}
+
+/**
+ * As famílias cujo READY conta para enfileirar este head (OWNER-20261123-1442-THREE-REVIEWS). A prova é a revisão escrita
+ * no PR (CO (l)); o correio (complete-review, record-review) não acrescenta READY e serve só para tirar famílias dos
+ * pedidos (ALTO do hed9 em c615434258). Na ordem do tempo dos comentários e revisões (um READY na hora em que foi escrito;
+ * uma retirada na hora da última edição; num empate, a retirada fica por último), um READY estrito (readyEstrito) da
+ * família a põe, e um comentário que a tira (tiraReady) a tira, até um READY estrito posterior. Ficam de fora a família
+ * autora (a do prefixo do ramo; num ramo sem prefixo de família, a de mais commits, dd03) e toda família com commit no PR
+ * (CO (e), FQ (1)). naoContados: as famílias com um READY que a leitura larga lê e que não está na forma estrita, para a
+ * recusa dizer a linha a escrever (MÉDIO 3 do hed9). NÃO CONFERIDO (naoConferido) quando o PR ou os commits não puderam
+ * ser lidos agora, quando há commit de família desconhecida (junção sem trailer inclusive, CO (e)), ou quando uma revisão
+ * CHANGES_REQUESTED não diz de que família é.
  */
 export function readyQueContam(pr, sha, ramo = null) {
   const noPr = revisoresNoPr(pr, sha);
@@ -1374,15 +1366,25 @@ export function readyQueContam(pr, sha, ramo = null) {
   const cm = commitsDoPr(pr, ramo);
   if (!cm) return { naoConferido: "os commits do PR não puderam ser lidos agora" };
   if (cm.desconhecidas.size) return { naoConferido: `o PR tem commit de família desconhecida (${[...cm.desconhecidas].join(", ")}), que pode ser a de um dos revisores` };
-  const ultimo = new Map();
-  for (const t of textosNoPr.get(`${pr}@${String(sha).slice(0, 10)}`) ?? []) {
-    const r = revisaoCanonica(t.corpo, pr, sha);
-    if (r) ultimo.set(r.familia, r.veredito);
+  const curto = String(sha).slice(0, 10), eventos = [], naoContados = new Map();
+  for (const t of textosNoPr.get(`${pr}@${curto}`) ?? []) {
+    const soma = readyEstrito(t.corpo, pr, sha);
+    if (soma) { eventos.push({ fam: soma, ready: true, em: t.em, ordem: 0, i: t.i }); continue; }
+    const tira = tiraReady(t.corpo, pr, sha, t.estado);
+    if (tira === "?") return { naoConferido: "uma revisão do PR pede mudanças (CHANGES_REQUESTED) sem dizer de que família é" };
+    if (tira) { eventos.push({ fam: tira, ready: false, em: t.editado > t.em ? t.editado : t.em, ordem: 1, i: t.i }); continue; }
+    const larga = revisoraDoComentario(t.corpo, curto);
+    if (larga && vereditoDoCorpo(t.corpo) === "READY" && !naoContados.has(larga)) naoContados.set(larga, (String(t.corpo).split(/\r?\n/).find((l) => l.trim()) ?? "").trim().slice(0, 90));
   }
+  eventos.sort((a, b) => (a.em < b.em ? -1 : a.em > b.em ? 1 : a.ordem - b.ordem || a.i - b.i));
+  const ultimo = new Map();
+  for (const e of eventos) ultimo.set(e.fam, e.ready);
   const doRamo = familiaDoRamo(ramo);
   const autores = doRamo ? [doRamo] : cm.dominantes;
-  const valem = new Set([...ultimo].filter(([fam, v]) => v === "READY" && !autores.includes(fam) && !cm.familias.has(fam)).map(([fam]) => fam));
-  return { valem, autor: autores.join(", ") || "(nenhuma)", comoAutor: doRamo ? "a do prefixo do ramo" : "a dominante nos commits, num ramo sem prefixo de família" };
+  const conta = (fam) => !autores.includes(fam) && !cm.familias.has(fam);
+  const valem = new Set([...ultimo].filter(([fam, ok]) => ok && conta(fam)).map(([fam]) => fam));
+  for (const fam of [...naoContados.keys()]) if (valem.has(fam) || !conta(fam)) naoContados.delete(fam);
+  return { valem, naoContados, autor: autores.join(", ") || "(nenhuma)", comoAutor: doRamo ? "a do prefixo do ramo" : "a dominante nos commits, num ramo sem prefixo de família" };
 }
 
 export function registrarRevisao({ eu, pr, sha, resultado, link, agora = new Date() }) {
@@ -1681,7 +1683,7 @@ export function pegar({ tipo, eu, agora = new Date() }) {
     }
     if (!cf) naoConferido.push("o conflito com o main e com a fila de integração");
     const feito = [atual && !diferente && fonte !== "ref" ? `head ${atual.slice(0, 10)} igual ao do pedido (${fonte === "ramo" ? `pelo ramo ${ramoPedido}` : "pela referência"})` : null, cf ? `sem conflito com o main e com os ${cf.grupos} grupo(s) da fila de integração` : null].filter(Boolean);
-    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta confere os ${READY_EXIGIDAS} READY de fora no verify-enqueue e no complete-enqueue (a prova é a revisão escrita no PR neste head, na primeira linha, em forma de cabeçalho: "<família> review #N @<head>: READY", "READY #N @<head> ... <família>" ou a transcrição do Codex; vale o último veredito de cada família, na ordem do tempo, e uma retirada escrita a tira; linhas de situação, pedidos e "Re:" não contam; sem a família do prefixo do ramo, ou, num ramo sem prefixo, a de mais commits, e sem as com commit no PR; commit de família desconhecida, junção sem trailer inclusive, não segue); não confere a família de quem abriu o PR num ramo sem prefixo de família e sem commit dela, as 9 verificações, os CHANGES e achados ainda abertos, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1), OWNER-20261123-1442)` };
+    return { pedido: alvo, aviso: `${feito.join("; ") || "nada conferido"}${naoConferido.length ? `. NÃO CONFERIDO (confira à mão): ${naoConferido.join("; ")}` : ""}. A ferramenta confere os ${READY_EXIGIDAS} READY de fora no verify-enqueue e no complete-enqueue (a prova é a revisão escrita no PR neste head: soma só a primeira linha "<família> review #N @<head>: READY", sem citação, condição nem contagem; qualquer outro comentário da família neste head com CHANGES, NOT READY, "READY?", retirada ou correção a tira, até um READY nessa forma escrito depois; sem a família do prefixo do ramo, ou, num ramo sem prefixo, a de mais commits, e sem as com commit no PR; commit de família desconhecida, junção sem trailer inclusive, não segue); não confere a família de quem abriu o PR num ramo sem prefixo de família e sem commit dela, as 9 verificações, os CHANGES e achados ainda abertos, o SIM de workflow nem a vez de custo: isso é de quem enfileira (FQ (1), OWNER-20261123-1442)` };
   }
   return { pedido: alvo };
 }
@@ -1845,8 +1847,11 @@ export function conferirTomada({ eu, id, agora = new Date() }) {
   // outra família que pede a fila mantém o seu READY (MÉDIO do Claude 5 id8Ws no #5408 @dcee6a68d5; LEVE 1 do hed9).
   const conta = readyQueContam(p.pr, sha, ramo);
   if (conta.naoConferido) throw new Error(`as revisões READY de #${p.pr} @${sha.slice(0, 10)} NÃO FORAM CONFERIDAS agora: ${conta.naoConferido}; não enfileire (passo 4: nada NÃO CONFERIDO segue)`);
-  const { valem, autor, comoAutor } = conta;
-  if (valem.size < READY_EXIGIDAS) throw new Error(`#${p.pr} @${sha.slice(0, 10)} tem ${valem.size} READY de família de fora no head exato (${[...valem].sort().join(", ") || "nenhum"}); são ${READY_EXIGIDAS}, de ${READY_EXIGIDAS} famílias diferentes, sem a família ${autor || "(desconhecida)"} (${comoAutor}) e sem as que têm commit (OWNER-20261123-1442-THREE-REVIEWS); não enfileire; conclua como recusado (--result declined) para o autor pedir de novo com as ${READY_EXIGIDAS}`);
+  const { valem, naoContados, autor, comoAutor } = conta;
+  // MÉDIO 3 do hed9 no #5408 @ca80774537: a recusa diz quais comentários com READY não contaram e a linha a escrever.
+  const pulados = [...(naoContados ?? new Map())].map(([fam, linha]) => `${fam}: "${linha}"`);
+  const forma = `${pulados.length ? `; não contaram, por não estarem na forma "<família> review #${p.pr} @${sha.slice(0, 10)}: READY" no começo da primeira linha: ${pulados.join("; ")}; quem revisou escreve essa linha num comentário novo` : ""}`;
+  if (valem.size < READY_EXIGIDAS) throw new Error(`#${p.pr} @${sha.slice(0, 10)} tem ${valem.size} READY de família de fora no head exato (${[...valem].sort().join(", ") || "nenhum"}); são ${READY_EXIGIDAS}, de ${READY_EXIGIDAS} famílias diferentes, sem a família ${autor || "(desconhecida)"} (${comoAutor}) e sem as que têm commit (OWNER-20261123-1442-THREE-REVIEWS)${forma}; não enfileire; conclua como recusado (--result declined) para o autor pedir de novo com as ${READY_EXIGIDAS}`);
   return { p, head: sha };
 }
 

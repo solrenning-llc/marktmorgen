@@ -24,6 +24,7 @@
  *     settles only once the refund reads succeeded; one that then fails is made again.
  */
 import { addPeriods, finishPlan, rememberPlan, settlePlans } from "@/lib/plans";
+import { owedPlanWords } from "@/lib/plan-stuck-notice";
 import { LATE_REFUND_CALLS, LATE_REFUNDS_PER_TRY } from "@/lib/plan-late-refunds";
 import * as registry from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
@@ -64,12 +65,15 @@ let chargeLags = false;
 let refundStatus = "succeeded";
 /** Payment intents whose refund Stripe refuses for good (a 400 with this code). */
 const refusedFor = new Map<string, string>();
+/** When set, the creator's account refuses us on every request, as Stripe does once the account disconnected us. */
+let accountRefused = false;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname !== "api.stripe.com") return answer({ object: "list", data: [], has_more: false });
   stripeCalls += 1;
+  if (accountRefused) return answer({ error: { type: "invalid_request_error", message: "The provided key does not have access to account acct_synthetic (or that account does not exist)." } }, 403);
   const method = init?.method ?? "GET";
   const path = url.pathname.replace(/^\/v1/, "");
   const headers = (init?.headers ?? {}) as Record<string, string>;
@@ -429,6 +433,62 @@ async function main(): Promise<void> {
     await rememberPlan(ACCOUNT, none.session);
     await settlePlans();
     is("control: a plan with no late payment is let go at once", await inALine(none.session), false);
+  }
+
+  part("A watched plan whose account refuses us is never made stuck: read again while watched, let go after (OWNER-20261124-0218, MEDIO 1)");
+  {
+    reset();
+    redis.clear();
+    Date.now = () => clock * 1000;
+    const w = plan(2, 70, 3);
+    await rememberPlan(ACCOUNT, w.session);
+    is("(setup) refunded, settled and watched", [(await settlePlans()).done, await inALine(w.session)], [1, true]);
+    // The creator disconnects us after the plan ended: every read of the watched plan is refused from now on.
+    accountRefused = true;
+    let stuck = 0;
+    let told = 0;
+    try {
+      for (const day of [8, 15, 22, 29]) {
+        Date.now = () => (clock + day * DAY) * 1000;
+        const run = await settlePlans();
+        stuck += run.stuck;
+        told += run.told;
+      }
+      is("RED: inside its watch it is never counted stuck, and its creator is never told the plan is stuck", [stuck, told], [0, 0]);
+      is("still in the line while watched", await inALine(w.session), true);
+      Date.now = () => (clock + 45 * DAY) * 1000;
+      const after = await settlePlans();
+      is("RED: past its watch, a refused read lets it go", await inALine(w.session), false);
+      is("never stuck, never told, never counted again", [after.stuck, after.told, after.done, after.dropped], [0, 0, 0, 0]);
+    } finally {
+      accountRefused = false;
+      Date.now = () => clock * 1000;
+    }
+  }
+
+  part("A watched plan read as gone is not counted dropped: it was counted done (OWNER-20261124-0218, LEVE 2)");
+  {
+    reset();
+    redis.clear();
+    Date.now = () => clock * 1000;
+    const g = plan(2, 70, 3);
+    await rememberPlan(ACCOUNT, g.session);
+    is("(setup) settled and watched", [(await settlePlans()).done, await inALine(g.session)], [1, true]);
+    delete sessions[g.session];
+    Date.now = () => (clock + 8 * DAY) * 1000;
+    const gone = await settlePlans();
+    is("RED: let go, counted neither dropped nor done again", [await inALine(g.session), gone.dropped, gone.done], [false, 0, 0]);
+    Date.now = () => clock * 1000;
+  }
+
+  part("The email for a plan whose list could not be read says only what is known (OWNER-20261124-0218, NIT 3)");
+  {
+    const words = owedPlanWords("Harbor", "Course", "cs_test_synthetic", [], 7);
+    // The plan may have been owed for another reason first, and earlier tries may have refunded part of its payments.
+    is("RED: it never says the list went unread for all those days", /For 7 days we could not read/.test(words.text), false);
+    is("RED: it never says none was refunded", /not refunded any of them/.test(words.text), false);
+    is("it says payments already refunded stay refunded", /already refunded/.test(words.text), true);
+    is("and asks to refund only what is not refunded yet", /not refunded yet/.test(words.text), true);
   }
 
   part("A plan owed today is read again by the next daily run, even one that starts a little early (#3367, LOW 3 of 6938631896)");

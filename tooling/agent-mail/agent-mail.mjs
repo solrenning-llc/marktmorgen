@@ -1346,7 +1346,7 @@ const LOGO_DEPOIS = new RegExp(String.raw`^\s*(?:$|\.(?:\s|$)|[,;:—–-]?\s*\(
 // "low fee", "leve"); só "nit"/"nits" vale também em minúsculas (LEVE do Claude 3 wSUb3 no #5408 @0aefb8aa0f).
 // ... e, em qualquer caixa, quando rotula algo: seguido de dois-pontos ou de um travessão entre espaços ("Grave: vaza a
 // sessão", "Leve — o nome", "Nit: typo"; MÉDIO do Claude 5 ichw no #5408 @044dca4bfa). "high-risk" e "low fee" não rotulam.
-const GRAU_MAIUSCULO = /\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)S?\b|\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)s\b|\bnits?\b/;
+const GRAU_MAIUSCULO = /\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)S?\b|\b(?:GRAVE|ALT[OA]|M[EÉ]DI[OA]|LEVE|NIT|LOW|MEDIUM|HIGH|CRITICAL)s\b|\b[Nn][Ii][Tt][Ss]?\b/;
 const GRAU_ROTULO = /\b(?:grave|alt[oa]|m[eé]di[oa]|leve|nit|low|medium|high|critical)s?\s*(?::|\s[—–-]\s)/i;
 const GRAU_NOMEADO = { test: (t) => GRAU_MAIUSCULO.test(t) || GRAU_ROTULO.test(t) };
 function abreAchado(texto) {

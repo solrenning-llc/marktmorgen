@@ -189,6 +189,19 @@ const listedAs = (prefix: string): { member: string; score: number } | null => {
     is("the offer is still on the job's list, still pending", [listedAs(`quiet|${kept}|`) !== null, JSON.parse(String(redis.run(["GET", `nl:upsell:${kept}`]))).state], [true, "pending"]);
   }
 
+  // Claude 5 iao9Ep's NIT on #5482: the thanks page takes off the plain entry only; one the job rescheduled carries its
+  // time and is let go at its next look, which reads the offer settled (one look, on its schedule).
+  part("An offer settled by the thanks page after the job rescheduled it leaves at its next look");
+  redis.clear();
+  {
+    const paid = "cs_test_paidonthanks0001";
+    const began = Date.now() - 10 * 60_000;
+    redis.run(["SET", `nl:upsell:${paid}`, JSON.stringify({ state: "paid", product: "p1", pi: "pi_paid", at: began })]);
+    redis.run(["ZADD", PENDING, began, `quiet|${paid}||at:${began}`]);
+    await settlePendingOffers(async () => null, Date.now() + 10_000);
+    is("the entry carrying its time leaves the list", listedAs(`quiet|${paid}|`), null);
+  }
+
   // Claude 5 ichw's LEVE 4 on #5482: a record that has expired is let go at its next look.
   part("A record that has expired is let go at its next look");
   redis.clear();

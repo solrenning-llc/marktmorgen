@@ -168,6 +168,10 @@ const NOTHING_TAKEN = new Set(["requires_payment_method", "canceled", "requires_
  * Adds an offer to the job's list, and takes it off. Best effort: the list
  * only makes the settling sooner, the thanks page settles an offer too, so a
  * moment of Redis trouble here never stands in the way of the buyer's answer.
+ * Taking it off removes the entry as listed here; one the job has since
+ * rescheduled carries the offer's time (AT_MARK) and is left to its next look,
+ * which reads the offer settled and lets it go: one look, on its schedule
+ * (Claude 5 iao9Ep on #5482; tests/upsell-pending-thrown-behind.test.ts).
  */
 async function watchPending(store: Store, session: string, slot: string): Promise<void> {
   await redisPipeline([["ZADD", PENDING_KEY, Date.now(), pendingMember(store.handle, session, slot)]]).catch((error) =>

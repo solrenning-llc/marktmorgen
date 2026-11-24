@@ -352,6 +352,21 @@ async function main(): Promise<void> {
   store = await freshStore();
   subs.push(addOn(1, "active"));
   is("control: one made before, with no id, is still read by its handle", [await applyListedAssistant({ ...subs[0] }), (await storeForEmail(OWNER))?.assistantPlan?.subscriptionId], [true, subs[0].id]);
+  // Claude 3 xvBY8's LEVE and NIT on #5379: the paid return reads the store by id too, and an empty id names no store.
+  store = await freshStore();
+  const othersPage = ((await start(store, ORIGIN)) as { checkout: string }).checkout;
+  const othersSession = sessions.find((s) => s.url === othersPage)!;
+  othersSession.metadata = { ...othersSession.metadata, assistant_sid: "0123456789abcdef0123456789abcdef" };
+  is("a paid return naming this handle but another store's id is not this store's", await readAssistantReturn(store, pay(othersPage)), null);
+  store = await freshStore();
+  const ownPage = ((await start(store, ORIGIN)) as { checkout: string }).checkout;
+  is("control: the paid return naming this store's id is this store's", (await readAssistantReturn(store, pay(ownPage)))?.subscriptionId?.startsWith("sub_"), true);
+  store = await freshStore();
+  subs.push(addOn(1, "active", { metadata: { addon: "assistant", assistant_for: HANDLE, assistant_sid: "" } }));
+  posts.length = 0;
+  const emptyId = await outcome(store);
+  is("a live add-on whose id is there but empty names no store, never read by its handle: a page of this store's own is opened", [emptyId.startsWith("checkout "), posts.length], [true, 1]);
+  is("and the daily sync never writes it on this store", [await applyListedAssistant({ ...subs[0] }), (await storeForEmail(OWNER))?.assistantPlan?.subscriptionId ?? null], [false, null]);
 
   // Claude 1's LEVE 1 on #5349 @30b8c0d1ea: two of this store's open pages, both at another price, are never both
   // expired nor followed by a third: the start says it could not, and nothing is expired or opened.

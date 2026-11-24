@@ -464,15 +464,18 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
  * an id (its id key fenced on with EXISTS) or, for a store from before ids, its statsId, compared with its owner's
  * record's own (v3, the rule of lib/store-live-cache.ts setWhileStoreLive v2; Claude 2 and Codex X4 on #4880: v2 fenced
  * a legacy store on an id key it never has). A gone, erasing or no-longer-its-owner's store returns -2 without any
- * mark/index write; an owner record that does not parse returns -3 (unknown), never erased. Mark pairs start at
- * ARGV[5]. lib/redis-memory.ts runs it the same way.
+ * mark/index write; an owner record that does not parse returns -3 (unknown), never erased. v4: a record that does not
+ * start as a JSON object (a list, a string, a number, null) is -3 too, refused before cjson decodes it, since cjson
+ * decodes a list to a table that v3 then read as another owner's (-2; Claude 3 yaQt's LEVE on #4880). Mark pairs start
+ * at ARGV[5]. lib/redis-memory.ts runs it the same way.
  */
-export const BENEFIT_MARK = `-- marktmorgen:benefit-mark:v3
+export const BENEFIT_MARK = `-- marktmorgen:benefit-mark:v4
 if ARGV[4] == "" then
   if redis.call("EXISTS", KEYS[4]) == 0 then return -2 end
 else
   local raw = redis.call("GET", KEYS[4])
   if not raw then return -2 end
+  if not string.find(raw, "^%s*{") then return -3 end
   local ok, record = pcall(cjson.decode, raw)
   if not ok or type(record) ~= "table" then return -3 end
   if record["statsId"] ~= ARGV[4] then return -2 end

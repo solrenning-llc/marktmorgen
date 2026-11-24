@@ -2200,7 +2200,7 @@ export class MemoryRedis {
         }
         // lib/tier-benefits.ts BENEFIT_MARK: one person's benefit marks written only while they are not on the store's
         // list of the deleted; -1 when they are, otherwise each HSETNX's reply and the SADD's.
-        if (key.startsWith("-- marktmorgen:benefit-mark:v3\n") && args[0] === "5" && args.length >= 12 && (args.length - 10) % 2 === 0) {
+        if (key.startsWith("-- marktmorgen:benefit-mark:v4\n") && args[0] === "5" && args.length >= 12 && (args.length - 10) % 2 === 0) {
           const [, marks, who, erased, identity, erasing, print, person, erasingField, statsId, ...pairs] = args;
           this.scriptCalls += 1;
           if (statsId === "") {

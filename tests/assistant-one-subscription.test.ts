@@ -297,7 +297,11 @@ async function main(): Promise<void> {
   expired.length = 0;
   // The second tab lists the open pages after the first expired the old one and before its new page exists.
   const firstTab = outcome(store);
-  while (expired.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+  // Waited for at most two seconds (Claude 3 wSUb3's LEVE on #5349): a regression that never expires the old page fails
+  // this part, and the file goes on, instead of hanging until the runner kills it.
+  const waitUntil = performance.now() + 2_000;
+  while (expired.length === 0 && performance.now() < waitUntil) await new Promise((resolve) => setTimeout(resolve, 5));
+  is("the first tab expired the page at another price (within two seconds)", expired.length > 0, true);
   const tabs = await Promise.all([firstTab, outcome(store)]);
   postDelayMs = 0;
   const open = sessions.filter((s) => s.status === "open");

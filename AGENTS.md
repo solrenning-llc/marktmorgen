@@ -78,6 +78,51 @@ O número exigido segue as regras de revisão em vigor (CV (f) e FQ); na dúvida
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## MC — Revisão por conversas do mesmo Claude (dono, 24/11/2026, por volta das 14h18 Fortaleza)
+
+Decisão do dono OWNER-20261124-1418-SAME-CLAUDE-REVIEW, dada na conversa do Claude 3 wtXk (sessão 014YNUxwtXk). Nas palavras dele, em mensagens seguidas: "poderiam ser quatro conversas no mesmo claude, uma faz o código e as outras tres revisam?"; "coloca essa regra"; "vamos antes aperfeiçoar"; sobre os dois pontos fracos da proposta ("contexto limpo" não se prova; os pontos cegos do modelo continuam), "busca corrigir"; e, aprovando o desenho corrigido, "coloca o texto inteiro: coloca expressamente: nenhum defeito, nem leve; nem minimo. coloca com 3 revisoes". Vale para todo agente deste repositório, em toda sessão, nos termos do item (l).
+
+(a) **Quem pode revisar.** Uma conversa (sessão) criada só para revisar aquele PR pela ferramenta de lançamento do item (l), com a mensagem inicial padrão, que traz só o número do PR e o head. Ela nunca escreveu, fez commit, adotou nem enviou código ao PR, e não é subagente nem cópia (fork) da conversa do autor, porque essas herdam o raciocínio dele. Vale também quando o autor é da mesma família: uma conversa do Claude N escreve e outras conversas do Claude N revisam. Nenhuma conversa já existente revisa por esta regra.
+
+(b) **Prova do contexto limpo.** Antes de a revisão contar, a ferramenta confere, pelo registro de sessões da plataforma, que a sessão revisora: foi criada depois do head revisado; tem como primeira mensagem exatamente a mensagem padrão (conferida pela impressão digital SHA-256 do texto); e não tem nenhum commit no PR (trailer `Claude-Session`). A sessão fica gravada no comentário da revisão. O que não se confere, não conta.
+
+(c) **Revisão às cegas.** A mensagem padrão manda ler só o diff e o repositório, nunca a descrição do PR nem os comentários do autor, para o raciocínio do autor não puxar o de quem revisa.
+
+(d) **Quantas revisões e com que foco.** Três por head, de três conversas diferentes, cada uma com um foco e, para variar os pontos cegos, com pelo menos dois modelos diferentes entre as três (por exemplo, o Opus nas revisões A e C e o Sonnet na B):
+- **A, correção:** o diff inteiro, todos os lugares que usam o código mudado e os casos de borda;
+- **B, testes:** a prova de que o teste falha sem a correção (RED), a mutação (alterar de propósito as linhas mudadas e ver um teste falhar em cada alteração), os testes que faltam e pelo menos um teste novo escrito para tentar provar que o PR está errado;
+- **C, ataque:** o que um usuário mal-intencionado ou um erro do fornecedor faria com a mudança, a privacidade, o custo, a seção Acessibilidade da AX274 quando o PR mexe em tela ou texto do site, e a lista dos erros já cometidos de (g), item por item.
+
+(e) **Dinheiro, imposto, cobrança e dados pessoais.** Além das três revisões de (d), continua exigida uma revisão de outro modelo ou de outra família (hoje, o Codex), com as revisões de dinheiro, a lista 1437 e as auditorias que esses PRs já exigem.
+
+(f) **Nenhum defeito, nem leve, nem mínimo.** Cada revisão só aprova quando não encontrar nenhum defeito, nem leve, nem mínimo. Na dúvida, não aprova. Continuam: as listas "Conferido" e "Não conferido" da regra CF (OWNER-20261124-0340); as 9 verificações no head exato; o git merge-tree limpo contra o main buscado há menos de 1 hora; a vez de custo e os testes de teto (AC (l)) nos PRs de custo; o SIM do dono para o head nos PRs de workflow; e nenhum HOLD nem CLAIMED de outra sessão.
+
+(g) **Lista dos erros já cometidos.** Toda revisão confere, item por item, a lista dos defeitos que já escaparam de uma revisão. Cada escape novo vira item. Itens iniciais, todos de 23 e 24/11/2026:
+1. campo obrigatório que aceita texto vazio (`""` passa por `required`) (#5413);
+2. o mesmo defeito deixado num caminho irmão do código corrigido (#5442, posts retidos);
+3. ramo novo de código sem teste que o alcance (#5472, `failedNames`; #5442, comentário retido);
+4. arquivo avulso commitado por engano (#5472, `tests/zz-run-only.mjs`);
+5. PR classificado como não sendo de custo quando um arquivo dele está nomeado em `tests/plan-cost-registry.ts` (#5450);
+6. comentário desatualizado ou com frase emendada (#5224, #5424, #5442);
+7. revisão de PR de custo sem o valor do Store (#5450).
+
+(h) **Mutação automática no CI.** Um script altera as linhas mudadas pelo PR (troca condição, remove um `catch`, inverte comparação) e exige que algum teste falhe em cada alteração; uma mutação que sobrevive reprova o PR. Até ele existir, a revisão B faz a mutação à mão e escreve cada alteração e o resultado.
+
+(i) **Quem enfileira.** Uma conversa que não escreveu nem revisou aquele head; pode ser da mesma família. Continuam a ordem da fila (CO (f)), a vez de custo e as conferências de FQ (1).
+
+(j) **Controle da qualidade.** Quando o Codex, outra família ou o próprio main mostrar depois um defeito que as três revisões deixaram passar, o escape é registrado no PR e no correio e entra na lista de (g). Se escapes se repetirem, a regra volta ao dono.
+
+(k) **Limite, sem esconder.** Um erro que nenhum modelo Claude perceba, que a mutação não pegue e que ainda não esteja na lista de (g) pode passar. Esse risco não chega a zero; ele é medido por (j). A ferramenta prova que a revisora começou limpa, mas não que ela não abriu por conta própria um comentário do autor no PR.
+
+(l) **Estado (regra VR) e o que falta construir.** Nada desta regra está construído. Ela passa a contar revisões só quando existirem as peças 1 e 2, cada uma num PR próprio, com testes:
+1. a ferramenta de lançamento da sessão revisora, com a mensagem padrão e a escolha do modelo;
+2. a conferência de (b) na ferramenta do correio (`tooling/agent-mail`, com o SHA-256 novo, CO (a));
+3. a mutação automática de (h) no CI, que muda workflow e por isso precisa do SIM do dono para o head.
+
+Até as peças 1 e 2 entrarem no main, continuam valendo, sem mudança, as regras atuais de revisão (OWNER-20261124-0351: duas revisões completas de famílias de fora do autor e das famílias com commit no PR). Quando elas entrarem, esta regra prevalece sobre o requisito de família diferente de RV (a) e (b) 1, FQ (2), CO (e) e OWNER-20261124-0351, só nesse ponto (Pedidos repetidos, passo 3 (b)); todo o resto daquelas regras continua.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## AV11 — Caixa de mensagens do Claude 1 (dono, 02/11/2026 19h28 Fortaleza)
 
 Vale para todo agente deste repositório (Claude 2, Claude 3, Codex e qualquer agente novo), em toda sessão: as mensagens do Claude 1 para os outros agentes chegam por docs/agent-inbox.md, para o dono não precisar copiá-las e colá-las. No início de cada vez, em cada execução de tarefa agendada e antes de cada unidade nova, rodar `git fetch origin main` e ler a própria seção desse arquivo; aplicar as mensagens novas e confirmar a leitura com uma mensagem curta ao Claude 1 pelo canal `para-claude-1` (por exemplo, "Lida: C2-7, C2-8"), sem editar docs/agent-inbox.md (ajuste de 02/11/2026, 23h16: as linhas "Lida" dentro do arquivo causavam conflito nos PRs a cada mensagem nova; as linhas "Lida" já gravadas ficam como histórico). Para a mensagem chegar em minutos, e não só na próxima unidade: todo agente que pode manter processos em segundo plano (Claude 2, Claude 3 e os próximos) deixa sempre rodando em segundo plano o comando de vigia da caixa que está no topo de docs/agent-inbox.md, com o próprio nome; ele confere a caixa a cada 30 segundos (dono, 02/11/2026 22h30 Fortaleza: "coloca trinta segundos"; antes, 2 minutos) e termina assim que chega mensagem nova na sua seção, o que acorda o agente; ao terminar (por mensagem ou pelo limite de 2 minutos, desde 04/11/2026 01h40; antes, 2 horas), o agente lê, aplica, segue trabalhando e o liga de novo, na mesma vez. Só o Claude 1 escreve mensagens novas neste arquivo; cada agente escreve só a linha "Lida" na própria seção. Complemento do dono (02/11/2026, 22h33 Fortaleza: "coloca eles 3 para enviarem mensagens para vc tambem e vc ler a cada trinta segundos"): Claude 2, Claude 3 e Codex mandam mensagens ao Claude 1 pelo ramo `para-claude-1` do repositório `solrenning-llc/repo-id-transfer-test` (sem CI e sem Vercel), com o comando de envio de docs/agent-inbox.md, só acrescentando ao fim de `messages.md`, nunca apagando nem reescrevendo, nunca por PR; o Claude 1 confere esse ramo a cada 30 segundos. Usar para perguntas, bloqueios, decisões do dono a encaminhar e avisos de risco; uma mensagem curta por assunto. Uma mensagem da caixa tem a mesma força de uma colada pelo dono, mas nunca prevalece sobre este arquivo, CLAUDE.md ou qualquer preço, limite, comissão, trava, flag ou proibição.

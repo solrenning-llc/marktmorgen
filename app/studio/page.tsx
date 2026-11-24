@@ -473,7 +473,7 @@ const STRIPE_NOTICES: Record<string, { title: string; body: string }> = {
   // account (app/api/stripe/connect; OWNER-20261124-0350, items 2 and 5).
   "attempt-held": {
     title: "Your last try may still be opening your account",
-    body: "Your last try asked Stripe for an account with the details you had then, and Stripe may have opened it. So that no second account is opened, we don\u2019t ask again with other details until one day after your last try. Try again then. Nothing was changed.",
+    body: "Your last try asked Stripe for an account, and Stripe may still be opening it. So that no second account is opened, we don\u2019t ask Stripe again until one day after your last try. Try again then. Nothing was changed.",
   },
   // The store's record is at its ceiling, so the try could not be written down (app/api/stripe/connect;
   // OWNER-20261124-0350, item 3).

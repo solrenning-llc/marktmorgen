@@ -402,7 +402,7 @@ export type Store = {
   stripeConnecting?: StripeConnecting;
   /**
    * The attempts to open the creator's Stripe account that were replaced (past STRIPE_CONNECT_REUSE_SECONDS, or by a
-   * press in another country a day after the last one) or lapsed, newest last, at most STRIPE_CONNECT_REPLACED_KEPT:
+   * press in another country or with another address a day after the last one) or lapsed, newest last, at most STRIPE_CONNECT_REPLACED_KEPT:
    * an account Stripe made with a lost answer can be found only by its idempotency key, which holds the attempt's id
    * (Claude 1 2as's LOW 2 on #5095). Only the id, the country and the times: never the address or the name it was asked
    * with. Kept with the store's record and gone with it.
@@ -934,10 +934,10 @@ export const STRIPE_CONNECT_HOLD_SECONDS = 24 * 60 * 60;
 export const STRIPE_CONNECT_REUSE_SECONDS = 29 * 24 * 60 * 60;
 const CONNECT_ATTEMPT_ID = /^[0-9a-f]{32}$/;
 /**
- * An attempt as kept on the record, or undefined. One past STRIPE_CONNECT_REUSE_SECONDS from its first write is read as
- * none (the coordinator's df44 on #5095): it no longer holds the store (its hold counts from its last press, a day) and
- * is never reused, so the creator's address and name it was asked with go at the record's next save instead of staying
- * for good.
+ * An attempt as kept on the record, or undefined. One past STRIPE_CONNECT_REUSE_SECONDS from its first write, and past
+ * the day its last press holds the store, is read as none (the coordinator's df44 on #5095; OWNER-20261124-0350, item
+ * 5): it no longer holds the store and is never reused, so the creator's address and name it was asked with go at the
+ * record's next save instead of staying for good. One past its 29 days but still inside that day is kept, never reused.
  */
 function readConnecting(raw: unknown, now = Date.now(), anyAge = false): StripeConnecting | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
@@ -2820,7 +2820,9 @@ export type StripeAccountResult =
 /**
  * Writes down a press that asks Stripe to open the creator's account, before Stripe is asked (Codex L-20261120-0258),
  * under the store's lock. The store's own attempt is reused while its key is (STRIPE_CONNECT_REUSE_SECONDS) and the press
- * is for its country, so a press again, or a second tab, asks with the same idempotency key and gets the same account.
+ * is for its country and its address (OWNER-20261124-0350, item 2), so a press again, or a second tab, asks with the same
+ * idempotency key and gets the same account. `{ held }` when the press has another address, or the attempt is past its
+ * 29 days, and its last press was less than a day ago (item 5): nothing is asked; past that day a new attempt replaces it.
  * Each press is written on it first: its time (which starts the day it holds the store again) and its count of sends.
  * `{ other }` when an open attempt for another country was pressed less than a day ago (Claude 7 xAF on #5095): an
  * account's country is fixed for good, so nothing is asked of Stripe, and the creator is told. Past that day, a press

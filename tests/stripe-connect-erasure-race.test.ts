@@ -17,6 +17,8 @@
 import { NextRequest } from "next/server";
 import { POST as connectPOST } from "@/app/api/stripe/connect/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { addProduct, setStripeAccount, storeForEmail } from "@/lib/store";
+import { afterTasks } from "./next-server-after-world";
 import { ERASING_KEY, MAX_STORE_BYTES, STRIPE_CONNECT_HOLD_SECONDS, STRIPE_CONNECT_REPLACED_KEPT, STRIPE_CONNECT_REUSE_SECONDS, beginStripeConnect, claimHandle, clearStripeConnect, createStore, deleteStore as deleteWith, erasingField, finishStripeConnect, setCommunity, storeForId, storeRef } from "@/lib/store";
 import { BATCH_KEY, StripeConnectingError, prepareStore, queueDeleted } from "@/lib/closed-store-data";
 import { FINAL_INDEX } from "@/lib/closing-holds";
@@ -560,7 +562,17 @@ async function main(): Promise<void> {
     const other = await measure("connect-cost-other@example.com", b.sid, "US");
     is(`an attempt in another country, nothing asked: ${other.billed} within ${bound}`, [other.said, other.billed <= bound], ["attempt-country", true]);
     const c = await extraStore("connect-cost-late@example.com", "connectcostlatefirst", "connectcostlateextra");
-    meanwhile = async () => { await finishStripeConnect(storeRef(c), c.sid, (await storeForId(c.sid))?.stripeConnecting?.id ?? "", "acct_CostLateTab01"); };
+    // The other tab's own write is its press's, never this one's: not counted here (Claude 3 xvBY8 on #5095, LEVE 1).
+    const uncounted = redis.pipeline.bind(redis);
+    meanwhile = async () => {
+      const counting = redis.pipeline;
+      redis.pipeline = uncounted;
+      try {
+        await finishStripeConnect(storeRef(c), c.sid, (await storeForId(c.sid))?.stripeConnecting?.id ?? "", "acct_CostLateTab01");
+      } finally {
+        redis.pipeline = counting;
+      }
+    };
     const late = await measure("connect-cost-late@example.com", c.sid);
     is(`another tab wrote the account first, the store read again: ${late.billed} within ${bound}`, [late.billed <= bound], [true]);
     const d = await extraStore("connect-cost-lost@example.com", "connectcostlostfirst", "connectcostlostextra");
@@ -571,6 +583,119 @@ async function main(): Promise<void> {
     await beginStripeConnect(storeRef(e), e.sid, { country: "us", email: "an-old-address@example.com", name: "Held" });
     const heldCost = await measure("connect-cost-held@example.com", e.sid);
     is(`an attempt held (other details, its day not over), nothing asked: ${heldCost.billed} within ${bound}`, [heldCost.said, heldCost.billed <= bound], ["attempt-held", true]);
+    // Each write of the store's record reads its catalog's first page again (buildHead): a full page is the dearest
+    // press (Claude 3 xvBY8 on #5095, LEVE 1).
+    const fullOwner = "connect-cost-full-page@example.com";
+    await claimHandle(fullOwner, "connectcostfullpage", "Full page", "");
+    for (let i = 0; i < 40; i += 1) {
+      const made = await addProduct(fullOwner, `Synthetic product ${i}`, "", "10", null);
+      if (!made.ok) throw new Error(`no product ${i}`);
+    }
+    const fullSid = (await storeForEmail(fullOwner))?.sid ?? "";
+    const opened = await measure(fullOwner, fullSid);
+    is(`a press that opens the account, a full first catalog page: ${opened.billed} within ${bound}`, [opened.said, opened.billed <= bound], ["onboarding", true]);
+  }
+
+  part("Branches a mutation could change unseen are held (Claude 3 xvBY8 on #5095, LEVE 3)");
+  {
+    // Another tab wrote the account between this press's first read and its attempt: begin answers null, the store is
+    // read again and the press goes on with that account; Stripe is not asked and no notice is sent by this press.
+    reset();
+    const owner = "connect-held-before@example.com";
+    const store = await extraStore(owner, "connectheldbeforefirst", "connectheldbeforeextra");
+    const real = redis.pipeline.bind(redis);
+    let wrote = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!wrote && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:store:lock:") && c.includes("NX"))) {
+        wrote = true;
+        redis.pipeline = real;
+        await setStripeAccount(storeRef(store), "acct_BeforeBegin01", false, { expected: null });
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const tasksBefore = afterTasks.length;
+    let said: string | null;
+    try { said = await connect(owner, store.sid); } finally { redis.pipeline = real; }
+    is("another tab wrote first: the press goes on with that account", [wrote, said, keys.length], [true, "onboarding", 0]);
+    is("and sends no notice of its own", afterTasks.length - tasksBefore, 0);
+
+    // This press's own answer comes after another tab (same key) wrote the account: it goes on with it, no notice.
+    reset();
+    const lateOwner = "connect-late-answer@example.com";
+    const late = await extraStore(lateOwner, "connectlateanswerfirst", "connectlateanswerextra");
+    meanwhile = async () => {
+      const attempt = (await storeForId(late.sid))?.stripeConnecting;
+      await finishStripeConnect(storeRef(late), late.sid, attempt?.id ?? "", "acct_1Synthetic1");
+    };
+    const lateBefore = afterTasks.length;
+    is("a late answer for the account another tab wrote goes on with it", await connect(lateOwner, late.sid), "onboarding");
+    is("and only the press that wrote the account sends the notice", afterTasks.length - lateBefore, 0);
+    const writerBefore = afterTasks.length;
+    reset();
+    const writer = await extraStore("connect-writer@example.com", "connectwriterfirst", "connectwriterextra");
+    is("(control) a press that writes the account", await connect("connect-writer@example.com", writer.sid), "onboarding");
+    is("sends the notice once", afterTasks.length - writerBefore, 1);
+
+    // What says nothing was made, and what does not.
+    const typed = (status: number, code = "parameter_invalid_empty", type = "invalid_request_error") => new StripeConnectError(status, code, "x", type, true);
+    is("a typed 400 says nothing was made", typed(400).madeNothing, true);
+    is("408, 409 and 429 never do", [typed(408).madeNothing, typed(409).madeNothing, typed(429).madeNothing], [false, false, false]);
+    is("nor an idempotency_error, by its code or its type", [typed(400, "idempotency_error", "invalid_request_error").madeNothing, typed(400, "x", "idempotency_error").madeNothing], [false, false]);
+    is("nor a 400 whose body is not Stripe's", new StripeConnectError(400, "unknown", "x", "", false).madeNothing, false);
+
+    // Writes only for the same store's same attempt, and an account id in Stripe's shape.
+    reset();
+    const fOwner = "connect-fences@example.com";
+    const f = await extraStore(fOwner, "connectfencesfirst", "connectfencesextra");
+    const other = await extraStore("connect-fences-other@example.com", "connectfencesotherfirst", "connectfencesotherextra");
+    const open = await beginStripeConnect(storeRef(f), f.sid, { country: "us", email: fOwner, name: "Fences" });
+    const id = open && "id" in open ? open.id : "";
+    is("another attempt's refusal clears nothing", await clearStripeConnect(storeRef(f), f.sid, "f".repeat(32)), false);
+    is("nor one asked with another store's id", await clearStripeConnect(storeRef(f), other.sid, id), false);
+    is("another store's id writes no account", await finishStripeConnect(storeRef(f), other.sid, id, "acct_FencesAnswer01"), null);
+    is("an id not in Stripe's shape writes nothing", await finishStripeConnect(storeRef(f), f.sid, id, "not-an-account"), null);
+    is("the attempt is still open after all of them", (await storeForId(f.sid))?.stripeConnecting?.id ?? null, id);
+
+    // A press and a count not written are read as the first press having sent the key.
+    const [, found] = redis.run(["SCAN", "0", "MATCH", "*", "COUNT", "100000"]) as [string, string[]];
+    const key = found.find((k) => { let v: unknown; try { v = redis.run(["GET", k]); } catch { return false; } return typeof v === "string" && v.includes(`"sid":"${f.sid}"`) && v.includes('"handle"'); });
+    if (!key) throw new Error("no store record found");
+    const raw = JSON.parse(String(redis.run(["GET", key]))) as { stripeConnecting: Record<string, unknown>; stripeConnectReplaced?: unknown };
+    delete raw.stripeConnecting.sends;
+    delete raw.stripeConnecting.pressedAt;
+    // The same attempt also listed as replaced (a record written by an older save): listed once, never twice.
+    raw.stripeConnectReplaced = [{ id, country: "us", at: String(raw.stripeConnecting.at), until: String(raw.stripeConnecting.at) }];
+    redis.run(["SET", key, JSON.stringify(raw)]);
+    const read = (await storeForId(f.sid))?.stripeConnecting;
+    is("with no count written, one send; with no press written, its first write", [read?.sends, read?.pressedAt === read?.at], [1, true]);
+
+    // An address longer than kept is cut, and a press again with it still reuses the attempt.
+    reset();
+    const long = `${"l".repeat(400)}@example.com`;
+    const g = await extraStore("connect-long@example.com", "connectlongfirst", "connectlongextra");
+    const first = await beginStripeConnect(storeRef(g), g.sid, { country: "us", email: long, name: "Long" });
+    const again = await beginStripeConnect(storeRef(g), g.sid, { country: "us", email: long, name: "Long" });
+    is("kept at 320 characters", first && "id" in first ? first.email.length : 0, 320);
+    is("and reused by a press again with the same address", again && "id" in again && first && "id" in first ? again.id === first.id : false, true);
+  }
+
+  part("An attempt replaced twice is listed once (Claude 3 xvBY8 on #5095, LEVE 3: withReplaced)");
+  {
+    reset();
+    const owner = "connect-dedup@example.com";
+    const store = await extraStore(owner, "connectdedupfirst", "connectdedupextra");
+    const old = Date.now() - (STRIPE_CONNECT_HOLD_SECONDS + 60) * 1000;
+    const first = await beginStripeConnect(storeRef(store), store.sid, { country: "us", email: owner, name: "Dedup" }, old);
+    const firstId = first && "id" in first ? first.id : "";
+    // Listed as replaced already (an older save), and still the open attempt: a press in another country replaces it.
+    const [, found] = redis.run(["SCAN", "0", "MATCH", "*", "COUNT", "100000"]) as [string, string[]];
+    const key = found.find((k) => { let v: unknown; try { v = redis.run(["GET", k]); } catch { return false; } return typeof v === "string" && v.includes(`"sid":"${store.sid}"`) && v.includes('"handle"'); });
+    if (!key) throw new Error("no store record found");
+    const raw = JSON.parse(String(redis.run(["GET", key]))) as { stripeConnecting: Record<string, unknown>; stripeConnectReplaced?: unknown };
+    raw.stripeConnectReplaced = [{ id: firstId, country: "us", at: String(raw.stripeConnecting.at), until: String(raw.stripeConnecting.at) }];
+    redis.run(["SET", key, JSON.stringify(raw)]);
+    await beginStripeConnect(storeRef(store), store.sid, { country: "gb", email: owner, name: "Dedup" });
+    is("its id is listed once", ((await storeForId(store.sid))?.stripeConnectReplaced ?? []).filter((r) => r.id === firstId).length, 1);
   }
 
   done();

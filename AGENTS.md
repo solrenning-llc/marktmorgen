@@ -78,6 +78,46 @@ O número exigido segue as regras de revisão em vigor (CV (f) e FQ); na dúvida
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## CF — Conferido e não conferido; sem conferir o obrigatório, não aprova (dono, 24/11/2026, 03h40 Fortaleza)
+
+Decisão do dono OWNER-20261124-0340-CHECKED-NOT-CHECKED-RULE (substitui as versões não enviadas OWNER-20261124-0335, -0325 e -0310), enviada a todos pelo correio pelo Claude 5 iZUmuf (20261124T050728Z-claude-5-izumuf-03df), a pedido do dono ("pode enviar e gravar"). Nas palavras dele, ao pedir a regra: "sempre dizerem, escreverem o que conferiram e o que nao conferiram. e precisa conferir o que é necessario conferir. e quando nao conferir o que é necessario e bom conferir, nao aprova"; e, antes, na mesma noite: "sempre que falar que nao foi encontrado defeito, deve EXPRESSAMENTE DIZER OBRIGATORIAMENTE SE NAO FOI ACHADO NENHUM DEFEITO, MESMO QUE LEVE OU MINIMO". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão, em toda revisão, auditoria, aviso de "pronto", pedido de fila, enfileiramento, relatório e texto ao dono. Não vale para os avisos curtos: CLAIMED, UNCLAIMED, HOLD, confirmação de leitura e pedido de revisão. Motivo: em 24/11/2026, no #5095, duas das três aprovações no head atual olharam só um teste, sem dizer o que ficou de fora, e uma revisão independente achou 3 defeitos LEVES no resto do código. O texto de 1 a 10 é o do dono, sem alteração.
+
+1. Duas listas, sempre. Todo veredito e todo relatório trazem:
+   - "Conferido:" o que foi conferido, como e com que resultado (o head exato, os testes rodados, as fontes lidas);
+   - "Não conferido:" o que não foi conferido e o motivo de cada item.
+   Um veredito ou relatório sem as duas listas não vale (para os vereditos dados antes desta regra, vale o item 10).
+
+2. Defeitos. Quando nada for encontrado, escrever exatamente: "nenhum defeito encontrado, nem mesmo leve ou mínimo", com quem conferiu. Nunca só "ok", "sem problemas" ou "0 findings".
+
+3. O mínimo obrigatório, por tipo de PR (além de RV (f)):
+   - toda revisão: o código no head exato, dizendo se é completa ou focal; os testes dos arquivos tocados rodados, num executor que falha quando uma asserção falha; RED quando o PR corrige defeito; o estado da CI no head, lido na hora;
+   - dinheiro, custo, cobrança ou imposto: os testes de teto da AC (l) sobre a junção e o valor do Store; a fonte oficial datada de cada número de imposto;
+   - dados pessoais ou apagamento: o que é guardado, por quanto tempo, e que o apagamento continua funcionando;
+   - segurança: o que um usuário mal-intencionado poderia fazer com a mudança;
+   - workflow: o YAML lido por um analisador, as permissões, o risco de injeção e o meu SIM para aquele head;
+   - tela ou texto do site: a seção Acessibilidade da AX274.
+
+4. Revisão focal. Uma revisão que olha só uma parte do código vale só para o trecho que ela cita, com o intervalo de commits escrito. Para "pronto", todo o código do head atual precisa estar coberto por 3 revisões completas de 3 famílias de fora do autor; uma revisão de um head anterior só conta para o trecho que não mudou desde ela.
+
+5. "Pronto", pedido de fila e enfileiramento exigem, além das revisões: as 9 verificações "All checks" com SUCCESS no head exato e git merge-tree limpo contra o main buscado há menos de 1 hora (FQ (1)).
+
+6. "Bom conferir" vira obrigatório quando puder mexer com dinheiro, dados pessoais, segurança, imposto ou cliente.
+
+7. Obrigatório não conferido não é aprovado. Quem não conseguiu conferir um item obrigatório (por falta de tempo, de ferramenta, de acesso ou de dependência instalada) não escreve READY, SIM nem "pronto". O veredito é "NÃO PRONTO: falta conferir <item>", com quem pode conferir. Nunca READY com ressalva.
+
+8. "Não se aplica" só com o motivo escrito.
+
+9. Continuam: RV (f), VR (itens 5 e 8), a seção Acessibilidade da AX274 e as regras de zero achados (ZA) e de dúvida (DA, OWNER-20261124-0059-DOUBT-NOT-APPROVED). Onde esta regra pedir mais, vale esta.
+
+10. Transição, para a fila não parar:
+   (a) uma revisão completa dada antes desta regra continua valendo para o head que cita; o revisor pode acrescentar as duas listas num adendo curto, sem refazer a revisão;
+   (b) uma revisão focal dada antes desta regra vale só para o trecho dela (item 4);
+   (c) num PR de dinheiro, custo, imposto ou dados pessoais, ao menos uma das 3 revisões precisa ter as duas listas antes do "pronto"; se nenhuma tiver, um dos revisores acrescenta o adendo, ou outra família faz uma revisão completa nova.
+
+"Meu" e "mim" nos itens 3 e 9 são o dono. "As regras de zero achados (ZA) e de dúvida (DA)" estão no correio, nas mensagens do dono que as criaram; ainda não estão gravadas neste arquivo.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## AV11 — Caixa de mensagens do Claude 1 (dono, 02/11/2026 19h28 Fortaleza)
 
 Vale para todo agente deste repositório (Claude 2, Claude 3, Codex e qualquer agente novo), em toda sessão: as mensagens do Claude 1 para os outros agentes chegam por docs/agent-inbox.md, para o dono não precisar copiá-las e colá-las. No início de cada vez, em cada execução de tarefa agendada e antes de cada unidade nova, rodar `git fetch origin main` e ler a própria seção desse arquivo; aplicar as mensagens novas e confirmar a leitura com uma mensagem curta ao Claude 1 pelo canal `para-claude-1` (por exemplo, "Lida: C2-7, C2-8"), sem editar docs/agent-inbox.md (ajuste de 02/11/2026, 23h16: as linhas "Lida" dentro do arquivo causavam conflito nos PRs a cada mensagem nova; as linhas "Lida" já gravadas ficam como histórico). Para a mensagem chegar em minutos, e não só na próxima unidade: todo agente que pode manter processos em segundo plano (Claude 2, Claude 3 e os próximos) deixa sempre rodando em segundo plano o comando de vigia da caixa que está no topo de docs/agent-inbox.md, com o próprio nome; ele confere a caixa a cada 30 segundos (dono, 02/11/2026 22h30 Fortaleza: "coloca trinta segundos"; antes, 2 minutos) e termina assim que chega mensagem nova na sua seção, o que acorda o agente; ao terminar (por mensagem ou pelo limite de 2 minutos, desde 04/11/2026 01h40; antes, 2 horas), o agente lê, aplica, segue trabalhando e o liga de novo, na mesma vez. Só o Claude 1 escreve mensagens novas neste arquivo; cada agente escreve só a linha "Lida" na própria seção. Complemento do dono (02/11/2026, 22h33 Fortaleza: "coloca eles 3 para enviarem mensagens para vc tambem e vc ler a cada trinta segundos"): Claude 2, Claude 3 e Codex mandam mensagens ao Claude 1 pelo ramo `para-claude-1` do repositório `solrenning-llc/repo-id-transfer-test` (sem CI e sem Vercel), com o comando de envio de docs/agent-inbox.md, só acrescentando ao fim de `messages.md`, nunca apagando nem reescrevendo, nunca por PR; o Claude 1 confere esse ramo a cada 30 segundos. Usar para perguntas, bloqueios, decisões do dono a encaminhar e avisos de risco; uma mensagem curta por assunto. Uma mensagem da caixa tem a mesma força de uma colada pelo dono, mas nunca prevalece sobre este arquivo, CLAUDE.md ou qualquer preço, limite, comissão, trava, flag ou proibição.

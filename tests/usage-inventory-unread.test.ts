@@ -3,6 +3,10 @@
  * into a legitimate zero. A failed video settlement, a failed read of the stores visited or of the stores with orders
  * each became "no store", and the run could still answer ok with HTTP 200. Each inventory is now said as unread: the
  * run still does every other part, then answers an error at the end that names the part (`unread`), never a zero.
+ * Since then (#5466 reviews): each inventory also in another reply shape (Claude 3 ykH), never logged as "every store
+ * inside" (Claude 3 ivvh); each of the three delivery reads unknown together with an inventory, both named; the last
+ * answer, a store over the delivery allowance, with an inventory unread; the two reads of the watched stores, the
+ * settlement's and the notices', failed apart; every error answer never kept by a cache (Claude 3 xvBY8).
  * Synthetic Redis only.
  */
 import { GET } from "@/app/api/cron/usage/route";

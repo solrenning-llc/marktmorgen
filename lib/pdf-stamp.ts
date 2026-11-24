@@ -56,7 +56,7 @@ import { type DataStore, keepFor } from "@/lib/store-data";
 import { standingOf } from "@/lib/plan-standing";
 import { storageBrakeFor, storageUsed } from "@/lib/storage-quota";
 import { releaseStorage, reserveStorage } from "@/lib/storage-reservations";
-import { type CopyMeter, FLY_MAX_BYTES, NO_ROOM_NOTE_SECONDS, PROBLEM_NOTE_SECONDS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
+import { type CopyMeter, FLY_MAX_BYTES, NO_ROOM_NOTE_SECONDS, PROBLEM_NOTE_SECONDS, PROBLEM_NOTE_UNITS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
 import type { LanguageCode } from "@/lib/store-language";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -188,6 +188,16 @@ export async function clearStorageNote(pathname: string): Promise<void> {
 async function noteProblem(pathname: string, problem: StampProblem): Promise<void> {
   if (!isRedisConfigured()) return;
   await redisPipeline(problemNoteCommands(pathname, problem)).catch(() => {});
+}
+
+/**
+ * A note a download writes outside a copy made on the fly, paid first: PROBLEM_NOTE_UNITS of the store's public requests
+ * (lib/stamp-cost-rules.ts; Claude 5 icEJ on #5360). Refused, nothing is written, and the download answers as it would.
+ */
+async function notePaid(pathname: string, problem: StampProblem, meter: CopyMeter): Promise<void> {
+  if (!isRedisConfigured()) return;
+  if (!(await meter.take(PROBLEM_NOTE_UNITS).catch(() => false))) return;
+  await noteProblem(pathname, problem);
 }
 
 /** What writeWithinStorage did: kept the copy, found no room, could not pay for the measurement, or failed to write. */
@@ -421,7 +431,7 @@ export async function stampedDelivery(
 ): Promise<StampedDelivery> {
   if (!isStampable(file) || !sale.reference || !sale.email) return ORIGINAL;
   if (file.bytes > MAX_STAMP_BYTES) {
-    await noteProblem(file.pathname, "too_big");
+    await notePaid(file.pathname, "too_big", meter);
     return ORIGINAL;
   }
   const key = copyKey(sale.reference, file);
@@ -463,12 +473,12 @@ export async function stampedDelivery(
     if (!(await roomNotedOut(file))) {
       const original = await readWhole(file.pathname, MAX_STAMP_BYTES);
       if (!original) {
-        await noteProblem(file.pathname, "too_big");
+        await notePaid(file.pathname, "too_big", meter);
         return ORIGINAL;
       }
       const result = await stampBytes(file, original, sale, store);
       if (!result.ok) {
-        await noteProblem(file.pathname, result.problem);
+        await notePaid(file.pathname, result.problem, meter);
         return ORIGINAL;
       }
       stamped = result;
@@ -490,8 +500,11 @@ export async function stampedDelivery(
       // The studio is told only what is true: no room was confirmed. A write that failed, or a measurement the store's
       // requests could not pay for, is not the storage running out.
       // Kept as long as the studio's other notes, so the creator sees it, until a copy of this file is kept again.
-      if (kept === "no_room") await noteProblem(file.pathname, "storage");
-      return await sendUnkept(file, stamped, meter);
+      // Written once the copy sent unkept is paid for: flyUnits holds FLY_BASE, which prices this note, so it is paid
+      // once, never before a send the store cannot pay (Claude 5 icEJ on #5360).
+      const sent = await sendUnkept(file, stamped, meter);
+      if (kept === "no_room" && sent.kind === "fly") await noteProblem(file.pathname, "storage");
+      return sent;
     }
     const copy: ProductFile = {
       pathname,
@@ -509,7 +522,7 @@ export async function stampedDelivery(
       console.error("a stamped copy's record could not be kept; the next download asks the file store for it", error);
     }
     // The storage has room again: the studio no longer says it ran out for this file.
-    if (storageNoted) await clearStorageNote(file.pathname);
+    if (storageNoted && (await meter.take(PROBLEM_NOTE_UNITS).catch(() => false))) await clearStorageNote(file.pathname);
     // Copies left over by a removal the file store failed are tried again here too, a few at a time; the buyer's
     // copy is already made, and a failure leaves them on the list for the next try. This file's own folder is kept
     // for a later try: emptying it now would delete the copy handed over below.

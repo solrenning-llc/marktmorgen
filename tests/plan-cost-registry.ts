@@ -3017,9 +3017,10 @@ export const COST_LINES: CostLine[] = [
       // STORAGE_MEASURE_UNITS public requests taken before it lists, and a store found without room is not listed
       // again for NO_ROOM_NOTE_SECONDS; a copy stamped on the fly for a store without room is held at its worst before
       // the original is read and settled at its measured work (C3-136, 12 November 2026; STORAGE_MEASURE_READ and
-      // FLY_BASE, FLY_CPU_MS, FLY_BYTE held in tests/plan-cost-registry.test.ts).
-      { file: "lib/stamp-cost-rules.ts", names: ["MEASURE_LIST_PAGES", "STORAGE_MEASURE_UNITS", "NO_ROOM_NOTE_SECONDS", "FLY_HOLD_SECONDS", "FLY_BASE_UNITS", "FLY_SHARE_COMMANDS", "FLY_CPU_MS_PER_UNIT", "FLY_CPU_PER_WALL_MS", "FLY_BYTES_PER_UNIT", "FLY_MAX_BYTES", "flyUnits", "flyHoldUnits"] },
-      { file: "lib/pdf-stamp.ts", names: ["meter.take(STORAGE_MEASURE_UNITS)", "noRoomKey(folder)", "NO_ROOM_NOTE_SECONDS", "if (!(await roomNotedOut(file)))", "const held = flyHoldUnits(file.bytes);", "await meter.take(held)", "meter.give(held - used)", "meter.take(used - held)", "meter.take(flyUnits(0, stamped.bytes.byteLength))"] },
+      // FLY_BASE, FLY_CPU_MS, FLY_BYTE held in tests/plan-cost-registry.test.ts). A file's problem note written, or the storage
+      // note cleared, outside a copy made on the fly is paid first, PROBLEM_NOTE_UNITS (notePaid; Claude 5 icEJ on #5360).
+      { file: "lib/stamp-cost-rules.ts", names: ["MEASURE_LIST_PAGES", "STORAGE_MEASURE_UNITS", "NO_ROOM_NOTE_SECONDS", "PROBLEM_NOTE_UNITS", "FLY_HOLD_SECONDS", "FLY_BASE_UNITS", "FLY_SHARE_COMMANDS", "FLY_CPU_MS_PER_UNIT", "FLY_CPU_PER_WALL_MS", "FLY_BYTES_PER_UNIT", "FLY_MAX_BYTES", "flyUnits", "flyHoldUnits"] },
+      { file: "lib/pdf-stamp.ts", names: ["meter.take(STORAGE_MEASURE_UNITS)", "noRoomKey(folder)", "NO_ROOM_NOTE_SECONDS", "if (!(await roomNotedOut(file)))", "const held = flyHoldUnits(file.bytes);", "await meter.take(held)", "meter.give(held - used)", "meter.take(used - held)", "meter.take(flyUnits(0, stamped.bytes.byteLength))", "notePaid", "meter.take(PROBLEM_NOTE_UNITS)"] },
       { file: "lib/pdf-preview.ts", names: ["if (await roomNotedOut(file)) return null;", "writeWithinStorage(file, pathname, bytes, \"application/pdf\", store, meter)"] },
       { file: "app/api/store/download/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now, \"buyer\", { shared: true })", "givePublicRequests(store, units, now, { shared: true })", "copyMeter(store)"] },
       { file: "app/api/store/preview/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now)", "givePublicRequests(store, units, now)"] },

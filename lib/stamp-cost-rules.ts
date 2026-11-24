@@ -39,6 +39,13 @@ export const PROBLEM_NOTE_LONGEST_DAYS = (PROBLEM_NOTE_SECONDS + PREVIEW_MARK_SE
  */
 export const PROBLEM_NOTE_WRITE_COMMANDS = 3;
 /**
+ * Public requests a download pays before it writes a file's problem note, or clears the storage note, anywhere but on a
+ * copy made on the fly (whose FLY_BASE prices its note): one, which covers the script and its two calls
+ * (PROBLEM_NOTE_WRITE_COMMANDS), or the clear's compare-and-delete, three (Claude 5 icEJ on #5360: they were priced
+ * nowhere). Refused, nothing is written. Held in tests/plan-cost-registry.test.ts.
+ */
+export const PROBLEM_NOTE_UNITS = 1;
+/**
  * The longest one path's preview mark (nl:preview:bad:) can live, in days: the once-mark (never written over, NX), then
  * "unreadable" written fresh for PREVIEW_MARK_SECONDS just before it runs out (Claude 5 ygH4 on #5360). Priced in the
  * data registry and said by the closing rule, held in tests/stamp-problem-lifetime.test.ts.

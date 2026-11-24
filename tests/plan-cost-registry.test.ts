@@ -71,8 +71,8 @@ import { WINBACK_OPEN_READ } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES, ORDERS_METERED_PROGRESS } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_MOVES_READ_COMMANDS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_PROGRESS_COMMANDS, ORDERS_UNIT_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
-import { BLOB_LIST_PAGE, FLY_BASE, FLY_BYTE, FLY_CPU_MS, STORAGE_MEASURE_READ } from "./plan-cost-registry";
-import { FLY_BASE_UNITS, FLY_BYTES_PER_UNIT, FLY_CPU_MS_PER_UNIT, FLY_CPU_PER_WALL_MS, FLY_HOLD_SECONDS, FLY_MAX_BYTES, MEASURE_LIST_PAGES, NO_ROOM_NOTE_SECONDS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
+import { BLOB_LIST_PAGE, COMMAND, FLY_BASE, FLY_BYTE, FLY_CPU_MS, STORAGE_MEASURE_READ } from "./plan-cost-registry";
+import { FLY_BASE_UNITS, FLY_BYTES_PER_UNIT, FLY_CPU_MS_PER_UNIT, FLY_CPU_PER_WALL_MS, FLY_HOLD_SECONDS, FLY_MAX_BYTES, MEASURE_LIST_PAGES, NO_ROOM_NOTE_SECONDS, PROBLEM_NOTE_UNITS, PROBLEM_NOTE_WRITE_COMMANDS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
 import { BLOB_LIST_PAGES } from "@/lib/storage-rules";
 import { VAULT_LIST_PAGES } from "@/lib/vault-rules";
 import { MAX_STAMP_BYTES } from "@/lib/product-file";
@@ -433,6 +433,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // its share, the held function and notes, a CPU millisecond counted FLY_CPU_PER_WALL_MS times per millisecond of wall
   // time, and each byte read or sent; the hold before it reads covers the whole time limit and every byte it may send.
   assert.ok(FLY_BASE_UNITS * laterPageCost() >= FLY_BASE, `${FLY_BASE_UNITS} x ${laterPageCost()} < ${FLY_BASE}`);
+  // A file's problem note written, or the storage note cleared, outside a copy made on the fly (lib/pdf-stamp.ts notePaid):
+  // the units taken first pay for the script and its two calls, or the clear's compare-and-delete, three (Claude 5 icEJ on #5360).
+  assert.ok(PROBLEM_NOTE_UNITS * laterPageCost() >= Math.max(PROBLEM_NOTE_WRITE_COMMANDS, 3) * COMMAND, `${PROBLEM_NOTE_UNITS} x ${laterPageCost()} < a note's commands`);
   assert.ok(laterPageCost() >= FLY_CPU_MS_PER_UNIT * FLY_CPU_MS, `${laterPageCost()} < ${FLY_CPU_MS_PER_UNIT} ms of CPU`);
   assert.ok(laterPageCost() >= FLY_BYTES_PER_UNIT * FLY_BYTE, `${laterPageCost()} < ${FLY_BYTES_PER_UNIT} bytes`);
   assert.ok(FLY_CPU_PER_WALL_MS >= 2, "two processors' CPU counted for each millisecond of wall time");

@@ -1,9 +1,10 @@
 /**
  * Postponing a payment request's reminder never puts an erased request back on the due list (issue #4767, Codex L).
- * The five-minute job holds a due reminder's ids; if the person's erasure takes the request and its due member off
- * while the job's read of it fails, the job postponed it with a plain ZADD, which put the member back with a later
- * score: an erased request was kept on the list until a later run found it gone. Now the postponement is ZADD XX: it
- * moves a member that is still there and never adds one. Synthetic, in-memory Redis only.
+ * The daily reminders job (app/api/cron/reminders, `0 10 * * *` in vercel.json) holds a due reminder's ids; if the
+ * person's erasure takes the request and its due member off while the job's read of it fails, the job postponed it
+ * with a plain ZADD, which put the member back with a later score: an erased request was kept on the list until a
+ * later run found it gone. Now the postponement is ZADD XX: it moves a member that is still there and never adds one.
+ * Synthetic, in-memory Redis only.
  */
 import assert from "node:assert/strict";
 import test from "node:test";

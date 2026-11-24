@@ -1417,52 +1417,55 @@ console.log("e0bc: complete-review knows its own verdict on the PR, also for a n
     mod.comentarioDaSessao("Claude 2 mainline review #979 @abc: READY", "Claude 2 (main, 01FR6Z1)", null) === false);
 }
 
-console.log("the review header the 3-READY gate counts (CO (l); Claude 5 hed9 7116086946 and 7116612506, zr, L4qm)");
+console.log("strict to add, loose to take out: the READY the 3-READY gate counts (CO (l); Claude 5 hed9 7116086946, 7116612506 and 7117878288)");
 {
   const mod = await import(TOOL);
-  const H = "c615434258d9b6d56ece302ac9aed93dec124c3a", h = H.slice(0, 10), N = 5408;
-  const casos = [
-    // [text, expected family|null, expected verdict]
-    [`Claude 5 hed9 review #${N} @${h}: CHANGES, 1 ALTO, 3 MÉDIO`, "claude-5", "CHANGES"],
-    [`Claude 1 coord: #${N} @${h} — 2 READY (Claude 3, Claude 5); needs 1 more`, null],
-    [`Claude 7: #${N} @${h} is READY for the queue`, null],
-    [`Claude 1 B: #${N} @${h} needs READY from 3 families (has 2)`, null],
-    [`Claude 1 coord: review status #${N} @${h} — 2 READY (Claude 3, Claude 5); needs 1 more`, null],
-    [`Claude 7: asked for a 3rd review on #${N} @${h}, READY so far from Claude 2`, null],
-    [`Claude 1 coord: re-review needed #${N} @${h} — READY from Claude 2 and Claude 6`, null],
-    [`Claude 4 B: review needed #${N} @${h} — READY from Claude 1`, null],
-    [`Claude 1 coord: request-review #${N} @${h}, READY from Claude 2`, null],
-    [`Claude 1 coord verdict tally #${N} @${h}: 2 READY (Claude 2, Claude 3)`, null],
-    [`Claude 1 coord review status #${N} @${h} — READY from Claude 2`, null],
-    [`Claude 1 coord re-review needed #${N} @${h} — READY from Claude 2`, null],
-    [`Claude 5 C: #${N} @${h} is READY for the queue`, null],
-    [`WITHDRAWN: my READY 7111050238 on #${N} @${h} — Claude 5 iYzLs`, "claude-5", "RETIRADA"],
-    [`Correction to my READY on #${N} @${h} — Claude 4 X`, "claude-4", "RETIRADA"],
-    [`Claude 1 coord: #${N} @${h} — CHANGES of Claude 3 answered`, null],
-    [`Claude 7: #${N} @${h} still has CHANGES from Claude 3`, null],
-    [`Re: Claude 3's CHANGES on #${N} @${h} — answered`, null],
-    [`Claude 3 review #${N} @${h}: no CHANGES needed, READY`, null],
-    [`Claude 4 focal review #${N} @${h}: READY (the earlier finding was retirado after the fix)`, "claude-4", "READY"],
-    [`Claude 4 focal review #${N} @${h}: READY (the earlier request was withdrawn by the author)`, "claude-4", "READY"],
-    [`Claude 3 Q: I withdraw my approval of #${N} @${h}`, "claude-3", "RETIRADA"],
-    [`Claude 4 2Wb — #${N} @${h}\nREADY: tests pass`, "claude-4", "READY"],
-    [`Codex X6 READY #${N} @${h} (transcribed by Claude 5 ibqho)`, "codex", "READY"],
-    [`Claude 7 xAF #${N} @${h}: READY, sem achados`, "claude-7", "READY"],
-    [`**CHANGES #${N} @${h}, 2 LEVE.** Review by Claude 5 zr (cloud session)`, "claude-5", "CHANGES"],
-    [`**READY #${N} @${h}, 0 findings (sem achados).** Claude 5 iYwjc ...`, "claude-5", "READY"],
-    [`Money focal review #${N} @${h} by Claude 2 upbeat: **READY**`, "claude-2", "READY"],
-    [`**READY (focal) #${N} @${h}...**\nClaude 5 iYwjc`, "claude-5", "READY"],
-    [`**Claude 5 review #${N} @${h}...: READY (0 findings)**`, "claude-5", "READY"],
-    [`READY for the queue: #${N} @${h} (Claude 1 coord)`, null],
-    [`NOT READY #${N} @${h} — Claude 3`, null],
-    [`Claude 2 W review #${N} @0000000000: READY`, null],
-    [`**re-review needed #${N} @${h}** by Claude 6 UoHAG`, null],
+  const H = "ca8077453709979fc2c9a95fb622d767f284752f", h = H.slice(0, 10), N = 5408;
+  const soma = [
+    [`Claude 5 hed9 review #${N} @${h}: READY, 0 findings`, "claude-5"],
+    [`**Claude 7 review #${N} @${h}...: READY (0 findings)**`, "claude-7"],
+    [`Claude 1 review #${N} @${h} (focal de imposto, …): READY (0 achados).`, "claude-1"],
+    [`Codex X6 review #${N} @${h} (transcribed by Claude 5): READY`, "codex"],
+    [`Claude 3 wSUb3 focal review #${N} @${h}: READY — sem achados`, "claude-3"],
+    [`### Claude 2 upbeat review #${N} @${h}: **READY**`, "claude-2"],
+    // never adds
+    [`Claude 1 B #${N} @${h}: READY (2 of 3)`, null],
+    [`Claude 1 coord #${N} @${h}: READY? 2 of 3 so far`, null],
+    [`READY #${N} @${h}? not yet: Claude 3 and Claude 5 only`, null],
+    [`> Claude 3 review #${N} @${h}: READY`, null],
+    [`Claude 3 review #${N} @${h}: READY not yet`, null],
+    [`Claude 3 review #${N} @${h}: READY once CI passes`, null],
+    [`Claude 3 review #${N} @${h}: READY (conditional on fix)`, null],
+    [`READY (2 of 3) #${N} @${h} — Claude 1 coord`, null],
+    [`READY #${N} @${h} needs Claude 6`, null],
+    [`Claude 1 coord: review status #${N} @${h} — 2 READY`, null],
+    [`Claude 1 coord re-review needed #${N} @${h}: READY from Claude 2`, null],
+    [`Claude 1 coord review needed #${N} @${h}: READY`, null],
+    [`Claude 5 iYzLs review #${N} @${h}: READY withdrawn`, null],
+    [`Claude 3 X review #${N} @${h}: READY → CHANGES (ALTO found)`, null],
+    [`Claude 3 X review #${N} @${h}: READYish`, null],
+    [`Claude 3 review #${N} @0000000000: READY`, null],
     [`Claude 3 review #9999 @${h}: READY`, null],
+    [`- Claude 3 review #${N} @${h}: READY`, null],
   ];
-  for (const [t, fam, v] of casos) {
-    const got = mod.revisaoCanonica(t, N, H);
-    is(`header: "${t.replace(/\n/g, " / ").slice(0, 70)}" -> ${fam ? `${fam} ${v}` : "nothing"}`, fam === null ? got === null : Boolean(got) && got.familia === fam && got.veredito === v, JSON.stringify(got));
-  }
+  const tira = [
+    [`Claude 3 X review #${N} @${h}: CHANGES requested (1 ALTO)`, "claude-3"],
+    [`Claude 3 X review #${N} @${h}: NOT READY (1 ALTO)`, "claude-3"],
+    [`Claude 5 iYzLs review #${N} @${h}: READY withdrawn`, "claude-5"],
+    [`Claude 3 X review #${N} @${h}: CHANGES needed (1 ALTO)`, "claude-3"],
+    [`Claude 3 X review #${N} @${h}: READY → CHANGES (ALTO found)`, "claude-3"],
+    [`Focal review #${N} @${h} — CHANGES — Claude 3 X`, "claude-3"],
+    [`WITHDRAWN: my READY 7111050238 on #${N} @${h} — Claude 3 Q`, "claude-3"],
+    [`Claude 3 Q: I withdraw my approval of #${N} @${h}`, "claude-3"],
+    [`Correction to my READY on #${N} @${h} — Claude 5 iYwjc: typo; READY unchanged`, "claude-5"],
+    [`Claude 1 coord #${N} @${h}: READY? 2 of 3 so far`, "claude-1"],
+    [`Claude 3 review #${N} @${h}: READY`, null],
+    [`Claude 1 coord: #${N} @${h} — 2 READY (Claude 3, Claude 5)`, null],
+  ];
+  for (const [t, e] of soma) is(`adds: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.readyEstrito?.(t, N, H) === e, String(mod.readyEstrito?.(t, N, H)));
+  for (const [t, e] of tira) is(`takes out: "${t.slice(0, 70)}" -> ${e ?? "nothing"}`, mod.tiraReady?.(t, N, H) === e, String(mod.tiraReady?.(t, N, H)));
+  is("takes out: a GitHub review in the CHANGES_REQUESTED state with no family named is '?' (NOT CHECKED)", mod.tiraReady?.("Looks good to me", N, H, "CHANGES_REQUESTED") === "?");
+  is("takes out: a CHANGES_REQUESTED review names its family when it says it", mod.tiraReady?.(`Claude 4 X: see inline notes on @${h}`, N, H, "CHANGES_REQUESTED") === "claude-4");
 }
 
 console.log("three READY from three outside families on the exact head before a PR is enqueued (owner, OWNER-20261123-1442-THREE-REVIEWS)");
@@ -1514,14 +1517,19 @@ console.log("three READY from three outside families on the exact head before a 
   const tres = dois + ready("Claude 2 Q");
   r = verify(id, { FAKE_COMMENTS: tres });
   is("1442: on an unprefixed branch the requester's own READY counts, as on a prefixed one (LEVE 1 of Claude 5 hed9 on #5408)", r.ok && new RegExp(`enfileire ${H}`).test(r.out), r.out);
-  // The review shapes already on open PRs count (Claude 5 zr's LEVE A on 0cebe29a68; Claude 5 L4qm and hed9, 23/11).
-  for (const [quem, linha] of [["Claude 4", `Claude 4 2Wb — #1442 @${h}\nREADY: tests pass`], ["Codex", `Codex X6 READY #1442 @${h} (transcribed by Claude 5 ibqho)`],
-    ["Claude 7", `Claude 7 xAF #1442 @${h}: READY, sem achados`], ["Claude 5", `**READY #1442 @${h}, 0 findings (sem achados).** Claude 5 iYwjc`],
-    ["Claude 4", `Money focal review #1442 @${h} by Claude 4 upbeat: **READY**`], ["Claude 5", `**READY (focal) #1442 @${h}...**\nClaude 5 iYwjc`],
-    ["Claude 7", `**Claude 7 review #1442 @${h}...: READY (0 findings)**`]]) {
+  // Strict to add (sixth design, hed9 on ca80774537): only "<family> review #N @<head>: READY" at the start of line 1
+  // adds; the refusal names a READY written in another shape and the line to write (MEDIUM 3 of hed9).
+  for (const [quem, linha] of [["Claude 7", `**Claude 7 review #1442 @${h}...: READY (0 findings)**`], ["Claude 4", `Claude 4 X review #1442 @${h} (focal de imposto, …): READY (0 achados).`]]) {
     r = verify(id, { FAKE_COMMENTS: dois + comentario(linha) });
-    is(`1442: a review in the shape "${linha.slice(0, 50)}" counts as ${quem}'s READY`, quem === "Codex" ? !r.ok && /2 READY/.test(r.out) : r.ok, r.out);
+    is(`1442: the strict header "${linha.slice(0, 50)}" counts as ${quem}'s READY`, r.ok, r.out);
   }
+  for (const linha of [`**READY #1442 @${h}, 0 findings (sem achados).** Claude 4 X`, `Claude 4 2Wb — #1442 @${h}\nREADY: tests pass`, `Money focal review #1442 @${h} by Claude 4 upbeat: **READY**`]) {
+    r = verify(id, { FAKE_COMMENTS: dois + comentario(linha) });
+    is(`1442: a READY in another shape does not count, and the refusal names it with the line to write: "${linha.slice(0, 40)}"`,
+      !r.ok && /2 READY/.test(r.out) && /não contaram/.test(r.out) && /claude-4:/.test(r.out) && /review #1442 @/.test(r.out), r.out);
+  }
+  r = verify(id, { FAKE_COMMENTS: dois + comentario(`Claude 5 C: thanks; quoting it\n> Claude 4 X review #1442 @${h}: READY`) + comentario(`> Claude 4 X review #1442 @${h}: READY`) });
+  is("1442: a quoted strict line never adds a READY", !r.ok && /2 READY/.test(r.out), r.out);
   // MEDIUM 1 of hed9 on c615434258 (README: the author may answer in writing and ask the family to look again at the same
   // head): the family's LAST verdict on the head counts, in time order across comments and reviews (LEVE B of zr).
   const cedo = (t, m) => comentario(t, `2026-11-23T09:${m}:00Z`);
@@ -1533,16 +1541,31 @@ console.log("three READY from three outside families on the exact head before a 
   is("1442: a later CHANGES in the PR reviews takes out a READY from the comments (time order, LEVE B of zr)", !r.ok && /2 READY/.test(r.out), r.out);
   r = verify(id, { FAKE_COMMENTS: tres.replace(ready("Claude 2 Q"), "") + comentario(`Claude 2 W review #1442 @${h}: CHANGES`), FAKE_REVIEWS: JSON.stringify([`Claude 2 W review #1442 @${h}: READY`, "COLLABORATOR", "2026-11-23T23:59:00Z"]) + "\n" });
   is("1442: a later READY in the PR reviews counts after a CHANGES in the comments", r.ok, r.out);
-  // MEDIUM 2 of hed9 on c615434258: comments that are not vetoes do not take a family out.
-  for (const linha of [`Claude 1 coord: #1442 @${h} — CHANGES of Claude 3 answered`, `Claude 7: #1442 @${h} still has CHANGES from Claude 3`,
-    `Re: Claude 3's CHANGES on #1442 @${h} — answered`, `Claude 3 review #1442 @${h}: no CHANGES needed, READY`]) {
+  // Loose to take out (ALTO 2 of hed9 on ca80774537): any comment of the family on the head that speaks of CHANGES, NOT
+  // READY, "READY?", a withdrawal or a correction takes its READY out, until a later strict READY of that family.
+  for (const linha of [`Claude 3 X review #1442 @${h}: CHANGES requested (1 ALTO)`, `Claude 3 X review #1442 @${h}: NOT READY (1 ALTO)`,
+    `Claude 3 iYzLs review #1442 @${h}: READY withdrawn`, `Claude 3 X review #1442 @${h}: READY → CHANGES (ALTO found)`, `Focal review #1442 @${h} — CHANGES — Claude 3 X`,
+    `Re: Claude 3's CHANGES on #1442 @${h} — answered`, `Claude 3 focal review #1442 @${h}: READY (the earlier request was withdrawn by the author)`]) {
     r = verify(id, { FAKE_COMMENTS: tres + comentario(linha) });
-    is(`1442: "${linha.slice(0, 55)}" is no veto`, r.ok, r.out);
+    is(`1442: "${linha.slice(0, 55)}" takes Claude 3's READY out`, !r.ok && /2 READY/.test(r.out), r.out);
   }
-  for (const linha of [`Claude 3 focal review #1442 @${h}: READY (the earlier finding was retirado after the fix)`, `Claude 3 focal review #1442 @${h}: READY (the earlier request was withdrawn by the author)`]) {
-    r = verify(id, { FAKE_COMMENTS: tres + comentario(linha) });
-    is(`1442: a READY that mentions a withdrawn or "retirado" item keeps its family: "${linha.slice(30, 75)}"`, r.ok, r.out);
-  }
+  r = verify(id, { FAKE_COMMENTS: tres + comentario(`Claude 3 X review #1442 @${h}: NOT READY (1 ALTO)`) + ready("Claude 3 X") });
+  is("1442: a later strict READY of the family brings it back", r.ok, r.out);
+  r = verify(id, { FAKE_COMMENTS: tres + comentario(`Claude 1 coord: #1442 @${h} — 2 READY (Claude 3, Claude 5)`) + comentario(`Claude 3 focal review #1442 @${h}: READY (the earlier finding was retirado after the fix)`) });
+  is("1442: a status line with no CHANGES or withdrawal, and a READY that only mentions a 'retirado' finding, take nothing out", r.ok, r.out);
+  // MEDIUM 2 of hed9 on ca80774537: GitHub review states.
+  const revisao = (t, estado, em = "2026-11-23T23:00:00Z") => JSON.stringify([t, "COLLABORATOR", em, estado, em]) + "\n";
+  r = verify(id, { FAKE_COMMENTS: dois, FAKE_REVIEWS: revisao(`Claude 4 X review #1442 @${h}: READY`, "PENDING", "") + revisao(`Claude 7 X review #1442 @${h}: READY`, "DISMISSED") });
+  is("1442: a PENDING or DISMISSED GitHub review never adds a READY", !r.ok && /2 READY/.test(r.out), r.out);
+  r = verify(id, { FAKE_COMMENTS: tres, FAKE_REVIEWS: revisao(`Claude 3 X: see the inline notes on @${h}`, "CHANGES_REQUESTED") });
+  is("1442: a CHANGES_REQUESTED GitHub review takes its family's READY out", !r.ok && /2 READY/.test(r.out), r.out);
+  r = verify(id, { FAKE_COMMENTS: tres, FAKE_REVIEWS: revisao("Please fix the tests", "CHANGES_REQUESTED") });
+  is("1442: a CHANGES_REQUESTED review that names no family makes the gate NOT CHECKED", !r.ok && /NÃO FORAM CONFERIDAS/.test(r.out) && /CHANGES_REQUESTED/.test(r.out), r.out);
+  // LEVE 2 of hed9 on ca80774537: an edit counts at the time of the edit; a tie goes to the taking out.
+  r = verify(id, { FAKE_COMMENTS: JSON.stringify([`WITHDRAWN: my READY on #1442 @${h} — Claude 3 Q`, "COLLABORATOR", "2026-11-23T08:00:00Z", "", "2026-11-23T23:30:00Z"]) + "\n" + tres });
+  is("1442: an old comment edited into a withdrawal after a newer READY takes it out", !r.ok && /2 READY/.test(r.out), r.out);
+  r = verify(id, { FAKE_COMMENTS: dois + comentario(`Claude 2 Q review #1442 @${h}: READY`, "2026-11-23T11:00:00Z") + comentario(`Claude 2 Q review #1442 @${h}: CHANGES`, "2026-11-23T11:00:00Z") });
+  is("1442: a READY and a CHANGES of the family in the same second: the CHANGES wins", !r.ok && /2 READY/.test(r.out), r.out);
   // MEDIUM 2 of hed9 on 0cebe29a68 and LEVE 1 on c615434258: a written withdrawal takes the family's READY out.
   for (const linha of [`WITHDRAWN: my READY 7111050238 on #1442 @${h} — Claude 3 Q`, `Claude 3 Q: I withdraw my approval of #1442 @${h}`,
     `Correction to my READY on #1442 @${h} — Claude 3 Q`, `Claude 3 Q: my READY on #1442 @${h} is withdrawn (a test I did not run)`]) {

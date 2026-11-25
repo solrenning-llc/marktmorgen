@@ -16,12 +16,27 @@ const workflow = readFileSync(".github/workflows/product-checks.yml", "utf8");
 part("the step list of store-copy.mjs");
 is("each entry calls the step it is named for", names.every((match) => match[1] === match[2]), true);
 is("no step is listed twice", new Set(steps).size, steps.length);
-const imported = [...source.matchAll(/^import\s*\{([^}]*)\}\s*from\s*"\.\/[^"]+";$/gm)]
-  .flatMap((match) => match[1].split(",").map((name) => name.trim()))
-  .filter((name) => /^(check|capture)\w+$/.test(name));
-const calledElsewhere = imported.filter((name) => !steps.includes(name));
-is("every imported check runs either as a step or in the studio journey",
-  calledElsewhere.every((name) => new RegExp(`await ${name}\\(`).test(source)), true);
+/**
+ * The checks of a store-copy source that would escape the parts: imported (on one line or several) or defined in the
+ * file, neither a step nor called inside the studio journey; or awaited after the steps' loop, where every part would
+ * run it (Claude 1's LOW 2 on #3505). Empty when every check runs exactly where the parts expect.
+ */
+function escapes(text: string, stepNames: string[]): string[] {
+  const named = [
+    ...[...text.matchAll(/^import\s*\{([^}]*)\}\s*from\s*"\.\/[^"]+";$/gm)].flatMap((match) => match[1].split(",").map((name) => name.trim())),
+    ...[...text.matchAll(/^async function ((?:check|capture)[A-Z]\w*)\(/gm)].map((match) => match[1]),
+  ].filter((name) => /^(check|capture)\w+$/.test(name));
+  const loop = "for (const [name, step] of steps) if (running.has(name)) await step();";
+  const after = text.indexOf(loop) < 0 ? "" : text.slice(text.indexOf(loop) + loop.length);
+  const late = [...after.matchAll(/await ((?:check|capture)[A-Z]\w*)\(/g)].map((match) => `${match[1]} after the steps' loop`);
+  const unrun = named.filter((name) => !stepNames.includes(name) && !new RegExp(`await ${name}\\(`).test(text)).map((name) => `${name} never run`);
+  return [...unrun, ...late];
+}
+is("every imported check runs either as a step or in the studio journey", escapes(source, steps), []);
+const loopLine = "  for (const [name, step] of steps) if (running.has(name)) await step();\n";
+is("a check awaited after the steps' loop is caught (it would run in every part)", escapes(source.replace(loopLine, `${loopLine}  await checkHomeHero();\n`), steps).length > 0, true);
+is("a check defined in the file and run nowhere is caught", escapes(`async function checkLocalOnly(page) {}\n${source}`, steps).length > 0, true);
+is("a check imported over several lines and run nowhere is caught", escapes(`import {\n  checkSplitImport,\n  checkOther,\n} from "./split.mjs";\n${source}`, steps).length > 0, true);
 is("the steps run only through the chosen part", /for \(const \[name, step\] of steps\) if \(running\.has\(name\)\) await step\(\);/.test(source), true);
 is("the studio journey runs only in part 1 or in a full run", /\n {2}if \(chosen\.journey\) \{\n/.test(source), true);
 

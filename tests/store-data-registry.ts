@@ -243,7 +243,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:mail:lock@app/api/cron/mail/route.ts": lock("The mail job"),
   "nl:monthly:lock@app/api/cron/monthly/route.ts": lock("The monthly job"),
   "nl:plans:lock@app/api/cron/plans/route.ts": lock("The plans job"),
-  "nl:quiet:at:@app/api/cron/quiet/route.ts": company("When the quiet-sales job ran each day", "One key a day, the company's job, kept two days."),
+  "nl:quiet:done:@app/api/cron/quiet/route.ts": company("Which stores the quiet-sales job reached each day", "One set a day of store folders, the company's job, kept two days."),
   "nl:quiet:lock@app/api/cron/quiet/route.ts": lock("The quiet-sales job"),
   "nl:recount:lock@app/api/cron/recount/route.ts": lock("The one-time count of what stores keep"),
   "nl:remind:lock@app/api/cron/reminders/route.ts": lock("The reminders job"),

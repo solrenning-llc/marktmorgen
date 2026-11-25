@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isSenderConfigured } from "@/lib/email";
 import { visitedFolders } from "@/lib/traffic";
@@ -14,11 +14,12 @@ import { runStoreJob } from "@/lib/store-lock-wait";
 /**
  * Once a day for each store with visits this month or last, whether its
  * sales have stopped (lib/quiet-sales.ts), and whether its numbers went off
- * course in another way (lib/store-alerts.ts). Runs every hour and goes on from
- * where the day's last run stopped, so each store is reached once a day
- * however many there are, and a run after the last store reads nothing; each
- * store is also marked looked-at for the day before anything is read, so a
- * store reached twice is read once.
+ * course in another way (lib/store-alerts.ts). Runs every hour and keeps the
+ * stores the day's runs have walked, so each store is reached once a day
+ * however many there are, a store first visited later in the day is reached
+ * that day wherever it sorts (issue #4005), and a run after the last store
+ * reads nothing; each store is also marked looked-at for the day before
+ * anything is read, so a store reached twice is read once.
  */
 export const maxDuration = 60;
 const TIME_BUDGET_MS = 45_000;
@@ -45,24 +46,27 @@ async function runJob(request: NextRequest) {
     const now = new Date();
     const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
     const folders = [...new Set([...(await visitedFolders(monthKey(now))), ...(await visitedFolders(monthKey(lastMonth)))])].sort();
-    const atKey = `nl:quiet:at:${now.toISOString().slice(0, 10)}`;
-    // Where today's walk goes on from, read exactly (CX-123 rule 24): nil is the start, a whole number the place;
-    // anything else is unknown, and nothing is read on it and the place is left as it was. Within one UTC day the
-    // list only grows (lib/traffic.ts adds folders and keeps them 400 days), so this pass never wrote a place past
-    // its end: that is unknown too.
-    const kept = repliesFor(await redisPipeline([["GET", atKey]]), 1);
-    const place = kept ? kept[0] : undefined;
-    let at = place === null ? 0 : typeof place === "string" && /^(0|[1-9][0-9]{0,8})$/.test(place) ? Number(place) : -1;
-    if (at < 0 || at > folders.length) {
-      console.error("quiet: where today's walk goes on from is unknown; nothing read this run");
+    const doneKey = `nl:quiet:done:${now.toISOString().slice(0, 10)}`;
+    // The stores today's runs have walked, read exactly (CX-123 rule 24): a list of folders, an empty one at the start;
+    // anything else is unknown, and nothing is read on it and nothing is written. Kept by folder, not by a place in
+    // the sorted list: a store first visited later in the day sorts anywhere, before the place too (issue #4005).
+    const kept = repliesFor(await redisPipeline([["SMEMBERS", doneKey]]), 1);
+    const walked = kept ? stringList(kept[0]) : null;
+    if (!walked) {
+      console.error("quiet: which stores today's walk has reached is unknown; nothing read this run");
       return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
     }
-    while (at < folders.length && Date.now() - started <= TIME_BUDGET_MS) {
+    const already = new Set(walked);
+    const left = folders.filter((folder) => !already.has(folder));
+    const reached: string[] = [];
+    let at = 0;
+    while (at < left.length && Date.now() - started <= TIME_BUDGET_MS) {
       // A store that cannot be read is tried again at once. If it still cannot be, it is counted as failed and said
       // in the log, never passed over as "no store"; the walk goes on to the stores after it, so one store never
       // holds back the rest, and the next day's walk tries it again.
-      const folder = folders[at];
+      const folder = left[at];
       at += 1;
+      reached.push(folder);
       const store = await storeOf(folder).catch(() => storeOf(folder)).catch((error: unknown) => {
         console.error(`quiet: the store of folder ${folder} could not be read twice; counted as failed, tried again on the next day's walk`, error);
         return undefined;
@@ -84,7 +88,7 @@ async function runJob(request: NextRequest) {
       });
       out.alerts += alerted.said;
     }
-    await redisPipeline([["SET", atKey, at, "EX", 2 * 86400]]);
+    if (reached.length) await redisPipeline([["SADD", doneKey, ...reached], ["EXPIRE", doneKey, 2 * 86400]]);
     console.log(`quiet: ${JSON.stringify(out)}`);
     return Response.json({ ok: true, ...out }, { headers: { "Cache-Control": "no-store" } });
   } finally {

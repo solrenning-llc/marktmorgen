@@ -146,9 +146,15 @@ export async function createAssistantCheckout(store: Store, origin: string): Pro
   // price is in the key: a request with other values under a used key is refused by Stripe. The store is named by its
   // id, which a rename does not change; a store with none is its owner's first, the only one without.
   const slot = Math.floor(Date.now() / 1000 / CHECKOUT_KEY_SECONDS);
+  // A page at another price is at another price id, so under another key (#5285 row #3334). A key that Stripe answers
+  // with a page that is no longer open (one this start expired, at the same price id) is never given: the start says it
+  // could not, and the next key window opens a page; two tabs at the same moment still share one key (Claude 5 ibuF's
+  // LEVE on #5349).
   const idempotencyKey = `assistant-checkout:${store.stripeCustomerId}:${store.sid || "first"}:${body.get("line_items[0][price]")}:${slot}`;
   const session = await onPlatform("POST", "/checkout/sessions", body, { version: CHECKOUT_VERSION, idempotencyKey });
   if (typeof session.url !== "string" || !session.url) throw new Error("Stripe did not return a checkout URL");
+  // A status that does not read is unknown, never open (rule 24; Claude 3 yUZf's NIT on #5349).
+  if (session.status !== "open") throw new Error("Stripe returned a checkout page that is not open");
   return session.url;
 }
 
@@ -251,9 +257,20 @@ async function startWithinCutoff(store: Store, origin: string): Promise<Assistan
       const url = ownField(row, "url");
       return !isStoreAddOn(row, store) || (ownField(row, "customer") === customer && typeof url === "string" && CHECKOUT_PAGE.test(url));
     }, CHECKOUT_VERSION);
-    const open = pages.rows.find((row) => isStoreAddOn(row, store) && ownField(row, "mode") === "subscription");
+    const mine = pages.rows.filter((row) => isStoreAddOn(row, store) && ownField(row, "mode") === "subscription");
+    // Given again only at today's price (#5285 row #3334, Claude's LOW 1): a page opened before a price change stays
+    // open about a day, and paid there it would charge the old price under a margin check made for the new one.
+    const open = mine.find((row) => ownField(row, "amount_subtotal") === ASSISTANT_PRICE_CENTS && ownField(row, "currency") === "usd");
     if (open) return ownField(open, "url") as string;
     if (!pages.complete) throw new StripeListUnreadable("the store's open add-on pages are not all known");
+    // A page at another price, or whose price does not read, is expired before a new one is opened, so the store never
+    // has two pages open at once; an expiry Stripe does not confirm opens nothing (the start answers it could not).
+    if (mine.length > 1) throw new StripeListUnreadable("the store has more than one open add-on page");
+    if (mine.length === 1) {
+      const id = String(mine[0].id);
+      const ended = await onPlatform("POST", `/checkout/sessions/${encodeURIComponent(id)}/expire`, new URLSearchParams(), { version: CHECKOUT_VERSION });
+      if (ownField(ended, "id") !== id || ownField(ended, "status") !== "expired") throw new Error("an open add-on page at another price was not confirmed expired");
+    }
     return null;
   };
   const open = await openPage();

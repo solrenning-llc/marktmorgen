@@ -45,7 +45,7 @@ const HANDLE = "rtwothree";
 const CUSTOMER = "cus_R23Assist01";
 const ORIGIN = "https://marktmorgen.com";
 type Sub = { id: string; status: string; customer: string; cancel_at_period_end: boolean; metadata: Record<string, string> | null; items: unknown };
-type Session = { id: string; url: string; status: "open" | "complete" | "expired"; mode: string; customer: string; subscription: string | null; metadata: Record<string, string> };
+type Session = { id: string; url: string; status: "open" | "complete" | "expired"; mode: string; customer: string; subscription: string | null; metadata: Record<string, string>; amount_subtotal?: number; currency?: string };
 
 let subs: Sub[] = [];
 let sessions: Session[] = [];
@@ -59,6 +59,8 @@ let sessionList: ((url: URL) => Response) | null = null;
 let lists: string[] = [];
 /** How long a checkout POST stays in progress at the fake Stripe before its session exists. */
 let postDelayMs = 0;
+/** The new page answered without its status (Claude 3 yUZf's NIT on #5349 @7846aec9cc: unknown is not open). */
+let postNoStatus = false;
 const IN_PROGRESS = "in-progress";
 /** When true, every checkout POST answers 409 as for a key still in progress. */
 let answer409 = false;
@@ -123,10 +125,23 @@ function install(): void {
       if (postDelayMs) await new Promise((resolve) => setTimeout(resolve, postDelayMs));
       const id = `cs_test_R23Assist${String(sessions.length + 1).padStart(4, "0")}`;
       const body = new URLSearchParams(String(init?.body ?? ""));
-      const made: Session = { id, url: `https://checkout.stripe.com/c/pay/${id}`, status: "open", mode: "subscription", customer: body.get("customer") ?? "", subscription: null, metadata: { addon: body.get("metadata[addon]") ?? "", assistant_for: body.get("metadata[assistant_for]") ?? "" } };
+      const made: Session = { id, url: `https://checkout.stripe.com/c/pay/${id}`, status: "open", mode: "subscription", customer: body.get("customer") ?? "", subscription: null, metadata: { addon: body.get("metadata[addon]") ?? "", assistant_for: body.get("metadata[assistant_for]") ?? "" }, amount_subtotal: 6900, currency: "usd" };
       sessions.push(made);
       if (key) keys.set(key, id);
+      if (postNoStatus) {
+        const { status: _status, ...withoutStatus } = made;
+        void _status;
+        return json(withoutStatus);
+      }
       return json(made);
+    }
+    const expiring = path.match(/^\/checkout\/sessions\/([^/]+)\/expire$/);
+    if (method === "POST" && expiring) {
+      expired.push(expiring[1]);
+      const s = sessions.find((one) => one.id === expiring[1]);
+      if (!s || expireFails) return json({ error: { type: "api_error", message: "down" } }, 500);
+      s.status = "expired";
+      return json(s);
     }
     if (method === "GET" && path.startsWith("/checkout/sessions/")) {
       if (sessionReadFails) return json({ error: { type: "api_error", message: "down" } }, 500);
@@ -147,6 +162,9 @@ function install(): void {
   }) as typeof fetch;
 }
 let invoicesDisputed = false;
+/** The open pages asked to expire, and whether Stripe answers that ask with an error (#5285 row #3334, LOW 1). */
+const expired: string[] = [];
+let expireFails = false;
 
 /** The creator pays on Stripe's page: an active add-on subscription exists from then on. */
 function pay(checkoutUrl: string): string {
@@ -250,6 +268,82 @@ async function main(): Promise<void> {
   is("the second tab gets the first tab's page", [tabOne, tabTwo], ["checkout https://checkout.stripe.com/c/pay/cs_test_R23Assist0001", "checkout https://checkout.stripe.com/c/pay/cs_test_R23Assist0001"]);
   is("one checkout created for both tabs", posts.length, 1);
 
+  // Board #5285, row #3334: Claude's LOW 1 of 6786975580. A page opened before a price change (a deploy that changes
+  // ASSISTANT_PRICE_CENTS) stays open for about a day; given again, the creator would pay the old price, under a margin
+  // check made for the new one. A page at another price, or one whose price does not read, is expired and a page at
+  // today's price is opened; an expiry Stripe does not confirm opens nothing.
+  part("An open page made at another price is expired, and one at today's price is opened");
+  store = await freshStore();
+  const old = await outcome(store);
+  const oldId = old.slice(old.lastIndexOf("/") + 1);
+  sessions.find((s) => s.id === oldId)!.amount_subtotal = 4900;
+  // Made before a price change, under the old price's id: another key (the stand-in has one price id, so its key is forgotten).
+  keys.clear();
+  posts.length = 0;
+  expired.length = 0;
+  const now69 = await outcome(store);
+  is("the old page is expired at Stripe, once", [expired, sessions.find((s) => s.id === oldId)?.status], [[oldId], "expired"]);
+  is("and a new page is opened, never the old one given again", [now69.startsWith("checkout ") && !now69.endsWith(oldId), posts.length], [true, 1]);
+
+  part("Two tabs at the same moment, after a page at another price: one new page for both (Claude 5 ibuF's LEVE on #5349)");
+  store = await freshStore();
+  const before = await outcome(store);
+  sessions.find((s) => s.url === before.slice("checkout ".length))!.amount_subtotal = 4900;
+  keys.clear();
+  postDelayMs = 200;
+  expired.length = 0;
+  // The second tab lists the open pages after the first expired the old one and before its new page exists.
+  const firstTab = outcome(store);
+  // Waited for at most two seconds (Claude 3 wSUb3's LEVE on #5349): a regression that never expires the old page fails
+  // this part, and the file goes on, instead of hanging until the runner kills it.
+  const waitUntil = performance.now() + 2_000;
+  while (expired.length === 0 && performance.now() < waitUntil) await new Promise((resolve) => setTimeout(resolve, 5));
+  is("the first tab expired the page at another price (within two seconds)", expired.length > 0, true);
+  const tabs = await Promise.all([firstTab, outcome(store)]);
+  postDelayMs = 0;
+  const open = sessions.filter((s) => s.status === "open");
+  is("both tabs get the same new page, or one is asked to try again: never two pages open", [open.length, tabs.filter((t) => t.startsWith("checkout ")).every((t) => t === `checkout ${open[0]?.url}`)], [1, true]);
+
+  for (const [label, change] of [
+    ["a page in another currency", (s: Session) => { s.currency = "eur"; }],
+    ["a page whose price does not read", (s: Session) => { delete s.amount_subtotal; }],
+  ] as [string, (s: Session) => void][]) {
+    store = await freshStore();
+    const page = await outcome(store);
+    change(sessions.find((s) => s.url === page.slice("checkout ".length))!);
+    expired.length = 0;
+    // The same price id, so the same key: Stripe answers it with the expired page, which is never given.
+    is(`${label}: expired, never given again, and no second page opened in this key's window`, [await outcome(store), expired.length, sessions.filter((s) => s.status === "open").length], ["refused", 1, 0]);
+  }
+  store = await freshStore();
+  const stale = await outcome(store);
+  sessions.find((s) => s.url === stale.slice("checkout ".length))!.amount_subtotal = 4900;
+  keys.clear();
+  expireFails = true;
+  posts.length = 0;
+  is("an expiry Stripe does not confirm opens nothing", [await outcome(store), posts.length], ["refused", 0]);
+  expireFails = false;
+
+  // Claude 1's LEVE 1 on #5349 @30b8c0d1ea: two of this store's open pages, both at another price, are never both
+  // expired nor followed by a third: the start says it could not, and nothing is expired or opened.
+  part("Two open pages at another price: nothing expired, nothing opened, the start says it could not");
+  store = await freshStore();
+  const firstOld = await outcome(store);
+  const twin = sessions.find((s) => s.url === firstOld.slice("checkout ".length))!;
+  twin.amount_subtotal = 4900;
+  sessions.push({ ...twin, id: `${twin.id}b`, url: `${twin.url}b`, metadata: { ...twin.metadata } });
+  keys.clear();
+  posts.length = 0;
+  expired.length = 0;
+  is("refused, with no expiry asked and no page opened", [await outcome(store), expired.length, posts.length, sessions.filter((s) => s.status === "open").length], ["refused", 0, 0, 2]);
+
+  part("A page Stripe answers without its status is never given (Claude 3 yUZf's NIT on #5349)");
+  store = await freshStore();
+  keys.clear();
+  postNoStatus = true;
+  is("a status that does not read is not open: refused", await outcome(store), "refused");
+  postNoStatus = false;
+
   part("Two tabs at the same moment: both POSTs carry the same Idempotency-Key, so Stripe gives one page");
   store = await freshStore();
   // The first tab's POST is still running when the second's arrives: Stripe answers the second 409.
@@ -340,9 +434,9 @@ async function main(): Promise<void> {
   part("The start's Stripe calls are priced: every essential billing event may be an add-on start");
   const startCalls = (assistantRules as Record<string, unknown>).ASSISTANT_START_STRIPE_CALLS;
   const pages = (assistantRules as Record<string, unknown>).ASSISTANT_START_LIST_PAGES;
-  // Subscriptions, open pages, open pages read again after a 409, then the price read, the product read and write,
-  // the price write and the checkout POST.
-  is("the most calls a start makes", [typeof pages === "number" && pages > 0, startCalls === 3 * (pages as number) + 5], [true, true]);
+  // Subscriptions, open pages, open pages read again after a 409, then the expiry of a page at another price (#5285
+  // row #3334), the price read, the product read and write, the price write and the checkout POST.
+  is("the most calls a start makes", [typeof pages === "number" && pages > 0, startCalls === 3 * (pages as number) + 6], [true, true]);
   const line = COST_LINES.find((row) => row.id === "assistant-start-reads");
   is("a cost line cites the start and its count", Boolean(line?.sources.some((s) => s.file === "lib/assistant-billing.ts" && s.names.includes("startAssistant")) && line?.sources.some((s) => s.names.includes("ASSISTANT_START_STRIPE_CALLS"))), true);
   const wait = (assistantRules as Record<string, unknown>).ASSISTANT_IN_PROGRESS_WAIT_MS as number;

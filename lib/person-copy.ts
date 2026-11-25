@@ -34,6 +34,7 @@ import { readDeals, readFields, readPersonTasks, readStages, readValues } from "
 import { readPersonNotes } from "@/lib/buyer-profile";
 import { readForms, readResponses } from "@/lib/form-store";
 import { listRequests } from "@/lib/payment-request-store";
+import { applicationsOfPerson } from "@/lib/apply-first-store";
 import { VersionUnreadError, listAgreements, readVersionExact } from "@/lib/agreement-store";
 import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
@@ -111,6 +112,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/crm.ts": { how: "copied", what: "The store's fields about you, its deals with you, and the tasks its team wrote about you" },
   "lib/crm-companies.ts": { how: "copied", what: "Which of the store's companies you are linked to (639 [GL7](4)); the companies themselves are the store's" },
   "lib/payment-request-store.ts": { how: "copied", what: "Payment requests the store sent you" },
+  "lib/apply-first-store.ts": { how: "copied", what: "Your applications to buy, what became of each, and when" },
   "lib/agreement-store.ts": { how: "copied", what: "Proposals and agreements the store sent you, each version's text, and your signature" },
   "lib/buyer-profile.ts": { how: "copied", what: "Notes the store's team wrote about you" },
   "lib/form-store.ts": { how: "copied", what: "Your answers to the store's forms" },
@@ -354,6 +356,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     }
     return out;
   },
+  "lib/apply-first-store.ts": async (s) => (await applicationsOfPerson(s.sid, s.email)).map((a) => {
+    // Its times are kept in milliseconds; iso reads seconds.
+    const when = (ms: number) => iso(Math.floor(ms / 1000));
+    return { offer: a.offer, state: a.state, applied: when(a.at), decided: when(a.decidedAt), linkEnds: when(a.expiresAt), linkUsed: when(a.usedAt) };
+  }),
   "lib/payment-request-store.ts": async (s) => {
     const list = await listRequests(s.store);
     if (list === null) throw new Error("the payment requests could not be read");

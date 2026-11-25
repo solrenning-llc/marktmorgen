@@ -43,7 +43,7 @@ export const APPLY_LINK_DAYS_MIN = 1;
 export const APPLY_LINK_DAYS_MAX = 30;
 /** A link token: 24 random bytes, lower-case hex. */
 export const APPLY_TOKEN = /^[0-9a-f]{48}$/;
-/** An application's own id (16 random bytes, hex), made by whoever stores it. */
+/** An application's own 128-bit hex id, made by whoever stores it (stable for one form attempt). */
 export const APPLICATION_ID = /^[0-9a-f]{32}$/;
 /** An offer (a product id in the store), never anything personal. */
 const OFFER_ID = /^[A-Za-z0-9_-]{1,64}$/;

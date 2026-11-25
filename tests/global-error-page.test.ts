@@ -59,6 +59,22 @@ async function main(): Promise<void> {
   part("2.4.7 / 2.4.13: a 3 px focus ring of its own");
   is("a 3 px outline on :focus-visible", /:focus-visible\s*\{[^}]*outline:\s*3px solid/.test(style), true);
 
+  // Claude 7's LEVE on #4696 (6893621153; board #5285): AX274 Part A 4 asks for a skip link on every page. This page
+  // gets none of app/globals.css, so the link is hidden and shown by the page's own styles, not by Tailwind classes.
+  part("AX274 Part A 4: a skip link to the main region, first in the body");
+  const body = (html.match(/<body>([\s\S]*)<\/body>/) ?? [])[1] ?? "";
+  const skip = /^<a\b([^>]*)>([^<]+)<\/a>/.exec(body);
+  is("the body starts with a link", skip !== null, true);
+  is("it leads to the main region", [/href="#content"/.test(skip?.[1] ?? ""), /<main id="content"/.test(html)], [true, true]);
+  is("it says where it goes, in plain words", skip?.[2] ?? "", "Skip to the page content");
+  is("it carries the page's own skip class", /class="ge-skip"/.test(skip?.[1] ?? ""), true);
+  const hidden = rule(".ge-skip");
+  const shown = rule(".ge-skip:focus");
+  is("hidden off screen until it takes the focus, never display:none", /position:\s*absolute/.test(hidden) && /left:\s*-/.test(hidden) && !/display:\s*none/.test(hidden), true);
+  is("on focus it comes into view", /left:\s*1rem/.test(shown) && /top:\s*1rem/.test(shown), true);
+  is("on focus it is a 44 x 44 px target", /min-height:\s*44px/.test(shown) && /min-width:\s*44px/.test(shown), true);
+  is("on focus it has a background of the page's own, so its words keep the 7:1 checked below", /background:/.test(shown), true);
+
   part("1.4.6: 7:1 or more, in the light and the dark scheme");
   for (const scheme of ["light", "dark"] as const) {
     const c = GLOBAL_ERROR_LOOK[scheme];

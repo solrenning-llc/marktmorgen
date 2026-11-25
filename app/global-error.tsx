@@ -25,6 +25,10 @@ export default function GlobalError({ error, retry }: { error: unknown; retry: (
         <style>{GLOBAL_ERROR_STYLE}</style>
       </head>
       <body>
+        {/* AX274 Part A 4: a skip link on every page. Its own styles (lib/global-error-look.ts): this page has no globals.css. */}
+        <a className="ge-skip" href="#content">
+          Skip to the page content
+        </a>
         <main id="content">
           <div className="ge-card">
             <p className="ge-muted">Something went wrong on our side</p>

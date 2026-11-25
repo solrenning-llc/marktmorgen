@@ -77,6 +77,10 @@ function unitChecks(): void {
     ["special", 2], ["nation", 2], ["region", 2], ["million", 2], ["people", 2], ["patient", 2], ["quality", 3],
     ["language", 2], ["friend", 1], ["social", 2], ["each", 1], ["great", 1], ["team", 1],
   );
+  // A word in capitals is read as the word it is, not letter by letter (Codex X6's LOW 3 on #4612): a terms page's
+  // "THESE" or "CLAIM" is one syllable. Initialisms stay spelled out: those with no vowel, and the ones this product
+  // writes with a vowel (INITIALISMS).
+  exact.push(["THESE", 1], ["CLAIM", 1], ["TERMS", 1], ["NOTICE", 2], ["ALL", 1], ["API", 3], ["FAQ", 3], ["EU", 2], ["VAT", 3], ["IDs", 2], ["HTML", 4], ["CSV", 3]);
   for (const [word, want] of exact) is(`syllablesOf(${JSON.stringify(word)})`, syllablesOf(word), want);
 
   part("Syllables: known misses of the heuristic, held to one syllable a word");

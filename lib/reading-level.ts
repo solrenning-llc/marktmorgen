@@ -139,9 +139,22 @@ export function wordsOf(text: string): string[] {
  * list to one syllable a word, and the hiatus words to their dictionary
  * count.
  */
+/**
+ * The initialisms with a vowel that this product writes, said letter by letter (syllablesOf). An all-capital word with
+ * no vowel ("PDF", "HTML") is one too; any other all-capital word is read as the word it is ("THESE", "CLAIM"), as a
+ * terms page writes them (Codex X6's LOW 3 on #4612).
+ */
+export const INITIALISMS: ReadonlySet<string> = new Set([
+  "AAA", "AI", "API", "EEA", "EIN", "EU", "EUR", "FAQ", "ID", "IOSS", "IP", "IRS", "ITIN", "OSS", "SEO", "SSO", "UI", "UK",
+  "URL", "US", "USA", "USD", "UTC", "UX", "VAT", "WCAG",
+]);
+
 export function syllablesOf(word: string): number {
   if (word.includes("-")) return word.split("-").filter(Boolean).reduce((sum, part) => sum + syllablesOf(part), 0);
-  if (/^[A-Z]{2,5}s?$/.test(word)) return [...word.replace(/s$/, "")].reduce((sum, letter) => sum + (letter === "W" ? 3 : 1), 0);
+  if (/^[A-Z]{2,5}s?$/.test(word)) {
+    const letters = word.replace(/s$/, "");
+    if (!/[AEIOUY]/.test(letters) || INITIALISMS.has(letters)) return [...letters].reduce((sum, letter) => sum + (letter === "W" ? 3 : 1), 0);
+  }
   const w = word.toLowerCase().replace(/['’]s$/, "").replace(/['’](?:t|re|ve|ll|d|m)$/, "").replace(/[^a-zà-öø-ÿ]/g, "");
   if (!w) return 0;
   if (w.length <= 3) return 1;

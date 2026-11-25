@@ -316,15 +316,25 @@ export const STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE = 0.12;
 /**
  * Every look the five-minute job takes at one offer after paying still waiting on Stripe (lib/upsell.ts,
  * settlePendingOffers), from its first minute to the day it is let go: a payment the bank asked the buyer to confirm,
- * one whose answer was lost on the way back, or one still processing. At most OFFER_WATCH_LOOKS_MOST looks an offer,
- * each at most OFFER_WATCH_LOOK_COMMANDS_MOST database commands (its record read twice, its next look written, the
- * store's record and the run's share of reading the list), and Stripe reads of the creator's account, which bill no API
- * call. Measured in tests/upsell-settle-late.test.ts and held to a declared share of ORDER_COMPUTE, an offer being its
- * own order (line orders); what is left of ORDER_COMPUTE is more than the offer's own answer takes, measured there too.
+ * one whose answer was lost on the way back, or one still processing. A look that throws, or whose record does not read,
+ * is looked at again on the same schedule, from the time the offer began, noted beside the list when it was listed
+ * (lib/upsell.ts atKey), so it adds no look (tests/upsell-pending-thrown-behind.test.ts); a look whose own reschedule
+ * or drop threw sends no second one (Claude 5 ichw's MÉDIO on #5482). At most OFFER_WATCH_LOOKS_MOST looks an offer,
+ * each at most OFFER_WATCH_LOOK_COMMANDS_MOST database commands as billed, a script counted as one plus every call inside
+ * it: the run's share of reading the list, the offer's record read, the store's record (two GETs), the record written
+ * when Stripe changed it (writeUpsell) and, when it settled, its entry taken off (unwatchPending's ZREM), the record
+ * read again, and the entry moved (one ZADD XX) or taken off (one ZREM); a look that throws reads the noted time instead
+ * (one GET). Stripe reads of the creator's account bill no API call. The dearest look is an orphan claim let go (only the claim written, no customer and no
+ * payment): the list, the record, the store's two, ORPHAN_RELEASE (1 + GET + DEL), the record again and the ZREM, 9
+ * database commands (Claude 5 icEJ's MÉDIO on #5482). Measured in tests/upsell-settle-late.test.ts and held to a
+ * declared share of ORDER_COMPUTE, an offer being its own order (line orders); what is left of ORDER_COMPUTE is more
+ * than the offer's own answer takes, measured there too, its listing's SET of the noted time included. The share is
+ * 0.7 since the orphan's 9 (Claude 5 icEJ on #5482): 11 x 9 = 99 commands inside 105 of ORDER_COMPUTE's 150, the 45
+ * left above what the offer's own answer measures; ORDER_COMPUTE itself does not move.
  */
 export const OFFER_WATCH_LOOKS_MOST = 11;
-export const OFFER_WATCH_LOOK_COMMANDS_MOST = 7;
-export const OFFER_WATCH_SHARE_OF_ORDER_COMPUTE = 0.6;
+export const OFFER_WATCH_LOOK_COMMANDS_MOST = 9;
+export const OFFER_WATCH_SHARE_OF_ORDER_COMPUTE = 0.7;
 /**
  * The access emails a plan's window holds (lib/store-allowance-rules.ts):
  * since 17 October 2026 counted and refused past the figure, before sending
@@ -2536,7 +2546,7 @@ export const COST_LINES: CostLine[] = [
       // An offer still waiting on Stripe is looked at by the five-minute job less often the longer it waits (WATCH_AFTER_MS),
       // and a bank payment still processing past its second day once a day until its seventh: OFFER_WATCH_LOOKS_MOST x
       // OFFER_WATCH_LOOK_COMMANDS_MOST commands at most, inside OFFER_WATCH_SHARE_OF_ORDER_COMPUTE.
-      { file: "lib/upsell.ts", names: ["settlePendingOffers", "WATCH_AFTER_MS", "nextLook", "PROCESSING_WATCH_MS = 7 * 24", "PROCESSING_RECHECK_MS = 24 * 60"] },
+      { file: "lib/upsell.ts", names: ["settlePendingOffers", "WATCH_AFTER_MS", "nextLook", "PROCESSING_WATCH_MS = 7 * 24", "PROCESSING_RECHECK_MS = 24 * 60", "atKey", "lookAgain", "let moved = false;", "if (moved) continue;"] },
       // A contact an order writes is written only over the row it was decided from (consent audit of 9 November 2026; review of #3448): its worst case, a script counted as 1 plus the calls inside it, held in tests/contacts-write-cost.test.ts.
       { file: "lib/contacts.ts", names: ["CONTACT_COMMANDS_MOST", "CONTACT_FENCED_WRITE_CALLS", "CONTACT_WRITE_CALLS"] },
     ],

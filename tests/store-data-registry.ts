@@ -1288,6 +1288,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:upload-budget:v2:{YYYY-MM}@lib/upload-budget-policy.ts": company("The ledger's name", "The company's ledger."),
   "nl:upsell-slots:@lib/upsell.ts": short("The offers a checkout took", "order", 8, KEY),
   "nl:upsell:@lib/upsell.ts": short("An offer after paying: one or two an order", "order", 8, 2 * KB),
+  "nl:upsell:at:@lib/upsell.ts": short("When an offer after paying began, noted while the job may look at it: one or two an order, a key each", "order", 8, 2 * KEY),
   "nl:upsell:pending@lib/upsell.ts": company("Offers being charged", "One sorted set, each an order's, for minutes, or up to seven days while a bank payment clears."),
   "nl:@lib/usage-billing.ts": { what: "What a meter billed, is adding, told, a month", parts: [capped(3 * 3 * 14 * KEY, "Three meters, three marks, 400 days.")] },
   "nl:watch:monthly:@lib/usage-billing.ts": company("A subscription's monthly watching billed", "The company's billing of its own plan."),

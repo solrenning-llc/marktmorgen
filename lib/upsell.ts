@@ -131,6 +131,17 @@ const PENDING_WATCH_MS = 2 * 24 * 60 * 60 * 1000;
 const PROCESSING_WATCH_MS = 7 * 24 * 60 * 60 * 1000;
 const PROCESSING_RECHECK_MS = 24 * 60 * 60 * 1000;
 /**
+ * When an offer began, kept beside the job's list under the offer's own name (its checkout and slot, written once with
+ * NX by watchPending, kept RECORD_SECONDS like the offer's record and never longer), so a look whose
+ * record does not read is looked at again on the offer's own schedule (WATCH_AFTER_MS, then daily inside
+ * PROCESSING_WATCH_MS), never on a guess: soon after a passing failure, and never past the looks an offer has
+ * (OFFER_WATCH_LOOKS_MOST, tests/plan-cost-registry.ts), however its record was rewritten (Claude 5 iYwjc's and ichw's
+ * findings on #5482). The list's members stay "<store handle>|<checkout>|<slot>", so a deploy rolled back to code that
+ * does not know this key reads and reschedules them as before (Claude 5 ichw on #5482: a time carried on the member
+ * itself was looked at on every run by that code); the key only expires.
+ */
+const atKey = (session: string, slot: string) => (slot ? `nl:upsell:at:${session}:${slot}` : `nl:upsell:at:${session}`);
+/**
  * When the job looks at a waiting offer again, by how long after it began: its first look comes a minute after it
  * began (settlePendingOffers' grace), then once its lost answer can be told apart (LOST_ANSWER_MS), after an hour,
  * six hours, a day, and at the end of PENDING_WATCH_MS. The buyer's own thanks page settles it at once whenever it is
@@ -155,14 +166,16 @@ const pendingMember = (handle: string, session: string, slot: string) => `${hand
 const NOTHING_TAKEN = new Set(["requires_payment_method", "canceled", "requires_action", "requires_confirmation"]);
 
 /**
- * Adds an offer to the job's list, and takes it off. Best effort: the list
- * only makes the settling sooner, the thanks page settles an offer too, so a
- * moment of Redis trouble here never stands in the way of the buyer's answer.
+ * Adds an offer to the job's list, with the time it began beside it (atKey), and takes it off. Best effort: the list
+ * only makes the settling sooner, the thanks page settles an offer too, so a moment of Redis trouble here never stands
+ * in the way of the buyer's answer. Taking it off removes its one entry; the time beside it expires by itself.
  */
 async function watchPending(store: Store, session: string, slot: string): Promise<void> {
-  await redisPipeline([["ZADD", PENDING_KEY, Date.now(), pendingMember(store.handle, session, slot)]]).catch((error) =>
-    console.error("listing a waiting offer failed", error),
-  );
+  const now = Date.now();
+  await redisPipeline([
+    ["ZADD", PENDING_KEY, now, pendingMember(store.handle, session, slot)],
+    ["SET", atKey(session, slot), now, "NX", "EX", RECORD_SECONDS],
+  ]).catch((error) => console.error("listing a waiting offer failed", error));
 }
 
 /**
@@ -891,12 +904,17 @@ export async function settlePendingOffers(
   if (!isRedisConfigured()) return counts;
   // A minute's grace: the buyer's own browser is usually back by then and
   // settles it itself on the thanks page.
-  const [members] = await redisPipeline([["ZRANGEBYSCORE", PENDING_KEY, 0, Date.now() - 60_000, "LIMIT", 0, 50]]);
-  const list = Array.isArray(members) ? (members as unknown[]).map(String) : [];
-  for (const member of list) {
+  const [members] = await redisPipeline([["ZRANGEBYSCORE", PENDING_KEY, 0, Date.now() - 60_000, "WITHSCORES", "LIMIT", 0, 50]]);
+  const flat = Array.isArray(members) ? (members as unknown[]).map(String) : [];
+  const list: [string, number][] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) list.push([flat[i], Number(flat[i + 1])]);
+  for (const [entry, score] of list) {
     if (Date.now() >= deadline) break;
-    const [handle, session, slot = "", mark = ""] = member.split("|");
-    const drop = () => redisPipeline([["ZREM", PENDING_KEY, member]]);
+    const [handle, session, slot = "", mark = ""] = entry.split("|");
+    const drop = () => redisPipeline([["ZREM", PENDING_KEY, entry]]);
+    // The entry's next look, only while it is still listed (XX: an entry another path took off is never put back,
+    // Claude 5 ichw on #5482). One command, so a look's cost is the same whatever wrote the entry.
+    const lookAgain = (next: number) => redisPipeline([["ZADD", PENDING_KEY, "XX", next, entry]]);
     const since = CREDIT_MARK.exec(mark)?.[1];
     if (since && handle && SESSION_ID.test(session ?? "") && (!slot || SLOT_PATTERN.test(slot))) {
       counts.checked += 1;
@@ -907,7 +925,7 @@ export async function settlePendingOffers(
         await drop();
       } catch (error) {
         // Still unknown: kept, moved behind the others, tried at the next run, for as long as an offer is watched
-        // from the first failure (the member carries its time, so no read is needed to let it go).
+        // from the first failure (the entry carries its time, so no read is needed to let it go).
         console.error("crediting a paid offer again failed; tried again by the job", error);
         if (Date.now() - Number(since) > PENDING_WATCH_MS) await drop().catch(() => undefined);
         else await redisPipeline([["ZADD", PENDING_KEY, Date.now(), creditMember(handle, session, slot, Number(since))]]).catch(() => undefined);
@@ -919,24 +937,32 @@ export async function settlePendingOffers(
       continue;
     }
     counts.checked += 1;
+    let at: number | null = null;
+    // Set once this look has sent its own reschedule or drop: a write whose reply was lost may have been made, so the
+    // catch never sends another (Claude 5 ichw on #5482: that second write took a look past its priced commands).
+    let moved = false;
+    const settle = async (write: () => Promise<unknown>) => {
+      moved = true;
+      await write();
+    };
     try {
       const record = await readUpsell(session, slot);
       if (!record || record.state !== "pending") {
-        await drop();
+        await settle(drop);
         continue;
       }
+      at = record.at;
       const store = await storeFor(handle);
       if (!store || !store.stripeAccountId) {
         const next = nextLook(record.at, Date.now());
-        if (next === null) await drop();
-        else await redisPipeline([["ZADD", PENDING_KEY, next, pendingMember(handle, session, slot)]]);
+        await settle(next === null ? drop : () => lookAgain(next));
         continue;
       }
       const status = await settleOne(store, session, slot, record, OFFER_PAGES_IN_JOB);
       const after = await readUpsell(session, slot);
       if (!after || after.state !== "pending") {
         counts.settled += 1;
-        await drop();
+        await settle(drop);
       } else {
         // Looked at again later, less often the longer it waits (WATCH_AFTER_MS); past its watch, a payment still
         // clearing at the bank is looked at once a day, so a late success is handed over in full. An answer that
@@ -944,15 +970,47 @@ export async function settlePendingOffers(
         // later, still only inside PROCESSING_WATCH_MS, so its looks stay inside OFFER_WATCH_LOOKS_MOST.
         const next = nextLook(after.at, Date.now());
         if (next !== null) {
-          await redisPipeline([["ZADD", PENDING_KEY, next, pendingMember(handle, session, slot)]]);
+          await settle(() => lookAgain(next));
         } else if ((status === "processing" || status === UNREAD) && Date.now() - after.at <= PROCESSING_WATCH_MS) {
-          await redisPipeline([["ZADD", PENDING_KEY, Date.now() + PROCESSING_RECHECK_MS, pendingMember(handle, session, slot)]]);
+          await settle(() => lookAgain(Date.now() + PROCESSING_RECHECK_MS));
         } else {
-          await drop();
+          await settle(drop);
         }
       }
     } catch (error) {
       console.error("settling a waiting offer failed", error);
+      // A look whose own reschedule or drop threw is left as that write left it: if the write was made, the entry is
+      // where it should be; if not, it is still due and the next run looks at it once more.
+      if (moved) continue;
+      // Moved behind the others (#4624): an offer whose look threw kept its score, so 50 of them held the front of every
+      // run and the healthy offers behind waited their whole watch. Looked at again on the schedule of an offer still
+      // pending (WATCH_AFTER_MS), then once a day while a payment could still be clearing, then let go, as the branches
+      // above, so its looks stay inside OFFER_WATCH_LOOKS_MOST. One whose record did not read takes the time noted
+      // beside the list when it began (atKey): so a passing failure is looked at again minutes later, never a day
+      // (Claude 5 ichw on #5482), and an offer whose record never reads is let go when its watch is over. An entry
+      // listed before that time was noted has only its score: the time watchPending listed it, or, once the job had
+      // rescheduled it, the time of the look it was due at, which is later, so its watch can end up to that much later,
+      // once (Claude 5 ichw's LEVE on #5482). That score is noted as its time (NX, never over one already there), so
+      // its later looks keep to it and never creep forward. An entry with neither is let go.
+      const now = Date.now();
+      let when = at;
+      let note = false;
+      if (when === null) {
+        const noted = await redisPipeline([["GET", atKey(session, slot)]]).then((reply) => Number(reply?.[0]), () => Number.NaN);
+        if (Number.isSafeInteger(noted) && noted > 0) when = noted;
+        else if (mark === "" && Number.isSafeInteger(score) && score > 0) {
+          when = score;
+          note = true;
+        }
+      }
+      const next = when === null ? null : nextLook(when, now) ?? (now - when <= PROCESSING_WATCH_MS ? now + PROCESSING_RECHECK_MS : null);
+      if (next === null) {
+        await drop().catch((dropError) => console.error("letting go of a waiting offer whose look threw failed", dropError));
+      } else {
+        const write: (string | number)[][] = [["ZADD", PENDING_KEY, "XX", next, entry]];
+        if (note) write.push(["SET", atKey(session, slot), when as number, "NX", "EX", RECORD_SECONDS]);
+        await redisPipeline(write).catch((writeError) => console.error("moving a waiting offer whose look threw behind failed", writeError));
+      }
     }
   }
   return counts;

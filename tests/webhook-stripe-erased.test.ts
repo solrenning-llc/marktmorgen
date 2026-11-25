@@ -67,8 +67,11 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
 }) as typeof redis.pipeline;
 
 const PAID = 1_790_000_000;
-const evt = (id: string, type: string, created: number, object: Record<string, unknown>, previous?: Record<string, unknown>) =>
-  ({ id, type, created, data: { object, ...(previous ? { previous_attributes: previous } : {}) } });
+// A refund here is always the charge's first: Stripe gives the refunded total before it, 0 (lib/webhooks.ts waits when it is missing).
+const evt = (id: string, type: string, created: number, object: Record<string, unknown>, previous?: Record<string, unknown>) => {
+  const before = previous ?? (type === "charge.refunded" ? { amount_refunded: 0 } : undefined);
+  return { id, type, created, data: { object, ...(before ? { previous_attributes: before } : {}) } };
+};
 const refund = (id: string, email: string, created: number | undefined = PAID) => ({
   id, object: "charge", ...(created === undefined ? {} : { created }), payment_intent: `pi_${id}`, amount: 2900, amount_refunded: 2900, refunded: true, currency: "usd",
   metadata: { store: HANDLE, product: "p_course" }, billing_details: { email, name: `Name of ${email}` }, receipt_email: email,
@@ -169,7 +172,7 @@ async function main() {
   await erase("offer-gone@example.com", PAID + 50);
   await erase("member-gone@example.com", PAID + 50);
   const session = (id: string, email: string, mode = "payment", extra: Record<string, unknown> = {}) => ({
-    id, object: "checkout.session", created: PAID, status: "complete", payment_status: "paid", mode, amount_total: 4900, currency: "usd",
+    id, object: "checkout.session", created: PAID, status: "complete", payment_status: "paid", mode, amount_total: 4900, currency: "usd", total_details: { amount_discount: 0 },
     metadata: { store: HANDLE, product: "p_course" }, customer_details: { email, name: `Name of ${email}` }, ...extra,
   });
   const offer = (id: string, email: string) => ({ id, object: "payment_intent", created: PAID, amount: 1900, currency: "usd", receipt_email: email, metadata: { store: HANDLE, kind: "upsell", product: "p_offer" } });

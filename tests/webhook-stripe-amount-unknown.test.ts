@@ -6,7 +6,10 @@
  * `amount_refunded` as 0 and a missing `currency` as "usd" and sent it, once
  * and for good (the event's once-only mark): the creator's books, fed by the
  * endpoint, recorded a sale of nothing. Now such an event waits, as one whose
- * shape our code does not know, and the events before it are sent as they were.
+ * shape our code does not know, and the events before it are sent as they were;
+ * once Stripe gives it whole it is sent, so it waited rather than being passed
+ * over. A discount is read only for a store that hears sale.completed, the one
+ * event that sends it (LEVEs 1 and 2 of #5206's triple audit).
  * Synthetic Stripe answers only; the endpoint resolves to a private address.
  */
 import { addEndpoint, recentMessages, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
@@ -21,10 +24,25 @@ const account = "acct_AmountUnknown01";
 const HANDLE = "amount-unknown-shop";
 let events: unknown[] = [];
 const intents: Record<string, Record<string, string>> = {};
+/**
+ * The events Stripe would list for this read, newest first, as Stripe does: after an anchor (`ending_before`) only
+ * the newer ones, past a cursor (`starting_after`) only the older ones. An event the code read without error moves
+ * the anchor past it and is never listed again, so a check that an event waited can tell waiting from passing over
+ * (LEVE 1 of Claude 1 on #5206 @777454ad42).
+ */
+function listed(url: URL) {
+  const rows = events as { id: string; created: number }[];
+  const at = (id: string | null) => (id ? rows.find((row) => row.id === id) : undefined);
+  const newer = at(url.searchParams.get("ending_before"));
+  if (newer) return rows.filter((row) => row.created > newer.created);
+  const older = at(url.searchParams.get("starting_after"));
+  if (older) return rows.filter((row) => row.created < older.created);
+  return rows;
+}
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.origin !== "https://api.stripe.com" || init?.method !== "GET" || new Headers(init.headers).get("Stripe-Account") !== account) throw new Error(`unexpected synthetic operation ${url}`);
-  if (url.pathname === "/v1/events") return Response.json({ data: events, has_more: false });
+  if (url.pathname === "/v1/events") return Response.json({ data: listed(url), has_more: false });
   const intent = url.pathname.match(/^\/v1\/payment_intents\/(pi_\w+)$/)?.[1];
   if (intent && intents[intent]) return Response.json({ id: intent, metadata: intents[intent] });
   return Response.json({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such object" } }, { status: 404 });
@@ -65,6 +83,12 @@ async function main() {
     ["its amount null", { amount_total: null }],
     ["its amount as text", { amount_total: "4900" }],
     ["its money missing", { currency: undefined }],
+    // Codex G-20261119-0600 (#5010 row 97): the discount is sent once and for good, so it is read exactly too.
+    ["its discount details missing", { total_details: undefined }],
+    ["its discount missing", { total_details: {} }],
+    ["its discount as text", { total_details: { amount_discount: "0" } }],
+    ["its discount negative", { total_details: { amount_discount: -1 } }],
+    ["its discount fractional", { total_details: { amount_discount: 0.5 } }],
   ];
   for (const [what, change] of checkoutCases) {
     const store = await setup(["sale.completed"]);
@@ -75,6 +99,27 @@ async function main() {
     await watchStripe(Date.now() + 10_000);
     const sent = (await recentMessages(store, "sale.completed", 10)).map((m) => m.data as Record<string, unknown>);
     is(`${what}: the whole one before it is sent as it was, and it is not sent at $0 or in dollars`, sent.map((d) => [d.checkout_session, d.amount_cents, d.currency]), [["cs_good01", 4900, "eur"]]);
+    // It waits, not passed over (LEVE 2 of #5206's triple audit): read again once whole, it is sent, and only once.
+    events = [
+      { id: "evt_Bad01", type: "checkout.session.completed", created: 1_790_000_100, data: { object: session("cs_bad01") } },
+      { id: "evt_Good01", type: "checkout.session.completed", created: 1_790_000_000, data: { object: session("cs_good01") } },
+    ];
+    await watchStripe(Date.now() + 10_000);
+    const later = (await recentMessages(store, "sale.completed", 10)).map((m) => String((m.data as Record<string, unknown>).checkout_session)).sort();
+    is(`${what}: it waited, so once Stripe gives it whole it is sent, and the one before it is not sent again`, later, ["cs_bad01", "cs_good01"]);
+  }
+
+  part("A discount nobody hears never holds a membership's start (LEVE 1 of #5206's triple audit)");
+  for (const [what, totals] of [["missing", undefined], ["as text", { amount_discount: "0" }], ["fractional", { amount_discount: 0.5 }]] as [string, unknown][]) {
+    const store = await setup(["membership.started"]);
+    const name = what.replace(" ", "");
+    const object: Record<string, unknown> = { id: `cs_start_${name}`, object: "checkout.session", mode: "subscription", status: "complete", payment_status: "paid", amount_total: 6900, currency: "usd", subscription: `sub_Start${name}`, customer_details: { email: "member@example.com", name: "Member" }, metadata: { store: HANDLE, product: "p_member" } };
+    if (totals !== undefined) object.total_details = totals;
+    events = [{ id: `evt_Start${name}`, type: "checkout.session.completed", created: 1_790_000_200, data: { object } }];
+    await watchStripe(Date.now() + 10_000);
+    const started = (await recentMessages(store, "membership.started", 10)).map((m) => m.data as Record<string, unknown>);
+    is(`a discount ${what}: the membership's start is sent, with its amount`, started.map((d) => [d.subscription, d.amount_cents, d.currency]), [[`sub_Start${name}`, 6900, "usd"]]);
+    is(`a discount ${what}: no sale.completed, which nobody hears`, (await recentMessages(store, "sale.completed", 10)).length, 0);
   }
 
   part("A one-click offer");
@@ -101,6 +146,51 @@ async function main() {
     await watchStripe(Date.now() + 10_000);
     const sent = (await recentMessages(store, "refund.issued", 10)).map((m) => m.data as Record<string, unknown>);
     is(`${what}: only the whole one is sent`, sent.map((d) => [d.charge, d.amount_refunded_cents, d.amount_cents, d.currency]), [["ch_GoodRefund", 1000, 4900, "eur"]]);
+  }
+  // Codex G-20261119-0604 (#5010 row 96): the previous refunded total, when Stripe gives one, is read exactly and is
+  // never above the new total; an unreadable one waits, never sent as a wrong amount.
+  for (const [what, before] of [["text", "0"], ["negative", -1], ["fractional", 0.5], ["larger than the new total", 1001]] as const) {
+    const store = await setup(["refund.issued"]);
+    events = [
+      { id: "evt_BadRefund", type: "charge.refunded", created: 1_790_002_100, data: { object: refund("ch_BadRefund"), previous_attributes: { amount_refunded: before } } },
+      { id: "evt_GoodRefund", type: "charge.refunded", created: 1_790_002_000, data: { object: refund("ch_GoodRefund"), previous_attributes: { amount_refunded: 0 } } },
+    ];
+    await watchStripe(Date.now() + 10_000);
+    const sent = (await recentMessages(store, "refund.issued", 10)).map((m) => m.data as Record<string, unknown>);
+    is(`its previous refunded amount is ${what}: only the whole one is sent`, sent.map((d) => [d.charge, d.amount_refunded_cents]), [["ch_GoodRefund", 1000]]);
+    // It waits, not passed over (LEVE 2 of #5206's triple audit): read again once whole, it is sent, and only once.
+    events = [
+      { id: "evt_BadRefund", type: "charge.refunded", created: 1_790_002_100, data: { object: refund("ch_BadRefund"), previous_attributes: { amount_refunded: 0 } } },
+      { id: "evt_GoodRefund", type: "charge.refunded", created: 1_790_002_000, data: { object: refund("ch_GoodRefund"), previous_attributes: { amount_refunded: 0 } } },
+    ];
+    await watchStripe(Date.now() + 10_000);
+    const later = (await recentMessages(store, "refund.issued", 10)).map((m) => String((m.data as Record<string, unknown>).charge)).sort();
+    is(`its previous refunded amount is ${what}: it waited, so once whole it is sent, and the one before it is not sent again`, later, ["ch_BadRefund", "ch_GoodRefund"]);
+  }
+  // A missing previous refunded total is unknown, never the first refund's 0 (#5206, adopted by Claude 5 iZUmuf after an
+  // independent review): Stripe's event reference says previous_attributes is "only included in events of type
+  // *.updated" (https://docs.stripe.com/api/events/object, read 24/11/2026), and charge.refunded is not one. On a second
+  // partial refund (1000 before, 1500 now), reading it as 0 sent 1500 refunded instead of 500, once and for good.
+  const second = (id: string) => ({ ...refund(id), amount_refunded: 1500 });
+  for (const [what, data] of [
+    ["missing from previous_attributes", (id: string) => ({ object: second(id), previous_attributes: { refunded: false } })],
+    ["missing with no previous_attributes", (id: string) => ({ object: second(id) })],
+  ] as const) {
+    const store = await setup(["refund.issued"]);
+    events = [
+      { id: "evt_BadRefund", type: "charge.refunded", created: 1_790_002_100, data: data("ch_BadRefund") },
+      { id: "evt_GoodRefund", type: "charge.refunded", created: 1_790_002_000, data: { object: second("ch_GoodRefund"), previous_attributes: { amount_refunded: 1000 } } },
+    ];
+    await watchStripe(Date.now() + 10_000);
+    const sent = (await recentMessages(store, "refund.issued", 10)).map((m) => m.data as Record<string, unknown>);
+    is(`its previous refunded amount ${what}: only the one with its amount is sent, with the refund's own 500`, sent.map((d) => [d.charge, d.amount_refunded_cents, d.total_refunded_cents]), [["ch_GoodRefund", 500, 1500]]);
+    events = [
+      { id: "evt_BadRefund", type: "charge.refunded", created: 1_790_002_100, data: { object: second("ch_BadRefund"), previous_attributes: { amount_refunded: 1000 } } },
+      { id: "evt_GoodRefund", type: "charge.refunded", created: 1_790_002_000, data: { object: second("ch_GoodRefund"), previous_attributes: { amount_refunded: 1000 } } },
+    ];
+    await watchStripe(Date.now() + 10_000);
+    const later = (await recentMessages(store, "refund.issued", 10)).map((m) => m.data as Record<string, unknown>).map((d) => [d.charge, d.amount_refunded_cents]).sort();
+    is(`its previous refunded amount ${what}: it waited, never sent as 1500; once Stripe gives it, it is sent as 500`, later, [["ch_BadRefund", 500], ["ch_GoodRefund", 500]]);
   }
 
   part("A dispute");

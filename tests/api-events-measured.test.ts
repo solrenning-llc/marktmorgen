@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     id: `evt_BigSale${String(n).padStart(3, "0")}`,
     type: "checkout.session.completed",
     created: 1_790_000_000 + n,
-    data: { object: { id: `cs_BigSale${String(n).padStart(3, "0")}`, object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 99_00, currency: "usd", metadata: { ...meta, ...extra }, customer_details: { email: `buyer${n}@example.com`, name: "Synthetic Buyer" } } },
+    data: { object: { id: `cs_BigSale${String(n).padStart(3, "0")}`, object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 99_00, currency: "usd", total_details: { amount_discount: 0 }, metadata: { ...meta, ...extra }, customer_details: { email: `buyer${n}@example.com`, name: "Synthetic Buyer" } } },
   });
   events = Array.from({ length: LOG_SIZE }, (_, n) => sale(n)).reverse();
   await watchStripe(Date.now() + 60_000);
@@ -233,7 +233,7 @@ async function main(): Promise<void> {
       ...bundleMeta("bundle", more.slice(0, 20)), bump: more[20], bump2: more[21], bump3: more[22],
       ...bundleMeta("bump_bundle", more.slice(23, 43)), ...bundleMeta("bump2_bundle", more.slice(43, 63)), ...bundleMeta("bump3_bundle", more.slice(63, 83)),
     };
-    events = [{ id: `evt_Worst${n}`, type: "checkout.session.completed", created: 1_790_001_000 + n, data: { object: { id: `cs_Worst${n}`, object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 99_00, currency: "usd", metadata, customer_details: { email: long, name: long } } } }];
+    events = [{ id: `evt_Worst${n}`, type: "checkout.session.completed", created: 1_790_001_000 + n, data: { object: { id: `cs_Worst${n}`, object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 99_00, currency: "usd", total_details: { amount_discount: 0 }, metadata, customer_details: { email: long, name: long } } } }];
     await watchStripe(Date.now() + 60_000);
     const [id] = await deliveryIds(statsId);
     const [raw, size] = await redis.pipeline([["GET", `nl:hooks:d:${id}`], ["STRLEN", `nl:hooks:d:${id}`]]);

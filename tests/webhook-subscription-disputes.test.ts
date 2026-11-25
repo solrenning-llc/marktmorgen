@@ -99,7 +99,9 @@ console.error = (...args: unknown[]) => {
 const subscriptionInvoice = (meta: Record<string, string>) => ({ parent: { type: "subscription_details", subscription_details: { subscription: "sub_Member01", metadata: meta } } });
 const dispute = (id: string, intent: string) => ({ id, object: "dispute", charge: `ch_${id}`, payment_intent: intent, amount: 2900, currency: "usd", reason: "product_not_received", status: "needs_response", evidence_details: { due_by: 1_791_000_000 }, metadata: {} });
 const refund = (id: string, intent: string, metadata: Record<string, string> = {}) => ({ id, object: "charge", payment_intent: intent, amount: 2900, amount_refunded: 2900, refunded: true, currency: "usd", metadata, billing_details: { email: null, name: null } });
-const evt = (id: string, type: string, created: number, object: Record<string, unknown>) => ({ id, type, created, data: { object } });
+// A refund here is always the charge's first: Stripe gives the refunded total before it, 0 (lib/webhooks.ts waits when it is missing).
+const evt = (id: string, type: string, created: number, object: Record<string, unknown>) =>
+  ({ id, type, created, data: { object, ...(type === "charge.refunded" ? { previous_attributes: { amount_refunded: 0 } } : {}) } });
 const sentIds = async (store: Awaited<ReturnType<typeof setup>>, type: "dispute.opened" | "refund.issued", key: "dispute" | "charge") =>
   (await recentMessages(store, type, 10)).map((m) => (m.data as Record<string, string>)[key]).sort();
 const lookups = () => asked.filter((a) => a.path !== "/v1/events");
@@ -335,8 +337,8 @@ async function main() {
 
   part("A failure inside one event's handling is counted too, and ends in a give-up");
   store = await setup(["sale.completed"]);
-  const brokenSale = evt("evt_Broken", "checkout.session.completed", 1_790_094_000, { id: "cs_Broken01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } });
-  const nextSale = evt("evt_NextSale", "checkout.session.completed", 1_790_094_100, { id: "cs_Next01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } });
+  const brokenSale = evt("evt_Broken", "checkout.session.completed", 1_790_094_000, { id: "cs_Broken01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", total_details: { amount_discount: 0 }, metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } });
+  const nextSale = evt("evt_NextSale", "checkout.session.completed", 1_790_094_100, { id: "cs_Next01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", total_details: { amount_discount: 0 }, metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } });
   timeline = [brokenSale, nextSale];
   const brokenMark = `nl:hooks:evt:${eventIdFor(statsId, "sale.completed", "cs_Broken01")}`;
   const realPipelineEarly = redis.pipeline.bind(redis);
@@ -395,7 +397,7 @@ async function main() {
     unheardCancel,
     evt("evt_UnRefund", "charge.refunded", 1_790_100_100, refund("ch_unheard", "pi_Member")),
     evt("evt_UnDispute", "charge.dispute.created", 1_790_100_200, dispute("dp_unheard", "pi_Member")),
-    evt("evt_Sale", "checkout.session.completed", 1_790_100_300, { id: "cs_Sale01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } }),
+    evt("evt_Sale", "checkout.session.completed", 1_790_100_300, { id: "cs_Sale01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", total_details: { amount_discount: 0 }, metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } }),
   ];
   await watchStripe(Date.now() + 10_000);
   is("the sale goes out in the same run", (await recentMessages(store, "sale.completed", 10)).map((m) => (m.data as { checkout_session: string }).checkout_session), ["cs_Sale01"]);
@@ -439,7 +441,7 @@ async function main() {
   store = await setup(["membership.canceled", "sale.completed"]);
   store = await paid();
   failing["/v1/customers/cus_Cancel0"] = { left: 1_000_000, how: "403" };
-  const sale = evt("evt_SaleAfter", "checkout.session.completed", 1_790_110_000, { id: "cs_Throw01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } });
+  const sale = evt("evt_SaleAfter", "checkout.session.completed", 1_790_110_000, { id: "cs_Throw01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", total_details: { amount_discount: 0 }, metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } });
   timeline = [heldCancel(0), sale];
   await seedWait("evt_Cancel0");
   const used0 = await allowanceUsed(store, "webhook");
@@ -546,7 +548,7 @@ async function main() {
   part("A line says only what was not sent, and whose the failure was");
   store = await setup(["sale.completed", "membership.started"]);
   is("a second endpoint hearing only sales is kept", (await addEndpoint(store, "https://hooks.example.org/sales-only", ["sale.completed"])).ok, true);
-  const subCheckout = evt("evt_SubCheckout", "checkout.session.completed", 1_790_130_000, { id: "cs_Sub01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "subscription", subscription: "sub_Started01", amount_total: 2900, currency: "usd", metadata: { store: HANDLE, product: "p_member" }, customer_details: { email: null, name: null } });
+  const subCheckout = evt("evt_SubCheckout", "checkout.session.completed", 1_790_130_000, { id: "cs_Sub01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "subscription", subscription: "sub_Started01", amount_total: 2900, currency: "usd", total_details: { amount_discount: 0 }, metadata: { store: HANDLE, product: "p_member" }, customer_details: { email: null, name: null } });
   timeline = [subCheckout];
   // The sale goes out; the membership's start fails on the store every time.
   const startedMark = `nl:hooks:evt:${eventIdFor(statsId, "membership.started", "sub_Started01")}`;
@@ -589,7 +591,7 @@ async function main() {
 
   part("An event is never marked sent without its deliveries");
   store = await setup(["sale.completed"]);
-  timeline = [evt("evt_Queued", "checkout.session.completed", 1_790_134_000, { id: "cs_Queued01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } })];
+  timeline = [evt("evt_Queued", "checkout.session.completed", 1_790_134_000, { id: "cs_Queued01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", total_details: { amount_discount: 0 }, metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } })];
   const queuedMark = `nl:hooks:evt:${eventIdFor(statsId, "sale.completed", "cs_Queued01")}`;
   breakWhen((command) => command[0] === "ZADD" && command[1] === "nl:hooks:q");
   await watchStripe(Date.now() + 10_000);
@@ -619,7 +621,7 @@ async function main() {
   ] as const) {
     store = await setup(["sale.completed"]);
     is(`${what}: a second endpoint is kept`, (await addEndpoint(store, "https://hooks.example.org/two", ["sale.completed"])).ok, true);
-    timeline = [evt("evt_LostReply", "checkout.session.completed", 1_790_140_000, { id: "cs_LostReply01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } })];
+    timeline = [evt("evt_LostReply", "checkout.session.completed", 1_790_140_000, { id: "cs_LostReply01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", total_details: { amount_discount: 0 }, metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } })];
     loseReplyOnce(bad);
     await watchStripe(Date.now() + 10_000);
     mend();
@@ -632,7 +634,7 @@ async function main() {
     is(`${what}, the reply lost: exactly one delivery an endpoint in the log and on the queue after the next visit`, [log.length, new Set(log.map((d) => d.id)).size, log.map((d) => d.endpoint).sort(), (await queued()).length, await waitRecord()], [2, 2, ["hooks.example.net/in", "hooks.example.org/two"], 2, null]);
   }
   store = await setup(["sale.completed"]);
-  timeline = [evt("evt_Lost", "checkout.session.completed", 1_790_141_000, { id: "cs_Lost01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } })];
+  timeline = [evt("evt_Lost", "checkout.session.completed", 1_790_141_000, { id: "cs_Lost01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", total_details: { amount_discount: 0 }, metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } })];
   const lostMark = `nl:hooks:evt:${eventIdFor(statsId, "sale.completed", "cs_Lost01")}`;
   breakWhen((command) => (command[0] === "ZADD" && command[1] === "nl:hooks:q") || (command[0] === "DEL" && command[1] === lostMark) || (command[0] === "EVAL" && command.includes(lostMark)));
   await watchStripe(Date.now() + 10_000);

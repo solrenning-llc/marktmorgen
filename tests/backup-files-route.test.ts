@@ -203,8 +203,11 @@ async function main(): Promise<void> {
   is("the resume read the same provider page again", blobWorld.listCalls.map((c) => c.cursor), [undefined, undefined]);
   reset();
   clock = 0;
+  blobWorld.pages = [listing(blobs(0, 10))];
   const late = await backupFilesPage({ source: "blob", store: STORE, cursor: null }, { stopAt: 0, now: () => (clock += 1) });
-  is("past the cutoff before listing: nothing asked, incomplete with a cursor", [late.complete, late.reason, late.entries.length, typeof late.cursor, blobWorld.listCalls.length], [false, "cutoff", 0, "string", 0]);
+  // Board #5285 row #3313 (Codex X6's re-check): this used to answer "nothing asked", an empty page with the cursor it
+  // was given, which a Worker repeating it never moved past. One provider page is read and one object handed out now.
+  is("past the cutoff before listing: one listing, one object, incomplete with a cursor after it", [late.complete, late.reason, late.entries.length, typeof late.cursor, blobWorld.listCalls.length], [false, "cutoff", 1, "string", 1]);
   reset();
   blobWorld.pages = [listing(blobs(0, 1000, (n) => `${PREFIX}${"k".repeat(900)}-${n}`))];
   const heavy = await backupFilesPage({ source: "blob", store: STORE, cursor: null }, { stopAt: Number.POSITIVE_INFINITY });

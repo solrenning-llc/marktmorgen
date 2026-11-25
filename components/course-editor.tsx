@@ -44,7 +44,7 @@ import { AiAssist, AiOn } from "@/components/ai-assist";
 import { type StreamState, isStreamPath } from "@/lib/stream-rules";
 import { CAPTION_LANGUAGES, type CaptionTrack, MAX_CAPTION_BYTES, MAX_CAPTION_TRACKS } from "@/lib/captions";
 import { captionsAnchor } from "@/lib/course-access-check";
-import { CENTS_PER_MINUTE, GIVE_UP_HOURS, MAX_AUTO_LANGUAGES, MAX_AUTO_MINUTES, MIN_CENTS, autoCaptionCents, dollars } from "@/lib/auto-captions-rules";
+import { CENTS_PER_MINUTE, GIVE_UP_HOURS, MAX_AUTO_LANGUAGES, MAX_AUTO_MINUTES, MIN_CENTS, ORDER_LOOK_DAYS, autoCaptionCents, dollars } from "@/lib/auto-captions-rules";
 import { TusError, tusUpload } from "@/lib/tus-upload";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 
@@ -84,7 +84,7 @@ const MESSAGES: Record<string, string> = {
   auto_language: "Choose languages this video has no captions in yet, the one spoken first, three at most.",
   auto_long: `Captions are written for videos of up to ${MAX_AUTO_MINUTES / 60} hours.`,
   auto_busy: "Captions for this video are already being written. They appear here when they are done.",
-  auto_checking: "Stripe has not confirmed yet whether this charge went through. Nothing more is charged for this video until it does, in about 15 minutes. If your card was charged and no captions are written, the charge is refunded on its own.",
+  auto_checking: `Stripe has not confirmed yet whether this charge went through. Nothing more is charged for this video until it does, and we check again on our own. If your card was charged and no captions were written, what was paid is refunded once Stripe confirms the charge. If this note is still here ${ORDER_LOOK_DAYS} days after you asked, write to ${SUPPORT_EMAIL} about it.`,
   auto_plan: "Captions written by AI are charged to the card your plan is paid with, so they need a plan first.",
   auto_card: "There is no card on your plan to charge. Add one under Plan and billing, then try again.",
   auto_declined: "Your card was declined, so nothing was charged and nothing is being written.",

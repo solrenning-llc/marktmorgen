@@ -7,7 +7,9 @@
  * time, a few minutes for most lessons; it is asked again until every
  * language asked for is there (and told by its announcement too,
  * app/api/stream/hook), and each language is listed for the lesson as it
- * arrives. What has not arrived after GIVE_UP_HOURS is refunded.
+ * arrives. What has not arrived after GIVE_UP_HOURS is refunded once the
+ * service says what it delivered; an answer that stays unknown is asked again
+ * for DELIVERY_LOOK_DAYS, then kept for a person, never refunded on it.
  *
  *   nl:stream:auto:<video>   what is being written, and the charge for it
  *   nl:stream:autoq          which videos to ask about, and when
@@ -50,7 +52,7 @@ import { readStreamPath, STREAM_ID_PATTERN } from "@/lib/stream-rules";
 import { captionLabel } from "@/lib/captions";
 import { chargeNow, isBillingConfigured, onPlatformAt, refundCharge, refundsOnIntent } from "@/lib/billing";
 import type { Store } from "@/lib/store";
-import { GIVE_UP_HOURS, MAX_AUTO_MINUTES, autoCaptionCents, chargedMinutes, readAutoAsk } from "@/lib/auto-captions-rules";
+import { DELIVERY_LOOK_DAYS, GIVE_UP_HOURS, MAX_AUTO_MINUTES, ORDER_LOOK_DAYS, autoCaptionCents, chargedMinutes, readAutoAsk } from "@/lib/auto-captions-rules";
 
 const pendingKey = (id: string) => `nl:stream:auto:${id}`;
 /** The videos of one store folder with captions money not settled: a refund owed, or a charge kept for a person. */
@@ -71,12 +73,12 @@ const REFUND_KEEP_SECONDS = 400 * 86_400;
  */
 export const ORDER_SETTLE_MS = 15 * 60_000;
 /** An order Stripe's invoices cannot settle is looked at, further apart each time, for this long; then kept for a person. */
-const ORDER_LOOKS_MS = 14 * 86_400_000;
+const ORDER_LOOKS_MS = ORDER_LOOK_DAYS * 86_400_000;
 /**
  * Past GIVE_UP_HOURS, a request whose answer from the service stays unknown is looked at, further apart each time,
  * for this long; then kept for a person, never refunded on an unknown answer and never dropped.
  */
-const DELIVERY_LOOKS_MS = 14 * 86_400_000;
+const DELIVERY_LOOKS_MS = DELIVERY_LOOK_DAYS * 86_400_000;
 /** Each month's counts of what was kept for a person, for the owner's report: numbers only, no store, no person. */
 const keptMonthKey = (month: string) => `nl:stream:autokept:month:${month}`;
 const KEPT_KINDS = ["delivery", "order", "refund"] as const;

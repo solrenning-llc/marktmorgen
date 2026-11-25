@@ -12,6 +12,14 @@ type Command = (string | number)[];
 export type TakeScript = (run: (command: Command) => unknown, keys: string[], argv: string[]) => unknown;
 
 export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
+  // lib/community-mail.ts HOLD_PLACE: a held announcement's place among its community's held sends, at most ARGV[2].
+  "announcement-hold:v1": (run, [held], [id, most, seconds]) => {
+    if (run(["SISMEMBER", held, id]) === 1) return 1;
+    if (Number(run(["SCARD", held])) >= Number(most)) return 0;
+    run(["SADD", held, id]);
+    run(["EXPIRE", held, Number(seconds)]);
+    return 1;
+  },
   // lib/card-update.ts KEEP_CARD_OPEN_IF_LIVE: a setup page kept only while its store (id key, or record before ids) is live.
   "card-open-live:v1": (run, [storeId, erasing, open], [erasingField, session, seconds]) => {
     if (run(["EXISTS", storeId]) !== 1 || run(["HEXISTS", erasing, erasingField]) === 1) return "gone";

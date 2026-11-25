@@ -45,6 +45,8 @@ async function main(): Promise<void> {
     is("no list read, no member read: the lock, the record and one write", commandsSeen.some((c) => c[0] === "LRANGE"), false);
 
     part(`${label}, then back on`);
+    // An hour later: a held send is looked at again once its hour is past (#5285 row #3406).
+    db.run(["SET", `nl:cm:mail:${id}`, JSON.stringify({ ...saved(), retryAt: Date.now() - 1 })]);
     const resumed = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
     is("it goes out by itself, to both members, once", [resumed?.status, resumed?.sent, sent.length, db.run(["SISMEMBER", "nl:cm:mailq", id])], ["sent", 2, 1, 0]);
   }

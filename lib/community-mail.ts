@@ -26,7 +26,7 @@
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendListBatch } from "@/lib/email";
 import { stopTags } from "@/lib/mail-health-rules";
@@ -84,7 +84,100 @@ export type AnnouncementJob = {
    * is read for it.
    */
   space?: string;
+  /**
+   * While it waits on a store switched off or a plan without email: not looked at again before this time (ms), so a
+   * held send costs a read of its record a run, never the store's and a write (#5285 row #3406). Absent otherwise.
+   */
+  retryAt?: number;
+  /** When it began to wait on a store switched off or a plan without email (ms): it ends ANNOUNCEMENT_HELD_DAYS later. */
+  heldSince?: number;
+  /** Whether it holds its place among its community's held sends (ANNOUNCEMENTS_HELD_MOST); asked again on each look until it does. */
+  heldPlaced?: boolean;
 };
+
+/**
+ * How long a send held for a store switched off, or for a plan without email, waits between looks: an hour, as a
+ * broadcast's LIST_RETRY_SECONDS (lib/broadcasts.ts), never every run of the mail job (Claude 1's MEDIUM 1 on #3406).
+ */
+export const ANNOUNCEMENT_RETRY_SECONDS = 3_600;
+
+/**
+ * How long a send held for a store switched off, or for a plan without email, is kept: 60 days, as a product update
+ * held on a switched-off store (lib/product-updates.ts). Then it ends, out of line, saying so (Claude 4 AC, mail 2aab),
+ * so its looks have an end: at most 60 x 24 hourly looks and the five-minute runs between them.
+ */
+export const ANNOUNCEMENT_HELD_DAYS = 60;
+
+/**
+ * How many sends of one community can wait at once on a store switched off, or a plan without email: 3. A send that
+ * would be held past them ends at once, out of line, saying so, so the company's cost of held sends has a ceiling a
+ * store (the coordinator's cost line, ibqho c2c2; tests/plan-cost-registry.ts, ANNOUNCEMENT_HELD_EXPOSURE).
+ */
+export const ANNOUNCEMENTS_HELD_MOST = 3;
+/** The commands one run of the mail job sends for a held send before its hour is past: the lock's claim, its GET, the lock's release. */
+export const ANNOUNCEMENT_HELD_RUN_COMMANDS = 3;
+/** The commands an hourly look at a held send sends of its own, besides its store's and its settings' reads: the lock's claim, its GET, its SET, the lock's release. */
+export const ANNOUNCEMENT_HELD_LOOK_OWN_COMMANDS = 4;
+/**
+ * The commands a send's first hold adds once: the community's held sends read (SMEMBERS), their records (MGET), the
+ * SREM of those that ended, and its place taken (HOLD_PLACE: one EVAL and, inside it, SISMEMBER, SCARD, SADD, EXPIRE).
+ */
+export const ANNOUNCEMENT_HELD_ENTER_COMMANDS = 8;
+
+/** The sends of a community held at once (the ids of their records): at most ANNOUNCEMENTS_HELD_MOST waiting there. */
+const heldKey = (community: string) => `nl:cm:mailq:held:${community}`;
+
+/**
+ * A held send: looked at again in an hour, or ended once it has waited ANNOUNCEMENT_HELD_DAYS. A send's first hold
+ * takes a place among its community's held sends, read exactly: past ANNOUNCEMENTS_HELD_MOST it ends at once with
+ * `full`. It never waits without its place (Claude 2 upbeat's LEVE on #5341): a read of the others that does not
+ * answer only skips giving back places of sends that ended, the place is still asked of the atomic step, and when that
+ * step's own answer does not read the send ends at once with `unheld`, so the held sends never pass the ceiling.
+ */
+async function hold(job: AnnouncementJob, note: string, ended: string, full: string, unheld: string): Promise<AnnouncementJob> {
+  const now = Date.now();
+  // Its 60 days start on its first hold, whether or not its place could be taken then (Claude 7 xAF's LEVE on #5341).
+  const heldSince = job.heldSince ?? now;
+  if (now - heldSince >= ANNOUNCEMENT_HELD_DAYS * 86_400_000) {
+    if (job.heldPlaced) await redisPipeline([["SREM", heldKey(job.community), job.id]]);
+    return { ...job, status: "failed", note: ended, retryAt: undefined, heldPlaced: undefined };
+  }
+  const waiting = (): AnnouncementJob => ({ ...job, status: "waiting", note, retryAt: now + ANNOUNCEMENT_RETRY_SECONDS * 1000, heldSince, heldPlaced: true });
+  if (job.heldPlaced) return waiting();
+  const key = heldKey(job.community);
+  // Places held by sends that ended or are gone are given back first. A send still under way is never taken out on a
+  // read: it may be entering the hold at this moment.
+  const listed = repliesFor(await redisPipeline([["SMEMBERS", key]]), 1);
+  const ids = listed ? stringList(listed[0]) : null;
+  const others = (ids ?? []).filter((other) => other !== job.id);
+  if (others.length) {
+    const read = repliesFor(await redisPipeline([["MGET", ...others.map(jobKey)]]), 1);
+    const values = read ? repliesFor(read[0], others.length) : null;
+    const gone = !values ? [] : others.filter((_, i) => {
+      if (values[i] === null) return true;
+      const other = parse(values[i]);
+      return other !== null && (other.status === "sent" || other.status === "failed");
+    });
+    if (gone.length) await redisPipeline([["SREM", key, ...gone]]);
+  }
+  // The place itself in one atomic step (Claude 7 xAF's MEDIUM on #5341): sends held at the same moment never pass the
+  // ceiling together. Kept a day past the longest hold, from the last send held.
+  const taken = repliesFor(await redisPipeline([["EVAL", HOLD_PLACE, 1, key, job.id, ANNOUNCEMENTS_HELD_MOST, (ANNOUNCEMENT_HELD_DAYS + 1) * 86_400]]), 1)?.[0];
+  if (taken === 1) return waiting();
+  return { ...job, status: "failed", note: taken === 0 ? full : unheld, retryAt: undefined, heldSince: undefined, heldPlaced: undefined };
+}
+
+/**
+ * A held send's place among its community's held sends (KEYS: the set; ARGV: the send's id, ANNOUNCEMENTS_HELD_MOST,
+ * the set's seconds): 1 when it holds one (already, or taken now), 0 when the others hold them all. Modelled by
+ * lib/redis-memory-take.ts.
+ */
+export const HOLD_PLACE = `-- marktmorgen:announcement-hold:v1
+if redis.call("SISMEMBER", KEYS[1], ARGV[1]) == 1 then return 1 end
+if redis.call("SCARD", KEYS[1]) >= tonumber(ARGV[2]) then return 0 end
+redis.call("SADD", KEYS[1], ARGV[1])
+redis.call("EXPIRE", KEYS[1], tonumber(ARGV[3]))
+return 1`;
 
 function parse(raw: unknown): AnnouncementJob | null {
   if (typeof raw !== "string") return null;
@@ -408,6 +501,8 @@ export async function advanceAnnouncement(
       await redisPipeline([["SREM", QUEUE, id]]);
       return job;
     }
+    // Held for a store switched off or a plan without email: looked at again only once its hour is past.
+    if (job.status === "waiting" && typeof job.retryAt === "number" && Date.now() < job.retryAt) return job;
     const store = await load(job.handle);
     const config = store?.community?.id === job.community ? await readConfig(job.community) : null;
     if (!store || !config) {
@@ -419,16 +514,32 @@ export async function advanceAnnouncement(
     // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule 24):
     // nobody is read, reserved or emailed. It waits in line, saying so, and goes on by itself once the store is back on.
     if (store.suspended) {
-      job = { ...job, status: "waiting", note: job.done > 0 ? "Your store is switched off after notices about its content, so nothing more was sent. The rest go out by themselves once your store is back on." : "Your store is switched off after notices about its content, so nothing was sent. It goes out by itself once your store is back on." };
+      job = await hold(
+        job,
+        job.done > 0 ? "Your store is switched off after notices about its content, so nothing more was sent. The rest go out by themselves once your store is back on." : "Your store is switched off after notices about its content, so nothing was sent. It goes out by itself once your store is back on.",
+        `Your store was switched off after notices about its content for ${ANNOUNCEMENT_HELD_DAYS} days, so ${job.done > 0 ? "the rest of this announcement was" : "this announcement was"} not sent. Post it again once your store is back on.`,
+        `Only ${ANNOUNCEMENTS_HELD_MOST} announcements wait at a time while your store is switched off, so ${job.done > 0 ? "the rest of this one was" : "this one was"} not sent. Post it again once your store is back on.`,
+        `Your store is switched off after notices about its content, and ${job.done > 0 ? "the rest of this announcement" : "this announcement"} could not be held to wait for it, so it was not sent. Post it again once your store is back on.`,
+      );
       await save(job);
+      if (job.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);
       return job;
     }
     if (monthlyAllowance(store) === 0 || !store.mail) {
-      job = { ...job, status: "waiting", note: "Your plan does not include email right now. It goes out once Pro is on again." };
+      job = await hold(
+        job,
+        "Your plan does not include email right now. It goes out once Pro is on again.",
+        `Your plan did not include email for ${ANNOUNCEMENT_HELD_DAYS} days, so ${job.done > 0 ? "the rest of this announcement was" : "this announcement was"} not sent. Post it again once Pro is on.`,
+        `Only ${ANNOUNCEMENTS_HELD_MOST} announcements wait at a time while your plan does not include email, so ${job.done > 0 ? "the rest of this one was" : "this one was"} not sent. Post it again once Pro is on.`,
+        `Your plan does not include email right now, and ${job.done > 0 ? "the rest of this announcement" : "this announcement"} could not be held to wait for it, so it was not sent. Post it again once Pro is on.`,
+      );
       await save(job);
+      if (job.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);
       return job;
     }
-    job = { ...job, status: "sending", note: "" };
+    // No longer held: its place among the community's held sends is given back.
+    if (job.heldPlaced) await redisPipeline([["SREM", heldKey(job.community), id]]);
+    job = { ...job, status: "sending", note: "", retryAt: undefined, heldSince: undefined, heldPlaced: undefined };
     const community = job.community;
 
     while (job.done < job.total && Date.now() < deadline) {

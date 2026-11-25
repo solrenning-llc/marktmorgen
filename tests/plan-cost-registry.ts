@@ -148,6 +148,7 @@ import { REFUND_CHECK_WAITS, TICKET_CUSTOMERS, TICKET_PAYMENT_PAGES, TICKET_PAYM
 import { DEVICE_SENT_BYTES, MAX_MEMBER_DEVICES } from "@/lib/community-push";
 import { MAX_MENTIONS } from "@/lib/community-mentions";
 import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
+import { ANNOUNCEMENTS_HELD_MOST, ANNOUNCEMENT_HELD_DAYS, ANNOUNCEMENT_HELD_ENTER_COMMANDS, ANNOUNCEMENT_HELD_LOOK_OWN_COMMANDS, ANNOUNCEMENT_HELD_RUN_COMMANDS, ANNOUNCEMENT_RETRY_SECONDS } from "@/lib/community-mail";
 import { MAX_QUESTIONS, MAX_SPACES, MAX_WELCOME } from "@/lib/community-text";
 import { SEARCH_MESSAGES } from "@/lib/community-dm";
 import { MAX_FORMS } from "@/lib/forms";
@@ -2229,6 +2230,33 @@ export function heldCompanyMonthlyExposure(caseCap: number | null, observed: num
   const retention = Math.max(...(["creator", "pro", "scale"] as const).map(tier => heldStoreMonthlyExposure(tier).retentionUsd));
   const retry = heldStoreMonthlyExposure("scale").retryUsd;
   return { modeledUsd: caseCap * retention + HELD_EXPOSURE.monthlyAttempts * retry + HELD_EXPOSURE.globalCounterBytes * DB_BYTE_MONTH, completeUsd: null };
+}
+
+/**
+ * Board #5285, row #3406 (the coordinator's cost line, ibqho c2c2): community announcements held for a store switched
+ * off after notices, or for a plan without email, are a company exposure (that store pays for no email), outside
+ * paid-unit COST_LINES. At most ANNOUNCEMENTS_HELD_MOST sends of a community are held at once, each kept at most
+ * ANNOUNCEMENT_HELD_DAYS: every five-minute run of the mail job sends ANNOUNCEMENT_HELD_RUN_COMMANDS for it, and each
+ * hourly look (ANNOUNCEMENT_RETRY_SECONDS) ANNOUNCEMENT_HELD_LOOK_OWN_COMMANDS of its own plus its store's and its
+ * settings' reads (at most 4 more), held by tests/community-announce-wait-retry.test.ts; its first hold adds
+ * ANNOUNCEMENT_HELD_ENTER_COMMANDS once. A look's run is counted twice, on the safe side. Upstash bills commands; the
+ * bytes are a few hundred a command. Not a complete tariff certification.
+ */
+export const ANNOUNCEMENT_HELD_EXPOSURE = {
+  heldMost: ANNOUNCEMENTS_HELD_MOST,
+  days: ANNOUNCEMENT_HELD_DAYS,
+  runsPerDay: 288,
+  looksPerDay: 86_400 / ANNOUNCEMENT_RETRY_SECONDS,
+  runCommands: ANNOUNCEMENT_HELD_RUN_COMMANDS,
+  lookCommands: ANNOUNCEMENT_HELD_LOOK_OWN_COMMANDS + 4,
+  enterCommands: ANNOUNCEMENT_HELD_ENTER_COMMANDS,
+  bytesPerCommand: 1_024,
+} as const;
+/** The worst case one store's held announcements cost the company, over the longest hold: commands and US dollars. */
+export function announcementHeldStoreExposure(): { commands: number; usd: number } {
+  const e = ANNOUNCEMENT_HELD_EXPOSURE;
+  const commands = e.heldMost * (e.days * (e.runsPerDay * e.runCommands + e.looksPerDay * e.lookCommands) + e.enterCommands);
+  return { commands, usd: commands * (COMMAND + e.bytesPerCommand * DB_BYTE) };
 }
 
 

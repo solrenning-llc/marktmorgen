@@ -36,7 +36,7 @@ import { canOffer, saveOn } from "@/lib/save-offer";
 import { productOfSub } from "@/lib/tier-rules";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { type MembershipWords, membershipWords } from "@/lib/buyer-words/membership";
-import { type PauseSub, cannotPause, pauseOf, periodEndOf } from "@/lib/membership-pause-rules";
+import { type PauseSub, cannotPause, pauseOf, pauseSet, periodEndOf } from "@/lib/membership-pause-rules";
 import { isOwnReasonId, offers } from "@/lib/leave-rules";
 import { countLeave } from "@/lib/leave-flow";
 import { canSellProduct } from "@/lib/store-checkout";
@@ -581,6 +581,8 @@ export type Membership = {
   ending: Ending;
   /** A pause the member chose (lib/membership-pause-rules.ts), started or still to start; null when there is none. */
   pause: { from: number; until: number } | null;
+  /** Whether Stripe carries any pause on it, even one this code did not set (pauseSet): then no tier switch is offered. */
+  pauseSet: boolean;
   /** Whether the member may pause it now, as the store allows. */
   canPause: boolean;
   /** When the period already paid for ends, in seconds: where a pause would start. */
@@ -808,6 +810,7 @@ export async function membershipsListed(store: Store, token: string): Promise<{ 
       soldEnd: onlySoldEnd(sub) ? (sub.cancel_at as number) : null,
       ending: endingOf(sub),
       pause: pauseOf(sub as PauseSub),
+      pauseSet: pauseSet(sub as PauseSub),
       canPause: cannotPause(sub as PauseSub, store.pause) === null,
       periodEnd: periodEndOf(sub as PauseSub),
       yearly: (() => {

@@ -11,7 +11,7 @@ import { readFunnelFormReviews } from "@/lib/funnel-form-review";
 import { funnelLaunchIssues, type FunnelLaunchIssue, type FunnelLaunchStep } from "@/lib/funnel-launch-review";
 import type { PageFunnel } from "@/lib/page-funnel";
 import { readPageFunnelsStrict, stepStates, type StepState } from "@/lib/page-funnel-store";
-import { sellsThroughPayPal } from "@/lib/paypal-sales";
+import { paypalOffered } from "@/lib/paypal-sales";
 import type { Store } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
 
@@ -27,7 +27,7 @@ export function funnelPageIssues(store: Store, formIssues: readonly FunnelLaunch
 }
 
 /** Whether a paid step can be sold today, as the funnels page asks it. */
-export const funnelPaymentsAvailable = (store: Store): boolean => canSell(store) || sellsThroughPayPal(store);
+export const funnelPaymentsAvailable = (store: Store): boolean => canSell(store) || paypalOffered(store);
 
 /** A step as the launch checks read it. */
 export const launchStepOf = (state: StepState): FunnelLaunchStep => ({ title: state.title, open: state.open, why: state.why, product: state.step.kind === "product", free: state.free });

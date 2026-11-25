@@ -218,6 +218,10 @@ export const es: BuyerWords = {
       title: "Este pago de PayPal se está confirmando",
       body: "Otra pestaña o una segunda pulsación lo está terminando ahora. Revisa tu correo por si llega el recibo antes de volver a pagar. Si PayPal muestra un cargo y no llega ningún recibo, escribe a la tienda respondiendo al recibo de PayPal.",
     },
+    "paypal-tax": {
+      title: "PayPal no puede aceptar este pago",
+      body: "Esta tienda ahora añade el impuesto al pagar, y un pago con PayPal no lo incluiría. No se ha cobrado nada. Vuelve a pedirlo desde la página del producto, que muestra cómo puedes pagar.",
+    },
     "paypal-error": {
       title: "No se pudo asociar ese pago de PayPal a esta tienda",
       body: "No se ha entregado nada por él. Si PayPal muestra un cargo, escribe a la tienda respondiendo al recibo de PayPal.",

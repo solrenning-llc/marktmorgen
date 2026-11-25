@@ -1,7 +1,7 @@
 import type { Listing, Store } from "@/lib/store";
-import { canSell, canSellProduct } from "@/lib/store-checkout";
+import { canSell, canSellProduct, isSellingConfigured } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
-import { paypalReady, sellsThroughPayPal } from "@/lib/paypal-sales";
+import { paypalOffered, paypalReady, sellsThroughPayPal, taxOnTop } from "@/lib/paypal-sales";
 import { bundleReady, deliverableItems } from "@/lib/bundle-rules";
 import { bumpPauseWords, bumpStates, limitedStock, planPauseWords, planState } from "@/lib/product-extras";
 
@@ -24,7 +24,10 @@ export function savedOfferIssues(store: Store, product: Listing, known: readonly
   if (product.priceCents === 0) {
     if (!canGiveProduct(store,product)) issues.push("Free sign-up is unavailable with this saved configuration. Review delivery, the mailing list, store plan and email configuration.");
   } else {
-    if (!canSell(store) && !sellsThroughPayPal(store)) issues.push("Store payments are unavailable. Review the store plan and payment connection.");
+    // A store that sells by PayPal alone, with tax on top, is told the real cause (the coordinator's triple audit on #5243),
+    // and only a step it can take: without Stripe the tax editor cannot be used (Claude 6 hsz3's LEVE).
+    if (!canSell(store) && sellsThroughPayPal(store) && taxOnTop(store)) issues.push(`Store payments are unavailable: PayPal is not offered while tax is added on top of your prices, and card payments are not available. ${!isSellingConfigured() ? "Card payments are not available on Marktmorgen right now." : store.stripeAccountId ? "Finish setting up your Stripe account to take card payments, or under Tax and invoices choose \u201cMy prices already include it\u201d." : "Connect Stripe to take payments."}`);
+    else if (!canSell(store) && !paypalOffered(store)) issues.push("Store payments are unavailable. Review the store plan and payment connection.");
     else if (!canSellProduct(store,product) && !paypalReady(store,product)) issues.push("This paid offer is unavailable with its saved delivery or price options. Review the product.");
     if (limitedStock(product) === 0) issues.push("The configured quantity is zero. Live stock reservations have not been checked.");
     if (product.bundle) {

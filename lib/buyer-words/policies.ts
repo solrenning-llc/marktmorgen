@@ -35,7 +35,7 @@ export type PolicyWords = {
   notAdvice: string;
 };
 
-/** The accounts a store takes money into right now: Stripe (canSell), PayPal (sellsThroughPayPal), or both. */
+/** The accounts a store takes money into right now: Stripe (canSell), PayPal (paypalOffered), or both. */
 export type PaidInto = "stripe" | "paypal" | "both";
 
 /** A space a line cannot break at, before French ":". */

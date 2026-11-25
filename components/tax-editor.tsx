@@ -32,11 +32,14 @@ export function TaxEditor({
   tax,
   status,
   connected,
+  paypal = false,
 }: {
   tax: TaxSetting;
   /** What Stripe said about the creator's tax setup on this page load. */
   status: "active" | "pending" | "unknown";
   connected: boolean;
+  /** Whether the store sells through PayPal: tax on top takes the PayPal button away (#5243). */
+  paypal?: boolean;
 }) {
   const ready = useSyncExternalStore(subscribeToReadiness, clientReady, serverReady);
   const router = useRouter();
@@ -143,6 +146,13 @@ export function TaxEditor({
               <span>My prices already include it (usual in Europe, the UK and Australia)</span>
             </label>
           </fieldset>
+          {/* A PayPal payment would not include tax added on top, so PayPal is not offered then (lib/paypal-sales.ts
+              paypalOffered; the coordinator's triple audit on #5243). Said as the choice is made, before saving. */}
+          <p aria-live="polite" className="text-sm text-ink-soft">
+            {paypal && enabled && !included
+              ? "With tax added on top, PayPal is not offered at checkout, because a PayPal payment would not include the tax."
+              : ""}
+          </p>
 
           <fieldset className="space-y-3 border-t border-line pt-4" disabled={!ready || busy}>
             <legend className="field-label">Business buyers</legend>

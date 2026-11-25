@@ -48,7 +48,7 @@ import { VideoEmbed } from "@/components/video-embed";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import { StoreSocialsRow } from "@/components/store-socials-row";
 import { forVisitor } from "@/lib/visitor";
-import { sellsThroughPayPal } from "@/lib/paypal-sales";
+import { paypalOffered } from "@/lib/paypal-sales";
 import { saleClock, saleRunning } from "@/lib/store-sale";
 import { endsLine, speech } from "@/lib/buyer-words";
 import { EmptyState } from "@/components/empty-state";
@@ -268,7 +268,7 @@ export default async function StorePage({ params, searchParams }: Params) {
   const cartOn = selling && offersCart(store);
   const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" || query.cart === "abroad" || query.cart === "country" ? query.cart : null;
   // Sold through the creator's own PayPal as well, or instead (lib/paypal-sales.ts).
-  const byPayPal = sellsThroughPayPal(store);
+  const byPayPal = paypalOffered(store);
   // A buyer standing in front of a checkout deserves to know it is a rehearsal
   // before typing a card number into it, not after. Asked of the store: the
   // demo store stays in test mode whatever our own key is (lib/house-store.ts).

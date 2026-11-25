@@ -10,7 +10,8 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { Icon } from "@/components/icons";
 import { NewTab } from "@/components/new-tab";
 import { type TaxRegistration, placeOf, readTaxRegistrations } from "@/lib/tax-registrations";
-import { sellsThroughPayPal } from "@/lib/paypal-sales";
+import { paypalOffered, sellsThroughPayPal, taxOnTop } from "@/lib/paypal-sales";
+import { canSell, isSellingConfigured } from "@/lib/store-checkout";
 
 export const metadata: Metadata = { title: "Where you collect tax — Marktmorgen", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
@@ -84,8 +85,16 @@ export default async function StudioTaxPage({ searchParams }: Params) {
                 .
               </>
             )}
-            {/* Revisor 1 on #2735: a sale paid with PayPal adds no tax (lib/paypal-sales.ts reads no store.tax). */}
-            {sellsThroughPayPal(store) ? " Sales paid with PayPal have no tax added." : null}
+            {/* Revisor 1 on #2735: a sale paid with PayPal adds no tax (lib/paypal-sales.ts reads no store.tax). With tax on
+                top, PayPal is not offered at all, so no sale goes without its tax (#3971, lib/paypal-sales.ts paypalOffered). */}
+            {/* Only where PayPal would otherwise be offered, and the card checkout named only where it sells (Claude 1's
+                LEVE on #5243, VR item 2): a store that sells by PayPal alone is told nobody can pay, never "by card", and only a step
+                it can take: tax on top cannot be turned off here without Stripe (the coordinator's triple audit). */}
+            {sellsThroughPayPal(store) && taxOnTop(store)
+              ? ` PayPal is not offered at checkout while tax is added on top of your prices, because a PayPal payment would not include the tax.${canSell(store) ? " Buyers pay by card through Stripe." : !isSellingConfigured() ? " Card payments are not available on Marktmorgen right now, so buyers cannot pay." : store.stripeAccountId ? " Buyers cannot pay until your Stripe account can take card payments." : " Buyers cannot pay until you connect Stripe."}`
+              : paypalOffered(store)
+                ? " Sales paid with PayPal have no tax added."
+                : null}
           </p>
 
           <section aria-labelledby="registrations-title" className="mt-8 max-w-3xl">

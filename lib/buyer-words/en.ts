@@ -244,6 +244,10 @@ export const en = {
       title: "This PayPal payment is being confirmed",
       body: "Another tab or a second press is finishing it now. Check your email for the receipt before you pay again. If PayPal shows money taken and no receipt comes, write to the store by replying to PayPal's receipt.",
     },
+    "paypal-tax": {
+      title: "PayPal can't take this payment",
+      body: "This store now adds tax at checkout, and a PayPal payment would not include it. Nothing was charged. Order again from the product page, which shows how you can pay.",
+    },
     "paypal-error": {
       title: "That PayPal payment could not be matched to this store",
       body: "Nothing was handed over for it. If PayPal shows money taken, write to the store by replying to PayPal's receipt.",

@@ -627,10 +627,25 @@ export function takenBy(stripe: boolean, paypal: boolean): string {
   return stripe && paypal ? "Stripe or PayPal" : paypal ? "PayPal" : "Stripe";
 }
 
+/** Whether this store adds its tax on top of its prices (Stripe Checkout's exclusive tax). */
+export function taxOnTop(store: Pick<Store, "tax">): boolean {
+  return store.tax.enabled && !store.tax.included;
+}
+
+/**
+ * Whether PayPal is offered to buyers of this store right now (#3971, coordinator's decision 6df4): never while the
+ * store adds its tax on top of its prices, since a PayPal order asks for the price alone and the buyer would pay
+ * without the tax (IV (h): never sold without its tax). How PayPal could charge it is the owner's decision. What was
+ * already bought by PayPal is still read through sellsThroughPayPal, which this does not change.
+ */
+export function paypalOffered(store: Store): boolean {
+  return sellsThroughPayPal(store) && !taxOnTop(store);
+}
+
 /** Whether this store takes PayPal for this product right now. */
 export function paypalReady(store: Store, product: Listing): boolean {
   // The same plan that opens the Stripe till opens this one.
-  return sellsThroughPayPal(store) && sellsWithPayPal(product);
+  return paypalOffered(store) && sellsWithPayPal(product);
 }
 
 /**
@@ -793,7 +808,8 @@ export type Paid = {
 export type CaptureResult =
   | { ok: true; paid: Paid; fresh: boolean }
   /** "confirming": another return of the same order holds its last try right now (captureOrder's "spent"). */
-  | { ok: false; reason: "unknown" | "pending" | "declined" | "mismatch" | "error" | "confirming" };
+  /** "tax": the store adds tax on top now, which a PayPal payment would not include; nothing was asked of PayPal. */
+  | { ok: false; reason: "unknown" | "pending" | "declined" | "mismatch" | "error" | "confirming" | "tax" };
 
 /** Whether PayPal is still being waited on for an order this store opened. */
 export async function stillPending(store: Store, order: string): Promise<boolean> {
@@ -1205,6 +1221,22 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
     console.error(`a PayPal order's ${what} could not be read`, order, error);
     return { ok: false, reason: "unknown" };
   };
+  // An order opened before the creator added tax on top of the prices, approved after: PayPal would take the price
+  // alone, without the tax (Claude 7's LEVE on #5243). Nothing is asked of PayPal and nothing is written. One never
+  // tried is "tax": the buyer is told nothing was charged (the coordinator's triple audit). One tried before is read
+  // where it stands, as a spent one is (Claude 6 UoHAG's LEVE): paid is shown as paid; still under watch, the sweep
+  // reads PayPal's own order and the buyer goes to the thanks page; let go (a declined try), it is "tax" too.
+  if (taxOnTop(store)) {
+    if (tries === 0) return { ok: false, reason: "tax" };
+    let stands: CaptureResult;
+    try {
+      stands = await standing(order, opened);
+    } catch (error) {
+      // A read that does not answer is not "let go": the buyer is told it did not go through, as on every other path.
+      return unread(error, "standing");
+    }
+    return stands.ok || stands.reason === "pending" ? stands : { ok: false, reason: "tax" };
+  }
   if (tries >= CAPTURE_TRIES_PER_ORDER) return standing(order, opened).catch((error) => unread(error, "standing"));
   // Watched first: no capture is asked for an order the sweep could not find (watchFirst throws on anything unknown,
   // and a record ended since it was read, or less than a day from thirty past its opening, is no order to take a payment

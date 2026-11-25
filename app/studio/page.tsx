@@ -21,7 +21,7 @@ import { firstSaleAt } from "@/lib/yearly-offer";
 import { breakRunning, pauseView } from "@/lib/plan-pause";
 import { PLAN_BREAKS_ENABLED, PAID_MONTHS_BEFORE_PAUSE, PAUSE_MONTHS, PAUSE_EVERY_DAYS } from "@/lib/plan-pause-rules";
 import { MarkShipped } from "@/components/mark-shipped";
-import { paypalSalesConfigured } from "@/lib/paypal-sales";
+import { paypalSalesConfigured, sellsThroughPayPal, taxOnTop } from "@/lib/paypal-sales";
 import { PayPalWaiting } from "@/components/paypal-waiting-notice";
 import { lowestPriceCents } from "@/lib/product-option";
 import { SaleEditor } from "@/components/sale-editor";
@@ -319,6 +319,13 @@ const NEXT_WHEN_NOT = [
   "The checkout that pays into your account",
   "The list of what you have sold",
 ];
+
+// The way back to the PayPal button named only where the creator can take it: the tax choice needs Stripe connected
+// (components/tax-editor.tsx), so without Stripe the first step is connecting it (Claude 6 hsz3's LEVE on #5243).
+const paypalReadyTaxOnTop = (stripe: boolean) => ({
+  title: "PayPal says your account can take payments",
+  body: `PayPal is not offered at checkout while tax is added on top of your prices, because a PayPal payment would not include the tax. ${stripe ? "Under Tax and invoices, choose \u201cMy prices already include it\u201d to show the PayPal button." : "To show the PayPal button, connect Stripe, then under Tax and invoices choose \u201cMy prices already include it\u201d."}`,
+});
 
 const PAYPAL_NOTICES: Record<string, { title: string; body: string }> = {
   ready: {
@@ -1001,6 +1008,8 @@ export default async function StudioPage({
     // A call to PayPal or Meta refused for the store's calls to connected services (lib/metered-limits.ts).
     (store && typeof params.paypal === "string" && serviceAllowanceWords(store, params.paypal) ? { title: "PayPal can't be connected just now", body: serviceAllowanceWords(store, params.paypal) ?? "" } : undefined) ??
     (store && typeof params.metaads === "string" && serviceAllowanceWords(store, params.metaads) ? { title: "Meta can't be connected just now", body: serviceAllowanceWords(store, params.metaads) ?? "" } : undefined) ??
+    // With tax on top, PayPal is not offered (#5243): "now show a PayPal button" would be false.
+    (store && params.paypal === "ready" && taxOnTop(store) ? paypalReadyTaxOnTop(Boolean(store.stripeAccountId)) : undefined) ??
     PAYPAL_NOTICES[typeof params.paypal === "string" ? params.paypal : ""] ??
     META_NOTICES[typeof params.metaads === "string" ? params.metaads : ""] ??
     BILLING_NOTICES[BILLING_ALIASES[String(params.billing)] ?? (typeof params.billing === "string" ? params.billing : "")] ??
@@ -2345,7 +2354,7 @@ export default async function StudioPage({
                   );
                 })()}
 
-                <TaxEditor tax={store.tax} status={tax ? tax.state : "unknown"} connected={Boolean(current?.stripeAccountId)} />
+                <TaxEditor tax={store.tax} status={tax ? tax.state : "unknown"} connected={Boolean(current?.stripeAccountId)} paypal={sellsThroughPayPal(store)} />
 
                 {may("settings") ? <StoreLanguageEditor language={store.language} handle={store.handle} /> : null}
 
@@ -2705,6 +2714,11 @@ export default async function StudioPage({
                   <div className="mt-5 rounded-3xl bg-mint-brand/15 p-5">
                     <p className="font-bold text-ink">PayPal says this account can take payments</p>
                     <p className="mt-1 break-all font-mono text-xs text-ink-soft">{store.paypalSeller.merchant}</p>
+                    {taxOnTop(store) ? (
+                      <p className="mt-2 text-sm text-ink">
+                        Not offered at checkout while tax is added on top of your prices, because a PayPal payment would not include the tax.
+                      </p>
+                    ) : null}
                     {store.paypalSeller.at ? (
                       <p className="mt-2 text-sm text-ink-soft">
                         {`Connected on ${new Date(store.paypalSeller.at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}.`}

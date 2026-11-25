@@ -136,7 +136,8 @@ async function main(): Promise<void> {
     base: "https://x.test/@group-ref", from: "store@x.test" };
   const pipeline = redis.pipeline.bind(redis);
   redis.pipeline = async (commands) => {
-    if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === recordKey) return [null];
+    // The record's write leads its pipeline (#5125: a paid purchase's carries its buyer's index after it).
+    if (commands[0]?.[0] === "SET" && commands[0][1] === recordKey) return [null];
     return pipeline(commands);
   };
   try {

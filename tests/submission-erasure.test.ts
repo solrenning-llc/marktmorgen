@@ -142,6 +142,14 @@ async function main(): Promise<void> {
     is("and stays inside what the erasure counts for it, every one an open upload at its worst", measured.commands + 8 * MAX_SUBMISSIONS_PER_PERSON <= ERASE_SUBMISSIONS[0], true);
     is("in bytes too", measured.bytes + 1_024 * MAX_SUBMISSIONS_PER_PERSON <= ERASE_SUBMISSIONS[1], true);
     is("and frees the buyer to send again", (await openSubmissionDoor(ask(who, lesson(199)), steps)).ok, true);
+    // At its worst a buyer's submissions are each on a lesson of their own, so every place is a key to delete, twice
+    // (Codex X6 on #3574): the figure covers that case too.
+    const spread = "4".repeat(32);
+    for (let i = 0; i < MAX_SUBMISSIONS_PER_PERSON; i += 1) await send(spread, lesson(300 + i), steps);
+    const worst = await commandsOf(() => forgetSubmissionsPerson(FOLDER, spread, [], steps, SHOP));
+    is("one submission on each of as many lessons: every one goes", worst.value, MAX_SUBMISSIONS_PER_PERSON);
+    is("and that, the worst spread, stays inside the figure, every one an open upload at its worst", worst.commands + 8 * MAX_SUBMISSIONS_PER_PERSON <= ERASE_SUBMISSIONS[0], true);
+    is("in bytes too, at the worst spread", worst.bytes + 1_024 * MAX_SUBMISSIONS_PER_PERSON <= ERASE_SUBMISSIONS[1], true);
   }
 
   part("Deleting a person");

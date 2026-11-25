@@ -26,6 +26,8 @@ import type { SubmissionSetup } from "@/lib/submission-rules";
 import type { DataStore } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { COURSE, FOLDER, LESSONS, STORE, resetWorld, state } from "./submission-studio-world";
+import { noticeStudioUnits } from "@/lib/submission-notice";
+import type { Store } from "@/lib/store";
 import { done, is, part } from "./check";
 
 const MiB = 1024 * 1024;
@@ -174,7 +176,11 @@ async function main(): Promise<void> {
   const replied = await post({ action: "reply", id: "prod1", submission: target, text: "Knees out a little more." });
   is("it is answered", replied.body.state, "reviewed");
   is("with the words", (replied.body.reply as { text: string }).text, "Knees out a little more.");
-  is("its studio requests were taken first", state.events.includes(`allowance:studio:${SUBMISSION_REPLY_UNITS}`), true);
+  // The store has no list here, so the notice reads its record again and the reply takes those requests too (Claude 7's
+  // LOW 2 on #3583), before the store is read.
+  const taken = state.events.indexOf(`allowance:studio:${SUBMISSION_REPLY_UNITS + noticeStudioUnits(STORE as unknown as Store)}`);
+  is("its studio requests were taken first, with the notice's read of the store", taken >= 0 && noticeStudioUnits(STORE as unknown as Store) > 0, true);
+  is("and the store was read again only after they were taken", state.events.indexOf("read:store") > taken, true);
   is("the buyer's place is let go", await liveCount(FOLDER, COURSE, LESSONS[1], who, NOW), 0);
   is("a second reply is refused", await post({ action: "reply", id: "prod1", submission: target, text: "Again." }), { status: 409, body: { ok: false, error: "reviewed" } });
   const listed = [...((await get("id=prod1&list=1")).body.rows as { id: string; state: string }[]), ...((await get(`id=prod1&list=1&before=${(await get("id=prod1&list=1")).body.next}`)).body.rows as { id: string; state: string }[])];

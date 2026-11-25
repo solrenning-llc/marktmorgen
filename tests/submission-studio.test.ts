@@ -15,7 +15,9 @@
  *     a page at a time, newest first, and says a record it cannot read;
  *   - a reply is written once, moves the file to answered and lets the
  *     buyer's waiting place go; a second, an empty one, one for another course
- *     or for a file that is gone are refused; two at once never both pass.
+ *     or for a file that is gone are refused; two at once never both pass;
+ *   - the buyer is told of the reply once, and the studio hears whether the
+ *     email went (unit 6; the email itself in tests/submission-notice.test.ts).
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -26,6 +28,8 @@ import type { SubmissionSetup } from "@/lib/submission-rules";
 import type { DataStore } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { COURSE, FOLDER, LESSONS, STORE, resetWorld, state } from "./submission-studio-world";
+import { noticeStudioUnits } from "@/lib/submission-notice";
+import type { Store } from "@/lib/store";
 import { done, is, part } from "./check";
 
 const MiB = 1024 * 1024;
@@ -171,10 +175,26 @@ async function main(): Promise<void> {
   const who = `05${"a".repeat(30)}`;
   is("the buyer's place is held while it waits", await liveCount(FOLDER, COURSE, LESSONS[1], who, NOW), 1);
   is("an empty reply is refused", (await post({ action: "reply", id: "prod1", submission: target, text: "  " })).body, { ok: false, error: "reply" });
+  const counted = redis.pipeline.bind(redis);
+  let replyCommands = 0;
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    replyCommands += batch.length;
+    return counted(batch);
+  }) as typeof redis.pipeline;
   const replied = await post({ action: "reply", id: "prod1", submission: target, text: "Knees out a little more." });
+  redis.pipeline = counted;
   is("it is answered", replied.body.state, "reviewed");
   is("with the words", (replied.body.reply as { text: string }).text, "Knees out a little more.");
-  is("its studio requests were taken first", state.events.includes(`allowance:studio:${SUBMISSION_REPLY_UNITS}`), true);
+  // 750 [CD1] unit 6: the buyer is told by email, and the studio hears whether it went (no sender here, so it did not).
+  // No sender here: lib/email.ts answers false, which may also be a send that went, so it is never said as "none went".
+  is("the studio is told the email could not be confirmed, never that none went", replied.body.emailed, "unknown");
+  is("the reply is marked told, so it is never emailed twice", (await redis.pipeline([["EXISTS", `nl:sub:told:${FOLDER}:${target}`]]))[0], 1);
+  is("the reply and its notice stay inside the studio requests taken (20 commands each)", replyCommands <= 20 * (1 + SUBMISSION_REPLY_UNITS), true);
+  // The store has no list here, so the notice reads its record again and the reply takes those requests too (Claude 7's
+  // LOW 2 on #3583), before the store is read.
+  const taken = state.events.indexOf(`allowance:studio:${SUBMISSION_REPLY_UNITS + noticeStudioUnits(STORE as unknown as Store)}`);
+  is("its studio requests were taken first, with the notice's read of the store", taken >= 0 && noticeStudioUnits(STORE as unknown as Store) > 0, true);
+  is("and the store was read again only after they were taken", state.events.indexOf("read:store") > taken, true);
   is("the buyer's place is let go", await liveCount(FOLDER, COURSE, LESSONS[1], who, NOW), 0);
   is("a second reply is refused", await post({ action: "reply", id: "prod1", submission: target, text: "Again." }), { status: 409, body: { ok: false, error: "reviewed" } });
   const listed = [...((await get("id=prod1&list=1")).body.rows as { id: string; state: string }[]), ...((await get(`id=prod1&list=1&before=${(await get("id=prod1&list=1")).body.next}`)).body.rows as { id: string; state: string }[])];

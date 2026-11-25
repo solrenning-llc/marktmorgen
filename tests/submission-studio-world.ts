@@ -42,7 +42,7 @@ export const text = (value: unknown, max: number) => (typeof value === "string" 
 export async function readListingExactly(_store: unknown, id: string) {
   state.events.push("read:listing");
   if (state.listing === "unknown") return "unknown" as const;
-  return id === "prod1" && state.listing === "course" ? { id: "prod1", course: { id: COURSE } } : null;
+  return id === "prod1" && state.listing === "course" ? { id: "prod1", title: "Strong in 30 Days", course: { id: COURSE } } : null;
 }
 // lib/course.ts
 const course = { id: COURSE, modules: [{ id: "unit1", lessons: LESSONS.map((id, i) => ({ id, title: `Lesson ${i + 1}` })) }] };
@@ -58,9 +58,25 @@ export function findLesson(_course: unknown, lessonId: string) {
 export const storeFolder = async () => FOLDER;
 /** lib/auth.ts normaliseEmail, which lib/suppression.ts (the open's ask whether the buyer was deleted) reads. */
 export const normaliseEmail = (email: string) => email.trim().toLowerCase();
+/** lib/auth.ts EMAIL_PATTERN and MAX_EMAIL_LENGTH, the same values, which lib/joined-stores.ts reads for the buyer's reply email (unit 6). */
+export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const MAX_EMAIL_LENGTH = 254;
 export const storeRef = () => "owner@example.test";
+/** lib/store.ts MAX_STORE_BYTES and storeExactly, which lib/submission-notice.ts reads for a store with no list (Claude 7's LOW 2 on #3583). */
+export const MAX_STORE_BYTES = 1_000_000;
+export async function storeExactly(_ref: string) {
+  state.events.push("read:store");
+  return STORE;
+}
+// Read by lib/auth.ts (through lib/handle-prefill.ts), which the buyer's reply email loads for its address checks (unit 6).
+export const normaliseHandle = (raw: string) => raw.trim().replace(/^@+/, "").toLowerCase();
+export const newAddressProblem = () => null;
 // lib/store-allowance.ts
 export async function takeAllowance(_store: unknown, kind: string, n = 1) {
   state.events.push(`allowance:${kind}:${n}`);
   return state.allowance ? { ok: true as const } : { ok: false as const, reason: "used" as const, message: "Your plan's studio requests for this month are used up." };
+}
+// Main's lib/email.ts gives a store's email figure back when a batch answers "retry, unsent" (47486a7289): recorded only.
+export async function giveAllowance(_store: unknown, kind: string, n = 1) {
+  state.events.push(`give:${kind}:${n}`);
 }

@@ -10,17 +10,21 @@ import { readSubmissionReply, readSubmissionSetup } from "@/lib/submission-rules
 import { SUBMISSION_LIST_UNITS, SUBMISSION_REPLY_UNITS, readReviewCursor, readSetupFor, replySubmission, reviewCursorText, reviewList, saveSetupFor } from "@/lib/submission-store";
 import { DataRoomError } from "@/lib/store-data";
 import { SUBMISSIONS_READY } from "@/lib/submission-switch";
+import { emailedAnswer, noticeStudioUnits, tellBuyerOfReply } from "@/lib/submission-notice";
 
 const json = (body: Record<string, unknown>, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const no = (error: string, status: number) => json({ ok: false, error }, status);
 
 /** The creator's own course, found through their own store; null when it is not theirs or not there. */
-async function courseOf(store: Store, productId: string): Promise<{ courseId: string; course: NonNullable<Awaited<ReturnType<typeof readCourse>>> } | null | "unknown"> {
+async function courseOf(
+  store: Store,
+  productId: string,
+): Promise<{ courseId: string; course: NonNullable<Awaited<ReturnType<typeof readCourse>>>; productId: string; productTitle: string } | null | "unknown"> {
   const product = await readListingExactly(store, productId);
   if (product === "unknown") return "unknown";
   if (!product?.course) return null;
   const course = await readCourse(product.course.id);
-  return course ? { courseId: course.id, course } : null;
+  return course ? { courseId: course.id, course, productId: product.id, productTitle: product.title ?? "" } : null;
 }
 
 /** More studio requests, taken before a read that moves more than one request carries. */
@@ -85,7 +89,10 @@ const SETUP_ERRORS = { instruction: "instruction", kinds: "kinds", size: "size",
  *
  *   { action: "setup", id, lessonId, setup }        saves what the lesson asks for
  *   { action: "setup", id, lessonId, setup: null }  stops asking; answers the setup it had, for an undo
- *   { action: "reply", id, submission, text }       the creator's reply to one kept file, once
+ *   { action: "reply", id, submission, text }       the creator's reply to one kept file, once; the buyer
+ *                                                   is emailed once (lib/submission-notice.ts), and
+ *                                                   `emailed` says whether that email went
+ *                                                   (true, false, or "unknown" when not confirmed)
  *
  * Kept files are never deleted by a change here: stopping asking leaves what
  * buyers already sent, until its keeping time ends.
@@ -117,14 +124,27 @@ export async function POST(request: NextRequest) {
     if (action === "reply") {
       const read = readSubmissionReply({ text: body.text });
       if (!read.ok) return no(read.reason === "text" ? "reply" : "invalid", 400);
-      const refused = await takeMore(store, SUBMISSION_REPLY_UNITS);
+      // The notice's own read of the store, when it has no list, is taken here too, before anything is read.
+      const refused = await takeMore(store, SUBMISSION_REPLY_UNITS + noticeStudioUnits(store));
       if (refused) return refused;
       const done = await replySubmission(
         { data: store, folder: await storeFolder(storeRef(store)), courseId: found.courseId, id: text(body.submission, 40), reply: read.reply },
         Math.floor(Date.now() / 1000),
       );
       if (!done.ok) return no(done.reason === "state" ? "reviewed" : done.reason, done.reason === "gone" ? 404 : done.reason === "too_long" ? 400 : 409);
-      return json({ ok: true, state: done.submission.state, reply: done.submission.reply });
+      // The buyer is told once, from the store's own emails (unit 6); the reply is kept whether or not the email goes.
+      const lesson = done.submission.target.kind === "lesson" ? findLesson(found.course, done.submission.target.lessonId) : null;
+      const told = await tellBuyerOfReply({
+        store,
+        productId: found.productId,
+        productTitle: found.productTitle,
+        lessonTitle: lesson?.lesson.title ?? "",
+        submission: done.submission,
+      }).catch((error: unknown) => {
+        console.error("a buyer could not be told of a reply", error);
+        return "unknown" as const;
+      });
+      return json({ ok: true, state: done.submission.state, reply: done.submission.reply, emailed: emailedAnswer(told) });
     }
     return no("invalid", 400);
   } catch (error) {

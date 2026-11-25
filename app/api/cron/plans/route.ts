@@ -17,6 +17,7 @@ import { refreshRanges } from "@/lib/benchmarks";
 import { settleInvites } from "@/lib/creator-invite-credit";
 import { sendWinBacks } from "@/lib/winback-send";
 import { ensureDemoStore } from "@/lib/demo-seed";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 export const maxDuration = 60;
 
@@ -62,6 +63,11 @@ const PLANS_MS = 25_000;
  * one run at a time.
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   // Every request to Redis, Stripe and the rest is given up by 57 s
   // (lib/fetch-timeout.ts), inside the sixty Vercel gives the job.
   return withCutoff(Date.now() + 57_000, () => run(request));

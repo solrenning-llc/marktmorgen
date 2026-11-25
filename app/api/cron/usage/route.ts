@@ -29,6 +29,7 @@ import { SETUP_VISITS, countWords, publicVisitLimit, visitLimitFor, visitsWords 
 import { giveOrdersWordBack, takeOrdersWord } from "@/lib/orders-billing";
 import { orderedFolders, ordersIn } from "@/lib/orders";
 import { ORDERS_INCLUDED, ordersWords, paidOrdersLimitFor } from "@/lib/order-rules";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 /** The folders a calendar-month index lists this month and the last, once each. */
 async function foldersOfTwoMonths(read: (month: string) => Promise<string[]>): Promise<string[]> {
@@ -252,6 +253,11 @@ async function visitsRun(): Promise<VisitsRun> {
 }
 
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   if (!(await cronAllowed(request))) {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }

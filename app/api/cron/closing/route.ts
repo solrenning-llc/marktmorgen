@@ -9,6 +9,7 @@ import { tellStaysOpen } from "@/lib/closing-buyers";
 import { retryPlanUndos } from "@/lib/closing-plan-guard";
 import { finishPlanRefunds } from "@/lib/plan-refund-flow";
 import { retryStoreForgets } from "@/lib/store-forget-retry";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 export const maxDuration = 60;
 
@@ -30,6 +31,11 @@ export const maxDuration = 60;
  * finished the next day. One run at a time.
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   return withCutoff(Date.now() + 57_000, () => run(request));
 }
 

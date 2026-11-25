@@ -9,6 +9,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { timed, withCutoff } from "@/lib/fetch-timeout";
 import { failedNames } from "@/lib/health-check-status";
 import { STATUS_CHECKS, statusRunCommands, statusRunResult } from "@/lib/status-page";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 // The senders announce a bounce within seconds and a spam report within a
 // minute or so; the run waits up to a hundred seconds for both.
@@ -27,6 +28,11 @@ const RUN_MS = 160_000;
  * else can start it: only Vercel's scheduled call carries the secret.
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   const started = Date.now();
   return withCutoff(started + RUN_MS, () => timed(RUN_MS, async () => {
     if (!(await cronAllowed(request))) {

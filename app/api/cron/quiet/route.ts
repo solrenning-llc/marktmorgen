@@ -9,6 +9,7 @@ import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { checkQuiet } from "@/lib/quiet-sales";
 import { checkAlerts } from "@/lib/store-alerts";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 /**
  * Once a day for each store with visits this month or last, whether its
@@ -23,6 +24,11 @@ export const maxDuration = 60;
 const TIME_BUDGET_MS = 45_000;
 
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   if (!(await cronAllowed(request))) {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }

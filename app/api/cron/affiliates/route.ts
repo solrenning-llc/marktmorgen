@@ -8,6 +8,7 @@ import { settleAllPayPal } from "@/lib/paypal-payouts";
 import { idleSweep } from "@/lib/affiliates";
 import { readIdleDays } from "@/lib/affiliate-idle-rules";
 import { storesAfter } from "@/lib/store";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 /** Long enough to walk every store, short enough to end before the platform does. */
 const RUN_MS = 50_000;
@@ -30,6 +31,11 @@ export const maxDuration = 60;
  * one run at a time.
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   if (!(await cronAllowed(request))) {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }

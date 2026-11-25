@@ -57,7 +57,7 @@ let modelDown = false;
 let keepThrows = false;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
-  if (keepThrows && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:voice-keep:v1\n"))) throw new Error("the database did not answer");
+  if (keepThrows && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:voice-keep:v2\n"))) throw new Error("the database did not answer");
   return pipeline(commands);
 }) as typeof redis.pipeline;
 const realFetch = globalThis.fetch;

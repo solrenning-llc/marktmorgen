@@ -2066,13 +2066,49 @@ export class MemoryRedis {
           this.run(["SET", target, value, "EX", seconds]);
           return 1;
         }
-        // The customer voice's summary, written only while its reading's lock is its own (lib/customer-voice.ts, VOICE_KEEP).
-        if (key.startsWith("-- marktmorgen:voice-keep:v1\n") && args[0] === "2" && args.length === 6) {
+        // A deleted review's words marked on the customer voice's reading lock (lib/customer-voice.ts, VOICE_FORGET).
+        if (key.startsWith("-- marktmorgen:voice-forget:v1\n") && args[0] === "1" && args.length >= 3) {
+          const lock = args[1];
+          const marks = args.slice(2, -1);
+          const most = Number(args[args.length - 1]);
+          const held = this.run(["GET", lock]);
+          if (typeof held !== "string") return 0;
+          let add = "";
+          for (const mark of marks) if (!(held + add).includes(`|${mark}`)) add += `|${mark}`;
+          if (!add) return 1;
+          if (Buffer.byteLength(held + add, "utf8") > most) {
+            this.run(["DEL", lock]);
+            return 2;
+          }
+          // Match SET KEEPTTL: no expiry extension or removal.
+          this.data.set(lock, held + add);
+          return 1;
+        }
+        // The customer voice's summary, written only while its reading's lock is its own and, when a deletion marked it,
+        // only when it quotes none of the marked words (lib/customer-voice.ts, VOICE_KEEP).
+        if (key.startsWith("-- marktmorgen:voice-keep:v2\n") && args[0] === "2" && args.length >= 6) {
           const [, lock, target, token, value, seconds] = args;
-          if (this.run(["GET", lock]) !== token) return 0;
+          const quoted = args.slice(6);
+          const held = this.run(["GET", lock]);
+          if (typeof held !== "string") return 0;
+          if (held !== token) {
+            if (!held.startsWith(`${token}|`)) return 0;
+            const marked = held.slice(token.length);
+            if (quoted.some((mark) => marked.includes(`|${mark}`))) {
+              this.run(["DEL", lock]);
+              return 0;
+            }
+          }
           this.run(["SET", target, value, "EX", seconds]);
           this.run(["DEL", lock]);
           return 1;
+        }
+        // The customer voice's reading lock let go, marked or not (lib/customer-voice.ts, VOICE_RELEASE).
+        if (key.startsWith("-- marktmorgen:voice-release:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, lock, token] = args;
+          const held = this.run(["GET", lock]);
+          if (held === token || (typeof held === "string" && held.startsWith(`${token}|`))) return this.run(["DEL", lock]);
+          return 0;
         }
         if (key.startsWith("-- marktmorgen:fenced-set-new:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, target, token, value] = args;

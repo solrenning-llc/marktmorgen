@@ -66,7 +66,7 @@ export default async function CommunityAboutPage({ params }: Params) {
         <nav aria-label={w.label} className="text-sm">
           <ol className="flex flex-wrap items-center gap-x-2">
             <li>
-              <Link href={`/@${store.handle}`} className="st-footer-link font-semibold">{store.name}</Link>
+              <Link href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center font-semibold">{store.name}</Link>
             </li>
             <li aria-hidden="true">/</li>
             <li>

@@ -210,7 +210,8 @@ async function main(): Promise<void> {
     recipient = null;
     const winner = { at: now / 1000 - 1, tracking: "https://example.test/winning-tracking" };
     store.pipeline = async commands => {
-      if (commands.some(command => command[0] === "SET" && command[1] === doneKey(input.session))) {
+      // The done-mark's write is one EVAL of the store's claim fence (lib/shipments.ts takeMark, #5258), its key at [5].
+      if (commands.some(command => command[0] === "EVAL" && command[5] === doneKey(input.session))) {
         store.run(["SET", doneKey(input.session), JSON.stringify(winner), "EX", 400 * 86400]);
       }
       return originalPipeline(commands);

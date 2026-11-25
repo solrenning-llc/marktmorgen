@@ -11,8 +11,9 @@
  *     ticked, one upsertContact and a noteProduct for every other product; without it, a noteProduct for every product.
  *     Each is counted at CONTACT_COMMANDS_MOST (lib/contacts.ts), which tests/contacts-write-cost.test.ts checks
  *     against the real scripts. Both callers of putOnList hand over at most MAX_DELIVERED products;
- *   - the shares one paid cart order can spend together inside ORDER_COMPUTE (its stock holds, its stock confirmation
- *     and a purchase for several's settling waits) stay inside one ORDER_COMPUTE;
+ *   - an order's shipment mark (lib/shipments.ts, SHIPMENT_MARK_COMMANDS since #5258) is held to its own declared share;
+ *   - the shares one paid cart order can spend together inside ORDER_COMPUTE (its stock holds, its stock confirmation,
+ *     a purchase for several's settling waits and its shipment mark) stay inside one ORDER_COMPUTE;
  *   - an offer after paying is an order of its own: lib/upsell.ts admits it as one more order before anything is
  *     charged and puts nothing on the list or in stock. So OFFER_WATCH_SHARE_OF_ORDER_COMPUTE is a share of that
  *     order's compute, never added to the cart's.
@@ -21,6 +22,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUMP_KEYS, MAX_AFFILIATE_EXTRAS, MAX_BUNDLE_ITEMS, MAX_DELIVERED, deliveredIds } from "@/lib/bundle-rules";
 import { CONTACT_COMMANDS_MOST } from "@/lib/contacts";
+import { SHIPMENT_MARK_COMMANDS } from "@/lib/shipments";
 import { done, is, part } from "./check";
 import * as registry from "./plan-cost-registry";
 
@@ -29,6 +31,7 @@ const { CART_STOCK_SHARE_OF_ORDER_COMPUTE, COMMAND, GROUP_SETTLE_STRIPE_WAIT, OF
 const contactLine = (registry as Record<string, unknown>).ORDER_CONTACT_WRITE;
 const contactCommands = (registry as Record<string, unknown>).ORDER_CONTACT_WRITE_COMMANDS;
 const contactShare = (registry as Record<string, unknown>).CONTACT_SHARE_OF_ORDER_COMPUTE;
+const shipmentShare = (registry as Record<string, unknown>).SHIPMENT_MARK_SHARE_OF_ORDER_COMPUTE;
 
 const source = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
 
@@ -79,10 +82,20 @@ part("An order's contact write at its worst (lib/buyer-list.ts putOnList, MAX_DE
   is("and prices every order of the plan's figure at that worst", line ? line.monthlyUsd("creator") > 0 : false, true);
 }
 
+part("An order's shipment mark is a declared share of ORDER_COMPUTE (#5258, #5396)");
+{
+  // lib/shipments.ts is priced as ORDER (tests/plan-cost-registry.ts): the done-mark, taken once an order through the
+  // store's claim fence, is SHIPMENT_MARK_COMMANDS (an EVAL and its three calls, one plain SET before #5258).
+  is("RED: SHIPMENT_MARK_SHARE_OF_ORDER_COMPUTE is declared", typeof shipmentShare, "number");
+  is("the mark's commands stay inside that share", SHIPMENT_MARK_COMMANDS * COMMAND <= (shipmentShare as number) * ORDER_COMPUTE, true);
+  is("lib/shipments.ts takes the mark only through takeMark (claimOnceWhileStoreLive)", /const takeMark = \(store: Store, session: string, shipped: Shipped\) =>\s*claimOnceWhileStoreLive\(/.test(source("lib/shipments.ts")), true);
+}
+
 part("The shares one paid cart order can spend together");
 {
-  const together = CART_STOCK_SHARE_OF_ORDER_COMPUTE + STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE + GROUP_SETTLE_STRIPE_WAIT / ORDER_COMPUTE;
-  is("its stock holds, stock confirmation and a group's settling waits stay inside one ORDER_COMPUTE", together <= 1, true);
+  const together =
+    CART_STOCK_SHARE_OF_ORDER_COMPUTE + STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE + GROUP_SETTLE_STRIPE_WAIT / ORDER_COMPUTE + ((shipmentShare as number) ?? Number.NaN);
+  is("its stock holds, stock confirmation, a group's settling waits and its shipment mark stay inside one ORDER_COMPUTE", together <= 1, true);
 }
 
 part("An offer after paying is an order of its own, so its watch is not added to the cart's shares");

@@ -28,6 +28,10 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
+/** The done-mark's write: one EVAL of the store's claim fence on nl:ship:done (lib/shipments.ts takeMark, #5258). */
+const markWrite = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-claim-live:v1\n") && String(c[5]).startsWith("nl:ship:done:");
+/** Every command on the done-mark: its reads, and its fenced write. */
+const markCommand = (c: (string | number)[]) => String(c[1]).startsWith("nl:ship:done:") || markWrite(c);
 const OWNER = "owner@example.com";
 const checkouts: URLSearchParams[] = [];
 const emails: { to: string; subject: string; text: string }[] = [];
@@ -206,15 +210,15 @@ async function main(): Promise<void> {
   const observed: (string | number)[][] = [];
   try {
     session = { ...originalSession, id: "cs_test_legacycompat000001" };
-    redis.pipeline = async commands => { observed.push(...commands.filter(c => String(c[1]).startsWith("nl:ship:done:"))); return originalPipeline(commands); };
+    redis.pipeline = async commands => { observed.push(...commands.filter(markCommand)); return originalPipeline(commands); };
     const first = await markShipped(store, String(session.id), "https://example.test/original");
     is("the default action marks and uses the guarded SES sender", [first.ok, first.ok && first.emailed, legacySender.sent.length], [true,true,1]);
-    is("a new legacy mark keeps SET NX first without an extra GET", observed.map(c=>c[0]), ["SET"]);
-    is("the original claim retains its 400-day expiry", observed[0]?.slice(3), ["NX","EX",400*86400]);
+    is("a new legacy mark keeps its (store-fenced) SET NX first without an extra GET", observed.map(c=>c[0]), ["EVAL"]);
+    is("the original claim retains its 400-day expiry", [observed[0]?.[5], observed[0]?.[8], String(observed[0]?.[1]).includes('"SET", KEYS[3], ARGV[2], "NX", "EX", ARGV[3]'), redis.run(["TTL", `nl:ship:done:${session.id}`])], [`nl:ship:done:${session.id}`, 400*86400, true, 400*86400]);
     is("legacy acceptance is truthful, never a pending source", first.ok && first.mail, {state:"accepted",delayed:false});
     const again = await markShipped(store, String(session.id), "https://example.test/loser");
     is("a second press reads the original winner and sends nothing more", [again.ok && again.shipped.tracking,again.ok && again.emailed,legacySender.sent.length], ["https://example.test/original",false,1]);
-    is("an occupied claim needs only the original SET and GET", observed.map(c=>c[0]), ["SET","SET","GET"]);
+    is("an occupied claim needs only the original (fenced) SET and GET", observed.map(c=>c[0]), ["EVAL","EVAL","GET"]);
     is("no queue or budget-pool is silently created", [redis.run(["EXISTS","nl:ship:mail:due"]),redis.run(["EXISTS","nl:ship:mail:all"]),redis.run(["EXISTS","nl:ship:mail:pool"])], [0,0,0]);
     is("the legacy path does not bypass the Resend guard", legacySender.resend.length, 0);
     session={...originalSession,id:"cs_test_legacycompat000002",customer_details:{email:"not an address"}};
@@ -225,13 +229,15 @@ async function main(): Promise<void> {
     is("concurrent legacy presses return one stored winner and invoke only one accepted send",[raced.every(r=>r.ok),raced[0].ok&&raced[1].ok&&raced[0].shipped.tracking===raced[1].shipped.tracking,raced.filter(r=>r.ok&&r.emailed).length,legacySender.sent.length],[true,true,1,2]);
     const before=legacySender.sent.length;
     session={...originalSession,id:"cs_test_legacycompat000003"};
-    for(const reply of [undefined,false,0,1,"true",{},[],["OK",null],[null,"OK"]]){
-      redis.pipeline=async commands=>commands.some(c=>c[0]==="SET"&&String(c[1]).startsWith("nl:ship:done:")) ? (Array.isArray(reply)&&reply.length===2?reply:[reply]) : originalPipeline(commands);
+    // The fence answers 1 (taken now), 0 (held already: re-read, here nothing is kept), -1 (store gone), -2 (unknown);
+    // "OK" and null, a plain SET's answers, are now as malformed as the rest.
+    for(const reply of [undefined,false,0,"OK",null,-2,2,"true",{},[],["OK",null],[null,"OK"]]){
+      redis.pipeline=async commands=>commands.some(markWrite) ? (Array.isArray(reply)&&reply.length===2?reply:[reply]) : originalPipeline(commands);
       const result=await markShipped(store,String(session.id),"");
       is("legacy unknown claim ACK never authorizes email",[result.ok,legacySender.sent.length],[false,before]);
     }
     redis.pipeline=async commands=>{
-      if(commands.some(c=>c[0]==="SET"&&String(c[1]).startsWith("nl:ship:done:"))){await originalPipeline(commands);throw Error("synthetic lost claim ACK");}
+      if(commands.some(markWrite)){await originalPipeline(commands);throw Error("synthetic lost claim ACK");}
       return originalPipeline(commands);
     };
     is("a committed lost ACK never sends",[(await markShipped(store,String(session.id),"https://example.test/kept")).ok,legacySender.sent.length],[false,before]);
@@ -307,17 +313,19 @@ async function main(): Promise<void> {
   const noRecipientSession = session;
   try {
     session={...noRecipientSession,id:"cs_test_invalidrecipientack01",customer_details:{email:"not an address"}};
-    const malformedNoRecipient: unknown[] = [["OK","unexpected"],["OK",null],null,undefined,false,0,"OK",{},[],Array(1),[undefined],[null],[false],[0],["true"]];
+    // [0] is the fence's "held already" (re-read; nothing is kept here, so still unknown); [null] and ["OK"], a plain
+    // SET's answers, are now malformed like the rest.
+    const malformedNoRecipient: unknown[] = [["OK","unexpected"],["OK",null],null,undefined,false,0,"OK",{},[],Array(1),[undefined],[null],[false],[0],["true"],["OK"],[-2],[2]];
     for(const receipt of malformedNoRecipient){
       const seen:(string|number)[][]=[];
-      redis.pipeline=async commands=>{seen.push(...commands.filter(c=>String(c[1]).startsWith("nl:ship:done:")));return commands.some(c=>c[0]==="SET"&&String(c[1]).startsWith("nl:ship:done:"))?receipt as unknown[]:originalPipeline(commands);};
+      redis.pipeline=async commands=>{seen.push(...commands.filter(markCommand));return commands.some(markWrite)?receipt as unknown[]:originalPipeline(commands);};
       const beforeEmails=emails.length,beforeOutbox=outbox.commands.length;
       const result=await markShipped(store,String(session.id),"",undefined,runtime);
       is("a malformed no-recipient claim cannot confirm a shipment",result.ok?"marked":result.reason,"unknown");
-      is("only a confirmed NX miss re-reads; unknown receipts add no mail work",[seen.map(c=>c[0]),outbox.commands.length-beforeOutbox,emails.length-beforeEmails],[Array.isArray(receipt)&&receipt.length===1&&receipt[0]===null?["GET","SET","GET"]:["GET","SET"],0,0]);
+      is("only a confirmed NX miss re-reads; unknown receipts add no mail work",[seen.map(c=>c[0]),outbox.commands.length-beforeOutbox,emails.length-beforeEmails],[Array.isArray(receipt)&&receipt.length===1&&receipt[0]===0?["GET","EVAL","GET"]:["GET","EVAL"],0,0]);
     }
     redis.pipeline=async commands=>{
-      if(commands.some(c=>c[0]==="SET"&&String(c[1]).startsWith("nl:ship:done:")))throw Error("synthetic no-recipient SET outage");
+      if(commands.some(markWrite))throw Error("synthetic no-recipient SET outage");
       return originalPipeline(commands);
     };
     const failed=await markShipped(store,String(session.id),"",undefined,runtime);
@@ -325,7 +333,7 @@ async function main(): Promise<void> {
     session={...session,id:"cs_test_invalidrecipientlost01"};
     redis.pipeline=async commands=>{
       const reply=await originalPipeline(commands);
-      return commands.some(c=>c[0]==="SET"&&String(c[1]).startsWith("nl:ship:done:"))?[...reply,"unexpected"]:reply;
+      return commands.some(markWrite)?[...reply,"unexpected"]:reply;
     };
     const lost=await markShipped(store,String(session.id),"https://example.test/committed",undefined,runtime);
     is("a committed mark with an extra reply remains unconfirmed and is never deleted",[lost.ok,JSON.parse(String(redis.run(["GET",`nl:ship:done:${session.id}`]))).tracking],[false,"https://example.test/committed"]);

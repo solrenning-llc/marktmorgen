@@ -27,6 +27,10 @@ import { costsPaused } from "@/lib/plan-standing";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is } from "./check";
+import { withinOneUtcDay } from "./one-utc-day";
+
+// The stores below are "read today", named once; a real UTC midnight passing mid-file would make them all due again.
+withinOneUtcDay();
 
 process.env.META_APP_ID = "123456789012345";
 process.env.META_APP_SECRET = "meta-app-secret-for-tests-0123456789";
@@ -103,13 +107,20 @@ is("once every store is settled again, the run is O(1) again", quiet.commands <=
 // A run out of time sees only part of the list: no mark.
 await redis.pipeline([["DEL", "nl:metaads:pass"], ["INCR", "nl:metaads:gen"]]);
 await readMetaDue(Date.now() - 1, noStore);
-const afterShort = await counted(() => readMetaDue(Date.now() + 60_000, noStore));
+// The run that leaves the mark, the stand-in's clock and the check below read one instant: read apart, a second turning
+// between the code's TTL and the check's "rest of the day" made it look a second short (#5326 left the merge queue on
+// it, 25 November 2026; #5010). The clock stands still only here, so no limit or deadline moves.
+const at = Date.now();
+const realNow = Date.now;
+Date.now = () => at;
+const afterShort = await counted(() => readMetaDue(at + 60_000, noStore));
 is("a run that ran out of time leaves no mark: the next one walks", afterShort.commands > M, true);
 
-// The mark runs out by the next UTC day.
+// The mark runs out by the next UTC day: exactly the rest of that day, read at the instant the mark was written.
 const ttl = Number((await original([["TTL", "nl:metaads:pass"]]))[0]);
-const nextDay = Math.ceil((Date.parse(`${today}T00:00:00Z`) + 86_400_000 - Date.now()) / 1000);
-is("the mark lasts no longer than the rest of the UTC day", ttl > 0 && ttl <= nextDay, true);
+const nextDay = Math.ceil((Date.parse(`${new Date(at).toISOString().slice(0, 10)}T00:00:00Z`) + 86_400_000 - at) / 1000);
+Date.now = realNow;
+is(`the mark lasts the rest of the UTC day and no longer (${ttl} s, the day has ${nextDay} s left)`, ttl > 0 && ttl === nextDay, true);
 redis.advance((ttl + 1) * 1000);
 const tomorrow = await counted(() => readMetaDue(Date.now() + 60_000, noStore));
 is("once it runs out, the next run walks every store again", tomorrow.commands > M, true);

@@ -103,7 +103,7 @@ export async function GET(request: NextRequest) {
     const ships = shipped ? [shipped.cents > 0 ? sw.cost(formatMoney(shipped.cents, store.currency, locale)) : sw.free, shipped.note].filter(Boolean).join(" · ") : null;
     const soldOut = left.get(id) === 0;
     const unknown = left.has(id) && left.get(id) === undefined;
-    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && asking !== null && !asking.has(id) && coming !== null && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
+    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && asking !== null && !asking.has(id) && coming !== null && knownNotSoon(coming, id) && !soldOut && !unknown, ships, soldOut }];
   });
   // A product a bundle in the same cart already hands over is not payable on its own line: the bundle brings it (lib/bundle-rules.ts, heldByABundle).
   // Only a bundle that can be paid for itself brings anything: one sold out or coming soon holds nothing back.
@@ -169,10 +169,12 @@ export async function GET(request: NextRequest) {
     const listing = listings.find((p) => p.id === item.id);
     return listing ? [{ id: item.id, title: item.title, pairs: listing.pairs ?? [] }] : [];
   });
-  // With the coming-soon reading unknown nothing is offered either: a suggestion or a bundle could be a product not out yet.
+  // With the coming-soon reading unknown or partial nothing is offered either: a suggestion or a bundle could be a
+  // product not out yet (rule 24; Codex X5, #4287 item 14: a partial read is unknown, as the checkout reads it).
+  const whole = coming && !coming.partial ? coming : null;
   // The suggestions read what is left of a limited one only within the reads the cart's own lines left (MAX_CART in all).
-  const suggest = coming ? await suggestions(store, inCart, ids, coming.soon, country, locale, MAX_CART - left.size).catch(() => []) : [];
-  const bundle = coming ? bundleSwap(store, payable, ids, coming.soon, country, locale) : null;
+  const suggest = whole ? await suggestions(store, inCart, ids, whole.soon, country, locale, MAX_CART - left.size).catch(() => []) : [];
+  const bundle = whole ? bundleSwap(store, payable, ids, whole.soon, country, locale) : null;
   return Response.json(
     {
       ok: true,

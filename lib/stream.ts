@@ -886,26 +886,28 @@ export async function sweep(deadline: number, now = Date.now()): Promise<{ looke
     if (record?.state === "ready") counts.ready += 1;
     if (record?.state === "failed") counts.failed += 1;
   };
-  const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 40]]);
-  for (const id of Array.isArray(due) ? due : []) {
+  // Each queue read exactly (rule 24; Codex U, #4287 item 7): a list of text, or unknown, never "nothing to do".
+  const due = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 40]]), 1)?.[0]);
+  if (!due) throw new UnknownReplyError("the videos due for a look");
+  for (const id of due) {
     if (Date.now() > deadline) return counts;
-    if (typeof id !== "string") continue;
     await look(id);
   }
   // As many due videos past the unmoved ones as were lost to them, once: never a third page, and never more than 40
   // records looked at in a run, so a readable abandoned upload behind them is not left at the service run after run.
   if (unmoved > 0) {
     const lost = unmoved;
-    const [more] = await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 40 + lost]]);
-    for (const id of (stringList(more) ?? []).filter((next) => !tried.has(next)).slice(0, lost)) {
+    const more = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 40 + lost]]), 1)?.[0]);
+    if (!more) throw new UnknownReplyError("the videos due for a look, past the unmoved ones");
+    for (const id of more.filter((next) => !tried.has(next)).slice(0, lost)) {
       if (Date.now() > deadline) return counts;
       await look(id);
     }
   }
-  const [gone] = await redisPipeline([["SMEMBERS", GONE]]);
-  for (const id of (Array.isArray(gone) ? gone : []).slice(0, 40)) {
+  const gone = stringList(repliesFor(await redisPipeline([["SMEMBERS", GONE]]), 1)?.[0]);
+  if (!gone) throw new UnknownReplyError("the videos to delete at the service");
+  for (const id of gone.slice(0, 40)) {
     if (Date.now() > deadline) return counts;
-    if (typeof id !== "string") continue;
     const answer = STREAM_ID_PATTERN.test(id) ? await ask(config, "DELETE", `/videos/${id}`) : { status: 404, data: null };
     if (answer.status === 200 || answer.status === 404) {
       await redisPipeline([["SREM", GONE, id]]);

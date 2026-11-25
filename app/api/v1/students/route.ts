@@ -1,6 +1,6 @@
 import { apiError, apiStore, takeMoreApi } from "@/lib/api-guard";
 import { apiOkFields, badFields } from "@/lib/api-fields";
-import { STUDENT_FIELDS, students } from "@/lib/api-read";
+import { STUDENT_FIELDS, sentCursor, students } from "@/lib/api-read";
 
 /**
  * GET /api/v1/students?product=<id>&cursor= — everybody who has opened one course, with how far
@@ -16,8 +16,11 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const product = (params.get("product") ?? "").slice(0, 60);
   if (!product) return apiError(400, "product_required", "Say which course: ?product=<the course product's id>, from /api/v1/products.");
+  // A cursor sent twice is refused before anything is read or taken (#4363).
+  const cursor = sentCursor(params);
+  if (!cursor.ok) return cursor.refused;
   try {
-    const found = await students(store, product, params.get("cursor"), (more, taken) => takeMoreApi(store, more, taken));
+    const found = await students(store, product, cursor.cursor, (more, taken) => takeMoreApi(store, more, taken));
     if (found instanceof Response) return found;
     if (!found) return apiError(404, "not_a_course", "No course product with that id in this store.");
     return apiOkFields(request, found);

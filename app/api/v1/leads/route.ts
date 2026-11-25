@@ -1,6 +1,6 @@
 import { apiAdder, apiError, apiOk, apiStore, holdMoreApi } from "@/lib/api-guard";
 import { apiOkFields, badFields } from "@/lib/api-fields";
-import { LEAD_FIELDS, chargedLeads } from "@/lib/api-read";
+import { LEAD_FIELDS, chargedLeads, sentCursor } from "@/lib/api-read";
 import { WRITE_ERRORS, addLead, roomFor } from "@/lib/api-write";
 
 /**
@@ -15,9 +15,12 @@ export async function GET(request: Request) {
   const bad = badFields(request, LEAD_FIELDS);
   if (bad) return bad;
   const params = new URL(request.url).searchParams;
+  // A cursor sent twice is refused before anything is read or taken (#4363).
+  const cursor = sentCursor(params);
+  if (!cursor.ok) return cursor.refused;
   try {
     // A page at its most is set aside before the scan, and settled at what it read and sends before it is sent (lib/api-read-rules.ts, listPageMost, scannedPageWork).
-    const found = await chargedLeads(store, params.get("cursor"), params.get("agreed") === "true", (most) => holdMoreApi(store, most));
+    const found = await chargedLeads(store, cursor.cursor, params.get("agreed") === "true", (most) => holdMoreApi(store, most));
     if (found instanceof Response) return found;
     return apiOkFields(request, found);
   } catch (error) {

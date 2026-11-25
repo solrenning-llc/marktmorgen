@@ -1,6 +1,6 @@
 import { apiError, apiStore, takeMoreApi } from "@/lib/api-guard";
 import { apiOkFields, badFields } from "@/lib/api-fields";
-import { PRODUCT_FIELDS, products } from "@/lib/api-read";
+import { PRODUCT_FIELDS, products, sentCursor } from "@/lib/api-read";
 
 /** GET /api/v1/products?cursor= — every product, in the creator's order; a page takes what reading its listings costs, first (lib/api-read-rules.ts). */
 export async function GET(request: Request) {
@@ -9,8 +9,11 @@ export async function GET(request: Request) {
   // A ?fields= that cannot be answered is refused before any further request is taken or anything read.
   const bad = badFields(request, PRODUCT_FIELDS);
   if (bad) return bad;
+  // A cursor sent twice is refused before anything is read or taken (#4363).
+  const cursor = sentCursor(new URL(request.url).searchParams);
+  if (!cursor.ok) return cursor.refused;
   try {
-    const found = await products(store, new URL(request.url).searchParams.get("cursor"), (more, taken) => takeMoreApi(store, more, taken));
+    const found = await products(store, cursor.cursor, (more, taken) => takeMoreApi(store, more, taken));
     if (found instanceof Response) return found;
     return apiOkFields(request, found);
   } catch (error) {

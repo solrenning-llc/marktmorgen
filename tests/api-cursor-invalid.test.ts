@@ -56,6 +56,12 @@ async function main(): Promise<void> {
       const answered = await get(handler, join(path, `cursor=${encodeURIComponent(bad)}`));
       is(`cursor=${bad.length > 8 ? `${bad.slice(0, 4)}… (${bad.length} digits)` : bad}`, [answered.status, answered.json.error], [400, "invalid_cursor"]);
     }
+    // Two cursors (#4363): a query builder that repeats it, or a checkpoint added to a URL that had one, is not one
+    // cursor the list gave; the first was taken in silence, as /api/v1/sales no longer does.
+    for (const twice of ["cursor=0&cursor=0", "cursor=1&cursor=0", "cursor=&cursor=1"]) {
+      const answered = await get(handler, join(path, twice));
+      is(twice, [answered.status, answered.json.error], [400, "invalid_cursor"]);
+    }
   }
 
   part("No cursor, an empty one, or one the list gave still reads");

@@ -507,13 +507,25 @@ export function broadcastHeadsBytes(sizes: readonly number[], growth = 0): numbe
 }
 
 /** The emails a reading will read, newest first, and each one's size without its body, as measured (measureBroadcastHeads). */
-export type MeasuredHeads = { listId: string | null; ids: string[]; sizes: number[]; expired?: "skip" };
+export type MeasuredHeads = { listId: string | null; ids: string[]; sizes: number[]; expired?: "skip"; more?: boolean };
 /**
  * `expired: "skip"`, as listBroadcastsStrict's option (main's 57ca6e5a3, decision 2 of C4-20261108-0217): an id whose
  * record Redis answers as not there (the script's -1, its own nil) is a campaign gone after RECORD_DAYS, left out,
  * known. Any other answer still throws. Without it, nothing changes.
  */
-export type HeadsOptions = { expired?: "skip" };
+export type HeadsOptions = {
+  expired?: "skip";
+  /**
+   * `more: true` (get_emails, issue #4062): the same LRANGE asks for one id past `limit`, never more, and the same size
+   * script asks that id's size too (paid with the others); the measured emails are still the newest `limit`, and
+   * `more` says that id's record is still kept. An id whose record expired (-1) makes `more` false (Claude 6's LEVE on
+   * #5431), which says only that one id is gone: a record's RECORD_DAYS restart at every write (a send step, a cancel,
+   * a send scheduled up to a year ahead), so an older one can outlive it (Claude 6 hsz3's LEVE on #5431). Looking
+   * further would cost a size per id, unbounded; the tool's description says what false means. Without it, nothing
+   * changes.
+   */
+  more?: true;
+};
 /** The emails measured, or the sentence of the caller that would not pay for measuring them (nothing measured). */
 export type Measured = ({ ok: true } & MeasuredHeads) | { ok: false; refused: string };
 
@@ -576,20 +588,30 @@ export async function measureBroadcastHeads(listId: string | null, limit: number
   if (!listId) return { ok: true, listId, ids: [], sizes: [] };
   if (!isRedisConfigured()) throw new Error("Campaign storage is unavailable");
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid campaign history limit");
-  const index = repliesFor(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), 1);
+  const ask = options.more ? limit + 1 : limit;
+  const index = repliesFor(await redisPipeline([["LRANGE", listKey(listId), 0, ask - 1]]), 1);
   if (!index || !Array.isArray(index[0])) throw new Error("Campaign index is unavailable");
-  const ids: unknown[] = index[0];
-  if (ids.length > limit || ids.some((id) => typeof id !== "string" || !BROADCAST_ID.test(id)) || new Set(ids).size !== ids.length) throw new Error("Campaign index is incomplete");
-  if (!ids.length) return { ok: true, listId, ids: [], sizes: [] };
+  const listed: unknown[] = index[0];
+  if (listed.length > ask || listed.some((id) => typeof id !== "string" || !BROADCAST_ID.test(id)) || new Set(listed).size !== listed.length) throw new Error("Campaign index is incomplete");
+  // The one id past `limit` is only sized, never measured as an email or read: whether its record is still kept says
+  // whether the email just older than the newest `limit` is still there; -1 says only that that one is gone (issue
+  // #4062; Claude 6's and Claude 6 hsz3's LEVEs on #5431).
+  const ids = listed.slice(0, limit) as string[];
+  const past = options.more && listed.length > limit ? (listed[limit] as string) : null;
+  if (!ids.length) return { ok: true, listId, ids: [], sizes: [], ...(options.more ? { more: false } : {}) };
+  const asked = past ? [...ids, past] : ids;
   // Paid before it is sent: the script and a GET inside it for each email are not the caller's own request's to spend.
-  const paid = await paySizes(ids.length);
+  const paid = await paySizes(asked.length);
   if (paid.ok !== true) return { ok: false, refused: paid.message };
-  const sized = await headsOf((ids as string[]).map(bcKey), null);
+  const answered = await headsOf(asked.map(bcKey), null);
+  const sized = answered.slice(0, ids.length);
+  // Kept, readable or not, is an older email there; -1 is that one record gone, which says nothing of the ones before it.
+  const more = options.more ? { more: past !== null && answered[ids.length] !== -1 } : {};
   // With expired: "skip", a record that is not there (-1) is a campaign gone, left out; every other answer is checked.
   const skip = options.expired === "skip";
   const kept = (ids as string[]).flatMap((id, i) => (skip && sized[i] === -1 ? [] : [{ id, size: sized[i] }]));
   if (kept.some(({ size }) => typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0)) throw new Error("Campaign records are incomplete");
-  return { ok: true, listId, ids: kept.map(({ id }) => id), sizes: kept.map(({ size }) => size as number), ...(skip ? { expired: "skip" as const } : {}) };
+  return { ok: true, listId, ids: kept.map(({ id }) => id), sizes: kept.map(({ size }) => size as number), ...(skip ? { expired: "skip" as const } : {}), ...more };
 }
 
 /**

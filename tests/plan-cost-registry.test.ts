@@ -731,8 +731,9 @@ test("an API reading that reads more than a page takes further requests that cov
     for (const paypal of [0, 1_000, 40_000]) covers(addWork(emails, mailRevenueColdWork(paypal, revenueBytes)), `emails and what they sold, in one go ${paypal}/${revenueBytes}`);
   }
   for (const paypal of [0, 9, 1_000, 40_000]) for (const kept of [undefined, 1, 172_000, 3_000_000]) covers(mailRevenueColdWork(paypal, kept), `what the emails sold ${paypal}/${kept}`);
-  // Asking get_emails' emails' sizes, taken before the script is sent (Codex J 5811457165 on #3034), at every count it can ask.
-  for (let broadcasts = 0; broadcasts <= EMAILS_BROADCASTS; broadcasts += 1) covers(emailsSizesWork(broadcasts, broadcastSizesBytes(broadcasts)), `emails' sizes ${broadcasts}`);
+  // Asking get_emails' emails' sizes, taken before the script is sent (Codex J 5811457165 on #3034), at every count it can ask:
+  // its EMAILS_BROADCASTS and the one id past them whose record says whether an older email is kept (#4062, #5431).
+  for (let broadcasts = 0; broadcasts <= EMAILS_BROADCASTS + 1; broadcasts += 1) covers(emailsSizesWork(broadcasts, broadcastSizesBytes(broadcasts)), `emails' sizes ${broadcasts}`);
   // The numbers kept an hour: read anew with their keeping, and from the copy at every size it can have.
   for (const paypalSales of [0, 2_000, 50_000]) for (const paypalRefunds of [0, 500, 9_000]) covers(addWork(numbersWork({ kept: true, sales: true, stripe: true, paypalSales, paypalRefunds }), NUMBERS_KEEP_WORK), `numbers kept ${paypalSales}/${paypalRefunds}`);
   for (const bytes of [1, 999, 50_000, 400_000, NUMBERS_KEPT_BYTES + 64]) for (const sent of [0, 2, 30_000, NUMBERS_SENT_BYTES, 3_000_000]) covers(keptNumbersWork(bytes, sent), `numbers from the copy ${bytes}/${sent}`);
@@ -813,7 +814,7 @@ test("an API reading that reads more than a page takes further requests that cov
   before("lib/membership-numbers.ts", 'if (beforeStripe && !(await beforeStripe())) return "refused";', "/subscriptions?");
   // Regra 23 (#3034's siblings): get_emails reads its emails without their bodies, only those measured (was "listBroadcasts(store.listId, EMAILS_BROADCASTS)").
   // Asking the emails' sizes is taken before the script is sent, and a refusal is handed back before anything else (Codex J 5811457165 on #3034).
-  before("lib/broadcasts.ts", "const paid = await paySizes(ids.length);", "const sized = await headsOf(");
+  before("lib/broadcasts.ts", "const paid = await paySizes(asked.length);", "const answered = await headsOf(");
   // Regra 23 (merge of #3034 with main): the call now also passes { expired: "skip" } (main's 57ca6e5a3), so the needle
   // ends at paySizes; the order it holds (the charge before the measure) is unchanged.
   before("lib/mcp-tools.ts", "const refused = await meter.charge(units, 0);", "measureBroadcastHeads(store.listId, EMAILS_BROADCASTS, paySizes");

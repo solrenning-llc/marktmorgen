@@ -284,10 +284,11 @@ test("a walk that does not reach the end of the list within its ceiling is unkno
   const page = Array.from({ length: RESEARCH_PAGE }, (_, i) => answer(`ceiling${i}@example.com`));
   await world([], async (commands) => {
     await assert.rejects(forgetResearchPerson("ana@example.com"), UnknownReplyError);
-    assert.equal(commands.length, RESEARCH_PAGES, "the walk stops at its ceiling");
+    // The deletion's mark first (one SET, confirmed), then the walk stops at its ceiling.
+    assert.equal(commands.length, 1 + RESEARCH_PAGES, "the mark, then the walk stops at its ceiling");
     assert.equal(removals(commands).length, 0);
     await assert.rejects(researchCopyPerson("ana@example.com"), UnknownReplyError);
-  }, () => [page]);
+  }, (command) => (command[0] === "SET" ? ["OK"] : [page]));
 });
 
 test("answers still there after every confirming walk make the deletion partial, with what went", async () => {

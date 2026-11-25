@@ -77,7 +77,10 @@ export function answerBytes(row: string): number {
 }
 
 /**
- * The answer kept, the count and the write in one step: 0 when full,
+ * The answer kept, the count and the write in one step: -1 while the
+ * person's deletion is under way (KEYS[2], the typed address's mark, or
+ * KEYS[3], the signed-in account's, the same as KEYS[2] when anonymous:
+ * lib/creator-research-store.ts forgetMarkKey; Codex L-20261120-0837), 0 when full,
  * "busy:<cap>" when the day's share is taken, "already" when the account's
  * reserved place is taken, else the list's new length. The rows are read once
  * (LRANGE, at most RESEARCH_MAX_ANSWERS) to count the reserved ones, marked
@@ -85,13 +88,15 @@ export function answerBytes(row: string): number {
  * fewer than the reserve are taken and none is its account's; past the
  * reserve it goes in as anonymous (ARGV[7], the row without the mark).
  * Anonymous answers keep their room (the ceiling less the reserve) and the
- * day's share of it (researchDayCap). KEYS[1] the list; ARGV[1] the ceiling;
+ * day's share of it (researchDayCap). KEYS[1] the list; KEYS[2] and KEYS[3] the
+ * deletion marks; ARGV[1] the ceiling;
  * ARGV[2] the answer as stored (with the mark when signed in); ARGV[3] the
  * day's count with this answer; ARGV[4] RESEARCH_DAY_SHARE; ARGV[5]
  * RESEARCH_ANSWERS_PER_DAY; ARGV[6] RESEARCH_RESERVED; ARGV[7] the account's
  * mark, or "" when anonymous; ARGV[8] the answer without the mark.
  */
-export const KEEP_RESEARCH_ANSWER = `-- marktmorgen:research-answer-keep:v3
+export const KEEP_RESEARCH_ANSWER = `-- marktmorgen:research-answer-keep:v4
+if redis.call("EXISTS", KEYS[2], KEYS[3]) > 0 then return -1 end
 local length = redis.call("LLEN", KEYS[1])
 local max = tonumber(ARGV[1])
 if length >= max then return 0 end

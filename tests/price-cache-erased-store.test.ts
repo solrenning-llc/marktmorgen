@@ -9,7 +9,7 @@
  */
 import { claimHandle, ERASING_KEY, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import type { Listing } from "@/lib/catalog";
-import { yearlyPrice } from "@/lib/yearly-switch";
+import { YearlyStoreGoneError, yearlyPrice } from "@/lib/yearly-switch";
 import { tierPrice } from "@/lib/tier-switch";
 import { pwywPriceId } from "@/lib/pay-what-you-want";
 import { setWhileStoreLive } from "@/lib/store-live-cache";
@@ -73,8 +73,10 @@ async function main(): Promise<void> {
     const store = await shop(`price-cache-${how}@example.com`, `price-cache-${how}`);
     for (const [label, make] of makers) {
       duringPost = () => erase(store, how);
-      const id = await make(store).catch((error: unknown) => `threw: ${String(error)}`);
-      is(`${label}: Stripe's id is still handed back to this one request`, /^price_SyntheticCache\d{4}$/.test(id), true);
+      const id = await make(store).catch((error: unknown) => (error instanceof YearlyStoreGoneError ? "gone" : `threw: ${String(error)}`));
+      // The yearly price is not handed on either: no preview nor move follows it (#5010 row 85, tests/yearly-price-store-gone.test.ts).
+      if (label === "the yearly price") is(`${label}: the request is told the store is gone`, id, "gone");
+      else is(`${label}: Stripe's id is still handed back to this one request`, /^price_SyntheticCache\d{4}$/.test(id), true);
     }
     duringPost = async () => {};
     for (const family of FAMILIES) is(`nothing kept under ${family}`, cached(family), []);
@@ -101,9 +103,12 @@ async function main(): Promise<void> {
   redis.clear();
   const oldGone = await shop("price-cache-old-gone@example.com", "price-cache-old-gone");
   const legacyGone: Store = { ...oldGone, sid: "", extra: false };
-  for (const [, make] of makers) {
+  for (const [label, make] of makers) {
     duringPost = () => erase(legacyGone, "gone");
-    await make(legacyGone);
+    // The yearly price says the store is gone (#5010 row 85); the others hand Stripe's id back. Each outcome is held
+    // exactly, so a maker that stopped throwing, or started to, fails here (Claude 1 coord's LEVE 3 on #5157).
+    const outcome = await make(legacyGone).then((id) => (/^price_/.test(id) ? "id" : `odd ${id}`), (error: unknown) => (error instanceof YearlyStoreGoneError ? "gone" : `threw ${String(error)}`));
+    is(`its record gone: ${label} ${label === "the yearly price" ? "says the store is gone" : "hands Stripe's id back"}`, outcome, label === "the yearly price" ? "gone" : "id");
   }
   duringPost = async () => {};
   for (const family of FAMILIES) is(`its record gone: nothing kept under ${family}`, cached(family), []);

@@ -116,6 +116,30 @@ export function yearlyPriceBody(store: Store, product: Listing, cents: number): 
   });
 }
 
+/**
+ * The store's erasure began, or its record is gone, while its yearly price was being made: nothing may go on to the
+ * member's subscription (Codex L-20261119-1446, #5010 row 85). The price itself, made on the creator's account, is
+ * never charged and is left unused.
+ */
+export class YearlyStoreGoneError extends Error {
+  constructor() {
+    super("the store's erasure began while its yearly price was made");
+    this.name = "YearlyStoreGoneError";
+  }
+}
+
+/**
+ * Whether the store is still live could not be read while its yearly price was made (the fence answered neither kept
+ * nor gone): nothing goes on to the member's subscription either, and the member is told to try again (Claude 5 ibuF
+ * on #5157; an unknown answer is never taken as live, CX-123 rule 24).
+ */
+export class YearlyStoreUnknownError extends Error {
+  constructor() {
+    super("whether the store is live could not be read while its yearly price was made");
+    this.name = "YearlyStoreUnknownError";
+  }
+}
+
 /** The yearly price, made once on the creator's account for each amount and reused. */
 export async function yearlyPrice(store: Store, product: Listing, cents: number): Promise<string> {
   const account = store.stripeAccountId as string;
@@ -125,8 +149,11 @@ export async function yearlyPrice(store: Store, product: Listing, cents: number)
   const made = await onAccount("POST", account, "/prices", yearlyPriceBody(store, product, cents));
   const id = typeof made.id === "string" ? made.id : "";
   if (!PRICE_PATTERN.test(id)) throw new Error("Stripe returned no price");
-  // Kept only while the store is live: a Stripe answer that comes after its erasure began writes nothing back (L-1446).
-  await setWhileStoreLive(store, key, id, 400 * 86_400);
+  // Kept only while the store is live: a Stripe answer that comes after its erasure began writes nothing back (L-1446),
+  // and is not handed on either, so no preview is asked and no subscription is moved or charged for it (#5010 row 85).
+  const live = await setWhileStoreLive(store, key, id, 400 * 86_400);
+  if (live === "gone") throw new YearlyStoreGoneError();
+  if (live !== "kept") throw new YearlyStoreUnknownError();
   return id;
 }
 
@@ -206,6 +233,8 @@ export async function previewYearly(store: Store, token: string, subscription: s
       },
     };
   } catch (error) {
+    if (error instanceof YearlyStoreGoneError) return { ok: false, reason: "gone", emailed };
+    if (error instanceof YearlyStoreUnknownError) return { ok: false, reason: "error", emailed };
     if (!(error instanceof StripeError)) console.error("previewing a move to yearly failed", error);
     return { ok: false, reason: "error", emailed };
   }
@@ -276,6 +305,8 @@ export async function switchYearly(store: Store, token: string, subscription: st
     }, keepWhileUnconfirmed);
   } catch (error) {
     if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
+    if (error instanceof YearlyStoreGoneError) return { ok: false, reason: "gone" };
+    if (error instanceof YearlyStoreUnknownError) return { ok: false, reason: "error" };
     if (!(error instanceof StripeError)) console.error("moving a membership to yearly failed", error);
     return { ok: false, reason: "error" };
   }

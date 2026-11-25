@@ -88,7 +88,7 @@ function dispute(id: string, status: string, subscription: string | null, period
     object: "dispute",
     status,
     created: NOW - DAY,
-    charge: { id: `ch_${id.slice(3)}`, invoice: subscription ? { id: `in_${id.slice(3)}`, subscription, lines: { data: [{ period: { start: NOW - 10 * DAY, end: periodEnd } }] } } : null },
+    charge: { id: `ch_${id.slice(3)}`, invoice: subscription ? { id: `in_${id.slice(3).padEnd(6, "0")}`, subscription, lines: { data: [{ period: { start: NOW - 10 * DAY, end: periodEnd } }] } } : null },
   };
 }
 

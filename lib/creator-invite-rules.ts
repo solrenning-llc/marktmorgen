@@ -37,17 +37,22 @@ export const INVITE_SHARE_PERCENT = 50;
 export const INVITE_BONUS_CENTS = PLAN_PRICES.creator.month;
 
 /**
+ * The cards' usual window for a dispute, in days: the owner's decision of 19 November 2026 on #4514 (part (b)) holds
+ * every invite credit, and the invited creator's bonus, this long after the payment it is earned on.
+ */
+export const INVITE_DISPUTE_WINDOW_DAYS = 120;
+
+/**
  * Days after a payment before its credit is added.
  *
- * Our Refund Policy gives a full refund on request within REFUND_DAYS of a
- * charge, so the hold is that window and a week: a refund asked for on the
- * last day of it is made before anything has been credited on the back of a
- * payment that is given back. It is written as the sum rather than as a
- * number so that lengthening the refund window cannot quietly start paying
- * credit on refundable payments — which is exactly what happened the day
- * the window went from fourteen days to thirty and this said 21.
+ * The cards' dispute window (INVITE_DISPUTE_WINDOW_DAYS), and never less than our Refund Policy's full-refund window
+ * and a week: a refund asked for on the last day of it is made before anything has been credited on the back of a
+ * payment that is given back. Written as the larger of the two rather than as a number, so that lengthening the refund
+ * window cannot quietly start paying credit on refundable payments, which is exactly what happened the day the window
+ * went from fourteen days to thirty and this said 21. A payment taken back by a dispute decided even later than this
+ * is handled by lib/creator-invite-clawback.ts.
  */
-export const INVITE_HOLD_DAYS = REFUND_DAYS + 7;
+export const INVITE_HOLD_DAYS = Math.max(INVITE_DISPUTE_WINDOW_DAYS, REFUND_DAYS + 7);
 
 /** How long an accepted invite waits for its creator to make their store. */
 export const INVITE_COOKIE_DAYS = 60;

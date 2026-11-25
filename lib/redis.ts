@@ -7,6 +7,17 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 
 type Command = (string | number)[];
 
+/**
+ * Spends `count` commands of the command ceiling around the caller (lib/redis-ceiling.ts), through the meter that
+ * module registers when it is loaded. It is server-only (node:async_hooks) and browser bundles reach this file, so it is
+ * never imported here (a static import broke the build of /[handle]/community). Unset, nothing is counted, as outside
+ * any ceiling.
+ */
+function spendCommands(count: number): void {
+  const meter = (globalThis as Record<symbol, unknown>)[Symbol.for("marktmorgen.redis.spendCommands")];
+  if (typeof meter === "function") (meter as (n: number) => void)(count);
+}
+
 function getConfig() {
   const url =
     process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
@@ -43,6 +54,8 @@ export function isRedisConfigured(): boolean {
 export async function redisPipeline(commands: Command[]): Promise<unknown[]> {
   const config = getConfig();
   if (!config) throw new Error("Redis is not configured");
+  // Held to the command ceiling of the work it runs in, if any (lib/redis-ceiling.ts), before anything is sent.
+  spendCommands(commands.length);
 
   const results = await timed(REDIS_TIMEOUT_MS, async (signal) => {
     const response = await fetch(`${config.url}/pipeline`, {
@@ -74,6 +87,7 @@ export async function redisPipeline(commands: Command[]): Promise<unknown[]> {
 export async function redisPipelineBase64(commands: Command[]): Promise<unknown[]> {
   const config = getConfig();
   if (!config) throw new Error("Redis is not configured");
+  spendCommands(commands.length);
   const results = await timed(REDIS_TIMEOUT_MS, async (signal) => {
     const response = await fetch(`${config.url}/pipeline`, {
       method: "POST",

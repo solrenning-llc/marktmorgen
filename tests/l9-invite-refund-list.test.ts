@@ -24,10 +24,18 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   const method = init?.method ?? "GET";
   if (url.hostname !== "api.stripe.com") return answer({}, 404);
+  // An owed credit's invoice, read again by its id before the credit is sent (lib/creator-invite-credit.ts paidNow).
+  const byId = path.match(/^\/invoices\/(in_[A-Za-z0-9]+)$/);
+  if (method === "GET" && byId) {
+    const found = [...invoiceByCustomer.values()].find((inv) => inv.id === byId[1]);
+    return found ? answer(found) : answer({ error: { message: "No such invoice" } }, 404);
+  }
   if (method === "GET" && path === "/invoices") {
     const row = invoiceByCustomer.get(url.searchParams.get("customer") ?? "");
     return answer({ object: "list", data: row ? [row] : [], has_more: false });
   }
+  // The disputes of each paid invoice's payment, read beside its refunds (lib/creator-invite-credit.ts disputedOn): none here.
+  if (method === "GET" && path === "/disputes") return answer({ object: "list", data: [], has_more: false });
   if (method === "GET" && path === "/refunds") {
     const payment = url.searchParams.get("payment_intent") ?? url.searchParams.get("charge") ?? "";
     return answer(refundAnswerByPayment.get(payment));
@@ -86,8 +94,8 @@ async function main() {
     const made = await claimHandle(`${c.handle}@example.com`, c.handle, c.handle, "");
     if (!made.ok) throw new Error(`fixture failed: ${c.handle}`);
     await setSubscription(`${c.handle}@example.com`, { customerId: c.customer, subscriptionId: `sub_${c.handle.replace(/-/g, "")}01`, active: true });
-    redis.run(["SET", byKey(made.store.sid), JSON.stringify({ r: inviter.store.sid, at: NOW - 60 * DAY, terms: { version: 1, sharePercent: 50, bonusCents: 0 } })]);
-    redis.run(["ZADD", ALL_KEY, NOW - 60 * DAY, made.store.sid]);
+    redis.run(["SET", byKey(made.store.sid), JSON.stringify({ r: inviter.store.sid, at: NOW - (INVITE_HOLD_DAYS + 60) * DAY, terms: { version: 1, sharePercent: 50, bonusCents: 0 } })]);
+    redis.run(["ZADD", ALL_KEY, NOW - (INVITE_HOLD_DAYS + 60) * DAY, made.store.sid]);
     const row = invoice(c.invoice, c.customer, c.payment);
     if ("payments" in c && c.payments === null) delete row.payments;
     if ("payments" in c && c.payments === "more") row.payments = { object: "list", data: [{ payment: { type: "payment_intent", payment_intent: c.payment } }], has_more: true };

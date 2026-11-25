@@ -8,7 +8,8 @@
  *      pays us from are read. Each one paid at least INVITE_HOLD_DAYS ago —
  *      past the window in which our Refund Policy gives the money back — earns
  *      whoever invited it INVITE_SHARE_PERCENT of what was actually paid,
- *      less anything refunded or credited back. The first one that earns
+ *      less anything refunded, credited back or taken back by a dispute (one
+ *      whose dispute is not decided yet earns nothing until it is). The first one that earns
  *      also earns the invited creator INVITE_BONUS_CENTS on their own plan.
  *      An account that had paid us before it was invited earns nothing: it
  *      was not brought to us.
@@ -33,6 +34,7 @@
  * from 2025 on, which is why the version is pinned here.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { CommandCeilingError, withCommandCeiling } from "@/lib/redis-ceiling";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark } from "@/lib/claim-mark";
 import { isBillingConfigured, onPlatformAt } from "@/lib/billing";
@@ -49,6 +51,7 @@ import {
   parseCredit,
 } from "@/lib/creator-invites";
 import { INVITE_HOLD_DAYS, inviteShare, readInviteTerms } from "@/lib/creator-invite-rules";
+import { disputeTakes } from "@/lib/retained-revenue";
 
 export const INVITE_STRIPE_VERSION = "2026-08-26.dahlia";
 
@@ -103,16 +106,57 @@ function isPaidInvoice(row: unknown): row is PaidInvoice {
 export type InviteCounts = { invited: number; earned: number; added: number; failed: number; complete: boolean };
 
 /** The customer a store's credit goes on: its own, or its account's first store's. */
-async function customerFor(store: Store): Promise<string | null> {
+export async function customerFor(store: Store): Promise<string | null> {
   if (store.stripeCustomerId && CUSTOMER_PATTERN.test(store.stripeCustomerId)) return store.stripeCustomerId;
   if (!store.extra) return null;
   const first = await storeForEmail(store.email);
   return first?.stripeCustomerId && CUSTOMER_PATTERN.test(first.stripeCustomerId) ? first.stripeCustomerId : null;
 }
 
-/** What was given back on one invoice's payments: refunds made or on their way. */
-async function refundedOn(invoice: Invoice): Promise<number> {
+/** Every state Stripe gives a dispute (stripe-node v22.6.0 Dispute.Status, and the legacy `charge_refunded`). */
+const DISPUTE_STATES = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "needs_response", "under_review", "won", "lost", "prevented", "charge_refunded"]);
+/** A dispute or an inquiry not decided yet: the money it may take is not known, so the payment earns nothing yet. */
+const DISPUTE_OPEN = new Set(["warning_needs_response", "warning_under_review", "needs_response", "under_review"]);
+
+/**
+ * The disputes on one payment of an invoice, read exactly: the amount they took back, or "open" while one is not
+ * decided. A plan invoice stays `paid` after its charge is disputed, so its refunds alone do not say what the
+ * platform kept. A dispute takes its amount when disputeTakes says so (lost; prevented only when its own money left,
+ * a resolution's Refund being read with the refunds). Anything that does not read throws: the store fails this run
+ * and no credit is written.
+ */
+async function disputedOn(type: "payment_intent" | "charge", ref: string): Promise<number | "open"> {
+  const query = new URLSearchParams({ limit: "100" });
+  query.set(type, ref);
+  const list = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/disputes?${query}`);
+  const rows = list && list.object === "list" && list.has_more === false && Array.isArray(list.data) && list.data.length <= 100 ? list.data : null;
+  if (!rows) throw new UnknownReplyError("invite credits: the disputes of a payment");
   let total = 0;
+  let open = false;
+  for (const dispute of rows as unknown[]) {
+    if (!dispute || typeof dispute !== "object" || Array.isArray(dispute)) throw new UnknownReplyError("invite credits: a dispute");
+    const { object, amount, status } = dispute as { object?: unknown; amount?: unknown; status?: unknown };
+    if (object !== "dispute" || typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0 || typeof status !== "string" || !DISPUTE_STATES.has(status)) {
+      throw new UnknownReplyError("invite credits: a dispute");
+    }
+    if (DISPUTE_OPEN.has(status)) {
+      open = true;
+      continue;
+    }
+    const takes = disputeTakes(dispute as { status?: unknown; balance_transactions?: unknown });
+    if (takes === null) throw new UnknownReplyError("invite credits: a prevented dispute's money");
+    if (takes) total += amount;
+  }
+  return open ? "open" : total;
+}
+
+/**
+ * What was given back on one invoice's payments: refunds made or on their way, and disputes that took the money;
+ * "open" while a dispute on one of them is not decided, so the invoice earns nothing this run and is read again.
+ */
+async function takenBackOn(invoice: Invoice): Promise<number | "open"> {
+  let total = 0;
+  let open = false;
   // The invoice's own payments read whole first (Revisor 1 and Codex C2 on #2722): Stripe's list with every row, each
   // a payment of a known shape. Missing, cut short or odd is not "no payment": the store fails this run.
   const payments = invoice.payments as unknown;
@@ -148,8 +192,11 @@ async function refundedOn(invoice: Invoice): Promise<number> {
       if (status === "succeeded" || status === "pending" || status === "requires_action") total += amount;
       else if (status !== "failed" && status !== "canceled") throw new UnknownReplyError("invite credits: a refund status");
     }
+    const disputed = await disputedOn(type as "payment_intent" | "charge", ref);
+    if (disputed === "open") open = true;
+    else total += disputed;
   }
-  return total;
+  return open ? "open" : total;
 }
 
 /**
@@ -302,7 +349,10 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
     const id = inv.id;
     const paidAt = inv.status_transitions.paid_at;
     const cur = inv.currency;
-    const paid = inv.amount_paid > 0 ? paidOn(inv, await refundedOn(inv)) : 0;
+    const taken = inv.amount_paid > 0 ? await takenBackOn(inv) : 0;
+    // A dispute not decided yet: nothing is written, so the invoice is read again on a later run.
+    if (taken === "open") continue;
+    const paid = inv.amount_paid > 0 ? paidOn(inv, taken) : 0;
     const cents = inviteShare(paid, terms);
     const share: Credit = { id, kind: "share", to: by.r, from: sid, cents, cur, at: paidAt, state: cents > 0 ? "owed" : "none" };
     // Written once, for good: ours only on OK or this record read back (CX-123 rule 24, L9). Not known (it may have
@@ -335,15 +385,19 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
 /** The most pages of a customer's balance history read; a history longer than that is not known whole. */
 const HISTORY_PAGES = 10;
 
+/** A credit found on a customer's balance: the transaction's id and, as Stripe gave them, its amount, currency and customer. */
+type FoundCredit = { txn: string; amount: unknown; currency: unknown; customer: unknown };
+
 /**
- * The credits already on a customer's balance, by the credit id each carries. Read exactly (Claude 5 on #2722): each
+ * The credits already on a customer's balance, by the credit id each carries, each with what its row says it moved
+ * (FoundCredit; read exactly at use, in putOnPlan). Read exactly (Claude 5 on #2722): each
  * page Stripe's list, `has_more` true or false, at most the hundred asked for, each row with a string id and its
  * metadata an object (or null) whose credit mark, when there, is text. Anything else, a page that says there is more
  * but has no rows, or a history still going on after the last page read, is not "not sent": it throws
  * UnknownReplyError before any credit is sent, the credit stays owed, and the next run reads again.
  */
-async function creditedAt(customer: string): Promise<Map<string, string>> {
-  const found = new Map<string, string>();
+async function creditedAt(customer: string): Promise<Map<string, FoundCredit>> {
+  const found = new Map<string, FoundCredit>();
   let after = "";
   for (let page = 0; page < HISTORY_PAGES; page += 1) {
     const query = new URLSearchParams({ limit: "100" });
@@ -356,12 +410,12 @@ async function creditedAt(customer: string): Promise<Map<string, string>> {
     let last = "";
     for (const row of rows) {
       if (!row || typeof row !== "object") throw new UnknownReplyError("invite credits: a balance history row");
-      const { id, metadata } = row as { id?: unknown; metadata?: unknown };
+      const { id, metadata, amount, currency, customer: owner } = row as { id?: unknown; metadata?: unknown; amount?: unknown; currency?: unknown; customer?: unknown };
       if (typeof id !== "string" || !id) throw new UnknownReplyError("invite credits: a balance history row");
       if (metadata !== null && (typeof metadata !== "object" || Array.isArray(metadata))) throw new UnknownReplyError("invite credits: a balance history row");
       const credit = metadata ? (metadata as Record<string, unknown>).nimbus_invite_credit : undefined;
       if (credit !== undefined && typeof credit !== "string") throw new UnknownReplyError("invite credits: a balance history row");
-      if (credit) found.set(credit, id);
+      if (credit) found.set(credit, { txn: id, amount, currency, customer: owner });
       last = id;
     }
     if (list.has_more === false) return found;
@@ -371,8 +425,56 @@ async function creditedAt(customer: string): Promise<Map<string, string>> {
   throw new UnknownReplyError("invite credits: a balance history longer than read");
 }
 
+/**
+ * What one invoice of an invited store has paid that the platform still has, read again now, before a credit earned
+ * on it is sent (Codex X5's review of #4514, ALTO, part (a)): the invoice by its id, exactly and its own (rule 30),
+ * with its refunds and disputes (takenBackOn). "open" while a dispute on it is not decided. Anything that does not
+ * read throws, so nothing is sent and the credit stays owed for the next run.
+ */
+async function paidNow(invoiceId: string): Promise<number | "open"> {
+  if (!INVOICE_PATTERN.test(invoiceId)) throw new UnknownReplyError("invite credits: a credit's invoice id");
+  const query = new URLSearchParams();
+  query.append("expand[]", "payments");
+  const inv = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/invoices/${invoiceId}?${query}`);
+  if (!isPaidInvoice(inv) || inv.id !== invoiceId) throw new UnknownReplyError("invite credits: a credit's invoice read again");
+  const taken = inv.amount_paid > 0 ? await takenBackOn(inv) : 0;
+  if (taken === "open") return "open";
+  return paidOn(inv, taken);
+}
+
+/**
+ * What an owed credit is still worth, read again before it is sent: a share is its invoice's share of what the
+ * platform still has; the invited creator's bonus follows the share it was earned with (the first paid invoice's,
+ * at the same moment), and earns nothing once that invoice has nothing left. Never more than written. "open" while a
+ * dispute is not decided. Throws when anything it needs does not read.
+ */
+async function stillOwed(credit: Credit): Promise<number | "open"> {
+  const byRead = repliesFor(await redisPipeline([["GET", byKey(credit.from)]]), 1);
+  if (!byRead || (byRead[0] !== null && typeof byRead[0] !== "string")) throw new UnknownReplyError("invite credits: who invited a store, read again");
+  const by = parseBy(byRead[0]);
+  const terms = by ? readInviteTerms(by.terms) : null;
+  if (!by || !terms) throw new UnknownReplyError("invite credits: the invite a credit was earned on");
+  if (by.back) return 0;
+  if (credit.kind === "share") {
+    const paid = await paidNow(credit.id);
+    if (paid === "open") return "open";
+    return Math.min(credit.cents, inviteShare(paid, terms));
+  }
+  // The bonus: the share it was earned with is the invited store's, on its inviter's list, at the bonus's moment.
+  const listed = repliesFor(await redisPipeline([["ZRANGEBYSCORE", mineKey(by.r), credit.at, credit.at]]), 1);
+  const ids = listed ? stringList(listed[0]) : null;
+  if (!ids) throw new UnknownReplyError("invite credits: the share a bonus was earned with");
+  const read = ids.length ? repliesFor(await redisPipeline(ids.map((id) => ["GET", creditKey(id)])), ids.length) : [];
+  if (!read) throw new UnknownReplyError("invite credits: the share a bonus was earned with");
+  const share = read.map(parseCredit).find((c) => c?.kind === "share" && c.from === credit.from && c.at === credit.at) ?? null;
+  if (!share) throw new UnknownReplyError("invite credits: the share a bonus was earned with");
+  const paid = await paidNow(share.id);
+  if (paid === "open") return "open";
+  return paid > 0 ? credit.cents : 0;
+}
+
 /** Step 2 for one credit. True when it is now on the plan. */
-async function putOnPlan(id: string, history: Map<string, Map<string, string>>, nowSeconds: number): Promise<boolean> {
+async function putOnPlan(id: string, history: Map<string, Map<string, FoundCredit>>, nowSeconds: number): Promise<boolean> {
   // Read exactly (CX-123 rule 24, audit round 7): only a record confirmed absent (an exact null) or read back and no
   // longer owed leaves the owed list here. Anything else throws: the credit stays listed and the next run tries again.
   const read = repliesFor(await redisPipeline([["GET", creditKey(id)]]), 1);
@@ -401,15 +503,43 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
     known = await creditedAt(customer);
     history.set(customer, known);
   }
-  let txn = known.get(id) ?? "";
-  if (!txn) {
+  const landed = known.get(id);
+  let txn = landed?.txn ?? "";
+  let sent = credit;
+  if (landed) {
+    // Already on the balance (a send whose answer was lost, found by its mark on a later run): written down at what
+    // that row moved, never at the amount first written, which a reduced send did not move (Claude 4's LOW on #4514,
+    // 7073362258: 840 recorded where 450 was credited). The row is held to this credit as a receipt is: a whole negative
+    // amount no larger than written, this credit's currency, and, when the row names one, this customer (the list is
+    // already this customer's own). Anything else throws: the credit stays owed and the next run reads again.
+    const moved = landed.amount;
+    if (typeof moved !== "number" || !Number.isSafeInteger(moved) || moved >= 0 || -moved > credit.cents ||
+        landed.currency !== credit.cur || (landed.customer !== undefined && landed.customer !== customer)) {
+      throw new UnknownReplyError(`invite credits: ${id} on the balance, not as a credit of it`);
+    }
+    sent = { ...credit, cents: -moved };
+  } else {
+    // Read again before it is sent (Codex X5 on #4514, ALTO (a)): a payment taken back since the credit was written
+    // makes it earn less, or nothing; a dispute not decided yet keeps it owed for a later run. A credit already at
+    // Stripe is not touched here: what it becomes after a late dispute is the owner's decision (part (b)).
+    const worth = await stillOwed(credit);
+    if (worth === "open") return false;
+    if (worth <= 0) {
+      const wrote = repliesFor(await redisPipeline([["SET", creditKey(id), JSON.stringify({ ...credit, cents: 0, state: "none" })], ["SREM", OWED_KEY, id]]), 2);
+      if (!wrote || wrote[0] !== "OK" || countOf(wrote[1]) === null) throw new UnknownReplyError(`invite credits: ${id} written down as earning nothing`);
+      return false;
+    }
+    sent = { ...credit, cents: worth };
     const body = new URLSearchParams({
-      amount: String(-credit.cents),
+      amount: String(-sent.cents),
       currency: credit.cur,
       description: credit.kind === "share" ? "Marktmorgen invite credit: a creator you invited paid" : "Marktmorgen invite credit: welcome",
       "metadata[nimbus_invite_credit]": id,
     });
-    const made = await onPlatformAt(INVITE_STRIPE_VERSION, "POST", `/customers/${customer}/balance_transactions`, body, `nimbus-invite-${id}`);
+    // The key as before for the amount written; a smaller amount after a take-back gets its own, so an earlier try
+    // of the larger amount is never answered for it (the balance history read above still finds any that landed).
+    const key = sent.cents === credit.cents ? `nimbus-invite-${id}` : `nimbus-invite-${id}-${sent.cents}`;
+    const made = await onPlatformAt(INVITE_STRIPE_VERSION, "POST", `/customers/${customer}/balance_transactions`, body, key);
     // Done only on a receipt (issue #4422): Stripe answers a created balance transaction with its `cbtxn_` id. A reply
     // without one does not show the credit landed, so it throws: the credit stays owed and on the owed list, and the
     // next run reads the history again and, if it is still not there, sends with the same idempotency key.
@@ -417,16 +547,16 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
     const metadata = made.metadata;
     if (typeof made.id !== "string" || !made.id.startsWith("cbtxn_") || made.id.length <= "cbtxn_".length ||
         made.object !== "customer_balance_transaction" || made.customer !== customer ||
-        made.amount !== -credit.cents || made.currency !== credit.cur ||
+        made.amount !== -sent.cents || made.currency !== credit.cur ||
         !metadata || typeof metadata !== "object" || Array.isArray(metadata) ||
         (metadata as Record<string, unknown>).nimbus_invite_credit !== id) {
       throw new UnknownReplyError(`invite credits: the receipt for ${id}`);
     }
     txn = made.id;
-    known.set(id, txn);
+    known.set(id, { txn, amount: made.amount, currency: made.currency, customer: made.customer });
   }
   await redisPipeline([
-    ["SET", creditKey(id), JSON.stringify({ ...credit, state: "done", txn, doneAt: nowSeconds })],
+    ["SET", creditKey(id), JSON.stringify({ ...sent, state: "done", txn, doneAt: nowSeconds })],
     ["SREM", OWED_KEY, id],
   ]);
   return true;
@@ -436,58 +566,137 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
  * The daily run. Bounded by `deadline`; the walk through invited stores
  * carries on the next day from where it stopped.
  */
+/**
+ * The most Redis commands one run of the job sends, in all (Claude 7's and Claude 5's MEDIUM on #4514; rule MR/FX275:
+ * a cost is bounded before it is spent, never unknown): held in code by lib/redis-ceiling.ts, whatever module sends
+ * them, and priced as a company fixed cost by tests/plan-cost-registry.ts INVITE_CREDIT_JOB (INVITE_JOB_MONTH_USD). Of it, INVITE_WALK_COMMANDS
+ * go to the invited stores and INVITE_OWED_COMMANDS to the credits owed; the rest is the run's own reads and its place.
+ * A run that reaches a ceiling stops there, is not complete, and keeps its place: the next run starts at the store it
+ * did not finish. A store whose own reading passes the whole walk's ceiling alone fails, and the walk goes past it, so
+ * it never holds the stores after it (as a customer past INVOICE_PAGES does: it is never credited until handled).
+ */
+export const INVITE_WALK_COMMANDS = 1_500;
+export const INVITE_OWED_COMMANDS = 480;
+/** The run's own: the list's size and place, at most two windows of it, the place written, and the owed credits read. */
+const INVITE_RUN_OWN_COMMANDS = 6;
+export const INVITE_RUN_COMMANDS = INVITE_WALK_COMMANDS + INVITE_OWED_COMMANDS + INVITE_RUN_OWN_COMMANDS;
+/**
+ * The most invited stores and owed credits one run reads by name: each costs at least one command, so no run reaches
+ * more than its ceilings allow, and neither list is ever read whole (their bytes are bounded too).
+ */
+const INVITE_WALK_STORES = INVITE_WALK_COMMANDS;
+const INVITE_OWED_READ = INVITE_OWED_COMMANDS;
+
+/**
+ * The job runs every second UTC day, on an even day since the epoch (owner, 17 November 2026, "A cada 2 dias"): it
+ * halves the runs a month can hold, so its cost line keeps the Store's refunded first year under the owner's US$66
+ * (tests/plan-cost-registry.ts, INVITE_JOB_RUNS_PER_MONTH). A credit comes at most a day later; it already waits
+ * INVITE_HOLD_DAYS before it is earned.
+ */
+export const INVITE_EVERY_DAYS = 2;
+
+/** Whether the invite-credit job runs on the UTC day of `now`. */
+export function inviteRunDay(now: number): boolean {
+  return Math.floor(now / 86_400_000) % INVITE_EVERY_DAYS === 0;
+}
+
 export async function settleInvites(deadline: number, now = Date.now()): Promise<InviteCounts> {
   const counts: InviteCounts = { invited: 0, earned: 0, added: 0, failed: 0, complete: false };
+  // Not its day: nothing read, nothing written, nothing failed; the next run day does the work (INVITE_EVERY_DAYS).
+  if (!inviteRunDay(now)) return { ...counts, complete: true };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
+  return withCommandCeiling(INVITE_RUN_COMMANDS, () => settleWithin(deadline, now, counts));
+}
+
+async function settleWithin(deadline: number, now: number, counts: InviteCounts): Promise<InviteCounts> {
   const nowSeconds = Math.floor(now / 1000);
 
   // The two lists walked are read exactly (CX-123 rule 24, audit round 7): a list Redis answered in another shape is
-  // not an empty list. The run counts a failure and is not complete; the walk's place is kept for the next run.
-  const listed = repliesFor(await redisPipeline([["ZREVRANGE", ALL_KEY, 0, -1], ["GET", CURSOR_KEY]]), 2);
-  const sids = listed ? stringList(listed[0]) : null;
+  // not an empty list. The run counts a failure and is not complete; the walk's place is kept for the next run. Only a
+  // window of the invited list is read, from the walk's place, wrapping round once (#4514: never the whole list).
+  const head = repliesFor(await redisPipeline([["ZCARD", ALL_KEY], ["GET", CURSOR_KEY]]), 2);
+  const total = head ? countOf(head[0]) : null;
+  let sids: string[] | null = null;
+  let start = 0;
+  if (total !== null) {
+    start = Math.min(Number(head?.[1]) || 0, total);
+    if (start >= total) start = 0;
+    const take = Math.min(total, INVITE_WALK_STORES);
+    const first = Math.min(take, total - start);
+    const ranges: (string | number)[][] = [];
+    if (first > 0) ranges.push(["ZREVRANGE", ALL_KEY, start, start + first - 1]);
+    if (take > first) ranges.push(["ZREVRANGE", ALL_KEY, 0, take - first - 1]);
+    const read = ranges.length ? repliesFor(await redisPipeline(ranges), ranges.length) : [];
+    const lists = read ? read.map((reply) => stringList(reply)) : null;
+    sids = lists && lists.every((list) => list !== null) ? (lists as string[][]).flat() : null;
+    // The list changed between its size and its window: read again on the next run.
+    if (sids && sids.length !== take) sids = null;
+  }
   let walkedAll = false;
-  if (!sids) {
+  if (!sids || total === null) {
     counts.failed += 1;
     console.error("reading the invited creators failed", new UnknownReplyError("invite credits: the invited list"));
   } else {
-    const start = Math.min(Number(listed?.[1]) || 0, sids.length);
     let walked = 0;
-    for (let n = 0; n < sids.length; n += 1) {
-      if (Date.now() > deadline) break;
-      const sid = sids[(start + n) % sids.length];
-      try {
-        counts.earned += await earnFrom(sid, nowSeconds);
-      } catch (error) {
-        counts.failed += 1;
-        console.error("reading an invited creator's payments failed", error);
+    let spent = false;
+    await withCommandCeiling(INVITE_WALK_COMMANDS, async () => {
+      for (const sid of sids ?? []) {
+        if (Date.now() > deadline) break;
+        try {
+          counts.earned += await earnFrom(sid, nowSeconds);
+        } catch (error) {
+          if (error instanceof CommandCeilingError) {
+            spent = true;
+            // The first store of the walk passed the whole walk's ceiling alone: it fails and the walk goes past it.
+            if (walked === 0) {
+              counts.failed += 1;
+              counts.invited += 1;
+              walked += 1;
+              console.error("an invited creator's payments pass the run's command ceiling", error);
+            }
+            break;
+          }
+          counts.failed += 1;
+          console.error("reading an invited creator's payments failed", error);
+        }
+        counts.invited += 1;
+        walked += 1;
       }
-      counts.invited += 1;
-      walked += 1;
-    }
-    walkedAll = walked === sids.length;
-    await redisPipeline([["SET", CURSOR_KEY, walkedAll ? 0 : (start + walked) % Math.max(1, sids.length)]]);
+    });
+    walkedAll = !spent && walked === total;
+    await redisPipeline([["SET", CURSOR_KEY, walkedAll ? 0 : (start + walked) % Math.max(1, total)]]);
   }
 
-  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", OWED_KEY]]), 1)?.[0]);
-  const history = new Map<string, Map<string, string>>();
+  // At most INVITE_OWED_READ of the owed credits, never the whole set (#4514); SRANDMEMBER picks another draw each run,
+  // so every credit owed is reached in time.
+  const ids = stringList(repliesFor(await redisPipeline([["SRANDMEMBER", OWED_KEY, INVITE_OWED_READ]]), 1)?.[0]);
+  const history = new Map<string, Map<string, FoundCredit>>();
   let pushedAll = ids !== null;
   if (!ids) {
     counts.failed += 1;
     console.error("reading the owed invite credits failed", new UnknownReplyError("invite credits: the owed list"));
   }
-  for (const id of ids ?? []) {
-    if (Date.now() > deadline) {
-      pushedAll = false;
-      break;
+  await withCommandCeiling(INVITE_OWED_COMMANDS, async () => {
+    for (const id of ids ?? []) {
+      if (Date.now() > deadline) {
+        pushedAll = false;
+        break;
+      }
+      try {
+        if (await putOnPlan(id, history, nowSeconds)) counts.added += 1;
+      } catch (error) {
+        if (error instanceof CommandCeilingError) {
+          pushedAll = false;
+          break;
+        }
+        counts.failed += 1;
+        console.error("putting an invite credit on a plan failed", error);
+      }
     }
-    try {
-      if (await putOnPlan(id, history, nowSeconds)) counts.added += 1;
-    } catch (error) {
-      counts.failed += 1;
-      console.error("putting an invite credit on a plan failed", error);
-    }
-  }
-  // A store or credit that could not be read for sure is not a complete pass (Codex N on #2722).
+  });
+  // A store or credit that could not be read for sure is not a complete pass (Codex N on #2722); nor is a run that
+  // read only a draw of the owed credits, while more than it are owed.
+  if (ids && ids.length >= INVITE_OWED_READ) pushedAll = false;
   counts.complete = walkedAll && pushedAll && counts.failed === 0;
   return counts;
 }

@@ -844,7 +844,10 @@ export default function TermsPage() {
           For every payment an invited account makes to us for its stores,
           we add {INVITE_SHARE_PERCENT}% of the amount actually paid, less any
           refund or credit given back on it, as credit on your account,{" "}
-          {INVITE_HOLD_DAYS} days after the payment. After its first payment,
+          {INVITE_HOLD_DAYS} days after the payment, the usual time a card
+          payment can be disputed. A payment with an open dispute earns
+          nothing until the bank decides, and a payment lost in a dispute
+          never earns credit. After its first payment,
           the invited account gets {formatMoney(INVITE_BONUS_CENTS, "usd")} of
           credit on its own account, at the same time. Credit is applied by
           our payment provider to your next charges until it is used up. It is
@@ -854,9 +857,12 @@ export default function TermsPage() {
         <p>
           We may withhold or reverse credit earned through abuse, such as
           invites to accounts you control, and we may change or end this
-          program for payments made after we give notice; credit already added
-          stays yours. This pause alone does not change the rates or earned
-          credit of existing invitations.
+          program for payments made after we give notice. If a payment is
+          taken back by a dispute after its credit was added, the part of that
+          credit not yet used comes off your balance; the part already used is
+          not charged to you, your balance never ends up owing us, and you are
+          never charged on your card for it. This pause alone does not change
+          the rates or earned credit of existing invitations.
         </p>
       </LegalSection>
 

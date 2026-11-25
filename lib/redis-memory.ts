@@ -1230,6 +1230,13 @@ export class MemoryRedis {
           const [, record, read] = args;
           return this.run(["GET", record]) === read ? this.run(["DEL", record]) : 0;
         }
+        // lib/upsell.ts WRITE_IF_READ: how an offer went, written only while its record is still exactly the one read.
+        if (key.startsWith("-- marktmorgen:upsell-write-if-read:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, record, read, next, seconds] = args;
+          if (this.run(["GET", record]) !== read) return 0;
+          this.run(["SET", record, next, "EX", seconds]);
+          return 1;
+        }
         // lib/group-buy.ts PLACE_DONE: a place marked done once, and said so only to the open that did it.
         if (key.startsWith("-- marktmorgen:group-place-done:v1\n") && args[0] === "1" && args.length === 4) {
           const [, members, field, json] = args;

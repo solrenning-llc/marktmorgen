@@ -781,6 +781,27 @@ export async function findOfferCharge(
  * Deletes an offer's record only while it is still exactly the orphan claim that was read (ARGV[1]): a record
  * written since — naming the customer, a payment or an answer — is never taken off.
  */
+/**
+ * How an offer went, written only while its record is still exactly the one read before Stripe was asked (#5285 row
+ * #4537, Codex X6): the buyer's thanks page and the five-minute job settle the same offer, so a write from an older
+ * read never undoes what the other wrote meanwhile (a "paid" put back to "pending"). KEYS[1] the record; ARGV[1] the
+ * record as read, ARGV[2] the new one, ARGV[3] its seconds. Answers 1 when written, 0 when the record changed.
+ * lib/redis-memory.ts runs it the same way.
+ */
+const WRITE_IF_READ = `-- marktmorgen:upsell-write-if-read:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+return 1`;
+
+/** Writes the offer's new record over the one read: true when written, false when another settle changed it first. */
+async function rewriteUpsell(session: string, slot: string, read: UpsellRecord, next: UpsellRecord): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["EVAL", WRITE_IF_READ, 1, recordKey(session, slot), JSON.stringify(read), JSON.stringify(next), RECORD_SECONDS]]), 1);
+  if (replies && replies[0] === 1) return true;
+  if (replies && replies[0] === 0) return false;
+  // A reply in another shape is unknown (rule 24): settleOne answers UNREAD and the offer is looked at again.
+  throw new UnknownReplyError("writing how an offer went");
+}
+
 const ORPHAN_RELEASE = `-- marktmorgen:upsell-orphan-release:v1
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
 return 0`;
@@ -813,8 +834,7 @@ async function settleOne(
       pi = await findOfferCharge(store, session, slot, record.customer, pages);
       if (!pi) {
         // Not there after long enough: the request never reached Stripe.
-        if (Date.now() - record.at > LOST_ANSWER_MS) {
-          await writeUpsell(session, slot, { ...record, state: "failed" });
+        if (Date.now() - record.at > LOST_ANSWER_MS && (await rewriteUpsell(session, slot, record, { ...record, state: "failed" }))) {
           await unwatchPending(store, session, slot);
         }
         return null;
@@ -831,18 +851,23 @@ async function settleOne(
     }
     const meta = pi.metadata as Record<string, string> | null;
     if (meta?.parent !== session || (meta?.step ?? "") !== slot) return null;
+    // A status in another shape is unknown, never "not processing" (#5285 row #4537, Codex X6): nothing is written and
+    // the job keeps watching the offer.
+    if (typeof pi.status !== "string") return UNREAD;
     const id = typeof pi.id === "string" ? pi.id : record.pi;
-    if (pi.status === "succeeded" || pi.status === "requires_payment_method" || pi.status === "canceled") {
-      await unwatchPending(store, session, slot);
-    }
+    // The offer leaves the job's watch only once its write landed (Claude 2 lpgvy's MEDIUM on #5343): a settle that
+    // lost the race to a write that left it pending (the job's "processing") keeps it watched, so the next look settles
+    // it; one that lost to a "paid" or "failed" leaves the unwatching to the settle that wrote it.
     if (pi.status === "succeeded") {
-      await writeUpsell(session, slot, { ...record, pi: id, state: "paid" });
+      // Another settle that wrote first also hands the purchase over: this one stops here.
+      if (!(await rewriteUpsell(session, slot, record, { ...record, pi: id, state: "paid" }))) return pi.status;
+      await unwatchPending(store, session, slot);
       const target = await readListing(store, record.product);
       const email = typeof pi.receipt_email === "string" ? pi.receipt_email : "";
       if (target) await afterPaid(store, session, slot, target, pi, email);
       else await creditCharge(store, session, slot, pi);
     } else if (pi.status === "requires_payment_method" || pi.status === "canceled") {
-      await writeUpsell(session, slot, { ...record, pi: id, state: "failed" });
+      if (await rewriteUpsell(session, slot, record, { ...record, pi: id, state: "failed" })) await unwatchPending(store, session, slot);
     } else {
       // Still pending: told as checking while Stripe says processing, as not confirmed while it waits on the buyer.
       const waiting = pi.status === "processing" ? "processing" : pi.status === "requires_action" ? undefined : record.waiting;
@@ -850,10 +875,10 @@ async function settleOne(
         const next: UpsellRecord = { ...record, pi: id };
         if (waiting) next.waiting = waiting;
         else delete next.waiting;
-        await writeUpsell(session, slot, next);
+        await rewriteUpsell(session, slot, record, next);
       }
     }
-    return typeof pi.status === "string" ? pi.status : null;
+    return pi.status;
   } catch (error) {
     console.error("settling an upsell failed", error);
     return UNREAD;

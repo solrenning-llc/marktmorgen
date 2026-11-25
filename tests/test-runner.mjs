@@ -89,6 +89,7 @@ export const SERIAL_TEST_FILES = Object.freeze([
   // Real child processes in groups of their own, ended at 0.4 to 1.2 s limits, under 1.5 s and 5 s guards.
   'test-runner.test.ts',
   // A real Chrome each (playwright-core), with its own renderer and GPU processes.
+  'address-field-wrap-browser.test.ts',
   'checkout-focus-browser.test.ts',
   'embed-editor-contrast.test.ts',
   'mail-access-review-browser.test.ts',

@@ -310,11 +310,17 @@ function parseModule(raw: unknown): CourseModule | null {
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Record<string, unknown>;
   if (typeof value.id !== "string" || !ITEM_ID_PATTERN.test(value.id)) return null;
-  const drip = Number(value.dripDays);
+  // A whole number of days from 0 to MAX_DRIP_DAYS, as the writers write it; none (a module saved before drips existed)
+  // is no wait. Any other value is never 0, which would open the module at once (rule 24; Codex P, #4287 item 8): it
+  // makes the whole course unreadable, as a course that does not parse is (parseCourse's catch).
+  const drip = value.dripDays;
+  if (drip !== undefined && !(typeof drip === "number" && Number.isInteger(drip) && drip >= 0 && drip <= MAX_DRIP_DAYS)) {
+    throw new Error("a module's drip days do not read");
+  }
   return {
     id: value.id,
     title: cleanTitle(value.title, "Untitled module"),
-    dripDays: Number.isInteger(drip) && drip >= 0 && drip <= MAX_DRIP_DAYS ? drip : 0,
+    dripDays: drip ?? 0,
     lessons: Array.isArray(value.lessons)
       ? value.lessons.map(parseLesson).filter((l): l is Lesson => l !== null)
       : [],

@@ -26,6 +26,13 @@ import { done, is, part } from "./check";
 
 type Reply = { ok?: boolean; error?: string; message?: string; access?: Record<string, string>; deal?: { id: string }; pipelines?: { id: string }[] };
 
+// Keep the unknown-write probes on the real commit boundary after the route
+// moved its HSET into the existing shared lease-fenced script.
+const accessCommit = (c: (string | number)[], key: string, who: string) =>
+  (c[0] === "HSET" && c[1] === key && c[2] === who) ||
+  (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:closing-fenced:v1\n") &&
+    c[4] === key && c[6] === "HSET" && c[9] === who);
+
 /**
  * The Lua that removes a deal only while it is the record read (DROP_CRM_DEAL in lib/crm.ts), as Redis runs it,
  * for the in-memory store this test uses: its own shim, so lib/redis-memory.ts stays as it is on main.
@@ -462,7 +469,7 @@ async function main(): Promise<void> {
   await writePipelineAccess(statsId,"sam@example.com",{},store);
   let dDropped=0;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if(commands.length===1 && commands[0][0]==="HSET" && commands[0][1]===`nl:crm:pacc:${statsId}` && commands[0][2]==="sam@example.com") { dDropped++; return []; }
+    if(commands.length===1 && accessCommit(commands[0], `nl:crm:pacc:${statsId}`, "sam@example.com")) { dDropped++; return []; }
     return real(commands);
   }) as typeof redis.pipeline;
   const dSave=await pacc({email:"sam@example.com",choices:{wkshp1:"none"},was:{}});
@@ -477,7 +484,7 @@ async function main(): Promise<void> {
   await writePipelineAccess(statsId,"sam@example.com",{},store);
   let d9Applied=0;
   redis.pipeline=(async(commands:(string|number)[][])=>{
-    if(commands.length===1&&commands[0][0]==="HSET"&&commands[0][1]===`nl:crm:pacc:${statsId}`&&commands[0][2]==="sam@example.com") {await real(commands);d9Applied++;return [];}
+    if(commands.length===1&&accessCommit(commands[0], `nl:crm:pacc:${statsId}`, "sam@example.com")) {await real(commands);d9Applied++;return [];}
     return real(commands);
   }) as typeof redis.pipeline;
   const d9Answer=await pacc({email:"sam@example.com",choices:{wkshp1:"none"},was:{}});

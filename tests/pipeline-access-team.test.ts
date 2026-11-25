@@ -88,13 +88,17 @@ async function main(): Promise<void> {
   is("the lock is let go once the change is written", lock, null);
   const pipe = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "HSET" && String(c[1]).startsWith("nl:crm:pacc:"))) throw new Error("down");
+    if (commands.some((c) =>
+      (c[0] === "HSET" && String(c[1]).startsWith("nl:crm:pacc:")) ||
+      (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:closing-fenced:v1\n") &&
+        String(c[4]).startsWith("nl:crm:pacc:") && c[6] === "HSET"),
+    )) throw new Error("down");
     return pipe(commands);
   }) as typeof redis.pipeline;
   const failed = await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "none" });
   redis.pipeline = pipe;
   const [after] = await redis.pipeline([["GET", `nl:crm:pacc:lock:${store.statsId}:sam@example.com`]]);
-  is("and also when the write fails, so the next save is not refused", [failed.status, after, (await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "none" })).status], [500, null, 200]);
+  is("and also when the write fails, so the next save is not refused", [failed.status, after, (await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "none" })).status], [503, null, 200]);
 
   part("While the teammate changes their sign-in");
   await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "edit" });
@@ -120,7 +124,7 @@ async function main(): Promise<void> {
   is("and the deal routes still refuse the moved teammate", movedDeal.status, 403);
   await moveMemberships("sam9@example.com", "sam@example.com");
   await redis.pipeline([typeof kept0 === "string" ? ["HSET", accessKey, "sam@example.com", kept0] : ["HDEL", accessKey, "sam@example.com"]]);
-  is("the route reads the teammate and writes with the team's lock held", readFileSync("app/api/store/pipeline-access/route.ts", "utf8").includes("await withTeamLocked(store.sid, async () => {"), true);
+  is("the route reads the teammate and writes with the team's lock held", readFileSync("app/api/store/pipeline-access/route.ts", "utf8").includes("await withTeamLocked(store.sid, async (teamLease) => {"), true);
 
   part("Every pipeline at once, from the Save button");
   await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "edit" });

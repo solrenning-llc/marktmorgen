@@ -39,7 +39,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { liveSecondStep } from "@/lib/second-step-gate";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { withLock } from "@/lib/redis-lock";
+import { type Held, withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
@@ -80,7 +80,7 @@ const logKey = (sid: string) => `nl:team:log:${sid}`;
 const teamLockKey = (sid: string) => `nl:team:lock:${sid}`;
 
 /** Runs one change to a store's team with its lock held: five seconds at most, waiting up to four. */
-function withTeam<T>(sid: string, work: () => Promise<T>): Promise<T> {
+function withTeam<T>(sid: string, work: (held: Held) => Promise<T>): Promise<T> {
   return withLock(teamLockKey(sid), 5, 4_000, work);
 }
 
@@ -98,10 +98,11 @@ export function withTeamLock<T>(sid: string, work: () => Promise<T>): Promise<T>
  * The same lock, for a change outside this file that must see the team as it
  * is while it writes (639 [GL7](7): a teammate's pipeline access, so a
  * sign-in moving at the same moment never leaves the new address without
- * it). Throws LockBusyError when the team stays busy. Never call
+ * it). The callback receives its lease for writes that must fence that token atomically.
+ * Throws LockBusyError when the team stays busy. Never call
  * logTeam or another function of this file that takes the lock inside it.
  */
-export function withTeamLocked<T>(sid: string, work: () => Promise<T>): Promise<T> {
+export function withTeamLocked<T>(sid: string, work: (held: Held) => Promise<T>): Promise<T> {
   return withTeam(sid, work);
 }
 

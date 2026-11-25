@@ -33,14 +33,17 @@ import { createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { type DataStore, dataKey, giveData, needData, noteData, takeData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { type DataStore, TAKE_DATA, dataKey, giveData, monthOf, needData, noteData, takeData, takeDataCommands } from "@/lib/store-data";
+import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 import { UPLOAD_SECONDS, readVaultPath } from "@/lib/vault-rules";
 import { reserveStoreUpload, reserveUploadControl, type UploadStore } from "@/lib/upload-budget";
+import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
+import { allowanceWindow } from "@/lib/allowance-window";
+import type { Tier } from "@/lib/plan";
 import { abortReservedVault, closeReservedVault, openReservedVault } from "@/lib/vault-storage";
 import type { StoreLiveFence } from "@/lib/live-fence";
 import { deleteVault, signPieces, type OpenedUpload } from "@/lib/vault";
-import { withLock } from "@/lib/redis-lock";
+import { LockBusyError, withLock, type Held } from "@/lib/redis-lock";
 import { isSuppressed } from "@/lib/suppression";
 import { STUDIO_UNIT_SENT_BYTES } from "@/lib/sent-bytes";
 import {
@@ -51,6 +54,8 @@ import {
   MAX_WAITING_PER_BUYER,
   type Submission,
   type SubmissionReply,
+  type SubmissionState,
+  type SubmittedFile,
   type SubmissionSetup,
   applySubmissionEvent,
   readSubmissionSetup,
@@ -93,7 +98,20 @@ export const SUBMISSION_SLOT_SWEEP_COMMANDS = 24;
 // their place is taken and again right after it; and its door's write is one step where it was three
 // (SUBMISSION_DOOR_OPEN_WRITE: one EVAL and its five calls, 6 billed) (Codex L-20261120-2049, MEDIUM). The open's own
 // at the most: 30, measured; plus the sweep's turn it pays for.
-export const SUBMISSION_STEP_COMMANDS = { open: 30 + SUBMISSION_SLOT_SWEEP_COMMANDS, sign: 1, done: 43, abort: 20 } as const;
+/** Store commands one start sends for the buyer's count (SUBMISSION_BUYER_OPEN): the EVAL, its HGET, HINCRBY and EXPIRE. */
+export const SUBMISSION_BUYER_OPEN_COMMANDS = 4;
+// Opening also counts the buyer's start in the store's window and, on the window's first start, takes the count's
+// bytes in the store's data room (one TAKE_DATA of one slot; Codex X6 on #3574).
+export const SUBMISSION_STEP_COMMANDS = {
+  open: 30 + SUBMISSION_SLOT_SWEEP_COMMANDS + SUBMISSION_BUYER_OPEN_COMMANDS + takeDataCommands(1),
+  sign: 1,
+  done: 43,
+  abort: 20,
+  /** The buyer's list (unit 5): their index, then a record and, for one not kept, its open upload, for each of their entries. */
+  mine: 1 + 2 * MAX_SUBMISSIONS_PER_PERSON,
+  /** A withdrawal (unit 5): the lock, the record, its growth in the data room, the write, the buyer's room slot set (settleBuyerRoom, 6), and the lock let go. */
+  withdraw: 18,
+} as const;
 /** Kept files the daily sweep deletes at most in one run; the rest wait for the next. */
 export const SUBMISSION_SWEEP_PER_RUN = 200;
 /** A file the sweep could not delete is tried again this much later, so it never holds back the files behind it. */
@@ -112,6 +130,8 @@ const liveKey = (folder: string, courseId: string, lessonId: string, who: string
   `nl:sub:live:${part(folder)}:${part(courseId)}:${part(lessonId)}:${part(who)}`;
 const doorKey = (folder: string, id: string) => `nl:sub:door:${part(folder)}:${part(id)}`;
 const whoKey = (folder: string, who: string) => `nl:sub:who:${part(folder)}:${part(who)}`;
+/** One buyer's upload starts in one store, one field a window (SUBMISSION_BUYER_OPEN; Codex X6 on #3574). */
+const opensKey = (folder: string, who: string) => `nl:sub:opens:${part(folder)}:${part(who)}`;
 const DUE_KEY = "nl:sub:due";
 const listKey = (folder: string, courseId: string) => `nl:sub:list:${part(folder)}:${part(courseId)}`;
 const listMember = (lessonId: string, id: string) => `${part(lessonId)}|${part(id)}`;
@@ -529,7 +549,77 @@ export type DoorAsk = {
 
 export type DoorOpened =
   | { ok: true; upload: OpenedUpload }
-  | { ok: false; reason: "busy" | "full" | "budget" | "room" | "pending" | "off" | "invalid" | "unavailable" };
+  | { ok: false; reason: "busy" | "full" | "budget" | "buyer_limit" | "room" | "pending" | "off" | "invalid" | "unavailable" };
+
+/**
+ * The upload starts one buyer may make in one store in one allowance window: a fifth of the plan's monthly upload
+ * starts (lib/upload-budget-policy.ts, PAID_UPLOAD_OPENS), rounded up (Codex X6 on #3574, MEDIUM; the coordinator's
+ * figure). Counted before the store's own allowance is asked and, like it, never given back: a buyer who opens and
+ * gives up again and again spends at most this share of the store's month, and is then told it is their own limit
+ * ("buyer_limit"), never that the store has no room.
+ */
+export const SUBMISSION_BUYER_OPENS: Readonly<Record<Tier, number>> = Object.freeze({
+  creator: Math.ceil(PAID_UPLOAD_OPENS.creator / 5),
+  pro: Math.ceil(PAID_UPLOAD_OPENS.pro / 5),
+  scale: Math.ceil(PAID_UPLOAD_OPENS.scale / 5),
+});
+/** Days the count outlives its window's end, so a late start in the window still finds it. */
+const OPENS_KEEP_EXTRA_SECONDS = 2 * 86_400;
+/**
+ * The buyer's count for one window and, on the window's first start, the count's bytes in the store's data room, in
+ * one step (Claude 2 upbeat on #3574, LOW): {1, 0} counted; {0, 0} the share is used, nothing counted or taken;
+ * {2, state} the room refused the count's bytes (state 0, full; -1, the room did not read), nothing counted; {-1, 0}
+ * the count does not read, nothing counted. A start already counted in the window, or refused, takes no more room,
+ * and a count is never made without its bytes (the room's own steps, TAKE_DATA, run inside as lib/creator-card.ts
+ * runs them). KEYS[1] the room, KEYS[2] the count. The first line names it for the local stand-in (lib/redis-memory.ts).
+ */
+const SUBMISSION_BUYER_OPEN = `-- marktmorgen:submission-buyer-open:v2
+local function room(limit, month, slot, size)
+  local KEYS = {KEYS[1]}
+  local ARGV = {limit, '0', month, 'a', slot, size}
+${TAKE_DATA}
+end
+local used = redis.call('HGET', KEYS[2], ARGV[1])
+local n = 0
+if used then n = tonumber(used) if not n or n < 1 or n ~= math.floor(n) then return {-1, 0} end end
+if n >= tonumber(ARGV[2]) then return {0, 0} end
+if n == 0 then
+  local taken = room(ARGV[4], ARGV[5], ARGV[6], ARGV[7])
+  if taken[1] ~= 1 then return {2, taken[1]} end
+end
+redis.call('HINCRBY', KEYS[2], ARGV[1], 1)
+redis.call('EXPIRE', KEYS[2], ARGV[3])
+return {1, 0}`;
+/** What the buyer's count weighs in the store's data room: its key with two windows' fields at their longest. */
+const OPENS_BYTES = (folder: string, who: string) => dataBytes([opensKey(folder, who), "2026-10-19", "99999", "2026-11-19", "99999"], 1);
+
+/**
+ * Counts one start of the buyer's in this store's window: "counted", "limit" (their share is used), "full" (the store's
+ * data room has no place for the count) or "unwindowed": the store has no allowance window, so nothing is counted here
+ * and the store's own allowance, which reserves only in a window (lib/upload-budget.ts), answers for it. The count's
+ * bytes are taken in the same step as the window's first start, until the count ends (SUBMISSION_BUYER_OPEN): a full
+ * room refuses before anything is counted, a refused or already counted start takes no more room, and no count is
+ * ever kept without its bytes. Anything not read exactly throws: nothing opens on a guess.
+ */
+async function countBuyerOpen(ask: DoorAsk): Promise<"counted" | "limit" | "full" | "unwindowed"> {
+  const window = allowanceWindow(ask.store, ask.nowSeconds * 1000);
+  if (!window) return "unwindowed";
+  const room = dataKey(ask.data);
+  if (!room) throw new UnknownReplyError("the store's data room");
+  const share = SUBMISSION_BUYER_OPENS[ask.store.tier];
+  const keepSeconds = Math.max(1, Math.ceil((window.end - ask.nowSeconds * 1000) / 1000)) + OPENS_KEEP_EXTRA_SECONDS;
+  const nowMs = ask.nowSeconds * 1000;
+  const reply = repliesFor(await redisPipeline([[
+    "EVAL", SUBMISSION_BUYER_OPEN, 2, room, opensKey(ask.folder, ask.who),
+    window.id, share, keepSeconds, contentRoomFor(ask.data, ask.nowSeconds), monthOf(nowMs),
+    `~${monthOf(Math.max((ask.nowSeconds + keepSeconds) * 1000, nowMs))}`, OPENS_BYTES(ask.folder, ask.who),
+  ]]), 1)?.[0];
+  const answer = Array.isArray(reply) && reply.length === 2 ? reply : null;
+  if (answer?.[0] === 1 && answer[1] === 0) return "counted";
+  if (answer?.[0] === 0 && answer[1] === 0) return "limit";
+  if (answer?.[0] === 2 && answer[1] === 0) return "full";
+  throw new UnknownReplyError("a buyer's upload starts");
+}
 
 /**
  * Opens the upload: the place's and the entry's bytes taken in the store's
@@ -593,6 +683,13 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
   }
   let opened: Awaited<ReturnType<typeof openReservedVault>> | null = null;
   try {
+    // The buyer's own share first (Codex X6 on #3574): past it, nothing of the store's allowance is asked.
+    const counted = await countBuyerOpen(ask);
+    if (counted === "limit" || counted === "full") {
+      await givePlace(place);
+      await giveBack();
+      return { ok: false, reason: counted === "limit" ? "buyer_limit" : counted };
+    }
     if (!(await steps.reserveStoreUpload(ask.store, ask.file.bytes, "r2"))) {
       await givePlace(place);
       await giveBack();
@@ -970,6 +1067,45 @@ async function readSubmissionRecord(folder: string, id: string): Promise<{ value
   }
 }
 
+/**
+ * A reply or a withdrawal lands in one step on the Redis side (Codex U, focal on #3574): only while the record is
+ * still the exact text read under the lock, and only while that lock is still ours. A request held up past its lock
+ * (a slow network, a paused function) can then never land over what the next holder wrote and confirmed. 1: written;
+ * 0: the record is gone (erased, or its time); -2: it changed since it was read; -1: the lock is no longer ours and
+ * nothing changed. The first line names it for the local stand-in (lib/redis-memory.ts).
+ */
+const SUBMISSION_MOVE = [
+  "-- marktmorgen:submission-move:v1",
+  'local now = redis.call("GET", KEYS[2])',
+  "if not now then return 0 end",
+  "if now ~= ARGV[2] then return -2 end",
+  'if redis.call("GET", KEYS[1]) ~= ARGV[1] then return -1 end',
+  'redis.call("SET", KEYS[2], ARGV[3], "XX", "EX", ARGV[4])',
+  'redis.call("ZREM", KEYS[3], ARGV[5])',
+  'if #KEYS == 4 then redis.call("ZADD", KEYS[4], ARGV[6], ARGV[7]) end',
+  "return 1",
+].join("\n");
+
+/**
+ * Writes `json` over the record read as `text`, fenced by `held` (SUBMISSION_MOVE), takes it off the live list and,
+ * for a withdrawal, puts its file on the sweep's list. "written", "gone" or "changed" are known; a lock lost with
+ * the record unchanged throws LockBusyError (nothing written, try again); any other reply throws, never said done.
+ */
+async function moveSubmission(
+  held: Held,
+  move: { key: string; text: string; json: string; seconds: number; live: string; liveMember: string; due?: { score: number; member: string } },
+): Promise<"written" | "gone" | "changed"> {
+  const keys = [held.key, move.key, move.live, ...(move.due ? [DUE_KEY] : [])];
+  const args = [held.token, move.text, move.json, move.seconds, move.liveMember, ...(move.due ? [move.due.score, move.due.member] : [])];
+  const replies = repliesFor(await redisPipeline([["EVAL", SUBMISSION_MOVE, keys.length, ...keys, ...args]]), 1);
+  const answer = replies?.[0];
+  if (answer === 1) return "written";
+  if (answer === 0) return "gone";
+  if (answer === -2) return "changed";
+  if (answer === -1) throw new LockBusyError("a submission's lock ran out before its write");
+  throw new UnknownReplyError("a submission's write");
+}
+
 // ------------------------------------------------------- the person's data
 
 /** Everything of one buyer's in a store, read exactly: their entries, at most MAX_SUBMISSIONS_PER_PERSON. */
@@ -1027,9 +1163,10 @@ export async function forgetSubmissionsPerson(
         ["DEL", recordKey(folder, entry.id)],
         ["DEL", doorKey(folder, entry.id)],
         ["ZREM", listKey(folder, entry.courseId), listMember(entry.lessonId, entry.id)],
-        // The file stays on the sweep's list, due at once (Claude 6 on #3570): the caller deletes it at the end of the
-        // erasure, but if that delete fails or never runs, this entry is its only durable reminder, and the next daily
-        // sweep deletes it. Deleting a file already gone is harmless, and the sweep's record DEL finds nothing.
+        // The file stays on the sweep's list, due at once (Claude 6 on #3570; Codex N1 and Codex X6 on #3574): the caller
+        // deletes it at the end of the erasure, but if that delete fails or never runs, this entry is its only durable
+        // reminder, and the next daily sweep deletes it. Deleting a file already gone is harmless, and the sweep's record
+        // DEL finds nothing.
         ...(pathname ? [["ZADD", DUE_KEY, nowSeconds, dueMember(folder, pathname)]] : []),
       ]),
       pathname ? 4 : 3,
@@ -1039,7 +1176,8 @@ export async function forgetSubmissionsPerson(
   }
   // Delete the doors again, after the live places went above (Claude 6 on #3570). A refused close or abort that put a
   // door back before those places were removed is undone here. Once the live place is gone, the put-back check refuses it.
-  const keys = entries.map((entry) => doorKey(folder, entry.id));
+  // And the buyer's count of upload starts in this store (Codex X6 on #3574): it names them.
+  const keys = [...entries.map((entry) => doorKey(folder, entry.id)), opensKey(folder, who)];
   // And their slots' turns on the store's list (review of #3568, Claude 6): each names the buyer, taken off with them.
   const turns = [...lessons].flatMap((at) => {
     const [courseId, lessonId] = at.split("|");
@@ -1310,5 +1448,170 @@ export async function replySubmission(
     if (replies[0] === 0) return { ok: false as const, reason: "gone" as const };
     if (replies[0] !== 1) throw new UnknownReplyError("a submission's reply");
     return { ok: true as const, submission: next };
+  });
+}
+
+// ------------------------------------------------------------ the buyer's own
+
+/**
+ * Bytes of the buyer's records one public request pays for (750 [CD1] unit
+ * 5): the size the private notes' download is paid at
+ * (lib/lesson-notes-rules.ts, NOTE_DOWNLOAD_BYTES_PER_UNIT), each a later
+ * page's price; tests/submission-buyer-cost.test.ts holds every count below
+ * what it pays.
+ */
+export const SUBMISSION_MINE_BYTES_PER_UNIT = 65_536;
+/** Public requests reading `records` of a buyer's records takes, beyond the one the request itself took: each at its largest. */
+export const mineUnits = (records: number) => Math.ceil((Math.max(0, records) * MAX_SUBMISSION_RECORD_BYTES) / SUBMISSION_MINE_BYTES_PER_UNIT);
+
+/** One of the buyer's own files on a lesson, as they are shown it: never their address, another buyer's, or a path but their own upload's. */
+export type MineRow =
+  | { id: string; state: "uploading"; file: SubmittedFile; at: number; pathname: string }
+  | {
+      id: string;
+      /** "unknown" when the kept state is none of the three: said, never guessed. */
+      state: SubmissionState | "unknown";
+      file: SubmittedFile;
+      note: string;
+      at: number;
+      keepUntil: number;
+      reply: { text: string; at: number } | null;
+    }
+  | { id: string; state: "unread" };
+
+const STATES: readonly string[] = ["submitted", "reviewed", "withdrawn"];
+
+/**
+ * The buyer's own files on one lesson, newest first, for the lesson page
+ * (750 [CD1] unit 5): their index read exactly, then, before any record is
+ * read, `pay` asked for the public requests the records take at their
+ * largest (mineUnits); refused, nothing more is read. Each record is read
+ * exactly; one that does not read is said ("unread", last), never left out;
+ * an upload still open is said as still sending, with its path so the buyer
+ * can give it up; an entry whose record and upload are both gone (its
+ * keeping time ended) is not shown.
+ */
+export async function buyerSubmissionsFor(
+  where: { folder: string; who: string; courseId: string; lessonId: string },
+  nowSeconds: number,
+  pay: (units: number) => Promise<boolean>,
+): Promise<{ ok: true; rows: MineRow[] } | { ok: false; reason: "resting" }> {
+  const entries = (await entriesOf(where.folder, where.who)).filter((entry) => entry.courseId === where.courseId && entry.lessonId === where.lessonId);
+  const units = mineUnits(entries.length);
+  if (units > 0 && !(await pay(units))) return { ok: false, reason: "resting" };
+  const rows: MineRow[] = [];
+  const unread: MineRow[] = [];
+  for (const entry of entries) {
+    let kept: KeptSubmission | null;
+    try {
+      kept = await readSubmission(where.folder, entry.id);
+      if (kept && (kept.who !== where.who || kept.target.kind !== "lesson" || kept.target.courseId !== where.courseId || kept.target.lessonId !== where.lessonId)) {
+        throw new UnknownReplyError("a buyer's submission");
+      }
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      unread.push({ id: entry.id, state: "unread" });
+      continue;
+    }
+    if (kept) {
+      rows.push({
+        id: kept.id,
+        state: STATES.includes(kept.state) ? kept.state : "unknown",
+        file: { name: String(kept.file?.name ?? ""), bytes: Number(kept.file?.bytes ?? 0), type: String(kept.file?.type ?? "") },
+        note: typeof kept.note === "string" ? kept.note : "",
+        at: kept.at,
+        keepUntil: kept.keepUntil,
+        reply: kept.reply ? { text: kept.reply.text, at: kept.reply.at } : null,
+      });
+      continue;
+    }
+    let door: Door | null;
+    try {
+      door = await readDoorById(where.folder, entry.id);
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      unread.push({ id: entry.id, state: "unread" });
+      continue;
+    }
+    if (door && door.who === where.who) rows.push({ id: door.id, state: "uploading", file: { name: door.name, bytes: door.bytes, type: door.type }, at: door.at, pathname: door.pathname });
+  }
+  rows.sort((a, b) => ("at" in b ? b.at : 0) - ("at" in a ? a.at : 0));
+  return { ok: true, rows: [...rows, ...unread] };
+}
+
+export type Withdrawn =
+  /** `deleted`: whether the vault confirmed its file deleted; when not, the file is due on the sweep's list from now. */
+  | { ok: true; submission: KeptSubmission; deleted: boolean }
+  | { ok: false; reason: "gone" | "state" | "expired" | "full" | "unavailable" };
+
+/**
+ * The buyer withdraws one of their own files still waiting for review (750
+ * [CD1] unit 5), once, under the same lock as the creator's reply, so the
+ * two never cross: the record read exactly and moved submitted -> withdrawn
+ * (applySubmissionEvent), its growth counted in the store's data room, then
+ * written back with the time it had left, with its file due on the sweep's
+ * list from now and the buyer's place on the lesson let go, all before any
+ * outside call (so a reply after it reads "withdrawn" and is refused). Then
+ * its file is deleted at the vault and taken off the sweep's list once the
+ * vault confirms it; `deleted` says whether it did, and a file it did not
+ * delete goes with the next sweep. Another buyer's, another lesson's, a
+ * reviewed one and one past its keeping time are refused.
+ */
+export async function withdrawSubmission(
+  input: { data: DataStore; folder: string; who: string; courseId: string; lessonId: string; id: string },
+  nowSeconds: number,
+  steps: Pick<DoorSteps, "deleteVault"> = VAULT_STEPS,
+): Promise<Withdrawn> {
+  if (!ID.test(input.id)) return { ok: false, reason: "gone" };
+  return withLock(replyLockKey(input.folder, input.id), 30, 5_000, async (held): Promise<Withdrawn> => {
+    const read = await readSubmissionRecord(input.folder, input.id);
+    const kept = read?.value;
+    if (!read || !kept || kept.who !== input.who || kept.target.kind !== "lesson" || kept.target.courseId !== input.courseId || kept.target.lessonId !== input.lessonId) {
+      return { ok: false, reason: "gone" };
+    }
+    const moved = applySubmissionEvent(kept, { event: "withdraw", actor: "buyer" }, nowSeconds);
+    if (!moved.ok) return { ok: false, reason: moved.reason === "expired" ? "expired" : "state" };
+    const next: KeptSubmission = { ...kept, ...moved.submission };
+    const json = submissionRecordJson(next);
+    if (json === null) throw new Error("submission_record_bytes");
+    const key = recordKey(input.folder, input.id);
+    const until = kept.keepUntil + SUBMISSION_SWEEP_GRACE_SECONDS;
+    const grown = dataBytes([key, json], 1) - dataBytes([key, JSON.stringify(kept)], 1);
+    if (grown > 0) {
+      const room = await takeData(input.data, [{ until: until * 1000, bytes: grown }], nowSeconds * 1000);
+      if (!room.ok) {
+        if (room.reason === "full") return { ok: false, reason: "full" };
+        throw new UnknownReplyError("the store's data room");
+      }
+    }
+    // The decision is kept first, inside the lock and with no outside call before it (review of #3574, Codex U): a
+    // reply that takes the lock after this reads "withdrawn" and is refused, so a reply the creator was told is kept
+    // is never overwritten, and its file never deleted from under it. The file is due on the sweep's list from now,
+    // so it goes even when the delete below does not.
+    // The write is fenced by the lock and the text read (moveSubmission, Codex U's focal): a withdrawal held up past its
+    // lock never lands over a reply the next holder confirmed, and its file is then never deleted from under it.
+    const member = dueMember(input.folder, kept.path);
+    const landed = await moveSubmission(held, {
+      key,
+      text: read.text,
+      json,
+      seconds: Math.max(1, until - nowSeconds),
+      live: liveKey(input.folder, kept.target.courseId, kept.target.lessonId, kept.who),
+      liveMember: kept.id,
+      due: { score: nowSeconds, member },
+    });
+    // Deleted since it was read (the buyer's erasure, or its time): nothing was written.
+    if (landed === "gone") return { ok: false, reason: "gone" };
+    // Changed by the next holder (a reply): nothing was written, and the file is not touched.
+    if (landed === "changed") return { ok: false, reason: "state" };
+    // The place is let go: the buyer's room slot comes down to what they still hold (review of #3568).
+    await settleBuyerRoom(input.data, { folder: input.folder, courseId: kept.target.courseId, lessonId: kept.target.lessonId, who: kept.who }, nowSeconds);
+    // Then the file: said deleted only when the vault confirmed it, and off the sweep's list only then.
+    const deleted = await steps.deleteVault([kept.path]).catch(() => false);
+    if (deleted) {
+      const off = await redisPipeline([["ZREM", DUE_KEY, member]]).then((answer) => repliesFor(answer, 1), () => null);
+      if (!off || countOf(off[0]) === null) console.error("a withdrawn submission's file is deleted, and stays on the sweep's list until the sweep finds it gone");
+    }
+    return { ok: true, submission: next, deleted };
   });
 }

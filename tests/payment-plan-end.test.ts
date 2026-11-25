@@ -23,7 +23,8 @@
  *     or none) decides nothing: it is never settled, so the job keeps the plan
  *     in its line of plans tried and asks again on its next pass.
  */
-import { addPeriods, finishPlan, rememberPlan, settlePlans } from "@/lib/plans";
+import { PUT_BACK_KEEP_DAYS, addPeriods, finishPlan, rememberPlan, settlePlans } from "@/lib/plans";
+import { PLAN_SETTLE_RUN } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -267,6 +268,137 @@ async function main(): Promise<void> {
   raw.clear();
 
   Date.now = trueNow;
+  part("A member's own cancel that lands between the read and the end being written is put back (Codex X5's MEDIUM on #3488)");
+  {
+    // finishPlan read the membership with no cancel_at, then the member pressed Cancel (lib/membership-manage.ts,
+    // cancelSoldEnd: cancel_at to the period's end, metadata cancel_requested_at), then finishPlan wrote the end that
+    // was sold over it. Stripe's answer carries the member's request it did not have when it read: the member's end
+    // is written back, and the plan is watched as one stopped early.
+    beforeEnds();
+    const periodEnd = ANCHOR + 30 * DAY;
+    const base = { id: "sub_race00000001", status: "active", billing_cycle_anchor: ANCHOR, trial_end: null, metadata: { store: "harbor", ends_after: "12", ends_interval: "month" }, items: { data: [{ current_period_end: periodEnd }] } };
+    sessions.cs_test_race00000001 = checkout("cs_test_race00000001", { ends_after: "12", ends_interval: "month" });
+    subscriptions.sub_race00000001 = { ...base };
+    const asked = String(ANCHOR + DAY - 60);
+    const before = updates.length;
+    Object.defineProperty(updateReplies, "sub_race00000001", {
+      configurable: true,
+      get: () => {
+        const last = updates[updates.length - 1]?.body.get("cancel_at");
+        return { ...base, cancel_at: Number(last), metadata: { ...base.metadata, cancel_requested_at: asked } };
+      },
+    });
+    const state = await finishPlan(ACCOUNT, "cs_test_race00000001");
+    const written = updates.slice(before).map((u) => u.body.get("cancel_at"));
+    const soldEnd = String(addPeriods(ANCHOR, "month", 12));
+    is("the end that was sold was written first, then the member's own end put back", written, [soldEnd, String(periodEnd)]);
+    is("watched as stopped early, not settled at the sold end", state, "early");
+    delete (updateReplies as Record<string, unknown>).sub_race00000001;
+    const asBefore = updates.length;
+    sessions.cs_test_race00000002 = checkout("cs_test_race00000002", { ends_after: "12", ends_interval: "month" });
+    subscriptions.sub_race00000002 = { ...base, id: "sub_race00000002", metadata: { ...base.metadata, cancel_requested_at: asked } };
+    await finishPlan(ACCOUNT, "cs_test_race00000002");
+    is("control: a request already there when it read (and taken back since) is not put back", updates.slice(asBefore).map((u) => u.body.get("cancel_at")), [soldEnd]);
+    Date.now = trueNow;
+  }
+
+  part("A put-back that Stripe did not confirm is written again on the next pass, never settled at the sold end (Claude 2's LEVE on #5367)");
+  {
+    // The same race, but the write of the member's end back is not confirmed (an answer for another object), and
+    // Stripe is left holding the end that was sold with the member's request. The first pass cannot settle it; the
+    // next one reads cancel_at at the sold end with a request already there, which alone it leaves alone (the control
+    // above), so the put-back still owed must be remembered where that pass reads it.
+    beforeEnds();
+    const periodEnd = ANCHOR + 30 * DAY;
+    const soldEnd = addPeriods(ANCHOR, "month", 12);
+    const asked = String(ANCHOR + DAY - 60);
+    const base = { id: "sub_race00000003", status: "active", billing_cycle_anchor: ANCHOR, trial_end: null, metadata: { store: "harbor", ends_after: "12", ends_interval: "month" }, items: { data: [{ current_period_end: periodEnd }] } };
+    const heldAtSoldEnd = { ...base, cancel_at: soldEnd, metadata: { ...base.metadata, cancel_requested_at: asked } };
+    sessions.cs_test_race00000003 = checkout("cs_test_race00000003", { ends_after: "12", ends_interval: "month" });
+    subscriptions.sub_race00000003 = { ...base };
+    const before = updates.length;
+    Object.defineProperty(updateReplies, "sub_race00000003", {
+      configurable: true,
+      // The first write (the sold end) answers with the member's request; the put-back answers for another object.
+      get: () => (updates.length - before === 1 ? heldAtSoldEnd : { id: "sub_other" }),
+    });
+    // Every Redis command a pass sends, to hold it to the registry (PLAN_SETTLE_RUN.putBackCommandsPerPlanTried).
+    const real = redis.pipeline.bind(redis);
+    let commands = 0;
+    redis.pipeline = (async (sent: (string | number)[][]) => {
+      commands += sent.length;
+      return real(sent);
+    }) as typeof redis.pipeline;
+    const first = await finishPlan(ACCOUNT, "cs_test_race00000003");
+    const firstCommands = commands;
+    is("first pass: the put-back is not confirmed, so nothing is settled", first, "unread");
+    const mark = "nl:plans:put-back:" + ACCOUNT + ":sub_race00000003";
+    const kept = Number(await real([["TTL", mark]]).then((r) => r[0]));
+    is("first pass: the member's end still owed is written down where the next pass reads it", (await real([["GET", mark]]))[0], String(periodEnd));
+    is("first pass: kept for a bounded time, through the member's end", kept > periodEnd - (ANCHOR + DAY) && kept <= PUT_BACK_KEEP_DAYS * DAY, true);
+    is("first pass: the sold end, then the member's end, were written", updates.slice(before).map((u) => u.body.get("cancel_at")), [String(soldEnd), String(periodEnd)]);
+    delete (updateReplies as Record<string, unknown>).sub_race00000003;
+    subscriptions.sub_race00000003 = { ...heldAtSoldEnd };
+    const again = updates.length;
+    commands = 0;
+    const second = await finishPlan(ACCOUNT, "cs_test_race00000003");
+    const secondCommands = commands;
+    redis.pipeline = real;
+    is("next pass: the member's end is written back first", updates.slice(again).map((u) => u.body.get("cancel_at")), [String(periodEnd)]);
+    is("next pass: Stripe now holds the member's end, not the sold end", subscriptions.sub_race00000003.cancel_at, periodEnd);
+    is("next pass: watched as stopped early, never settled as done at the sold end", second, "early");
+    is("next pass: the put-back confirmed, nothing is owed any more", (await real([["EXISTS", mark]]))[0], 0);
+    is("each pass's own Redis commands within the registry (PLAN_SETTLE_RUN.putBackCommandsPerPlanTried)", [firstCommands, secondCommands].every((n) => n <= PLAN_SETTLE_RUN.putBackCommandsPerPlanTried), true);
+    const third = updates.length;
+    const settled = await finishPlan(ACCOUNT, "cs_test_race00000003");
+    is("a pass after the confirmed put-back writes nothing more and keeps watching", [updates.length - third, settled], [0, "early"]);
+    Date.now = trueNow;
+  }
+
+  part("A put-back mark outliving its put-back never overrides the creator's later restore of the sold end (Claude 3's LEVE on #5367)");
+  {
+    // The put-back lands at Stripe but its answer is not confirmed, so its mark stays. The next pass finds the member's
+    // end in place (the confirmation the mark waits for) and takes the mark out. The creator then takes the member's
+    // cancel back in their own dashboard (the sold end again, the request metadata still there): with no mark left,
+    // the plan is settled at the sold end and left alone, as one whose request was already there (the control above).
+    beforeEnds();
+    const periodEnd = ANCHOR + 30 * DAY;
+    const soldEnd = addPeriods(ANCHOR, "month", 12);
+    const asked = String(ANCHOR + DAY - 60);
+    const base = { id: "sub_race00000004", status: "active", billing_cycle_anchor: ANCHOR, trial_end: null, metadata: { store: "harbor", ends_after: "12", ends_interval: "month" }, items: { data: [{ current_period_end: periodEnd }] } };
+    const withRequest = { ...base, metadata: { ...base.metadata, cancel_requested_at: asked } };
+    sessions.cs_test_race00000004 = checkout("cs_test_race00000004", { ends_after: "12", ends_interval: "month" });
+    subscriptions.sub_race00000004 = { ...base };
+    const before = updates.length;
+    Object.defineProperty(updateReplies, "sub_race00000004", {
+      configurable: true,
+      get: () => (updates.length - before === 1 ? { ...withRequest, cancel_at: soldEnd } : { id: "sub_other" }),
+    });
+    const first = await finishPlan(ACCOUNT, "cs_test_race00000004");
+    is("first pass: the put-back answer is not confirmed", first, "unread");
+    delete (updateReplies as Record<string, unknown>).sub_race00000004;
+    // The put-back did land: Stripe holds the member's end with the request.
+    subscriptions.sub_race00000004 = { ...withRequest, cancel_at: periodEnd };
+    const mark = "nl:plans:put-back:" + ACCOUNT + ":sub_race00000004";
+    const real = redis.pipeline.bind(redis);
+    let commands = 0;
+    redis.pipeline = (async (sent: (string | number)[][]) => {
+      commands += sent.length;
+      return real(sent);
+    }) as typeof redis.pipeline;
+    const second = await finishPlan(ACCOUNT, "cs_test_race00000004");
+    redis.pipeline = real;
+    is("next pass: the member's end in place, watched as stopped early", second, "early");
+    is("next pass: its one DEL within the registry (PLAN_SETTLE_RUN.putBackCommandsPerPlanTried)", commands <= PLAN_SETTLE_RUN.putBackCommandsPerPlanTried, true);
+    is("next pass: the member's end in place confirms the put-back, so its mark is taken out", (await redis.pipeline([["EXISTS", mark]]))[0], 0);
+    // The creator takes the member's cancel back: the sold end again, the request metadata still there.
+    subscriptions.sub_race00000004 = { ...withRequest, cancel_at: soldEnd };
+    const restored = updates.length;
+    const third = await finishPlan(ACCOUNT, "cs_test_race00000004");
+    is("after the creator restores the sold end: nothing written over it, settled", [updates.slice(restored).map((u) => u.body.get("cancel_at")), third], [[], "done"]);
+    Date.now = trueNow;
+  }
+
   done();
 }
 

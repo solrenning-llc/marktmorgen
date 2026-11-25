@@ -107,7 +107,7 @@ async function refundPass(): Promise<void> {
   ];
   for (const [label, page] of cases) {
     redis.run(["SET", anchorKey, String(before)]);
-    redis.run(["DEL", `nl:rev:refunds:seen:${store.statsId}`]);
+    redis.run(["DEL", `nl:rev:refunds:seenat:${store.statsId}`]);
     refunds = page;
     await markRefundedReviews(store, Date.now() + 30_000).catch(() => 0);
     is(`refunds answered ${label}: the anchor stays`, Number(redis.run(["GET", anchorKey])), before);

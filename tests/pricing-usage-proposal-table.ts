@@ -74,8 +74,10 @@ export function figuresBefore553(tier: Tier): Record<Printed, number[]> {
 export const PRICE_POINTS: Record<Tier, number[]> = {
   // 7_900 to 19_900 since 4 November 2026 (C4-4): with the private calendar feed's and the store readings' own cost lines, no point up to $69 reaches the share; looked at only, nothing proposed is in force.
   creator: [2_900, 3_500, 3_900, 4_900, 5_900, 6_900, 7_900, 8_900, 9_900, 12_900, 14_900, 16_900, 19_900],
-  pro: [9_900, 12_900, 14_900, 19_900, 24_900, 29_900, 44_900],
-  scale: [19_900, 24_900, 29_900, 34_900, 39_900, 49_900, 99_900],
+  // 49_900 since 22 November 2026 (#5092): with the review refund pass's fenced writes (Codex L-20261120-0838), $449 includes at most 9.99% on the year at ten; looked at only, nothing proposed is in force.
+  pro: [9_900, 12_900, 14_900, 19_900, 24_900, 29_900, 44_900, 49_900],
+  // 109_900 since 22 November 2026 (#5092): with the review refund pass priced, $999 includes at most 9.99% on the year at ten on today's main; looked at only, nothing proposed is in force.
+  scale: [19_900, 24_900, 29_900, 34_900, 39_900, 49_900, 99_900, 109_900],
 };
 /** The year at ten monthly payments. */
 export const yearOf = (monthCents: number) => monthCents * 10;

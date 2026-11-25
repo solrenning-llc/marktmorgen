@@ -67,6 +67,8 @@ import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { CERTIFICATE_PASS_EVERY_SECONDS, CERTIFICATE_REFUND_CHECKS_PER_MONTH, CERTIFICATE_REFUND_PAGES_PER_STORE, CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH } from "@/lib/certificate-refunds";
 import { LOST_DISPUTE_PAGES } from "@/lib/refunds";
+import { REVIEW_REFUND_BUSY_WAIT_SECONDS, REVIEW_REFUND_FAILED_MARKS_PER_MONTH, REVIEW_REFUND_PAGES, REVIEW_REFUND_PASS_EVERY_SECONDS, REVIEW_REFUND_PAYMENTS_PER_MONTH, REVIEW_REFUND_ROWS_PER_MONTH } from "@/lib/review-proof";
+import { REVIEW_REFUND_LOCK_WAIT_MS } from "@/lib/reviews";
 import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
 import { MAIL_CLICK_KEY_COMMANDS } from "@/lib/mail-clicks";
@@ -2072,7 +2074,7 @@ export const CERTIFICATE_TURN_READS = DAY_WINDOWS * 288;
 export const CERTIFICATE_TURN_BYTES = 128;
 /**
  * Commands of one pass, no row looked up, at the most: the store's turn (SET NX EX), the place's GET, the lost
- * disputes' place (GET, and its SET or DEL), one ZMSCORE of the rows handled for the lost disputes, one a page of
+ * disputes' place (GET, and its SET or DEL as one EVAL with the store's fence, its two reads first: Claude 1 coord's LEVE 33b7), one ZMSCORE of the rows handled for the lost disputes, one a page of
  * refunds and one to keep the disputes' place, the place's SET and ZREMRANGEBYSCORE, and the INCRBY and EXPIRE of
  * the month's checks a pass sends once when they are spent (focal review, L2)
  * (tests/certificate-refund-pass-cost.test.ts measures a pass under it).
@@ -2118,6 +2120,138 @@ export function certificatePassMonthUsd(tier: Tier): number {
   const checks = CERTIFICATE_REFUND_CHECKS_PER_MONTH[tier] * (CERTIFICATE_PASS_CHECK_COMMANDS * COMMAND + (MAX_PRODUCT_BYTES + 16_384) * DB_BYTE);
   const retries = CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH[tier] * CERTIFICATE_RETRY_TAKE_COMMANDS * COMMAND;
   return turns + runs + checks + retries;
+}
+
+
+/**
+ * The reviews' refund pass (lib/review-proof.ts markRefundedReviews, in the five-minute checkout sweep for every store
+ * paid through Stripe with a review): reads the refunds made on the creator's account since its last complete pass and
+ * marks every review a fully refunded payment paid for. Priced since 22/11/2026 (Claude 1 c1-revcusto on #5092: a
+ * spend with no line, MR). Until then it ran on every run of the sweep, 288 a day a store, re-reading the last thirty
+ * days' refunds and the lost disputes each time with one SISMEMBER a row.
+ *
+ * Runs a month at the most, on the store's turn (REVIEW_REFUND_PASS_EVERY_SECONDS): the days a billing month touches,
+ * and one more for a turn that lapses at its edge.
+ */
+export const REVIEW_REFUND_PASS_RUNS = Math.ceil((DAY_WINDOWS * 86_400) / REVIEW_REFUND_PASS_EVERY_SECONDS) + 1;
+/**
+ * The sweep reads every store's turn each run (one MGET a batch, a slot a store) and asks whether the store has a review
+ * (one SISMEMBER a store, as before the pace), 288 runs a day for the month's days; the store's own sweep (its
+ * revocations, reminders and confirmations) keeps its five-minute run whatever the turn says.
+ */
+export const REVIEW_REFUND_TURN_READS = DAY_WINDOWS * 288;
+/**
+ * Commands one store's turn read costs a run, at the most: its SISMEMBER and, in a batch of one store, the whole MGET
+ * (auditor 2's LEVE (b), 20261122T203956Z-claude-1-coord-a42f: priced at one before).
+ */
+export const REVIEW_REFUND_TURN_COMMANDS = 2;
+/** One store's slot in that MGET: its key asked and its turn answered. */
+export const REVIEW_REFUND_TURN_BYTES = 128;
+/**
+ * Commands one run of the pass sends outside its refunds, at the most: the turn's SET NX EX (one EVAL with the store's
+ * fence, its two reads first, and a GET reading a lost answer back: auditor 2's LEVE (c), a42f), the store's SISMEMBER
+ * (whether it has a review), the anchor's GET, the seen rows' trim below the window (ZREMRANGEBYSCORE), the lost
+ * disputes' place (GET, and its SET or DEL), one ZMSCORE a page of refunds (the rows already read and the payments
+ * marked, one command a page whatever the page holds), the month's rows a page as one EVAL with the store's fence
+ * (its two reads, INCRBY and EXPIRE) and the DECRBY that gives back what the page did not handle (one EVAL with the
+ * fence, three calls), one ZMSCORE of the lost disputes handled, the try of a payment past one of the month's ceilings
+ * (REVIEW_REFUND_CAPPED_TRY_COMMANDS), and the anchor's SET with the read refunds' EXPIRE as one EVAL with the store's
+ * fence, its two reads first (tests/review-refund-sweep-cost.test.ts measures a pass under it).
+ */
+/**
+ * Commands the try of a payment past one of the month's ceilings sends, made at every run while the ceiling is spent
+ * (11th triple audit on #5100, LEVE): its reviews' list read (HGET), the payment's take (one EVAL with the store's
+ * fence: its two reads, INCRBY and EXPIRE) and, past the failed marks' ceiling, the failure's take (the same), and the
+ * DECRBYs that give both back (each one EVAL with the fence, three calls). Measured by
+ * tests/review-refund-sweep-cost.test.ts (13th triple audit on #5100, LEVE 3).
+ */
+export const REVIEW_REFUND_CAPPED_TRY_COMMANDS = 1 + 5 + 5 + 4 + 4;
+export const REVIEW_REFUND_RUN_COMMANDS = (4 + 1) + 1 + 1 + 1 + (1 + 4) + REVIEW_REFUND_PAGES + 10 * REVIEW_REFUND_PAGES + 1 + REVIEW_REFUND_CAPPED_TRY_COMMANDS + 5;
+/** Stripe pages one run waits on, at the most: the refunds' and the lost disputes', each EXPORT_PAGE_SECONDS at 2 GB. */
+export const REVIEW_REFUND_RUN_PAGES = REVIEW_REFUND_PAGES + LOST_DISPUTE_PAGES;
+/** The ids asked and the flags answered for every row of those pages, at most 64 bytes each way. */
+export const REVIEW_REFUND_RUN_BYTES = 2 * 100 * REVIEW_REFUND_RUN_PAGES * 64;
+/**
+ * Billed commands one refunded payment costs outside its reviews: one of the month's payments taken and one of its
+ * failed marks taken (each INCRBY and EXPIRE as one EVAL with the store's fence, its two reads first:
+ * lib/live-fence.ts COUNT_IF_STORE_LIVE), the failure given back once the mark succeeded (DECRBY as one EVAL with the
+ * fence, three calls), its reviews' list (HGET) and the refund taken as seen with it (ZADD and EXPIRE as one EVAL with
+ * the fence, Codex L-20261120-0838).
+ */
+export const REVIEW_REFUND_PAYMENT_COMMANDS = 5 + 5 + 4 + 1 + 5;
+/**
+ * Commands one refund row of the month costs when it marks nothing, at the most (9th triple audit on #5100, point 2): a
+ * row of a payment with no review of ours (its reviews' list read, HGET, then ZADD and EXPIRE as one EVAL with the
+ * store's fence, its two reads first), a row of another charge on the creator's account, or the second part of a
+ * payment already marked. Every row not handled yet takes one of the store's REVIEW_REFUND_ROWS_PER_MONTH before it
+ * is handled; past them the pass stops where it is until next month.
+ */
+export const REVIEW_REFUND_ROW_COMMANDS = 1 + 5;
+/** Bytes one such row moves through the database: its id asked and flagged, and the reviews' list read (none). */
+export const REVIEW_REFUND_ROW_BYTES = 256;
+/**
+ * The tries of the product's lock one mark may send (lib/reviews.ts, locked: takeLock waited on 1.6 s, a SET NX a
+ * try; 11th triple audit on #5100, ALTO (b): the lock was priced as one SET), as the other lines price theirs
+ * (PAYPAL_PRESS_LOCK_TRIES, STORE_LOCK_TRIES).
+ */
+export const REVIEW_REFUND_LOCK_TRIES = lockTriesAtMost(REVIEW_REFUND_LOCK_WAIT_MS);
+/**
+ * Billed commands one review's mark costs, at the most (lib/reviews.ts markRefunded, creatorChange with "uncount"):
+ * the product's lock (SET NX, REVIEW_REFUND_LOCK_TRIES times when it is busy), the review's HGET, its write (HSET,
+ * ZREM, ZADD) with the AI summary's going (SET, ZREMRANGEBYSCORE) when it was counted, the product's numbers read
+ * (HGET) and kept (HSET) with the review taken off them (uncountRefunded: never the product's whole reviews, 9th
+ * triple audit on #5100, point 5), and the lock's release (an EVAL of three calls, billed four). Since the sweep's
+ * marks go through the store's fence (lib/live-fence.ts WRITE_IF_STORE_LIVE, Codex L-20261120-0838): the write and
+ * the numbers' HSET together as one EVAL with the fence's two reads (HGET, GET), three more (Claude 1 coord's cut B,
+ * 5636); the test counts the script's calls one by one (9th audit, point 3). The lock's tries are those of the sweep's
+ * shorter wait, REVIEW_REFUND_LOCK_WAIT_MS (cut A). The same test measures one mark under it, and counts the tries of
+ * a busy lock.
+ */
+export const REVIEW_REFUND_MARK_COMMANDS = REVIEW_REFUND_LOCK_TRIES + 1 + 5 + 2 + 4 + 3;
+/**
+ * Bytes one mark moves through the database, at the most: the review read and written again (a review at its largest,
+ * MAX_REVIEW_TEXT and a reply of MAX_REPLY_TEXT in four-byte characters, its name, MAX_REVIEW_PHOTOS paths and its
+ * ids, 9,104 bytes: tests/review-refund-sweep-cost.test.ts measures one) and the product's numbers read and written.
+ */
+export const REVIEW_REFUND_MARK_BYTES = 21 * 1_024;
+/**
+ * Billed commands one failed mark costs, at the most (a review busy at every try, or any other error after the
+ * payment's takes; lib/review-proof.ts REVIEW_REFUND_FAILED_MARKS_PER_MONTH, taken before each try): the payment's
+ * reviews listed (HGET), the payment's take and the failure's (each one EVAL with the store's fence: its two reads,
+ * INCRBY and EXPIRE), every one of its reviews at a whole mark (those before the one that failed are written in the
+ * try, and the payment's take is given back, so the marks term does not cover them; Claude 2 upbeat's LEVE on #5100
+ * @cf01736e7e), the payment's give-back (DECRBY as one EVAL with the fence, three calls) and the turn put off (SET EX
+ * as one EVAL with the fence, three calls). The same test measures a busy try with two reviews under it.
+ */
+export const REVIEW_REFUND_FAILED_MARK_COMMANDS = 1 + 5 + 5 + MAX_DELIVERED * REVIEW_REFUND_MARK_COMMANDS + 4 + 4;
+/**
+ * Commands the store page's "What buyers say" refresh costs once a pass that marked something (lib/store-quotes.ts
+ * refreshStoreQuotes): the newest reviews read (three commands and one HMGET a product among them), each product's
+ * listing, and the quotes kept under the store's lock. Measured by the same test.
+ */
+export const REVIEW_REFUND_QUOTES_COMMANDS = 60;
+/**
+ * The most the pass costs one store on a plan in a month, in dollars: its turns read (the slot's bytes and the store's
+ * SISMEMBER each run), its runs (commands, the Stripe
+ * pages waited on, the rows' bytes, and the quotes' refresh once a run), every payment of the month refunded (MR:
+ * all of its orders, each with the most products an order hands over and a review of each), its reviews marked, and
+ * the tries a busy review may cost. The two ceilings are counted in the store's billing month (lib/review-proof.ts
+ * monthOf: lib/allowance-window.ts windowId, as every other allowance of the plan), so each is priced once, as the
+ * header above says (11th triple audit on #5100, ALTO (a): counted by the calendar month, each touched two in one
+ * billing month and was priced at one).
+ */
+export function reviewRefundSweepMonthUsd(tier: Tier): number {
+  const turns = REVIEW_REFUND_TURN_READS * (REVIEW_REFUND_TURN_COMMANDS * COMMAND + REVIEW_REFUND_TURN_BYTES * DB_BYTE);
+  const runs = REVIEW_REFUND_PASS_RUNS * ((REVIEW_REFUND_RUN_COMMANDS + REVIEW_REFUND_QUOTES_COMMANDS) * COMMAND + REVIEW_REFUND_RUN_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND + REVIEW_REFUND_RUN_BYTES * DB_BYTE);
+  // The month's payments marked at a mark's full cost: REVIEW_REFUND_PAYMENTS_PER_MONTH is the plan's orders, and a
+  // ceiling the pass counts before each mark (10th triple audit on #5100), not only what the plan's orders suggest.
+  const marks = REVIEW_REFUND_PAYMENTS_PER_MONTH[tier] * ((REVIEW_REFUND_PAYMENT_COMMANDS + MAX_DELIVERED * REVIEW_REFUND_MARK_COMMANDS) * COMMAND + MAX_DELIVERED * REVIEW_REFUND_MARK_BYTES * DB_BYTE);
+  // Every row of the month's ceiling, beside the payments marked: repeated parts, rows with no review, other charges.
+  const rows = REVIEW_REFUND_ROWS_PER_MONTH[tier] * (REVIEW_REFUND_ROW_COMMANDS * COMMAND + REVIEW_REFUND_ROW_BYTES * DB_BYTE);
+  // The month's failed marks, each a whole failed try: counted before the try, so a deferral that did not land costs
+  // no more (13th triple audit on #5100).
+  const busy = REVIEW_REFUND_FAILED_MARKS_PER_MONTH * (REVIEW_REFUND_FAILED_MARK_COMMANDS * COMMAND + MAX_DELIVERED * REVIEW_REFUND_MARK_BYTES * DB_BYTE);
+  return turns + runs + marks + rows + busy;
 }
 
 /** CX-61: two bounded provider reads, independent of released-name history.
@@ -2337,6 +2471,22 @@ export const COST_LINES: CostLine[] = [
       { file: "vercel.json", names: ["/api/cron/mail", "*/5 * * * *"] },
     ],
     basis: "One store on a plan, a calendar month of DAY_WINDOWS days (the pass runs for any store paid through Stripe with a course, whatever its plan). Every run of the five-minute sweep reads the turns of its batch of stores in one MGET (a company fixed cost of the sweep, one command a batch whatever the number of stores), of which a store's share is CERTIFICATE_TURN_BYTES; a store whose pass is not due costs no command of its own. At most CERTIFICATE_PASS_RUNS passes, one each CERTIFICATE_PASS_EVERY_SECONDS (the store's turn, SET NX EX), at CERTIFICATE_PASS_RUN_COMMANDS and CERTIFICATE_PASS_RUN_BYTES each (CERTIFICATE_REFUND_PAGES_PER_STORE GET /refunds and LOST_DISPUTE_PAGES GET /events, Stripe bills no API call). No look at the store's courses: only the courses a refunded checkout gave are read. Every row looked up (at most CERTIFICATE_REFUND_LOOKUPS_PER_STORE a pass: 2 GET /refunds?charge and 1 GET /checkout/sessions, and the buyer's checkouts as courseStandingFor reads them) asks Stripe only until a course its checkout gave is read: each such course takes one of the plan's CERTIFICATE_REFUND_CHECKS_PER_MONTH before anything is read for it, and each row one before it is marked handled, each at CERTIFICATE_PASS_CHECK_COMMANDS and a listing and 16 KB of records; past them the pass waits for the next month at that row. A row that took its checks and was left unknown waits its age, between CERTIFICATE_REFUND_RETRY_SECONDS and CERTIFICATE_REFUND_RETRY_MAX_SECONDS, before it takes any again; it is tried again after every row read for the first time in the pass, and takes its checks from the month's checks, its first take in the pass also counted in the part of them kept for rows tried again (CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH, let through only while it is not spent before it), each such take at CERTIFICATE_RETRY_TAKE_COMMANDS; past that part it waits for the next month. The pass's time is inside CERTIFICATE_REFUND_PASS_MS of the sweep's run, whose schedule bounds it (a company fixed cost). Each reply read in its exact shape.",
+  },
+  {
+    id: "review-refund-sweep",
+    feature: "Reviews marked as refunded when their payment is given back: the checkout sweep's pass on the creator's refunds and lost disputes (Claude 1 c1-revcusto on #5092, 22/11/2026)",
+    monthlyUsd: (tier) => reviewRefundSweepMonthUsd(tier),
+    sources: [
+      { file: "lib/review-proof.ts", names: ["REVIEW_REFUND_PASS_EVERY_SECONDS", "REVIEW_REFUND_BUSY_WAIT_SECONDS", "REVIEW_REFUND_PAGES", "REVIEW_REFUND_ROWS_PER_MONTH", "REVIEW_REFUND_PAYMENTS_PER_MONTH", "reviewPassesDue", "takeReviewPass", "deferWhileLive", "REVIEW_REFUND_FAILED_MARKS_PER_MONTH", "markRefundedReviews", "windowId(store)", "ZMSCORE", "ZREMRANGEBYSCORE", "countWhileLive", "giveBackWhileLive", "refreshStoreQuotes(store)"] },
+      { file: "lib/reviews.ts", names: ["markRefunded", "creatorChange", "uncountRefunded", "payMembers"] },
+      { file: "lib/checkout-sweep.ts", names: ["reviewPassesDue(stores.slice(skip))", "takeReviewPass(store)", "markRefundedReviews(store, deadline)"] },
+      { file: "lib/refunds.ts", names: ["LOST_DISPUTE_PAGES", "confirmLostRead", "ZMSCORE"] },
+      { file: "lib/bundle-rules.ts", names: ["MAX_DELIVERED"] },
+      { file: "lib/order-rules.ts", names: ["ORDERS_INCLUDED"] },
+      { file: "app/api/cron/mail/route.ts", names: ["sweepCheckouts"] },
+      { file: "vercel.json", names: ["/api/cron/mail", "*/5 * * * *"] },
+    ],
+    basis: "One store on a plan, a billing month of DAY_WINDOWS days (the pass runs for any store paid through Stripe with a review, whatever its plan). Every run of the five-minute sweep reads the turns of its batch of stores in one MGET (a slot a store, REVIEW_REFUND_TURN_BYTES). A store's pass runs on its turn, held REVIEW_REFUND_PASS_EVERY_SECONDS, so REVIEW_REFUND_PASS_RUNS times a month at the most; each run sends REVIEW_REFUND_RUN_COMMANDS commands outside its refunds, waits on REVIEW_REFUND_RUN_PAGES Stripe pages at EXPORT_PAGE_SECONDS each, moves REVIEW_REFUND_RUN_BYTES through the database, and refreshes the store page's quotes once when it marked something (REVIEW_REFUND_QUOTES_COMMANDS, counted on every run). The worst month (MR) marks every payment the month's ceiling allows (REVIEW_REFUND_PAYMENTS_PER_MONTH, the plan's orders, ORDERS_INCLUDED, counted before each mark), each paid for the most products an order hands over (MAX_DELIVERED) with a review of each, and handles every row of the month's ceiling besides (REVIEW_REFUND_ROWS_PER_MONTH, each REVIEW_REFUND_ROW_COMMANDS and REVIEW_REFUND_ROW_BYTES: the parts of a payment after the first, rows of payments with no review, other charges on the account), past which the pass stops until next month (9th triple audit on #5100): a payment costs REVIEW_REFUND_PAYMENT_COMMANDS and each of its reviews REVIEW_REFUND_MARK_COMMANDS (the product's lock at REVIEW_REFUND_LOCK_TRIES tries) and REVIEW_REFUND_MARK_BYTES. Both ceilings count in the store's billing month (windowId), so each is spent and priced once a month. A mark that fails after its payment was taken (a review busy at every try, or any other error) takes one of the month's REVIEW_REFUND_FAILED_MARKS_PER_MONTH before the try, keeps it, and puts the pass off REVIEW_REFUND_BUSY_WAIT_SECONDS; each is priced at REVIEW_REFUND_FAILED_MARK_COMMANDS, every review of the payment at a whole mark (11th and 13th triple audits on #5100). No Stripe fee for a read is charged today; the Stripe endpoint tariff stays unknown (not certified zero), as for every other Stripe read in this registry.",
   },
   {
     id: "platform-subscription-search",

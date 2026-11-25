@@ -38,6 +38,25 @@ end
 redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
 return 1`;
 
+// The same identity rule, for a count of the month (lib/review-proof.ts, the rows handled and the payments marked):
+// INCRBY by ARGV[2] and EXPIRE ARGV[3], only while the store is live, the count after it answered. 0: gone or erasing,
+// nothing written (a count is never 0 after an INCRBY of at least one on a count never below zero); -1: the owner's
+// record could not be read (10th triple audit on #5092, LEVE 5).
+export const COUNT_IF_STORE_LIVE = `-- marktmorgen:store-count-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[4] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[5] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[4] then return 0 end
+end
+local count = redis.call("INCRBY", KEYS[3], tonumber(ARGV[2]))
+redis.call("EXPIRE", KEYS[3], ARGV[3])
+return count`;
+
 // The same identity rule as SET_IF_STORE_LIVE, for a line pushed onto a bounded list that is renewed as a whole
 // (lib/store-assistant.ts, the questions the assistant could not answer): LPUSH, LTRIM to ARGV[6] lines and EXPIRE,
 // only while the store is live (Codex L-20261120-2338). 0: gone or erasing, nothing written; -1: the owner's record
@@ -66,6 +85,58 @@ export async function setIfStoreLive(fence: StoreLiveFence, key: string, value: 
   if (!isRedisConfigured()) return "unknown";
   if (fence.statsId === null) return "unknown";
   const replies = repliesFor(await redisPipeline([["EVAL", SET_IF_STORE_LIVE, 3, fence.live, fence.erasing, key, fence.field, value, seconds, fence.statsId, fence.ref]]), 1);
+  const answer = replies?.[0];
+  return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
+}
+
+/** One command of a fenced step: a key is written as `{ key }`, so the step declares every key it touches. */
+export type FencedCommand = (string | number | { key: string })[];
+
+// The same identity rule as SET_IF_STORE_LIVE, for several writes made together only while the store is live: the
+// review a refund sweep marks, with its indexes and the product's numbers (lib/reviews.ts creatorChange; Codex
+// L-20261120-0838). ARGV[4] lists the commands as JSON; an argument written as {"k": n} stands for KEYS[n], so every
+// key the step touches is declared (KEYS[1] and KEYS[2] are the fence's, the commands' keys follow). 0: gone or
+// erasing, nothing written; -1: the owner's record could not be read, nothing written; 1: every command ran.
+export const WRITE_IF_STORE_LIVE = `-- marktmorgen:store-write-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[2] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[3] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[2] then return 0 end
+end
+for _, command in ipairs(cjson.decode(ARGV[4])) do
+  for i, part in ipairs(command) do
+    if type(part) == "table" then command[i] = KEYS[part["k"]] end
+  end
+  redis.call(unpack(command))
+end
+return 1`;
+
+/**
+ * Runs `commands` together, in one step, while the fenced store is live: "kept"; "gone" when its erasure has begun
+ * or its record is gone, and then nothing is written; "unknown" for any other answer (nothing known to be written).
+ * Billed as one command plus the fence's two reads plus one for each command.
+ */
+export async function writeIfStoreLive(fence: StoreLiveFence, commands: FencedCommand[]): Promise<"kept" | "gone" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  if (fence.statsId === null) return "unknown";
+  const keys: string[] = [];
+  const encoded = commands.map((command) =>
+    command.map((part) => {
+      if (typeof part !== "object") return part;
+      let at = keys.indexOf(part.key);
+      if (at < 0) at = keys.push(part.key) - 1;
+      return { k: at + 3 };
+    }),
+  );
+  const replies = repliesFor(
+    await redisPipeline([["EVAL", WRITE_IF_STORE_LIVE, 2 + keys.length, fence.live, fence.erasing, ...keys, fence.field, fence.statsId, fence.ref, JSON.stringify(encoded)]]),
+    1,
+  );
   const answer = replies?.[0];
   return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
 }
@@ -113,4 +184,20 @@ export async function pushIfStoreLive(fence: StoreLiveFence, key: string, value:
   const replies = repliesFor(await redisPipeline([["EVAL", PUSH_IF_STORE_LIVE, 3, fence.live, fence.erasing, key, fence.field, value, seconds, fence.statsId, fence.ref, most]]), 1);
   const answer = replies?.[0];
   return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
+}
+
+/**
+ * Adds `n` (at least one) to the count under `key`, kept `seconds`, while the fenced store is live: the count after it;
+ * "gone" when its erasure has begun or its record is gone, and then nothing is written; "unknown" for any other
+ * answer (nothing known to be written).
+ */
+export async function countIfStoreLive(fence: StoreLiveFence, key: string, n: number, seconds: number): Promise<number | "gone" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  if (fence.statsId === null) return "unknown";
+  if (!Number.isSafeInteger(n) || n < 1) return "unknown";
+  const replies = repliesFor(await redisPipeline([["EVAL", COUNT_IF_STORE_LIVE, 3, fence.live, fence.erasing, key, fence.field, n, seconds, fence.statsId, fence.ref]]), 1);
+  const answer = replies?.[0];
+  const count = typeof answer === "number" ? answer : typeof answer === "string" && /^-?\d+$/.test(answer) ? Number(answer) : null;
+  if (count === null || !Number.isSafeInteger(count)) return "unknown";
+  return count === 0 ? "gone" : count < 0 ? "unknown" : count;
 }

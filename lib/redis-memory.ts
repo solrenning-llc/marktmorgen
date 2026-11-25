@@ -169,6 +169,10 @@ export class MemoryRedis {
     if (Array.isArray(held) && (held.length === 0 || typeof held[0] === "object")) {
       return held as { score: number; member: string }[];
     }
+    // Real Redis answers WRONGTYPE for a sorted-set command against a key of another kind (a set, a hash, a string,
+    // a list); here it used to put an empty sorted set in its place (Claude 2 lpgvy on #5100: a key main wrote as a
+    // set, read as a sorted set, stopped the reviews' refund pass on a real Redis while every test passed).
+    if (held !== undefined) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
     const made: { score: number; member: string }[] = [];
     this.data.set(key, made);
     this.made.add(key);

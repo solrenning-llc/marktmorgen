@@ -342,7 +342,12 @@ const CURSOR_SECONDS = 30 * 86_400;
  * newest closing of the whole sweep, whether it went on from a place kept
  * by an earlier run, and `commit`, which keeps the place for the next run.
  */
-export type LostRead = { rows: GivenBackRow[]; complete: boolean; newest: number; resumed: boolean; commit: () => Promise<void> };
+export type LostRead = { rows: GivenBackRow[]; complete: boolean; newest: number; resumed: boolean; commit: (write?: PlaceWriter) => Promise<void> };
+/**
+ * Writes the place's one command: by default a plain pipeline; a job that must not write for a store being erased
+ * passes its own, through the store's fence (lib/review-proof.ts, Claude 1 coord's LEVE 33b7 on #5092).
+ */
+export type PlaceWriter = (commands: (string | number)[][]) => Promise<unknown>;
 
 /**
  * Keeps a job's place in the lost disputes only when every row it read was
@@ -350,13 +355,16 @@ export type LostRead = { rows: GivenBackRow[]; complete: boolean; newest: number
  * a row passed over for the run's lookups, its time or an error leaves the
  * place where it was, and the next run reads it again. True when kept.
  */
-export async function confirmLostRead(read: LostRead, seenKey: string): Promise<boolean> {
+export async function confirmLostRead(read: LostRead, seenKey: string, kept: "set" | "sorted" = "set", write?: PlaceWriter): Promise<boolean> {
   const ids = read.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
   if (ids.length) {
-    const [flags] = await redisPipeline([["SMISMEMBER", seenKey, ...ids]]);
-    if (!Array.isArray(flags) || flags.length !== ids.length || flags.some((flag) => Number(flag) !== 1)) return false;
+    // The job's handled rows: a set (SMISMEMBER, 1 each) or, for the reviews' job, a sorted set scored by the row's
+    // time (ZMSCORE, a score each, never null).
+    const [flags] = await redisPipeline([[kept === "sorted" ? "ZMSCORE" : "SMISMEMBER", seenKey, ...ids]]);
+    if (!Array.isArray(flags) || flags.length !== ids.length) return false;
+    if (kept === "sorted" ? flags.some((flag) => flag === null || flag === undefined) : flags.some((flag) => Number(flag) !== 1)) return false;
   }
-  await read.commit();
+  await read.commit(write);
   return true;
 }
 
@@ -396,8 +404,8 @@ export async function lostDisputesSince(
       complete,
       newest,
       resumed: kept.after !== "",
-      commit: async () => {
-        if (place) await redisPipeline([place]);
+      commit: async (write: PlaceWriter = (commands) => redisPipeline(commands)) => {
+        if (place) await write([place]);
       },
     };
   };

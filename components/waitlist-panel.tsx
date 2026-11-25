@@ -42,7 +42,7 @@ function dayWords(day: string): string {
   return new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
-type WaitlistAnswer = { ok: boolean; error?: string; view?: WaitlistView; viewsUnread?: boolean };
+type WaitlistAnswer = { ok: boolean; error?: string; message?: string; view?: WaitlistView; viewsUnread?: boolean };
 
 async function post(payload: Record<string, unknown>): Promise<WaitlistAnswer> {
   try {
@@ -118,6 +118,9 @@ export function WaitlistPanel({
     setBusy(false);
     if (answer.ok && answer.view) setView(answer.view);
     else if (answer.ok && answer.viewsUnread) setSaved(true);
+    // A launch of a long list takes studio requests for what it reads (#5010 row 149): refused, the server's own words
+    // say how many are left and when they come back.
+    else if (answer.error === "studio_used" && answer.message) setError(answer.message);
     else setError(MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error ?? "Something went wrong. Try again.");
     return answer.ok;
   }

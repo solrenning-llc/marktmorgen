@@ -1342,6 +1342,24 @@ export class MemoryRedis {
           this.scriptCalls += 1;
           return 1;
         }
+        // lib/waitlist.ts WAITLIST_COUNT: a waitlist's confirmed and waiting places counted where they are kept (#5010 row 149);
+        // a value that is not an object with a text `t` is neither, and `ok` reads as Number(ok) || 0 (true as 1).
+        if (key.startsWith("-- marktmorgen:waitlist-count:v1\n") && args[0] === "1" && args.length === 2) {
+          const all = this.run(["HGETALL", args[1]]) as string[];
+          this.scriptCalls += 1;
+          let confirmed = 0;
+          let waiting = 0;
+          for (let i = 1; i < all.length; i += 2) {
+            let place: unknown;
+            try { place = JSON.parse(all[i]); } catch { continue; }
+            if (!place || typeof place !== "object" || typeof (place as { t?: unknown }).t !== "string") continue;
+            const raw = (place as { ok?: unknown }).ok;
+            const ok = raw === true ? 1 : typeof raw === "number" || typeof raw === "string" ? Number(raw) || 0 : 0;
+            if (ok > 0) confirmed += 1;
+            else if (ok === 0) waiting += 1;
+          }
+          return [confirmed, waiting];
+        }
         // lib/waitlist.ts WAIT_JOIN: a join's place written only while its product is still coming soon (#4462).
         // -1 when no longer coming soon; "" as the place read writes only if still absent (HSETNX), else only over it.
         if (key.startsWith("-- marktmorgen:waitlist-join:v2\n") && args[0] === "2" && args.length === 7) {

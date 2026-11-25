@@ -55,6 +55,27 @@ export const BENEFIT_STRIPE_PAGES = 10;
  */
 export const BENEFIT_PAGE_UNITS = 6;
 
+/** Characters in the address written on a mark: the sign-in address's own cap (lib/auth.ts, MAX_EMAIL_LENGTH). */
+export const MARK_BY_MAX = 254;
+/**
+ * Whether an address may be written on a mark as who gave it (audit cd8d; coordinator 0b58, then cd33): what sign-in
+ * accepts (an address of one to MARK_BY_MAX UTF-16 units, no whitespace), less what costs more on the wire. A mark is
+ * read back as a JSON string inside the database's JSON reply, so a control character (C0, DEL or C1) or a lone
+ * surrogate costs up to 7 bytes, a quote or a backslash 4, and <, > and & 6 under an HTML-safe encoder (Claude 2
+ * upbeat on #5123); those are refused. Accented letters, ideographs and the rest still mark (Claude 7 3uv on #5123),
+ * and the dearest of them is 3 bytes for one UTF-16 unit, the bound BENEFIT_MARK_VALUE_BYTES
+ * (tests/plan-cost-registry.ts) is built on.
+ */
+export function markableBy(by: string): boolean {
+  return (
+    by.length >= 1 &&
+    by.length <= MARK_BY_MAX &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(by) &&
+    !/[\u0000-\u001F\u007F-\u009F"\\<>&]/.test(by) &&
+    !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(by)
+  );
+}
+
 export const CADENCES = ["once", "monthly"] as const;
 export type Cadence = (typeof CADENCES)[number];
 export const CADENCE_NAMES: Record<Cadence, string> = { once: "Once", monthly: "Every month" };

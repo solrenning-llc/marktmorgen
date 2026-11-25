@@ -1617,6 +1617,17 @@ export function readShapeCost(shape: ReadShape): number {
 export const RECEIPT_BATCH_COST = readShapeCost(RECEIPT_BATCH_SHAPE);
 
 /**
+ * One payment request's refunds read on their own at the most (lib/payment-requests.ts, checkRequestRefunds;
+ * C1-20261108-0315-C4-30): the route's own studio request with its commands (the record, the kept reading, the
+ * limiter's two, the studio requests taken, the record written under its lock and the reading kept, inside
+ * 20 + 2 * TAKE_COMMANDS), and one Stripe page of up to a hundred refunds (STRIPE_PAGE_BYTES worked through)
+ * waited on for its whole timeout (STRIPE_TIMEOUT_MS) at 2 GB. Paid as the route's studio request and
+ * REFUND_CHECK_UNITS more, taken before Stripe is asked (tests/plan-cost-registry.test.ts holds it); a check the kept
+ * reading answers asks Stripe nothing. Stripe bills no read call.
+ */
+export const REFUND_CHECK_READ = request("studio", 20 + 2 * TAKE_COMMANDS, 50_000) + (STRIPE_TIMEOUT_MS / 1000) * MEMORY_SECOND + perMegabyte(STRIPE_PAGE_BYTES);
+
+/**
  * One reading of Marktmorgen Path's money and counts (lib/path.ts, visitPath):
  * the numbers' all-time record at LIFE_WRITE_MAX fields of up to 96 bytes
  * each with the path's own record, the links counted, the record written,
@@ -3183,6 +3194,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/path-reminder.ts", names: ["sendPathReminder", "PATH_REMINDER_UNITS"] },
       { file: "lib/path-facts.ts", names: ["PATH_SALE_PAGES", "PATH_REFUND_PAGES", "PATH_MONEY_SECONDS"] },
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
+      // A payment request past the refund list's pages has its own refunds read when the creator asks: REFUND_CHECK_UNITS studio requests first, at most REFUND_CHECKS_PER_MINUTE a minute, a whole reading kept REFUND_CHECK_SECONDS (C1-20261108-0315-C4-30).
+      { file: "lib/payment-requests.ts", names: ["REFUND_CHECK_UNITS", "REFUND_CHECKS_PER_MINUTE", "countStudio(store, null, REFUND_CHECK_UNITS)", "\"payreq-refunds\""] },
+      { file: "lib/payment-request-refund-cache.ts", names: ["REFUND_CHECK_SECONDS"] },
       // A removed membership's invitations from an import: a page of the store's invitations per studio request, paid first.
       // The first is taken before the removal, where the membership is noted among those whose invitations wait to be deleted
       // (Claude 3, MEDIUM on #3473): the note's SISMEMBER, SCARD and SADD, then the mark, the count, the first page and the
@@ -4387,6 +4401,8 @@ export const SCOPES: Record<string, ScopeClass> = {
   "<dynamic:scope>": guard("withinStore and withinService pass their scope on to withinLimit (lib/metered-limits.ts)."),
   "<dynamic:scope: string>": guard("The definitions of withinLimit, withinMonth, withinStore and withinService themselves (lib/request-guard.ts, lib/metered-limits.ts)."),
   api: line("rest-api"), "studio-essential": line("studio"), "studio-paused": line("studio"), "bundle-picker": line("studio"),
+  // One payment request's refunds read on their own (lib/payment-requests.ts, checkRequestRefunds): REFUND_CHECKS_PER_MINUTE a store, each after REFUND_CHECK_UNITS studio requests.
+  "payreq-refunds": BURST("studio"),
   // The studio's one search box (766 [STN13]): its counters, checked before the search's STUDIO_SEARCH_UNITS studio requests are taken and counted inside them when it is answered.
   "studio-search": BURST("studio"), "studio-search-day": BURST("studio"),
   // Sign-in and account security.

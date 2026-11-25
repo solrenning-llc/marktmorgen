@@ -18,3 +18,26 @@ export function paymentRequestReply(httpOk: boolean, value: unknown, action: Req
   }
   return { ok: true };
 }
+
+/** What the studio shows for one request's refunds read on their own (action "refunds"). */
+export type RefundCheckReply = { checked: true; state: "paid" | "refunded"; refunded: number } | { checked: false; message: string };
+
+/** Said when the answer itself could not be read: never a check, never 0 refunded. */
+export const REFUND_CHECK_UNREAD = "Refunds were not checked: the answer could not be read. Try again in a minute, or look the payment up in your Stripe dashboard.";
+
+/**
+ * The route's answer to a refund check, only when it is exactly what the
+ * route sends: an HTTP error, a missing or odd field, or a state other than
+ * paid or refunded is not checked, with the route's own sentence when it
+ * gave one.
+ */
+export function refundCheckReply(httpOk: boolean, value: unknown): RefundCheckReply {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { checked: false, message: REFUND_CHECK_UNREAD };
+  const data = value as Record<string, unknown>;
+  const own = (key: string) => Object.prototype.hasOwnProperty.call(data, key);
+  const message = own("message") && typeof data.message === "string" && data.message.trim() ? data.message.trim().slice(0, 600) : REFUND_CHECK_UNREAD;
+  if (!httpOk || !own("ok") || data.ok !== true || !own("checked") || data.checked !== true) return { checked: false, message };
+  if (!own("state") || (data.state !== "paid" && data.state !== "refunded")) return { checked: false, message: REFUND_CHECK_UNREAD };
+  if (!own("refunded") || !Number.isSafeInteger(data.refunded) || (data.refunded as number) < 0) return { checked: false, message: REFUND_CHECK_UNREAD };
+  return { checked: true, state: data.state, refunded: data.refunded as number };
+}

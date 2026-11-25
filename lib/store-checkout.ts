@@ -1417,12 +1417,12 @@ export async function listSales(store: Store): Promise<SaleList> {
   const titles = new Map((await listingsNamedIn(store, rows)).map((p) => [p.id, p.title]));
   // Sales made under an address the store used before are still its sales.
   const handles = saleHandles(store);
-  const sales = rows
-    .filter(
-      (row) =>
-        isSettled(row) &&
-        handles.has(row.metadata?.store ?? ""),
-    )
+  const settled = rows.filter((row) => isSettled(row) && handles.has(row.metadata?.store ?? ""));
+  // A sale's currency must be given, as an offer's is below (#5010 row 95, Codex X8-20261119-1617): a missing, empty
+  // or malformed code is unknown, never proof that the buyer paid in US dollars nor in the store's own currency today.
+  // Shown as a sum in the wrong currency, it would be money the creator never saw; the whole list is unknown instead.
+  if (settled.some((row) => typeof row.currency !== "string" || !/^[a-z]{3}$/.test(row.currency))) return { state: "error" };
+  const sales = settled
     .map((row): Sale => {
       const paidAt = typeof row.created === "number" ? row.created : 0;
       const known = row.metadata?.product ? { title: titles.get(row.metadata.product) } : null;
@@ -1439,7 +1439,7 @@ export async function listSales(store: Store): Promise<SaleList> {
         // Only a whole number of the smallest unit, at least zero, is an amount; anything
         // else Stripe gave is unknown, never $0.00 nor the odd figure.
         amount: Number.isSafeInteger(row.amount_total) && (row.amount_total as number) >= 0 ? (row.amount_total as number) : null,
-        currency: typeof row.currency === "string" && row.currency ? row.currency : "usd",
+        currency: row.currency as string,
         email: typeof email === "string" && email ? email : null,
         paidAt,
         stillDownloadable: now - paidAt <= DOWNLOAD_WINDOW_SECONDS,

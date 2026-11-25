@@ -117,46 +117,70 @@ const timeout = () => new Error("Synthetic: Redis timed out");
  *  - "watch-lost": it is applied, but its answer is lost on the way back;
  *  - "watch-text" / "watch-wrapped": it is applied and answers in a shape not known (rule 24);
  *  - "record-gone": the order's record ends just before the step that puts it in pending (its life renewed there);
- *  - "life-text" / "life-two" / "life-null": that renewal is applied and answers in a shape not known (rule 24);
+ *  - "life-text" / "life-two" / "life-null": that step (PAYPAL_WATCH_FIRST: the try counted, the record renewed, the
+ *    order put in pending) is applied and answers in a shape not known (rule 24): its count in text, three values
+ *    rather than a state and a count, nothing;
  *  - "slow-settle": the step that puts the order in pending reaches Redis two seconds after it was sent, and the step
  *    that writes the payment down never reaches it (Claude 5's probe on #3411);
  *  - "standing-text": once every try is spent, the read of where the order stands answers in a shape not known.
  */
 type Fault = "none" | "settle" | "watch-unsent" | "watch-lost" | "watch-text" | "watch-wrapped" | "record-gone" | "life-text" | "life-two" | "life-null" | "slow-settle" | "standing-text";
-const pendingWrite = (commands: Commands) => commands.some((command) => command[0] === "ZADD" && String(command[1]).startsWith("nl:ppsell:pending:"));
-/** Where the step that puts an order in pending renews the order's record, if it does. */
-const lifeAt = (commands: Commands) => commands.findIndex((command) => /^EXPIRE(AT)?$/.test(String(command[0])) && String(command[1]).startsWith("nl:ppsell:o:"));
+/**
+ * Where a pipeline sends the step that counts a capture try and, when that count admits it, renews the order's record
+ * and puts it in pending (PAYPAL_WATCH_FIRST, lib/paypal-sales.ts: EVAL, script, 3, the count, pending, the record,
+ * the ceiling, the bound, the score, the order); -1 when it does not.
+ */
+const watchAt = (commands: Commands) => commands.findIndex((command) => command[0] === "EVAL" && String(command[1]).includes("marktmorgen:paypal-watch-first"));
+const pendingWrite = (commands: Commands) => watchAt(commands) >= 0;
 /** Every command the last return sent that writes or renews an order's record. */
 let recordSent: Commands = [];
 const settleWrite = (commands: Commands) => commands.some((command) => command[0] === "EVAL" && String(command[1]).includes("marktmorgen:paypal-settle"));
 
 /** The pipelines that put an order in pending before its capture, as the last return sent them. */
 let watchSent: Commands[] = [];
+/**
+ * What each of those steps was billed, as Upstash bills it: each command sent and each redis.call its script ran
+ * (the in-memory Redis runs a pipeline at once, so its count of script calls moves only for that step).
+ */
+let watchBilled: number[] = [];
 
 async function returnFor(store: Store, order: string, fault: Fault): Promise<{ status: number; location: string }> {
-  const pipeline: Pipeline = redis.pipeline.bind(redis);
+  const base: Pipeline = redis.pipeline.bind(redis);
+  const pipeline: Pipeline = (commands) => {
+    const before = redis.scriptCalls;
+    const replies = base(commands);
+    if (pendingWrite(commands)) watchBilled.push(commands.length + redis.scriptCalls - before);
+    return replies;
+  };
   let struck = false;
   watchSent = [];
+  watchBilled = [];
   recordSent = [];
   redis.pipeline = (async (commands: Commands) => {
-    if (pendingWrite(commands) && lifeAt(commands) >= 0) watchSent.push(commands);
+    if (pendingWrite(commands)) {
+      watchSent.push(commands);
+      // The renewal of the record that step sends, when the count admits the try: EXPIREAT the record, the ceiling.
+      const step = commands[watchAt(commands)];
+      recordSent.push(["EXPIREAT", String(step[5]), String(step[6])]);
+    }
     for (const command of commands) if (/^(SET|EXPIRE|EXPIREAT)$/.test(String(command[0])) && String(command[1]).startsWith("nl:ppsell:o:")) recordSent.push(command);
-    if (fault === "slow-settle" && pendingWrite(commands) && lifeAt(commands) >= 0) ahead += 2_000;
+    if (fault === "slow-settle" && pendingWrite(commands)) ahead += 2_000;
     if (struck || fault === "none") return pipeline(commands);
     if ((fault === "settle" || fault === "slow-settle") && settleWrite(commands)) {
       struck = true;
       throw timeout();
     }
-    if (fault === "record-gone" && pendingWrite(commands) && lifeAt(commands) >= 0) {
+    if (fault === "record-gone" && pendingWrite(commands)) {
       struck = true;
-      await pipeline([["DEL", String(commands[lifeAt(commands)][1])]]);
+      await pipeline([["DEL", String(commands[watchAt(commands)][5])]]);
       return pipeline(commands);
     }
-    if (fault.startsWith("life-") && pendingWrite(commands) && lifeAt(commands) >= 0) {
+    if (fault.startsWith("life-") && pendingWrite(commands)) {
       struck = true;
       const replies = await pipeline(commands);
-      const at = lifeAt(commands);
-      replies[at] = fault === "life-text" ? String(replies[at]) : fault === "life-two" ? 2 : null;
+      const at = watchAt(commands);
+      const pair = replies[at] as unknown[];
+      replies[at] = fault === "life-text" ? [pair[0], String(pair[1])] : fault === "life-two" ? [...pair, 0] : null;
       return replies;
     }
     if (fault === "standing-text" && commands[0]?.[0] === "ZSCORE" && String(commands[0][1]).startsWith("nl:ppsell:pending:")) {
@@ -182,7 +206,7 @@ async function returnFor(store: Store, order: string, fault: Fault): Promise<{ s
     // The return fails outright while Redis does: nothing is shown as paid; what matters is what is left written.
     return { status: 500, location: "" };
   } finally {
-    redis.pipeline = pipeline;
+    redis.pipeline = base;
   }
 }
 
@@ -242,9 +266,12 @@ async function main(): Promise<void> {
   is("paid, handed over, one receipt, counted once, off pending, not owed, captured once", await state(healthy, "healthy@example.com"), {
     paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1,
   });
-  is("one step put it in pending and renewed its record, after the step that counted the try, the commands tests/plan-cost-registry.ts prices", [watchSent.length, watchSent[0]?.length, PAYPAL_CAPTURE_WATCH.countCommandsPerTry + PAYPAL_CAPTURE_WATCH.watchCommandsPerCaptureAsked], [1, PAYPAL_CAPTURE_WATCH.watchCommandsPerCaptureAsked, PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked]);
+  // Claude 2's LEVE on #5335: the try counted and the order put in pending in one step, so no try counted earlier can
+  // write the entry after a later one did.
+  is("one step counted the try, put it in pending and renewed its record, billed what tests/plan-cost-registry.ts prices for the first try", [watchSent.length, watchSent[0]?.length, watchBilled[0], PAYPAL_CAPTURE_WATCH.countCommandsPerTry + PAYPAL_CAPTURE_WATCH.countExpiryCommandsPerOrder + PAYPAL_CAPTURE_WATCH.watchCommandsPerCaptureAsked], [1, 1, PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked, PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked]);
   is("the tries an order may ask, the bound lib/paypal-sales.ts holds, as tests/plan-cost-registry.ts prices them", (paypalSales as Record<string, unknown>).CAPTURE_TRIES_PER_ORDER, PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost);
-  is("all of them together inside a tenth of the order's own work (ORDER_COMPUTE)", PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked * COMMAND < ORDER_COMPUTE / 10, true);
+  is("the admitted tries of an order, computed from the parts the registry prices", PAYPAL_CAPTURE_WATCH.watchCommandsPerOrderAtMost, PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * (PAYPAL_CAPTURE_WATCH.countCommandsPerTry + PAYPAL_CAPTURE_WATCH.watchCommandsPerCaptureAsked) + PAYPAL_CAPTURE_WATCH.countExpiryCommandsPerOrder);
+  is("all of them together inside a tenth of the order's own work (ORDER_COMPUTE)", PAYPAL_CAPTURE_WATCH.watchCommandsPerOrderAtMost * COMMAND < ORDER_COMPUTE / 10, true);
   is("a sweep after it hands nothing over again", await sweep(), 0);
   is("and nothing moved", await state(healthy, "healthy@example.com"), { paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1 });
 
@@ -463,9 +490,9 @@ async function main(): Promise<void> {
   is("a sweep lets go of the entry and takes nothing", [await sweep(), await pending(gone), captures.get(gone) ?? 0], [0, false, 0]);
 
   for (const [fault, label] of [
-    ["life-text", "renewing the order's record answers in text, not a count"],
-    ["life-two", "renewing the order's record answers a count that is neither 0 nor 1"],
-    ["life-null", "renewing the order's record answers nothing"],
+    ["life-text", "the step that counts the try and puts the order in pending answers its count in text"],
+    ["life-two", "the step that counts the try and puts the order in pending answers three values, not a state and a count"],
+    ["life-null", "the step that counts the try and puts the order in pending answers nothing"],
   ] as [Fault, string][]) {
     part(`Rule 24: ${label}`);
     captureWith = "take";
@@ -496,12 +523,12 @@ async function main(): Promise<void> {
   for (let i = 0; i < replays; i += 1) {
     const shown = await returnFor(store, replayed, "none");
     watches += watchSent.length;
-    watchCommands += watchSent.reduce((sum, sent) => sum + sent.length, 0);
+    watchCommands += watchBilled.reduce((sum, billed) => sum + billed, 0);
     if (i >= tries) pastBound.push({ ...shown, records: recordSent.filter((command) => command[0] === "SET").length });
   }
   is("PayPal is asked to take the payment fewer times than the return was opened", (captures.get(replayed) ?? 0) < replays, true);
   is("exactly the bound's number of times, however often the return is opened", captures.get(replayed), tries);
-  is("the watch's commands, every return together, stay inside what the registry prices for the order", watchCommands <= PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked, true);
+  is("the watch's commands, every return together, stay inside what the registry prices for the order", watchCommands <= PAYPAL_CAPTURE_WATCH.watchCommandsPerOrderAtMost, true);
   is("only the returns inside the bound sent the watch; those past it wrote nothing and asked PayPal nothing", watches, tries);
   is("a return past the bound still lands on the thanks page and writes the record nothing more", pastBound.every((shown) => shown.status === 303 && shown.location.includes("/thanks?paypal=") && shown.records === 0), true);
   is("the order still stands in pending, never written down as paid", [await pending(replayed), Boolean(await readPaid(replayed))], [true, false]);
@@ -522,22 +549,30 @@ async function main(): Promise<void> {
   /**
    * Sends `count` returns of one order at once, each read of the order's record and count held until all of them have
    * read it (Claude 5's probe on #3411, Codex X2's MEDIUM 2): every one reads the count before any try is counted.
-   * Returns what each return was shown and every pipeline sent meanwhile with its replies.
+   * Returns what each return was shown and every pipeline sent meanwhile with its replies and what it was billed (each
+   * command sent and each redis.call a script ran: the in-memory Redis runs a pipeline at once, so its count of script
+   * calls moves only for that pipeline).
    */
-  const together = async (order: string, count: number, losePendingWrite = false) => {
+  const together = async (order: string, count: number, loseWatchAnswer = false) => {
     const pipeline: Pipeline = redis.pipeline.bind(redis);
-    const sent: { commands: Commands; replies: unknown[] }[] = [];
+    const sent: { commands: Commands; replies: unknown[]; billed: number }[] = [];
     const waiting: (() => void)[] = [];
     let read = 0;
+    let lost = false;
     const isRead = (commands: Commands) =>
       commands.length === 2 && commands[0][0] === "GET" && commands[0][1] === `nl:ppsell:o:${order}` && commands[1][0] === "GET" && commands[1][1] === `nl:ppsell:try:${order}`;
     redis.pipeline = (async (commands: Commands) => {
-      // The admitted return's write of the order to pending fails before Redis has it (Codex X5 on #3411).
-      if (losePendingWrite && commands.some((c) => c[0] === "ZADD" && String(c[1]).startsWith("nl:ppsell:pending:")) && !commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ppsell:o:"))) {
-        throw new Error("synthetic failure before recording pending");
+      const before = redis.scriptCalls;
+      const running = pipeline(commands);
+      const billed = commands.length + redis.scriptCalls - before;
+      const replies = await running;
+      sent.push({ commands, replies, billed });
+      // The first return's step that counts its try and puts the order in pending is applied, and its answer lost on
+      // the way back (Codex X5 on #3411: the count and the pending write are one step since Claude 2's LEVE on #5335).
+      if (loseWatchAnswer && !lost && pendingWrite(commands)) {
+        lost = true;
+        throw new Error("synthetic: the answer to the watch step is lost");
       }
-      const replies = await pipeline(commands);
-      sent.push({ commands, replies });
       if (isRead(commands)) {
         read += 1;
         if (read < count) await new Promise<void>((resolve) => waiting.push(resolve));
@@ -558,25 +593,24 @@ async function main(): Promise<void> {
       redis.pipeline = pipeline;
     }
   };
-  const tryCommand = (command: (string | number)[]) => /^(INCR|EXPIREAT)$/.test(String(command[0])) && String(command[1]).startsWith("nl:ppsell:try:");
-  /** A command that puts the order in pending, or renews its record, before PayPal is asked (watchLater's SET and ZADD after an answer are not). */
-  const watchCommand = (command: (string | number)[], commands: Commands) =>
-    (command[0] === "EXPIREAT" && String(command[1]).startsWith("nl:ppsell:o:")) ||
-    (command[0] === "ZADD" && String(command[1]).startsWith("nl:ppsell:pending:") && !commands.some((other) => other[0] === "SET" && String(other[1]).startsWith("nl:ppsell:o:")));
+  /** Each watch step the returns sent: the state it answered ("added", "there", "gone", "spent") and what it was billed. */
+  const watchSteps = (sent: { commands: Commands; replies: unknown[]; billed: number }[]) =>
+    sent.filter(({ commands }) => pendingWrite(commands)).map(({ commands, replies, billed }) => ({ state: String((replies[watchAt(commands)] as unknown[] | null)?.[0]), billed }));
 
   part("Claude 5's probe on #3411 (Codex X2's MEDIUM 2): eight returns of one order at once, each read before any try is counted");
   captureWith = "pending";
   const raced = await open("raced@example.com");
   const eight = await together(raced, 8);
-  const all = eight.sent.flatMap(({ commands }) => commands.map((command) => ({ command, commands })));
-  const watchWrites = all.filter(({ command, commands }) => watchCommand(command, commands)).length;
-  const tryWrites = all.filter(({ command }) => tryCommand(command)).length;
+  const steps = watchSteps(eight.sent);
+  const admitted = steps.filter((step) => step.state === "added" || step.state === "there");
+  const refusedSteps = steps.filter((step) => step.state === "spent");
+  const sum = (list: { billed: number }[]) => list.reduce((total, step) => total + step.billed, 0);
   is("all eight read the order's count before any of them counted a try", eight.read, 8);
   is("control: PayPal is asked to take the payment three times, the bound", captures.get(raced), PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost);
-  is("only the three admitted tries put the order in pending or renew its record", watchWrites, PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.watchCommandsPerCaptureAsked);
-  is("the admitted tries together send at most what the registry prices for the order (3 x 4 = 12)", watchWrites + PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.countCommandsPerTry <= PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked, true);
-  is("each refused return sends only its count, the refused path the registry prices per return", tryWrites, 8 * PAYPAL_CAPTURE_WATCH.countCommandsPerTry);
-  is("every watch and count command of the eight together: 3 x 4 + 5 x 2, not 8 x 4", watchWrites + tryWrites <= PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked + 5 * PAYPAL_CAPTURE_WATCH.commandsPerRefusedReturnAtMost, true);
+  is("each return sent one step; only the three admitted tries put the order in pending or renewed its record", [steps.length, admitted.length, refusedSteps.length], [8, PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost, 8 - PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost]);
+  is("the admitted tries together are billed at most what the registry prices for the order (13)", sum(admitted) <= PAYPAL_CAPTURE_WATCH.watchCommandsPerOrderAtMost, true);
+  is("each refused return is billed only its count, the refused path the registry prices per return", refusedSteps.every((step) => step.billed === PAYPAL_CAPTURE_WATCH.countCommandsPerTry && step.billed <= PAYPAL_CAPTURE_WATCH.commandsPerRefusedReturnAtMost), true);
+  is("every watch and count command of the eight together: 13 + 5 x 2, not 8 x 5", sum(steps) <= PAYPAL_CAPTURE_WATCH.watchCommandsPerOrderAtMost + 5 * PAYPAL_CAPTURE_WATCH.commandsPerRefusedReturnAtMost, true);
   // Codex X5 on #3411: a return refused because the others took every try proves no capture is under watch (the one
   // that took the last try may not have written it yet), so it is told it did not go through, never sent to the thanks
   // page; the three admitted ones, each with its capture in pending, are.
@@ -593,19 +627,19 @@ async function main(): Promise<void> {
   const lastSlot = await open("last-slot@example.com");
   await redis.pipeline([["SET", `nl:ppsell:try:${lastSlot}`, String(PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost - 1), "EX", 86_400]]);
   const pair = await together(lastSlot, 2);
-  const adds = pair.sent.flatMap(({ commands }) => commands).filter((command) => command[0] === "ZADD" && String(command[1]).startsWith("nl:ppsell:pending:")).length;
+  const pairSteps = watchSteps(pair.sent);
   is("both read the count with one try left", pair.read, 2);
   is("PayPal is asked once", captures.get(lastSlot), 1);
-  is("only one return sends the order to pending", adds, 1);
+  is("only one return puts the order in pending, the other finds its try spent", pairSteps.map((step) => step.state).sort(), ["added", "spent"]);
   is("declined: the order is not left in pending, nothing paid", [await pending(lastSlot), Boolean(await readPaid(lastSlot))], [false, false]);
 
-  part("Codex X5's MEDIUM on #3411: two returns read the last try, the admitted one never records pending: neither is sent to the thanks page");
+  part("Codex X5's MEDIUM on #3411: two returns read the last try, the admitted one never hears back from its step: neither is sent to the thanks page");
   captureWith = "pending";
   const lostWrite = await open("lost-write@example.com");
   await redis.pipeline([["SET", `nl:ppsell:try:${lostWrite}`, String(PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost - 1), "EX", 86_400]]);
   const unrecorded = await together(lostWrite, 2, true);
   is("both read the count with one try left", unrecorded.read, 2);
-  is("PayPal is asked nothing, nothing is in pending or paid", [captures.get(lostWrite) ?? 0, await pending(lostWrite), Boolean(await readPaid(lostWrite))], [0, false, false]);
+  is("PayPal is asked nothing, nothing paid; the entry the lost step wrote is left to the sweep", [captures.get(lostWrite) ?? 0, await pending(lostWrite), Boolean(await readPaid(lostWrite))], [0, true, false]);
   is("neither return is sent to the thanks page", unrecorded.shown.some((shown) => shown.location.includes("/thanks?paypal=")), false);
   is("the refused one is told it is being confirmed, never that it went through or that nothing was handed over", unrecorded.shown.some((shown) => shown.status === 303 && shown.location.includes("status=paypal-confirming")), true);
   is("and that notice exists in every buyer language, never sent as paid", (Object.keys(LANGUAGES) as LanguageCode[]).every((lang) => Boolean(wordsIn(lang).notices["paypal-confirming"]?.title)), true);

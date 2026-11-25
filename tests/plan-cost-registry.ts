@@ -1774,24 +1774,38 @@ export const NUMBERS_SUMMARY_RETRY = { triesPerPeriod: SUMMARY_TRIES, routeComma
 export const NUMBERS_SUMMARY_RETRY_COMMANDS = NUMBERS_SUMMARY_RETRY.triesPerPeriod * NUMBERS_SUMMARY_RETRY.routeCommandsPerTry;
 /**
  * What a PayPal return sends before PayPal is asked to take the payment (lib/paypal-sales.ts, watchFirst; #3404), in
- * Redis commands, held to what the real return route sends by tests/paypal-pending-before-capture.test.ts. First the
- * try is counted, in a step of its own: the INCR and EXPIREAT of the order's count of tries (countCommandsPerTry;
- * Claude 7's cost MEDIUM on #3411). Only a try that count admits then sends the ZADD that puts the order in pending
- * and the EXPIREAT that renews its record until thirty days from its opening (watchCommandsPerCaptureAsked; Codex X2's
- * MEDIUM 2 and Claude 5's MEDIUM on #3411: they used to go in the count's step, so returns that all read the count
- * before any of them counted each wrote all four). PayPal is asked at most capturesAskedPerOrderAtMost times an order
- * (CAPTURE_TRIES_PER_ORDER, lib/paypal-sales.ts), so the admitted tries send at most capturesAskedPerOrderAtMost x
- * commandsPerCaptureAsked commands an order, none past those thirty days; together they are inside a tenth of that
- * order's own work (line orders, ORDER_COMPUTE), besides settle's script. A refused return writes neither pending nor
- * the record and sends at most commandsPerRefusedReturnAtMost commands: the count's two when it read a count under the
- * bound and found it spent by returns at the same moment, or, when it read the count already spent, a ZSCORE of
- * pending and a GET of the paid record in one round trip, to tell a capture under watch from tries that were all
- * refused (Codex X2's MEDIUM 1, Claude 5's LEVE). That is a cost per return, not per order, like the reads every
- * return already sends (the paid record's GET, then the order's record and its count in one round trip), under the
- * route's own limit per connection and store ("paypal-return", line orders). What the record and the count keep for
- * those thirty days is in tests/store-data-registry.ts (nl:ppsell:o:, nl:ppsell:try:).
+ * Redis commands, held to what the real return route sends by tests/paypal-pending-before-capture.test.ts. The try is
+ * counted and, only when that count admits it, the order put in pending, in ONE step (PAYPAL_WATCH_FIRST,
+ * lib/paypal-sales.ts; Claude 2's LEVE on #5335, row #3404 of #5285: in two requests, a try counted before another
+ * could put the order in pending after it, and that other try, declined, let go of the entry the first was taking the
+ * payment under). Billed as the EVAL plus each redis.call (Upstash): the EVAL and the INCR of the order's count of
+ * tries every try (countCommandsPerTry; Claude 7's cost MEDIUM on #3411), the count's EXPIREAT only on the try that
+ * made the count (countExpiryCommandsPerOrder: the ceiling is the same second every try), then, only for a try the
+ * count admits, the EXPIREAT that renews the order's record until thirty days from its opening and the ZADD that puts it
+ * in pending (watchCommandsPerCaptureAsked; Codex X2's MEDIUM 2 and Claude 5's MEDIUM on #3411: returns that all read
+ * the count before any of them counted must not each write them). The dearest try, the first, sends
+ * commandsPerCaptureAsked commands. PayPal is asked at most capturesAskedPerOrderAtMost times an order
+ * (CAPTURE_TRIES_PER_ORDER, lib/paypal-sales.ts), so the admitted tries send at most watchCommandsPerOrderAtMost =
+ * capturesAskedPerOrderAtMost x (countCommandsPerTry + watchCommandsPerCaptureAsked) + countExpiryCommandsPerOrder
+ * commands an order (13; 12 when the count and the watch were two requests of two commands each), none past those
+ * thirty days; together they are inside a tenth of that order's own work (line orders, ORDER_COMPUTE), besides
+ * settle's script. A refused return writes neither pending nor the record and sends at most
+ * commandsPerRefusedReturnAtMost commands: the script's EVAL and INCR when it read a count under the bound and found it
+ * spent by returns at the same moment (the count past the bound is never the one that made it, so no EXPIREAT), or,
+ * when it read the count already spent, a ZSCORE of pending and a GET of the paid record in one round trip, to tell a
+ * capture under watch from tries that were all refused (Codex X2's MEDIUM 1, Claude 5's LEVE). That is a cost per
+ * return, not per order, like the reads every return already sends (the paid record's GET, then the order's record and
+ * its count in one round trip), under the route's own limit per connection and store ("paypal-return", line orders).
+ * What the record and the count keep for those thirty days is in tests/store-data-registry.ts (nl:ppsell:o:,
+ * nl:ppsell:try:).
+ * A try PayPal declines lets go of the pending entry it put there only while no other try has been counted since its
+ * own, read and removed in one step (PAYPAL_LET_GO_DECLINED, lib/paypal-sales.ts; Claude 6's LOW 2 on #3404, row #3404
+ * of #5285): the EVAL, the count's GET and the ZREM, billed as letGoCommandsPerDeclinedTry commands (the EVAL plus each
+ * redis.call, Upstash) where a lone ZREM was sent before, at most once an admitted try. With it an order sends at most
+ * watchCommandsPerOrderAtMost + capturesAskedPerOrderAtMost x letGoCommandsPerDeclinedTry = 22 commands before
+ * settle's script, inside a fifth of its own work (ORDER_COMPUTE), held by tests/paypal-pending-requeue-exact.test.ts.
  */
-export const PAYPAL_CAPTURE_WATCH = { countCommandsPerTry: 2, watchCommandsPerCaptureAsked: 2, commandsPerCaptureAsked: 4, capturesAskedPerOrderAtMost: 3, commandsPerRefusedReturnAtMost: 2 } as const;
+export const PAYPAL_CAPTURE_WATCH = { countCommandsPerTry: 2, countExpiryCommandsPerOrder: 1, watchCommandsPerCaptureAsked: 2, commandsPerCaptureAsked: 5, capturesAskedPerOrderAtMost: 3, watchCommandsPerOrderAtMost: 13, commandsPerRefusedReturnAtMost: 2, letGoCommandsPerDeclinedTry: 3 } as const;
 /**
  * The daily plans job (lib/plans.ts, settlePlans, from app/api/cron/plans/route.ts), per run, at the most:
  * - readCommandsPerRun: one pipeline reads both lines (SRANDMEMBER of the new plans, ZRANGEBYSCORE ... LIMIT of

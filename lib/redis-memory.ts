@@ -1635,6 +1635,14 @@ export class MemoryRedis {
           this.run(["SET", record, next]);
           return 1;
         }
+        // lib/paypal-sales.ts PAYPAL_LET_GO_DECLINED: a declined try's pending entry let go of only while no other try was counted since its own.
+        if (key.startsWith("-- marktmorgen:paypal-let-go-declined:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, tries, pending, mine, order, bound] = args;
+          const held = this.run(["GET", tries]);
+          const counted = held === null ? NaN : Number(held);
+          if (!Number.isFinite(counted) || Math.min(counted, Number(bound)) !== Number(mine)) return 0;
+          return this.run(["ZREM", pending, order]);
+        }
         // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
         if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
           const [, imported, own, field, job, ...known] = args;
@@ -2087,6 +2095,24 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== args[count + 1]) return 0;
           for (const target of targets) this.run(["DEL", target]);
           return 1;
+        }
+        // lib/paypal-sales.ts PAYPAL_WATCH_FIRST: a capture try counted and, only when admitted, the order's record renewed and the order put in pending, in one step.
+        if (key.startsWith("-- marktmorgen:paypal-watch-first:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, tries, pending, record, until, bound, score, order] = args;
+          const held = this.run(["GET", tries]);
+          if (held !== null && !/^-?[0-9]+$/.test(String(held))) throw new Error("ERR value is not an integer or out of range");
+          // Each redis.call the script runs is counted beside its EVAL, as Upstash bills it (scriptCalls).
+          const counted = Number(this.run(["INCR", tries]));
+          this.scriptCalls += 1;
+          if (counted === 1) {
+            this.run(["EXPIREAT", tries, until]);
+            this.scriptCalls += 1;
+          }
+          if (counted > Number(bound)) return ["spent", counted];
+          this.scriptCalls += 1;
+          if (this.run(["EXPIREAT", record, until]) === 0) return ["gone", counted];
+          this.scriptCalls += 1;
+          return [this.run(["ZADD", pending, score, order]) === 1 ? "added" : "there", counted];
         }
         // lib/paypal-sales.ts PAYPAL_WATCH_IF_LIVE: an order put back on a store's refund watch only while the store is live.
         if (key.startsWith("-- marktmorgen:paypal-watch-if-live:v1\n") && args[0] === "3" && args.length === 7) {

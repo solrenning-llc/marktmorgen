@@ -22,7 +22,17 @@ export async function GET(request: NextRequest) {
   const room = await withinLimit("paypal-return", `${clientAddress(request)}|${store.handle}`, 30, 600).catch(unknownLimit);
   if (room === "unknown") return away(`/@${store.handle}?status=error`);
   if (!room) return away(`/@${store.handle}?status=slow`);
-  const result = await captureOrder(store, order);
+  let result: Awaited<ReturnType<typeof captureOrder>>;
+  try {
+    result = await captureOrder(store, order);
+  } catch (error) {
+    // An error captureOrder does not turn into an answer (Redis out of reach, for one): nothing is shown as paid, and the
+    // buyer gets the store's notice, as for an answer not known, never a bare server error (Claude 6's NIT on #3404, row
+    // #3404 of #5285). A payment PayPal took is still in pending, put there before PayPal was asked, so the sweep writes
+    // it down and hands it over. Logged without the buyer's details: the store and the error's own name and words.
+    console.error("taking a PayPal payment on return failed", store.handle, error instanceof Error ? `${error.name}: ${error.message}` : typeof error);
+    return away(`/@${store.handle}?status=paypal-error`);
+  }
   if (result.ok) {
     if (result.fresh) await handOverPayPal(store, result.paid).catch((error) => console.error("handing over a PayPal purchase failed", error));
     return away(`/@${store.handle}/thanks?paypal=${encodeURIComponent(order)}`);

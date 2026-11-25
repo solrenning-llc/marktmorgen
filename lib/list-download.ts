@@ -3,11 +3,12 @@ import { windowCount, windowCountOf } from "@/lib/window-count";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { EXPORT_BYTES_PER_UNIT, EXPORT_COMMANDS_PER_UNIT } from "@/lib/store-export";
+import { jsonBytes } from "@/lib/json-bytes";
+import { shortWords } from "@/lib/download-words";
 import { holdStudio } from "@/lib/studio-route";
 import { standingOf } from "@/lib/plan-standing";
 import { ENDED_LIST_DOWNLOADS } from "@/lib/plan-closing-rules";
 import { PLANS_ON_SALE } from "@/lib/opening";
-import { KIND_WORDS } from "@/lib/store-allowance-rules";
 import type { Store } from "@/lib/store";
 
 /**
@@ -64,34 +65,8 @@ export function listDownloadHeld(contacts: number): number {
   return listDownloadUnits(Math.ceil(count / LIST_CONTACTS_PER_COMMAND) + 1, count * (LIST_READ_BYTES_PER_CONTACT + LIST_SENT_BYTES_PER_CONTACT) + LIST_HEADER_BYTES + listPageMost(count));
 }
 
-/**
- * The most bytes `value` takes written as JSON, as the database's answer
- * writes it: every character at its widest (a control character, a <, > or &,
- * or a line or paragraph separator escaped in six; a quote or a backslash in
- * two; a lone surrogate in six), so what a read moved is never counted short.
- */
-export function jsonBytes(value: unknown): number {
-  if (typeof value === "string") {
-    let n = 2;
-    for (let i = 0; i < value.length; i += 1) {
-      const c = value.charCodeAt(i);
-      if (c < 0x20 || c === 0x26 || c === 0x3c || c === 0x3e || c === 0x2028 || c === 0x2029) n += 6;
-      else if (c === 0x22 || c === 0x5c) n += 2;
-      else if (c < 0x80) n += 1;
-      else if (c < 0x800) n += 2;
-      else if (c >= 0xd800 && c <= 0xdbff && i + 1 < value.length && value.charCodeAt(i + 1) >= 0xdc00 && value.charCodeAt(i + 1) <= 0xdfff) {
-        n += 4;
-        i += 1;
-      } else if (c >= 0xd800 && c <= 0xdfff) n += 6;
-      else n += 3;
-    }
-    return n;
-  }
-  if (typeof value === "number" || typeof value === "boolean") return String(value).length;
-  if (Array.isArray(value)) return value.reduce((sum: number, v) => sum + jsonBytes(v) + 1, 2);
-  if (value && typeof value === "object") return Object.entries(value).reduce((sum, [k, v]) => sum + jsonBytes(k) + jsonBytes(v) + 2, 2);
-  return 4;
-}
+/** What a read moved, counted at the widest JSON the database answers with (lib/json-bytes.ts). */
+export { jsonBytes };
 
 /**
  * How many contacts a list holds, read in its exact shape (CX-123 rule 24):
@@ -114,14 +89,6 @@ export const LIST_UNCOUNTED_WORDS = "This can't be counted right now. Try again 
 /** How long the count of list downloads since a plan ended is kept: past its closing day and the week a late last notice adds, as the whole export's. */
 const ENDED_LIST_SECONDS = 60 * 86_400;
 
-/** The words for a download the studio figure has some room for, but not enough: what it needs and what is left, as holdAllowanceAt says it. */
-function shortWords(store: Store, units: number, held: { limit: number; left?: number; reset?: string }, atLeast = false): string {
-  const period = standingOf(store) === "trial" ? "in this trial" : "this month";
-  const needs = `This download needs ${atLeast ? "at least " : ""}${units.toLocaleString("en-US")} of your ${KIND_WORDS.studio.many} ${period}`;
-  if (held.left === undefined) return `${needs}, and your studio has ${held.limit.toLocaleString("en-US")} ${period} in all.`;
-  const left = held.left === 0 ? "none are left" : held.left === 1 ? "only 1 is left" : `only ${held.left.toLocaleString("en-US")} are left`;
-  return `${needs}, and ${left}.${held.reset ? ` ${held.reset}` : ""}`;
-}
 
 /**
  * A download let through: `read` is how its list is read (held before each

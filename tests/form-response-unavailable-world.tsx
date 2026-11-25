@@ -15,6 +15,8 @@ export function StudioStorePin({children}:{children:ReactNode}){return children;
 export function studioPath(){return '/studio';}
 /** Main's email page pays its studio requests before it reads the broadcast heads; both are synthetic here. */
 export async function countStudio(){return {ok:true as const};}
+/** The answers file holds the studio units of its read and its file before reading (#5010 row 145); synthetic here. */
+export async function holdStudio(){return {ok:true as const,give:async()=>{},force:async()=>{}};}
 // Merged with main of 15 November 2026 (Claude 1 cloud O): main's forms route gives a store with no stats id its id (ensureStatsId); this synthetic store has one.
 export async function ensureStatsId(){throw Error('unexpected: the synthetic store has its stats id');}
 export async function studioView(){return {ok:true,view:{store,role:'owner',email:store.email,stores:[],owned:[]}};}
@@ -24,7 +26,9 @@ export async function readForms(){state.formReads++;if(state.inventoryUnavailabl
 export async function readForm(){if(state.definitionsUnavailable)throw new UnknownReply('form');return state.missing?null:form;}
 export async function writeForm(){state.writes++;return true;}
 export async function dropForm(){if(state.deletionUnavailable)throw new UnknownReply('form deletion');state.writes++;return true;}
-export async function readResponses(_stats:unknown,id:string){if(state.unavailable&&id===form.id)throw new UnknownReply('form responses');return {responses,total:responses.length};}
+export async function readResponses(_stats:unknown,id:string){if(state.unavailable&&id===form.id)throw new UnknownReply('form responses');return {responses,total:responses.length,bytes:JSON.stringify(responses).length};}
+/** The answers file measures them before it reads them (#5010 row 145); the same unknown read refuses it here. */
+export async function responsesSize(_stats:unknown,id:string){if(state.unavailable&&id===form.id)throw new UnknownReply('form responses size');return {count:responses.length,bytes:JSON.stringify(responses).length};}
 export async function readResponse(_stats:unknown,id:string,responseId:string){if(state.unavailable&&id===form.id)throw new UnknownReply('form response');return responses.find(r=>r.id===responseId)??null;}
 export async function readCards(){return new Map();}
 export async function readOpportunityReview(){return {available:false,stages:[],deals:[],pipelines:[],versions:{}};}

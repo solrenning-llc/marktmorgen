@@ -1,13 +1,30 @@
 import type { NextRequest } from "next/server";
-import { creatorFrom } from "@/lib/studio-route";
-import { readForm, readResponses } from "@/lib/form-store";
+import { creatorFrom, holdStudio } from "@/lib/studio-route";
+import { readForm, readResponses, responsesSize } from "@/lib/form-store";
 import { FORM_ID, responsesCsv } from "@/lib/forms";
+import { exportUnitsPast } from "@/lib/export-unit-rules";
+import { FORM_EXPORT_COMMANDS, formExportReadMost } from "@/lib/form-export-rules";
+import { shortWords } from "@/lib/download-words";
+
 
 /**
  * A form's answers as a spreadsheet (lib/forms.ts, responsesCsv): every one
  * kept, newest first. Answers can hold people's addresses and their own
  * words, so only a role that may download the store's files reaches it.
+ *
+ * Its answers can weigh as much as the store's data room, so it takes from the
+ * store's studio figure what reading and sending them costs, at the unit of a
+ * download (lib/export-unit-rules.ts), before any answer is read (#5010 row
+ * 145): their count and length are measured in Redis first, with nothing read
+ * out (responsesSize), and held at their widest, every byte of an answer sent
+ * back escaped in six (lib/form-export-rules.ts); the file is counted after
+ * it is made, past the figure if it must, so a file whose answers could be
+ * read is never refused for its own size, and what was held and not used is
+ * given back. A size that does not read, or a figure
+ * without the units, refuses with no answer read. Measured in
+ * tests/forms-export-held.test.ts.
  */
+
 export async function GET(request: NextRequest) {
   const creator = await creatorFrom(request, "export");
   if (creator instanceof Response) return creator;
@@ -18,12 +35,52 @@ export async function GET(request: NextRequest) {
   const form = await readForm(store.statsId, id).catch(() => undefined);
   if (form === undefined) return plain(503, "unavailable");
   if (!form) return plain(404, "That form is gone.");
-  const read = await readResponses(store.statsId, id).catch(() => null);
-  if (read === null) return plain(503, "unavailable");
+  const size = await responsesSize(store.statsId, id).catch(() => null);
+  if (size === null) return plain(503, "unavailable");
+
+  // Held before any answer is read: the read at its widest.
+  const readMost = formExportReadMost(size);
+  let holding = size.count === 0 ? 0 : exportUnitsPast(FORM_EXPORT_COMMANDS, readMost);
+  const holds: { units: number; give: (n: number) => Promise<void>; force: (n: number) => Promise<void> }[] = [];
+  if (holding > 0) {
+    const held = await holdStudio(store, holding);
+    if (!held.ok) return plain(held.reason === "unknown" ? 503 : 429, held.reason === "unknown" ? "unavailable" : held.reason === "used" ? shortWords(store, holding, held) : held.message);
+    holds.push({ units: holding, give: held.give, force: held.force });
+  }
+  /** What was read and sent, counted at the units it took, and what was held and not used given back. */
+  const settle = async (used: number) => {
+    try {
+      if (used > holding) await holds[0]?.force(used - holding);
+      let back = holding - used;
+      for (const hold of [...holds].reverse()) {
+        if (back <= 0) break;
+        const n = Math.min(back, hold.units);
+        await hold.give(n);
+        back -= n;
+      }
+    } catch (error) {
+      console.error("settling a form's answers file failed", error);
+    }
+  };
+
+  // Measured empty, nothing is read: the file is its header alone, as the size found it (Claude 6 UoHAG's NIT on #5268:
+  // an answer kept between the size and a read would otherwise be read with nothing held to count it against).
+  const read = size.count === 0 ? { responses: [], total: 0, bytes: 0 } : await readResponses(store.statsId, id).catch(() => null);
+  if (read === null) {
+    // A read that failed is counted at its most, since it is never measured.
+    await settle(exportUnitsPast(FORM_EXPORT_COMMANDS, readMost));
+    return plain(503, "unavailable");
+  }
   const { responses } = read;
   const name = `${form.name.replace(/[^A-Za-z0-9 _-]+/g, "").trim().replace(/\s+/g, "-").slice(0, 40) || "form"}-${new Date().toISOString().slice(0, 10)}.csv`;
   // The byte-order mark makes Excel read the file as UTF-8.
-  return new Response(`﻿${responsesCsv(form, responses)}`, {
+  const body = `﻿${responsesCsv(form, responses)}`;
+  const sent = Buffer.byteLength(body, "utf8");
+  const used = responses.length === 0 ? 0 : exportUnitsPast(FORM_EXPORT_COMMANDS, read.bytes + sent);
+  // A file longer than what was held is counted past the figure, never refused: its answers were read and paid for
+  // already (Claude 5 icEJ's LOW on #5268, as the coordinator's audit of #5256 asked, 7bab 7).
+  await settle(used);
+  return new Response(body, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="${name}"`,

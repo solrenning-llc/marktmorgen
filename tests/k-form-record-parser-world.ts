@@ -19,3 +19,11 @@ export async function creatorFrom(_request: unknown, permission: string) {
 export async function countStudio(): Promise<never> {
   throw new Error('Synthetic export owner boundary: countStudio is not expected in this test');
 }
+
+/**
+ * The answers file holds the studio units of reading its answers before reading them (#5010 row 145): this
+ * boundary keeps the record parser's test on its own subject, the figure always having the units.
+ */
+export async function holdStudio() {
+  return { ok: true as const, give: async () => {}, force: async () => {} };
+}

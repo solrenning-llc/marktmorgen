@@ -5371,10 +5371,19 @@ function bookPairs(reply: unknown, what: string): [string, string][] {
  * Every record of one hash of the book, or UnknownReplyError: a record that does not read is never dropped. `seen`
  * is told the field and text each record was read from (main's refund marks, AFFILIATE_REFUND_MARK, keep them).
  */
+/**
+ * A record of the book itself in a shape no reading accepts (Claude 7 xAF's LEVE 1 on #5256): the same on every
+ * reading, unlike a reply that came back without its slots, which is a glitch of the answer (UnknownReplyError).
+ * The affiliate spreadsheet takes the month's failed try only for this.
+ */
+export class BookRecordUnreadable extends UnknownReplyError {
+  // Its name stays UnknownReplyError: every reader that treats an unknown reply so goes on doing it.
+}
+
 function bookRecords<T>(reply: unknown, parse: (raw: string) => T | null, what: string, seen?: (record: T, field: string, raw: string) => void): T[] {
   return bookPairs(reply, what).map(([field, raw]) => {
     const record = parse(raw);
-    if (record === null) throw new UnknownReplyError(what);
+    if (record === null) throw new BookRecordUnreadable(what);
     seen?.(record, field, raw);
     return record;
   });
@@ -5384,7 +5393,7 @@ function bookRecords<T>(reply: unknown, parse: (raw: string) => T | null, what: 
 function bookCounts(reply: unknown, what: string): Map<string, number> {
   return new Map(
     bookPairs(reply, what).map(([id, raw]) => {
-      if (!/^\d{1,15}$/.test(raw)) throw new UnknownReplyError(what);
+      if (!/^\d{1,15}$/.test(raw)) throw new BookRecordUnreadable(what);
       return [id, Number(raw)];
     }),
   );

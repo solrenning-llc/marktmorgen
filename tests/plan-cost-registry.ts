@@ -112,7 +112,7 @@ import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TR
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { MAX_STORE_LINKS } from "@/lib/store-link";
-import { CLAIM_PAGES, CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
+import { CLAIM_PAGES, CLOSING_DAYS, DEL_BATCH, ENDED_BOOK_EXPORTS, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_NOTICE_DAYS, BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
@@ -122,7 +122,9 @@ import { DELETED_STORE_DELETE_BATCH, DELETED_STORE_LIST_PAGES } from "@/lib/dele
 import { FORGET_LATE_PASSES, FORGET_TRIES } from "@/lib/store-forget-retry";
 import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS } from "@/lib/podcast-access";
 import { BODIES_PER_READ } from "@/lib/course";
-import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, STUDENT_ROW_BYTES, bookWork } from "@/lib/api-read-rules";
+import { BOOK_PAYPAL_REFUNDS, COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, STUDENT_ROW_BYTES, bookWork } from "@/lib/api-read-rules";
+import { bookExportWork } from "@/lib/affiliate-book-export";
+import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { BESIDE_POOL_BYTES, DATA_ROOM_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES } from "@/lib/store-data-rules";
@@ -177,7 +179,7 @@ import { DRIP_MONTH_UNITS_PER_STORE_EMAIL, DRIP_START_COMMANDS } from "@/lib/dri
 import { WINBACK_OPEN_STRIPE_CALLS } from "@/lib/winback";
 import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
-import { BOOK_INVOICES_KEPT_BYTES, BOOK_INVOICES_KEPT_LINES, BOOK_KEPT_REFUND_BYTES, DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
+import { BOOK_INVOICES, BOOK_INVOICES_KEPT_BYTES, BOOK_INVOICES_KEPT_LINES, BOOK_KEPT_REFUND_BYTES, DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
@@ -3532,7 +3534,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
   },
   {
     id: "closure",
-    feature: "Closing the store (18 October 2026): its records deleted, its followers read, its whole exports and list downloads after its plan ended, its last steps",
+    feature: "Closing the store (18 October 2026): its records deleted, its followers read, its whole exports, list downloads and affiliate spreadsheets after its plan ended, its last steps",
     monthlyUsd: (tier) => closureCost(tier).total,
     sources: [
       { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "decideCalendars", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "dueForErasure", "CLOSING_UNHELD", "fencedBy", "ownsAnother", "CLAIM_PAGES", "clearClaims", "servesAnother", "claimsLeft"] },
@@ -3548,6 +3550,9 @@ export const PER_PAYMENT_LINES: CostLine[] = [
       { file: "app/api/store/export/route.ts", names: ["ENDED_STORE_EXPORTS", "storeExport(store)"] },
       { file: "lib/store-export.ts", names: ["EXPORT_STRIPE_PAGES", "EXPORT_PAGE_SECONDS", "EXPORT_COMMANDS"] },
       { file: "lib/plan-closing-rules.ts", names: ["ENDED_LIST_DOWNLOADS"] },
+      // The affiliate spreadsheet once a plan has ended, its own (endedBookExportCost; #5010 row 150).
+      { file: "lib/plan-closing-rules.ts", names: ["ENDED_BOOK_EXPORTS"] },
+      { file: "app/api/store/affiliates/export/route.ts", names: ["ENDED_BOOK_EXPORTS", ":book-ended:"] },
       { file: "lib/list-download.ts", names: ["holdEndedListDownload", "ENDED_LIST_DOWNLOADS", ":list-ended:", "read: plainRead"] },
       { file: "lib/crm.ts", names: ["PERSON_ARG_BYTES = 35;", "valuesOf"] },
       { file: "lib/free.ts", names: ["Math.ceil(MAX_LEADS / 500) + 10"] },
@@ -3561,7 +3566,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
       { file: "lib/plan-closing.ts", names: ["stateSaver", "const check = async", "await save.check();", "await saveFinal.check();", "closeOne"] },
       { file: "lib/closing-buyers-rules.ts", names: ["BUYER_NOTICE_DAYS", "BUYER_SEND_DAYS"] },
     ],
-    basis: "Once for each store, so against each of its payments: a store that paid one month and closed carries all of it in that month's margin. Its keys deleted, the room's at the fewest bytes a key it counts can weigh and the rest at a mark's, DEL_BATCH at a command, each name sent back once: no longer than KEY_NAME_BYTES, and never more than that share of a key beside the ORDER_KEY_BYTES the room charges it, which the registry counts beside every key too (what Redis keeps beside it); its ENDED_STORE_EXPORTS whole exports once its plan has ended, its own and never refused, each at the largest store there can be: its room and its record, every product, course, lesson, post and form there can be, read together, and every page of its sales at Stripe; its ENDED_LIST_DOWNLOADS list downloads once its plan has ended, its own and never taken from its studio figure, each at the largest list its room and its record can hold (endedListDownloadCost); what its followers read, the room and what they read outside it, FOLLOW_BATCH entries at a command; and its last steps' commands, for its owner and every one of its team as a host; and its daily visits from its plan's end to the walk (closeOne), CLOSING_VISIT_DAYS of them, each at CLOSING_VISIT_COMMANDS commands with the check that its closing state is still the one it read (one GET, Claude 7 on #3501) and its record read back (closingVisitCost, measured in tests/closing-visit-cost.test.ts); a store held past those days is visited again each day as a company exposure with no reviewed ceiling (CLOSING_HELD_VISITS, unknown, never zero). The walk's own time is its schedule's. Its id left in a person's records across stores that are the company's (the lists they joined, an affiliate's hub: tests/store-data-registry.ts) is the company's as those records are, and runs out with the quarter it was written in (lib/joined-stores.ts).  Reading the whole database to find its keys is the company's, a scheduled job bounded by its schedule (docs/funded-exposure-review.md). What an order leaves for it, a buyer's library entry and a renewal to stop, is in the order's cost (ORDER_COST); what it writes once its plan has ended is a store that pays nothing's, in the share of those (nonPayingWorst). A store its owner deletes from the studio (lib/store.ts deleteStore) takes the same walk instead, once, and never also closes, since its record goes with it: its marks read and its entry written under its lock (queueDeleted, the same reads as prepareStore's), its record read again and its entry rewritten or dropped when a walk begins (admitDeleted), each in one script and only over the exact entry read (BATCH_SWAP: the same one command as the plain write it replaces, with Lua's own HGET inside it), and its keys deleted and followed as a closed store's, with no export and no closing record; so its cost is this line's, already in its payments' worst case or, for a store that never paid, in nonPayingWorst (closureCost(\"creator\", true)), and its commands are within PREPARE_COMMANDS: its marks' reads within the hundred, and none of the (1 + MAX_TEAM) × (2 × 50 + 5) a closing store's hosts' claims take, in whose place its admission, once its record reads gone, does again what its delete does after the record (Claude 6's two LOWs and reviewer C3 on #3670): one DELETED_HOLD script for each address that still led to it (MAX_ADDRESSES at the most) and four removals (settleDeletedStore), and its webhooks, API keys and assistant notes forgotten once more (forgetBoth, FORGET_TRY_COMMANDS less the line's five) or, when that fails, the line's own commands (queueStoreForget, within those five: its two exact reads and three writes since #4348), and, once they are confirmed, its files put in line when nothing says they were seen to (queueUnseenFiles, three exact reads and the same three writes; Codex X6's LOW on #4348), so at most 1 + MAX_ADDRESSES + 4 + FORGET_TRY_COMMANDS + 6 commands an admission, run again only on a run after one not confirmed. Its later tries in that line are the company's, as a delete's are (FORGET_TRIES).",
+    basis: "Once for each store, so against each of its payments: a store that paid one month and closed carries all of it in that month's margin. Its keys deleted, the room's at the fewest bytes a key it counts can weigh and the rest at a mark's, DEL_BATCH at a command, each name sent back once: no longer than KEY_NAME_BYTES, and never more than that share of a key beside the ORDER_KEY_BYTES the room charges it, which the registry counts beside every key too (what Redis keeps beside it); its ENDED_STORE_EXPORTS whole exports once its plan has ended, its own and never refused, each at the largest store there can be: its room and its record, every product, course, lesson, post and form there can be, read together, and every page of its sales at Stripe; its ENDED_LIST_DOWNLOADS list downloads once its plan has ended, its own and never taken from its studio figure, each at the largest list its room and its record can hold (endedListDownloadCost); its ENDED_BOOK_EXPORTS affiliate spreadsheets once its plan has ended, by its owner only, its own and never taken from its studio figure, each at the largest programme its room and its record can hold, a try that read the book and failed counted as one of them (endedBookExportCost); what its followers read, the room and what they read outside it, FOLLOW_BATCH entries at a command; and its last steps' commands, for its owner and every one of its team as a host; and its daily visits from its plan's end to the walk (closeOne), CLOSING_VISIT_DAYS of them, each at CLOSING_VISIT_COMMANDS commands with the check that its closing state is still the one it read (one GET, Claude 7 on #3501) and its record read back (closingVisitCost, measured in tests/closing-visit-cost.test.ts); a store held past those days is visited again each day as a company exposure with no reviewed ceiling (CLOSING_HELD_VISITS, unknown, never zero). The walk's own time is its schedule's. Its id left in a person's records across stores that are the company's (the lists they joined, an affiliate's hub: tests/store-data-registry.ts) is the company's as those records are, and runs out with the quarter it was written in (lib/joined-stores.ts).  Reading the whole database to find its keys is the company's, a scheduled job bounded by its schedule (docs/funded-exposure-review.md). What an order leaves for it, a buyer's library entry and a renewal to stop, is in the order's cost (ORDER_COST); what it writes once its plan has ended is a store that pays nothing's, in the share of those (nonPayingWorst). A store its owner deletes from the studio (lib/store.ts deleteStore) takes the same walk instead, once, and never also closes, since its record goes with it: its marks read and its entry written under its lock (queueDeleted, the same reads as prepareStore's), its record read again and its entry rewritten or dropped when a walk begins (admitDeleted), each in one script and only over the exact entry read (BATCH_SWAP: the same one command as the plain write it replaces, with Lua's own HGET inside it), and its keys deleted and followed as a closed store's, with no export and no closing record; so its cost is this line's, already in its payments' worst case or, for a store that never paid, in nonPayingWorst (closureCost(\"creator\", true)), and its commands are within PREPARE_COMMANDS: its marks' reads within the hundred, and none of the (1 + MAX_TEAM) × (2 × 50 + 5) a closing store's hosts' claims take, in whose place its admission, once its record reads gone, does again what its delete does after the record (Claude 6's two LOWs and reviewer C3 on #3670): one DELETED_HOLD script for each address that still led to it (MAX_ADDRESSES at the most) and four removals (settleDeletedStore), and its webhooks, API keys and assistant notes forgotten once more (forgetBoth, FORGET_TRY_COMMANDS less the line's five) or, when that fails, the line's own commands (queueStoreForget, within those five: its two exact reads and three writes since #4348), and, once they are confirmed, its files put in line when nothing says they were seen to (queueUnseenFiles, three exact reads and the same three writes; Codex X6's LOW on #4348), so at most 1 + MAX_ADDRESSES + 4 + FORGET_TRY_COMMANDS + 6 commands an admission, run again only on a run after one not confirmed. Its later tries in that line are the company's, as a delete's are (FORGET_TRIES).",
   },
   {
     id: "deleted-store-files",
@@ -3774,11 +3779,35 @@ export function endedListDownloadCost(bytes: number): number {
 }
 
 /**
+ * What one download of the affiliate programme's spreadsheet costs (app/api/store/affiliates/export,
+ * lib/affiliate-book-export.ts; #5010 row 150) for the work it does: its commands and every byte it reads and sends at
+ * a heavy request's price, the bytes it sends on to the browser at Fast Origin Transfer, a step's ten seconds for every 20 MB, and its wait on the creator's Stripe pages held at
+ * 2 GB, EXPORT_PAGE_SECONDS a page, as a whole export's wait is. bookExportUnits covers it at every size
+ * (tests/affiliate-book-export-cost.test.ts).
+ */
+export function bookExportCost(w: ReadWork): number {
+  // The file's bytes also leave the function for the browser, at Fast Origin Transfer (#5256 audit, ea4f 4).
+  return request("heavy", w.commands, w.bytes + w.sent) + w.sent * ORIGIN_PER_BYTE + Math.ceil((w.bytes + w.sent) / 20_000_000) * request("step", 0) + w.stripePages * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
+}
+
+/**
+ * One download of the affiliate spreadsheet once a plan has ended (ENDED_BOOK_EXPORTS of its own), at the largest
+ * programme a store of `bytes` can hold: its seven records are kept in the room, each entry counted there at ENTRY_BYTES
+ * at the least, so it holds at most bytes / ENTRY_BYTES of them; every affiliate there can be (MAX_AFFILIATES), the
+ * PayPal refunds and invoices the book reads at the most, and its Stripe pages; its work as bookExportWork counts it,
+ * at bookExportCost.
+ */
+export function endedBookExportCost(bytes: number): number {
+  const entries = Math.floor(bytes / ENTRY_BYTES);
+  return bookExportCost(bookExportWork({ kept: true, entries, people: MAX_AFFILIATES, leads: entries, paypalRefunds: BOOK_PAYPAL_REFUNDS, stripe: true, products: BOOK_INVOICES }));
+}
+
+/**
  * What closing one store costs at the most, once nobody pays for it: a store
  * of this plan, or a free trial's (`trial`, its room and its units). The
  * parts are said in the basis of the line closure.
  */
-export function closureCost(tier: Tier, trial = false): { deletes: number; follows: number; exports: number; lists: number; prepare: number; visits: number; total: number } {
+export function closureCost(tier: Tier, trial = false): { deletes: number; follows: number; exports: number; lists: number; books: number; prepare: number; visits: number; total: number } {
   const room = trial ? NON_PAYING_DATA_ROOM_BYTES.trial : DATA_ROOM_BYTES[tier];
   // A paying store's beside pool (C1-20261117): the records it holds for are deleted and followed with the room's;
   // they are not in an export or a list download, which read what the room holds.
@@ -3792,11 +3821,12 @@ export function closureCost(tier: Tier, trial = false): { deletes: number; follo
     follows: (kept + outside) * DB_BYTE + (Math.ceil((roomKeys + outside / MARK) / FOLLOW_BATCH) + FOLLOWED_FAMILIES.length * 4) * COMMAND,
     exports: ENDED_STORE_EXPORTS * exportCost(room + MAX_STORE_BYTES),
     lists: ENDED_LIST_DOWNLOADS * endedListDownloadCost(room + MAX_STORE_BYTES),
+    books: ENDED_BOOK_EXPORTS * endedBookExportCost(room + MAX_STORE_BYTES),
     prepare: PREPARE_COMMANDS * COMMAND + MAX_TEAM * STALE_ID_WIRE_BYTES * DB_BYTE,
     visits: CLOSING_VISIT_DAYS * closingVisitCost(),
     total: 0,
   };
-  out.total = out.deletes + out.follows + out.exports + out.lists + out.prepare + out.visits;
+  out.total = out.deletes + out.follows + out.exports + out.lists + out.books + out.prepare + out.visits;
   return out;
 }
 

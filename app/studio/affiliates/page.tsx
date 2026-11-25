@@ -9,7 +9,9 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { UNCONFIRMED_DAYS, affiliateLink, readBook } from "@/lib/affiliates";
 import { isSenderConfigured } from "@/lib/email";
 import { canSell } from "@/lib/store-checkout";
+import { standingOf } from "@/lib/plan-standing";
 import { AffiliateStudio } from "@/components/affiliate-studio";
+import { BOOK_EXPORT_ENDED_NOTE, BOOK_EXPORT_NOTE } from "@/lib/affiliate-book-export-rules";
 import { AffiliateSummary } from "@/components/affiliate-summary";
 import { SUMMARY_PERIODS, programSummary } from "@/lib/affiliate-summary";
 import { PayPalPayouts, PayPalUnread } from "@/components/paypal-payouts";
@@ -165,6 +167,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
 
         <AffiliateStudio
           handle={store.handle}
+          exportNote={standingOf(store) === "ended" ? (view.role === "owner" ? BOOK_EXPORT_ENDED_NOTE : null) : BOOK_EXPORT_NOTE}
           setting={store.affiliates}
           products={[...titles]
             .filter(([id]) => paid.has(id))

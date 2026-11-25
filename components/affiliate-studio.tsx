@@ -47,6 +47,7 @@ import { NewTab } from "@/components/new-tab";
 import { MAX_NOTICE_DAYS, MIN_NOTICE_DAYS, noticeLines } from "@/lib/affiliate-notice";
 import { IDLE_WARN_DAYS, MAX_IDLE_DAYS, MIN_IDLE_DAYS } from "@/lib/affiliate-idle-rules";
 import { type HeldOne, heldLines, readHeld, undoWords } from "@/lib/affiliate-bulk-words";
+import { BOOK_EXPORT_NOTE } from "@/lib/affiliate-book-export-rules";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -226,9 +227,15 @@ export function AffiliateStudio({
   unconfirmed = [],
   unconfirmedTotal = 0,
   unconfirmedDays = 14,
+  exportNote = BOOK_EXPORT_NOTE,
 }: {
   handle: string;
   setting: AffiliateSetting;
+  /**
+   * Said beside the spreadsheet's button, by the plan's state (lib/affiliate-book-export-rules.ts); null hides the
+   * button, for a teammate of a store whose plan has ended, who can no longer download it (#5256 audit, ea4f 3).
+   */
+  exportNote?: string | null;
   products: { id: string; title: string; credited: boolean; recurring?: boolean }[];
   rows: Row[];
   lines: LineView[];
@@ -378,16 +385,19 @@ export function AffiliateStudio({
             Wise — then write it down here with Mark as paid, and it shows on their page too.
           </p>
           <div className="mt-5 flex flex-wrap items-center gap-3">
-            <form action="/api/store/affiliates/export" method="get">
-              <StoreField />
-              <button type="submit" className="btn btn-secondary btn-sm">
-                <Icon name="download" size={16} />
-                Download everything (CSV)
-              </button>
-            </form>
+            {exportNote ? (
+              <form action="/api/store/affiliates/export" method="get">
+                <StoreField />
+                <button type="submit" className="btn btn-secondary btn-sm" aria-describedby="affiliate-export-note">
+                  <Icon name="download" size={16} />
+                  Download everything (CSV)
+                </button>
+              </form>
+            ) : null}
             <span className="text-sm text-ink-soft">{`Owed now, in all: ${money(owedTotal, currency)}`}</span>
           </div>
-          {pendingPayoutsChecked ? payPanel : <p className="notice notice-warn mt-5" role="alert">Pending payments could not be checked. New payment batches and batch files are unavailable until you reload and this check succeeds. Your saved records and full export remain available.</p>}
+          {exportNote ? <p id="affiliate-export-note" className="mt-2 text-sm text-ink-soft">{exportNote}</p> : null}
+          {pendingPayoutsChecked ? payPanel : <p className="notice notice-warn mt-5" role="alert">Pending payments could not be checked. New payment batches and batch files are unavailable until you reload and this check succeeds. {exportNote ? "Your saved records and the full export above remain available." : "Your saved records remain available."}</p>}
           {pendingPayoutsChecked && !settled ? (
             <p className="notice notice-warn mt-5" role="status">
               {!refundsChecked

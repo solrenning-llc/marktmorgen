@@ -121,3 +121,13 @@ export const ENDED_STORE_EXPORTS = 1;
  * plan runs, a list download is taken from the studio figure at its size.
  */
 export const ENDED_LIST_DOWNLOADS: number = 2;
+
+/**
+ * Downloads of the affiliate programme's spreadsheet a store may take once its plan has ended, before it closes
+ * (app/api/store/affiliates/export, lib/affiliate-book-export.ts; #5010 row 150): counted for that ending, never taken
+ * from the ended store's studio figure, so what is owed to its affiliates still leaves with its owner. Two, so a
+ * download that did not reach the browser can be taken again. Each is priced at the largest programme the store's
+ * room can hold, with the rest of its closing (tests/plan-cost-registry.ts, closure). While a plan runs, the
+ * spreadsheet is taken from the studio figure at the programme's size (bookExportUnits).
+ */
+export const ENDED_BOOK_EXPORTS: number = 2;

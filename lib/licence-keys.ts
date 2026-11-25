@@ -55,7 +55,7 @@ import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALP
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, countWithin, repliesFor, stringList } from "@/lib/redis-reply";
 import { StripeListUnreadable, type StripeRow, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
@@ -1056,8 +1056,13 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
               held = true;
               continue;
             }
-            const dropped = countOf(repliesFor(await redisPipeline([["HDEL", waitingKey(store, product), sale.reference]]), 1)?.[0]);
-            if (dropped === null) throw new UnknownReplyError("HDEL of a buyer waiting for a license key");
+            const drop = ["HDEL", waitingKey(store, product), sale.reference];
+            // One field is named, so only 0 or 1 can come back (countWithin): any other count is an unknown shape
+            // (CX-123 rule 24), and the refund stays unread until the place is confirmed gone (Codex G-20261119-2127,
+            // #5010 row 91). The sale is already marked refunded here, so the buyer is never given a key either way;
+            // what an unchecked count left behind was a stale waiting place, counted in keyCounts' `waiting` until the
+            // next restock let it go (Claude 5 ichw's LEVE 1 on #5370).
+            if (countWithin(repliesFor(await redisPipeline([drop]), 1)?.[0], drop) === null) throw new UnknownReplyError("HDEL of a buyer waiting for a license key");
           }
         }
       } catch (error) {

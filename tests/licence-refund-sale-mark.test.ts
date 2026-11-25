@@ -232,6 +232,50 @@ async function main(): Promise<void> {
   is("the upload serves the second buyer, and lets the first one's place go", [upload.served, (await give(slip, "cs_test_licmark000009")) !== null, (await real([["HLEN", slipWaiting]]))[0]], [1, true, 0]);
   is("the first one is given nothing", await give(slip, "cs_test_licmark000008"), null);
 
+  part("5b. An impossible HDEL count never says a refunded buyer's waiting place was removed (Codex G-20261119-2127)");
+  // The job's HDEL names one field, so only 0 or 1 can come back; 2 is an unknown shape (CX-123 rule 24). Until the
+  // place is confirmed gone the refund stays unread. The sale is already marked refunded, so the buyer gets no key
+  // either way (section 5); what the check keeps out is a stale place counted as waiting (Claude 5 ichw's LEVE 1 on
+  // #5370). Each HDEL of this place is recorded with whether the refund was read when it was sent (LEVE 3).
+  const waitingReference = "cs_test_licmark000011";
+  const waitingPayment = "pi_LicenceMark0011";
+  const waitingRefund = "re_LicenceMark0011";
+  is("the refunded buyer starts waiting", await give(slip, waitingReference, "third@example.com"), { state: "waiting" });
+  sessionsByPayment[waitingPayment] = [{ id: waitingReference, object: "checkout.session", metadata: { store: "licencemark", product: slip.id } }];
+  refunds = [refund(waitingRefund, waitingPayment)];
+  const drops: { seen: unknown; answered: unknown }[] = [];
+  const watchDrop = (answer: (commands: Command[]) => Promise<unknown[]>) =>
+    (async (commands: Command[]) => {
+      if (commands.length === 1 && commands[0][0] === "HDEL" && commands[0][1] === slipWaiting && commands[0][2] === waitingReference) {
+        const seen = await seenOf(waitingRefund);
+        const reply = await answer(commands);
+        drops.push({ seen, answered: reply[0] });
+        return reply;
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+  redis.pipeline = watchDrop(async () => [2]);
+  const impossibleRun = await run();
+  redis.pipeline = real;
+  is("the HDEL was sent once and answered the impossible 2, with the refund still unread", drops, [{ seen: 0, answered: 2 }]);
+  is("that run counts no key revoked for it", impossibleRun === "threw" || impossibleRun === 0, true);
+  is("the impossible count leaves the refund unread and the waiting place reachable", [await seenOf(waitingRefund), (await real([["HEXISTS", slipWaiting, waitingReference]]))[0]], [0, 1]);
+  // An unreadable count (a text, or none) is unknown too, never "removed" (Claude 3 knuth's LEVE on #5370, 7113939985,
+  // and Claude 3 xy6b's on 9200b1c0c7, 7114935042): the same HDEL answered ["x"], then [null].
+  for (const unreadable of ["x", null]) {
+    redis.pipeline = watchDrop(async () => [unreadable]);
+    const unreadRun = await run();
+    redis.pipeline = real;
+    is(`the HDEL answered ${JSON.stringify(unreadable)}, with the refund still unread`, drops.at(-1), { seen: 0, answered: unreadable });
+    is(`that run counts no key revoked for it (${JSON.stringify(unreadable)})`, unreadRun === "threw" || unreadRun === 0, true);
+    is(`an unreadable count (${JSON.stringify(unreadable)}) leaves the refund unread and the waiting place reachable`, [await seenOf(waitingRefund), (await real([["HEXISTS", slipWaiting, waitingReference]]))[0]], [0, 1]);
+  }
+  redis.pipeline = watchDrop(real);
+  await run();
+  redis.pipeline = real;
+  is("the healthy retry sends the HDEL while the refund is still unread, and it removes the place", drops.at(-1), { seen: 0, answered: 1 });
+  is("and only then the refund is marked read, the place gone", [await seenOf(waitingRefund), (await real([["HEXISTS", slipWaiting, waitingReference]]))[0]], [1, 0]);
+
   part("6. Cost: keyForSale stays inside ORDERS_KEY_COMMANDS on its dearest path, lost to the mark after five tries");
   let commands = 0;
   let refused = 0;

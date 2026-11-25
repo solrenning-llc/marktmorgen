@@ -34,8 +34,12 @@ const memoryKey = (statsId: string) => `nl:amem:${statsId}`;
 const lockKey = (statsId: string) => `nl:amem:lock:${statsId}`;
 const MEMORY_SLOT = "amem";
 const LOCK_SECONDS = 10;
-/** How long a change waits for another one to finish before it is refused as busy. */
-export const MEMORY_LOCK_WAIT_MS = 2_000;
+/**
+ * How long a change waits for another one to finish before it is refused as busy. Its whole wait at its worst (about
+ * 0.9 s, the sleeps' jitter included) stays inside the studio shape its route is billed at (SHAPES.studio, 1.5 s), with
+ * room for the route's own work (#5285 row #3039; tests/assistant-memory-lock-wait.test.ts). It was 2,000 ms.
+ */
+export const MEMORY_LOCK_WAIT_MS = 1_000;
 
 /** The longest record a store's notes can make, with room for JSON's quoting. */
 export const MAX_STORED_MEMORY_BYTES = MAX_MEMORY_NOTES * (MAX_MEMORY_NOTE * 6 + 128) + 1_024;

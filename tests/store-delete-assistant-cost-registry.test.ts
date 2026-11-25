@@ -47,9 +47,12 @@ async function main(): Promise<void> {
     replyBytes = 0;
     await forgetMemory(statsId, ROOM);
     is("maximum declared stored record is 55,264 bytes", MAX_STORED_MEMORY_BYTES, 55_264);
-    is("the real bounded lock path attempts eleven SETs", commands.filter(c => c[0] === "SET").length, 11);
-    is("external dispatches are fourteen: eleven lock attempts and three EVALs", commands.length, 14);
-    is("the declared sixteen is an outer-dispatch ceiling, not a Lua invoice proof", commands.length <= MEMORY_FORGET_COMMANDS, true);
+    // The lock tries follow MEMORY_LOCK_WAIT_MS (1,000 ms since #5285 row #3039: seven SETs; eleven at 2,000 ms), so the
+    // counts are computed from the declared ceiling (AC (n)): every try at the lock, then three EVALs, two under it.
+    const lockSets = MEMORY_FORGET_COMMANDS - 5;
+    is(`the real bounded lock path attempts ${lockSets} SETs`, commands.filter(c => c[0] === "SET").length, lockSets);
+    is(`external dispatches are ${lockSets + 3}: ${lockSets} lock attempts and three EVALs`, commands.length, lockSets + 3);
+    is(`the declared ${MEMORY_FORGET_COMMANDS} is an outer-dispatch ceiling, not a Lua invoice proof`, commands.length <= MEMORY_FORGET_COMMANDS, true);
     is("the record is actually removed", (await originalPipeline([["GET", `nl:amem:${statsId}`]]))[0], null);
     console.log("Observed forgetMemory external dispatches / JSON-serialized stub reply bytes (not RESP, wire or billed bytes):", commands.length, replyBytes);
   } finally {

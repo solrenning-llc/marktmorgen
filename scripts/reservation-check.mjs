@@ -60,6 +60,8 @@ export function ownerOfReservationFile(path, lanes) {
 }
 
 const cells = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+/** A table's separator row (`| --- | :---: |`): every cell three or more dashes, with an optional colon at either end. */
+const isSeparator = (row) => row.length > 0 && row.every((c) => /^:?-{3,}:?$/.test(c));
 const agentKey = (name) => name.replace(/\(.*?\)/g, "").trim().toLowerCase();
 
 /** The rows of the first table after a heading line that starts with `heading`. */
@@ -83,7 +85,16 @@ export function lanePrefixes(text) {
   const start = lines.findIndex((l) => l.startsWith("Lanes"));
   const rows = [];
   for (const line of lines.slice(start + 1)) {
-    if (line.trim().startsWith("|")) rows.push(cells(line));
+    if (line.trim().startsWith("|")) {
+      const row = cells(line);
+      // A later table's separator ends the lanes, as prose or a heading does (#5285 row #2604): its header goes too.
+      // A blank line inside the table is not a boundary (tests/reservation-table-blanks.test.ts).
+      if (rows.length > 2 && isSeparator(row)) {
+        rows.pop();
+        break;
+      }
+      rows.push(row);
+    }
     else if (rows.length && line.trim()) break;
   }
   return rows.slice(2).map(([agent, prefix]) => ({ agent: agentKey(agent), prefix: prefix.replace(/`/g, "").trim() })).filter((r) => r.prefix);

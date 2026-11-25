@@ -23,10 +23,11 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { types } from "node:util";
-import { readFullNumbers } from "@/lib/mcp-tools";
+import { keptSales, keptStats, salesCopy, statsCopy } from "@/lib/store-readings";
+import { productsInStats, readSales, readStats, readsSales, studioStats } from "@/lib/stats";
 import { readTitles } from "@/lib/catalog";
 import { type Store, storesAfter } from "@/lib/store";
-import type { StatsData } from "@/lib/stats";
+import type { SalesStats, Stats, StatsData } from "@/lib/stats";
 import { paidFiguresComplete } from "@/lib/paid-coverage";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
@@ -124,14 +125,59 @@ export async function readVerified(store: Pick<Store, "statsId">): Promise<Verif
   return slot && Object.hasOwn(slot, "value") ? parse(slot.value) : null;
 }
 
-/** Reads the numbers again and keeps them: from the daily job, and when the creator first turns one on. */
-export async function refreshVerified(store: Store, now = Date.now()): Promise<Verified | null> {
+/**
+ * The store's numbers for the record, from its kept readings (lib/store-readings.ts), never read past them (row 139
+ * of #5010): reading ninety days of counts and every page of sales here, with no reading taken, cost about sixty
+ * studio requests' worth each time, unpriced, and nothing bounded how often a failed refresh came back.
+ * - "take" (the creator turning the numbers on, or making a link): as the studio's home reads them, a copy fresh
+ *   within READING_FRESH_SECONDS reused, otherwise one of the day's readings taken first (priced in the
+ *   store-readings line); with the day's readings used, the last copy kept.
+ * - "pass" (the daily pass): a kept copy reused when there is one, otherwise the pass reads for itself, once a day,
+ *   never from the creator's readings of the day (coordinator 606b): priced in its own line
+ *   (tests/plan-cost-registry.ts, verified-numbers), one visits reading and one sales reading a day for each store
+ *   that shows them.
+ * The record carries the day its oldest part was read, never a later one. Null when no visits are known.
+ */
+async function numbersForRecord(store: Store, now: number, how: "take" | "pass"): Promise<NumbersRead | null> {
+  const pass = how === "pass";
+  const stats = pass ? (await statsCopy(store)) ?? (await passReading(() => readStats(store, now), now)) : await keptStats(store, now).catch(() => null);
+  if (!stats?.value) return null;
+  if (!readsSales(store)) return { stats: stats.value, sales: null, state: "none", at: stats.at };
+  const sales = pass ? (await salesCopy(store)) ?? (await passReading(() => readSales(store, now), now)) : await keptSales(store, now).catch(() => null);
+  if (!sales?.value) return { stats: stats.value, sales: null, state: "error", at: stats.at };
+  return { stats: stats.value, sales: sales.value, state: "ok", at: Math.min(stats.at, sales.at) };
+}
+
+type NumbersRead = { stats: Stats; sales: SalesStats | null; state: StatsData["sales"]; at: number };
+
+/**
+ * The studio's numbers for the record, with the products they name (productsInStats) listed by the titles already
+ * read: no listing is read for them, and a product that sold is never left out of the record (review of #5270).
+ */
+export function recordNumbers(store: Store, read: NumbersRead, titles: Map<string, string> | null): StatsData {
+  // Titles that could not be read (null) list no product at all: a product that sold is never shown under a false
+  // "no longer listed" (Claude 1 on #5270); the record is made again the next day.
+  const listed = titles ? productsInStats(store, read.stats, read.sales).map((id) => ({ id, title: titles.get(id) ?? "" })) : [];
+  return studioStats(store, read.stats, read.sales, read.state, listed);
+}
+
+/** The daily pass's own reading of the day, when the studio kept no copy (priced in the verified-numbers line). */
+async function passReading<T>(read: () => Promise<T>, now: number): Promise<{ value: T; at: number } | null> {
+  try {
+    return { value: await read(), at: now };
+  } catch {
+    return null;
+  }
+}
+
+/** Reads the numbers again and keeps them: from the daily job ("pass"), and when the creator first turns one on ("take"). */
+export async function refreshVerified(store: Store, now = Date.now(), how: "take" | "pass" = "take"): Promise<Verified | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  // The studio's numbers with the products in them, read as the studio reads them.
-  const data = await readFullNumbers(store, now);
-  if (!data) return null;
-  const titles = await readTitles(store).catch(() => new Map<string, string>());
-  const record = verifiedFrom(data, titles, now);
+  // The studio's numbers, from the readings the studio keeps.
+  const read = await numbersForRecord(store, now, how);
+  if (!read) return null;
+  const titles = await readTitles(store).catch(() => null);
+  const record = verifiedFrom(recordNumbers(store, read, titles), titles ?? new Map<string, string>(), read.at);
   // Kept only when Redis said OK: another reply leaves the record unknown, never counted as kept (CX-123 rule 24).
   const kept = repliesFor(await redisPipeline([["SET", key(store.statsId), JSON.stringify(record), "EX", KEEP_SECONDS]]), 1);
   if (kept?.[0] !== "OK") throw new UnknownReplyError("keeping the shared numbers");
@@ -183,8 +229,8 @@ export async function sendVerified(deadline: number): Promise<{ stores: number }
       if (Date.now() >= deadline) break;
       if (usesVerified(store)) {
         try {
-          await refreshVerified(store);
-          counts.stores += 1;
+          // A kept copy reused, otherwise its own reading (row 139): the pass never takes one of the creator's readings.
+          if (await refreshVerified(store, Date.now(), "pass")) counts.stores += 1;
         } catch (error) {
           console.error("reading the shared numbers failed", store.handle, error);
         }

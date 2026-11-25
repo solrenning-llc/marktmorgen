@@ -24,5 +24,14 @@ export async function storesAfter(cursor: string): Promise<{ stores: never[]; ne
   await new Promise((resolve) => setTimeout(resolve, world.delayMs));
   return { stores: [], next: world.next };
 }
-export async function readFullNumbers(): Promise<never> { throw new Error("No store should be refreshed in this test"); }
+// The shared numbers are read from the studio's kept readings since row 139 of #5010 (lib/store-readings.ts).
+export async function keptStats(): Promise<never> { throw new Error("No store should be refreshed in this test"); }
+export async function keptSales(): Promise<never> { throw new Error("No store should be refreshed in this test"); }
+export async function statsCopy(): Promise<never> { throw new Error("No store should be refreshed in this test"); }
+export async function salesCopy(): Promise<never> { throw new Error("No store should be refreshed in this test"); }
+export function readsSales(): never { throw new Error("No store should be refreshed in this test"); }
+export function studioStats(): never { throw new Error("No store should be refreshed in this test"); }
+export function productsInStats(): never { throw new Error("No store should be refreshed in this test"); }
+export async function readStats(): Promise<never> { throw new Error("No store should be refreshed in this test"); }
+export async function readSales(): Promise<never> { throw new Error("No store should be refreshed in this test"); }
 export async function readTitles(): Promise<never> { throw new Error("No product should be read in this test"); }

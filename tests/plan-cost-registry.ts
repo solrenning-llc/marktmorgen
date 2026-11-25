@@ -2049,6 +2049,8 @@ export const TEAM_COMMANDS_PER_VIEW = 2;
 
 /** Windows of a counter that a 31-day month can touch. */
 export const DAY_WINDOWS = 32;
+/** The commands a kit save or a numbers link that first builds the shared numbers' record from the kept copies bills past the studio request's figure (line verified-numbers; measured in tests/verified-numbers-kept-readings.test.ts). */
+export const VERIFIED_RECORD_EXTRA_COMMANDS = 2;
 /** The read-only contact admission is after the existing rolling-day store cap, before mail or an inbox unit.
  * Price every possible admission (sent, failed or gone), at 32 daily windows, including its own light compute.
  * Two possible store-limit identities are covered: handle before statsId, then the immutable statsId.
@@ -3247,6 +3249,24 @@ export const COST_LINES: CostLine[] = [
     basis: "Every reading of every UTC day of the window, each counted before it is read: HEAVY_READINGS_PER_DAY of the store's sales from Stripe and PayPal (its recent sales or its twelve months of earnings, each within SALES_READ_SHAPE and counted as one of them), the rest of STORE_READINGS_PER_DAY at the dearer of its visits and its memberships (STORE_READING_SHAPES); what a studio page reads of the kept readings (up to three, READING_COPY_MAX_BYTES each) and of the day's counts (two) for every page the studio figure allows; and the readings kept a day, one of each of READING_KINDS (four since the earnings). The page itself is the studio's STUDIO_PAGE_UNITS, as the Terms say.",
   },
   {
+    id: "verified-numbers",
+    feature: "The shared numbers a media kit and a numbers link show (lib/verified-numbers.ts): the daily pass's own reading for each store that shows them, and the record the studio builds from its kept readings (row 139 of #5010, coordinator 606b)",
+    monthlyUsd: (tier) =>
+      // The daily pass, every day of the window, at its worst: no copy kept, so one visits reading and one sales reading of
+      // its own, at the shapes the store-readings line prices a reading at, never taken from the creator's readings.
+      DAY_WINDOWS * (readShapeCost(STATS_READ_SHAPE) + readShapeCost(SALES_READ_SHAPE))
+      // The studio's kit save or numbers link that first builds the record from the kept copies: its copies' GETs and the
+      // record's SET past the studio request's figure, VERIFIED_RECORD_EXTRA_COMMANDS on every studio request of the plan.
+      + STORE_ALLOWANCES[tier].studio * VERIFIED_RECORD_EXTRA_COMMANDS * COMMAND,
+    sources: [
+      { file: "lib/verified-numbers.ts", names: ["refreshVerified", "sendVerified", "passReading", "statsCopy(store)", "salesCopy(store)", "keptStats(store, now)", "keptSales(store, now)"] },
+      { file: "lib/store-readings.ts", names: ["statsCopy", "salesCopy", "copyOf"] },
+      { file: "app/api/store/kit/route.ts", names: ["refreshVerified(saved)"] },
+      { file: "app/api/store/numbers-links/route.ts", names: ["refreshVerified(added.store)"] },
+    ],
+    basis: "Before row 139 the shared numbers read ninety days of counts and every page of sales on each refresh with no reading taken, about sixty studio requests' worth each time, unpriced (\$8.88 a month on Store at its worst). Now the studio builds the record from its kept readings (a fresh copy reused, otherwise one of the day's readings taken first, priced in store-readings), and the daily pass reuses a kept copy or reads for itself once a day, never from the creator's readings: one visits reading and one sales reading a day at their shapes, every day of the window, for a store that shows them. The record built from the copies costs VERIFIED_RECORD_EXTRA_COMMANDS past the studio request's figure (measured in tests/verified-numbers-kept-readings.test.ts, padded with the take and lockedUntil: a kit save 28 and a numbers link 29 against 27).",
+  },
+  {
     id: "calendar-feed",
     feature: "The private booking calendar a creator subscribes to (/api/store/calendar/<token>.ics): every answer from the last good copy, and the copy made again (C4-4, 4 November 2026)",
     monthlyUsd: () =>
@@ -3889,7 +3909,7 @@ export function nonPayingWorst(): number {
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.
-    + ["calendar-feed", "store-readings"].reduce((sum, id) => sum + creator(id), 0)
+    + ["calendar-feed", "store-readings", "verified-numbers"].reduce((sum, id) => sum + creator(id), 0)
     // The drip job's reads of its students' starts, at Store's figure, which is more than a trial's (lib/drip-start.ts:
     // a store that pays nothing reads only with one of the month's places).
     + creator("drip-start-read")

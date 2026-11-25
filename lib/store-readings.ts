@@ -312,6 +312,30 @@ export async function keptReading<T>(store: ReadingStore, kind: ReadingKind, rea
   }
 }
 
+/**
+ * One reading's kept copy as it is, nothing taken and nothing read: for the daily pass of the shared numbers
+ * (lib/verified-numbers.ts, row 139 of #5010), which reuses what the studio last read and never uses one of the
+ * creator's readings of the day. Null when none is kept, or when it cannot be read whole (never a guess).
+ */
+async function copyOf<T>(store: Pick<Store, "statsId">, kind: ReadingKind): Promise<Kept<T> | null> {
+  if (!store.statsId || !isRedisConfigured()) return null;
+  const replies = await redisPipeline([["GET", copyKey(kind, store.statsId)]]).catch(() => null);
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const raw: unknown = replies[0];
+  if (typeof raw !== "string" || !raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { at?: unknown; value?: unknown; unnamed?: unknown };
+    if (typeof parsed.at !== "number" || !Number.isFinite(parsed.at) || parsed.value === undefined) return null;
+    return { value: parsed.value as T, at: parsed.at, stale: false, ...(parsed.unnamed === true ? { unnamed: true } : {}) };
+  } catch {
+    return null;
+  }
+}
+/** The kept copy of the store's visits, nothing taken (copyOf). */
+export const statsCopy = (store: Pick<Store, "statsId">) => copyOf<Stats | null>(store, "stats");
+/** The kept copy of the store's sales, nothing taken (copyOf). */
+export const salesCopy = (store: Pick<Store, "statsId">) => copyOf<SalesStats | null>(store, "sales");
+
 /** The store's visits, kept (lib/stats.ts, readStats). */
 export async function keptStats(store: Store, now = Date.now(), fresh = false): Promise<Kept<Stats | null> | null> {
   return keptReading(store, "stats", () => readStats(store, now), now, fresh);

@@ -202,6 +202,43 @@ function lastOf(raw: unknown): ServerSetup["last"] {
   return kept as ServerSetup["last"];
 }
 
+/**
+ * The setup's write could not be confirmed either way (#4457): its reply was lost or was not OK, and reading the
+ * setup back then failed too. The change may or may not be kept; the route says so (503 "unconfirmed"), never
+ * "saved" and never "did not save".
+ */
+export class SetupWriteUnconfirmed extends Error {
+  constructor() {
+    super("the server conversions' setup write could not be confirmed");
+    this.name = "SetupWriteUnconfirmed";
+  }
+}
+
+/**
+ * Writes the whole setup and knows whether it is kept (#4457). Redis answers OK: kept. A lost reply (a transport
+ * error) or any other reply does not say: the setup is read back, and the very bytes written there mean it was kept,
+ * so the caller goes on as for OK; anything else kept there means this change is not, which throws an
+ * UnknownReplyError (the route answers 503 "unavailable"); a read back that fails too throws SetupWriteUnconfirmed.
+ */
+async function writeStored(statsId: string, stored: Stored): Promise<void> {
+  const written = JSON.stringify(stored);
+  try {
+    if (repliesFor(await redisPipeline([["SET", configKey(statsId), written]]), 1)?.[0] === "OK") return;
+  } catch (error) {
+    if (!(error instanceof UnknownReplyError)) console.error("writing the server conversions' setup did not answer", error);
+  }
+  let kept: unknown;
+  try {
+    const replies = repliesFor(await redisPipeline([["GET", configKey(statsId)]]), 1);
+    if (!replies) throw new UnknownReplyError("the server conversions' setup");
+    kept = replies[0];
+  } catch (error) {
+    if (!(error instanceof UnknownReplyError)) console.error("reading the server conversions' setup back after its write failed", error);
+    throw new SetupWriteUnconfirmed();
+  }
+  if (kept !== written) throw new UnknownReplyError("the server conversions' setup");
+}
+
 /** Read exactly: an unknown setup throws, never an empty one (the route answers 503, the studio says so). */
 export async function serverSetup(statsId: string | null): Promise<ServerSetup> {
   if (!statsId || !isRedisConfigured()) return NO_SETUP;
@@ -240,7 +277,7 @@ export async function setServerToken(
   if (!text) {
     delete stored[platform];
     if (platform === "pinterest") delete stored.pinterestAccount;
-    await redisPipeline([["SET", configKey(statsId), JSON.stringify(stored)]]);
+    await writeStored(statsId, stored);
     return "removed";
   }
   if (!TOKEN.test(text)) return "invalid";
@@ -250,7 +287,7 @@ export async function setServerToken(
     stored.pinterestAccount = account;
   }
   stored[platform] = seal(text, context(statsId, platform));
-  await redisPipeline([["SET", configKey(statsId), JSON.stringify(stored)]]);
+  await writeStored(statsId, stored);
   return "saved";
 }
 
@@ -261,7 +298,7 @@ export async function setTestCode(statsId: string, code: unknown): Promise<boole
   const stored = await readStored(statsId);
   if (text) stored.testCode = text;
   else delete stored.testCode;
-  await redisPipeline([["SET", configKey(statsId), JSON.stringify(stored)]]);
+  await writeStored(statsId, stored);
   return true;
 }
 

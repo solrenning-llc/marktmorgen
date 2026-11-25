@@ -1,0 +1,4 @@
+{
+  "@/lib/email": "mail-reservation-email.ts",
+  "@/lib/ses": "mail-reservation-ses.ts"
+}

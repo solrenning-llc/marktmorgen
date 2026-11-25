@@ -665,7 +665,17 @@ export async function sendTo(
       await rampBack(watched, chunk.length);
       return told({ done, rest: emails.slice(i), stopped: "retry" });
     }
-    const keys = counting?.size ? await rememberLinkKeys(store.listId as string, [...counting].map((email) => ({ email, token: tokens.get(email) ?? "" }))) : new Map<string, string>();
+    // The consented link keys are written before anything goes to the provider (lib/mail-clicks.ts): a write that
+    // failed is a known no-send, like an unknown token read above, so what was taken for the batch is given back and
+    // the batch is tried again later (issue #4107: it threw out of here with the month, the day and the portion taken).
+    let keys: Map<string, string>;
+    try {
+      keys = counting?.size ? await rememberLinkKeys(store.listId as string, [...counting].map((email) => ({ email, token: tokens.get(email) ?? "" }))) : new Map<string, string>();
+    } catch {
+      await release(store, chunk.length, day);
+      await rampBack(watched, chunk.length);
+      return told({ done, rest: emails.slice(i), stopped: "retry" });
+    }
     const messages: BatchMessage[] = chunk
       .filter((email) => tokens.has(email))
       .map((email) => {

@@ -15,8 +15,10 @@ import { readListing } from "@/lib/catalog";
  *   GET /api/store/licence?store=<handle>&product=<product id>&key=<key>
  *
  * answers `{ "status": "valid" }`, `{ "status": "revoked" }` or
- * `{ "status": "unknown" }`, and `valid: true` only for the first. It says
- * nothing else — not who bought the key, not when — because anyone can ask.
+ * `{ "status": "unknown" }` (never given), and `valid: true` only for the first.
+ * A key whose record is there but cannot be read just now is none of these: it
+ * answers 502, "Could not check right now", so the app can ask again (#5285).
+ * It says nothing else — not who bought the key, not when — because anyone can ask.
  * It can be called from a browser on any site, and from an app. Each
  * connection may ask 120 times a minute per store, which a real app never
  * comes near and which makes guessing keys pointless on top of their 60 bits

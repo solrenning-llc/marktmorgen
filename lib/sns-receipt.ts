@@ -51,6 +51,12 @@ export type SnsReceipt =
 
 const PENDING = /^([0-9]{13})\.[0-9]{9}$/;
 
+/**
+ * How far ahead of ours another run's clock may be and its pending value still be taken as live: two minutes, so a
+ * notice is held at most this plus SNS_RECEIPT_LEASE_MS, well inside SNS's retries.
+ */
+export const SNS_CLOCK_SKEW_MS = 120_000;
+
 async function swap(key: string, from: string, to: string): Promise<boolean> {
   try {
     const replies = repliesFor(await redisPipeline([["EVAL", SWAP, 1, key, from, to, SNS_RECEIPT_SECONDS]]), 1);
@@ -87,7 +93,14 @@ export async function takeSnsReceipt(key: string, now = Date.now()): Promise<Sns
   }
   if (value === SNS_RECEIPT_DONE) return { state: "done" };
   const pending = PENDING.exec(value);
-  if (pending && Math.abs(now - Number(pending[1])) < SNS_RECEIPT_LEASE_MS) return { state: "busy" };
+  // Another run's pending value is busy until SNS_RECEIPT_LEASE_MS after its own time, also when that time is ahead
+  // of ours by up to SNS_CLOCK_SKEW_MS (another server's clock running fast): Math.abs took a time more than the lease
+  // ahead as past its lease and took it over while its run could still be acting (Codex X5's LOW on #2612, board
+  // #5285). A time further ahead is no plausible clock and is taken over like any other value that is not a finished
+  // notice, so a damaged or far-fast time never holds a bounce or complaint past SNS's retries: acting twice is
+  // harmless, losing the notice is not (Claude 2 lpgvy's LEVE on #5406).
+  const at = pending ? Number(pending[1]) : NaN;
+  if (pending && now - at < SNS_RECEIPT_LEASE_MS && at - now <= SNS_CLOCK_SKEW_MS) return { state: "busy" };
   // A pending value past its lease, the route's old "1" or anything else that is not a finished notice: taken over
   // only while it still holds what was read, so two late deliveries never both act on the same take-over.
   return (await swap(key, value, token)) ? { state: "ours", key, token } : { state: "busy" };

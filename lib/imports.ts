@@ -99,6 +99,8 @@ import { stopTags } from "@/lib/mail-health-rules";
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
 import { movedPurchaseWords } from "@/lib/buyer-words/moved-purchases";
+// Its own line, apart from the import above that other open work changes (AC (e)).
+import { serviceMailKnownUnavailable } from "@/lib/email";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { inviteEmail, inviteMembers, keptAlready, moveFoot, movePostal, noteKept, dropReminder, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
@@ -1727,6 +1729,11 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   const pause = await pauseForSending(job.sid);
   if (pause === undefined) return "retry";
   const paused = pause !== null;
+  // While no sender can take mail at all (no Amazon SES, and no Resend key or no Resend fallback proof: a check with
+  // no IO, lib/email.ts), sendBatch would answer "retry" with nothing sent. Asked before the portion is read, so a
+  // step waits with the queue untouched instead of building every letter only to put them back (#5010 row 151). A
+  // paused store sends nothing either way: its addresses are still counted as not emailed below.
+  if (!paused && serviceMailKnownUnavailable()) return "retry";
   // And until then they go out in portions that double, a hundred buyers
   // first, so that a file of dead addresses is found while few have been
   // written to. A portion not yet open is waited for; nobody is dropped.

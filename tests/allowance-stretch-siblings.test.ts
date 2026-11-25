@@ -87,8 +87,12 @@ test("RED: every other counter keyed by the window id takes its time to live fro
   assert.match(read("lib/answers.ts"), /\["EXPIRE", key, windowKeySeconds\(store, 40 \* 86_400, now\)\]/);
   assert.match(read("lib/ai.ts"), /\["EXPIRE", key, windowKeySeconds\(store, 40 \* 86_400, now\)\]/);
   const kit = read("lib/affiliate-kit.ts");
-  assert.match(kit, /\["EXPIRE", month, kept\]/);
-  assert.match(kit, /\["EXPIRE", jobs, kept\]/);
+  // Since Codex P-20261120-1412 the three counters are taken in KIT_COUNTS, fenced on the store being live: the
+  // window's and the jobs' counters still end with the window (ARGV[4], the `kept` passed to it).
+  assert.match(kit, /redis\.call\("EXPIRE", KEYS\[4\], ARGV\[4\]\)/);
+  assert.match(kit, /redis\.call\("EXPIRE", KEYS\[5\], ARGV\[4\]\)/);
+  assert.match(kit, /const counters: \[string, string, string\] = \[day, month, jobs\];/);
+  assert.match(kit, /kitCounts\(store, "take", counters, 2 \* 86_400, kept\)/);
   assert.match(kit, /const kept = windowKeySeconds\(store, 40 \* 86_400, now\.getTime\(\)\);/);
   const share = read("app/api/store/funnel-share/route.ts");
   assert.doesNotMatch(share, /countUse\(storeMonthKey\([^)]*\), [^,]+, MONTH_USE_SECONDS\)/, "a store's month counted with a fixed 32 days");

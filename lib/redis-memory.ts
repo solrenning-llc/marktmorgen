@@ -1290,6 +1290,42 @@ export class MemoryRedis {
           this.run(["SET", cache, value, "EX", seconds]);
           return 1;
         }
+        // lib/affiliate-kit.ts KIT_COUNTS: an affiliate kit's three counters taken, and given back, only while the store
+        // is still its own and not erasing; given back only while all three are still there and above zero.
+        if (key.startsWith("-- marktmorgen:affiliate-kit-counts:v1\n") && args[0] === "5" && args.length === 12) {
+          const [, live, erasing, day, window, jobs, field, op, daySeconds, windowSeconds, statsId, ref] = args;
+          this.scriptCalls += 2;
+          if (this.run(["HGET", erasing, field]) !== null) return [0];
+          if (statsId === "") {
+            if (this.run(["GET", live]) !== ref) return [0];
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return [0];
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return [-1];
+            }
+            if (!record || typeof record !== "object") return [-1];
+            if ((record as { statsId?: unknown }).statsId !== statsId) return [0];
+          }
+          if (op === "take") {
+            this.scriptCalls += 6;
+            const counts = [[day, daySeconds], [window, windowSeconds], [jobs, windowSeconds]].map(([k, seconds]) => {
+              const n = this.run(["INCR", k]);
+              this.run(["EXPIRE", k, seconds]);
+              return n;
+            });
+            return [1, ...counts];
+          }
+          this.scriptCalls += 1;
+          const held = this.run(["MGET", day, window, jobs]) as (string | null)[];
+          if (!held.every((v) => v !== null && Number.isFinite(Number(v)) && Number(v) >= 1)) return [2];
+          this.scriptCalls += 3;
+          for (const k of [day, window, jobs]) this.run(["DECR", k]);
+          return [1];
+        }
         // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
         if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, book, token, json] = args;

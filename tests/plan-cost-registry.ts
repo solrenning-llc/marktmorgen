@@ -87,6 +87,7 @@ import { CONTACT_COMMANDS_MOST, CONTACT_READ_BYTES } from "@/lib/contacts";
 import { MAX_CART } from "@/lib/cart-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
 import { AI_MONTHLY } from "@/lib/ai-rules";
+import { KIT_COMMANDS_MOST } from "@/lib/affiliate-kit-rules";
 import { AI_STEP_EXTRA_BYTES, AI_STOP_COMMANDS } from "@/lib/ai-steps";
 import { AI_FILE_REDIS_BYTES, AI_FILE_REDIS_COMMANDS, AI_FILE_RENDER_SECONDS, AI_FILE_REPLY_BYTES, AI_FILE_SAVE_BYTES } from "@/lib/ai-file-rules";
 import { protocolInfrastructureMicroUsd } from "@/lib/spend-cost-table";
@@ -1404,6 +1405,14 @@ export function thanksNoteFenceUsd(tier: Tier): number {
   return thanksNoteFenceCost(STORE_ALLOWANCES[tier]);
 }
 
+/**
+ * The commands of one integration (a call out) as UNIT_COST.integration prices them: an affiliate kit's fenced
+ * counters and content reads (KIT_COMMANDS_MOST, Codex P-20261120-1412) are the most any integration's own commands
+ * come to, and the allowance's take. Read by the tests that check the unit, never typed again (AC (n); Claude 2
+ * upbeat's MEDIUM on #5101: tests/test-meeting-after-store-erasure.test.ts typed 10 by hand).
+ */
+export const INTEGRATION_UNIT_COMMANDS = Math.max(10, KIT_COMMANDS_MOST) + TAKE_COMMANDS;
+
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database, and lockedUntil's
@@ -1420,7 +1429,9 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // public request, so their PATH_LEAD_COMMANDS are priced here, with the email that carried the link.
   transactional: PER_EMAIL + (6 + PATH_LEAD_COMMANDS + TAKE_COMMANDS) * COMMAND,
   // A call out, waited on at 2 GB for ten seconds.
-  integration: request("wait", 10 + TAKE_COMMANDS, 21_024), // +1 KiB for the exact ref/legacy cap in paypal-link-live:v2; the owner record stays inside Redis.
+  // An affiliate kit's fenced counters and content reads (KIT_COMMANDS_MOST, Codex P-20261120-1412) are the most any
+  // integration's own commands come to, so every integration is priced at them.
+  integration: request("wait", INTEGRATION_UNIT_COMMANDS, 21_024), // +1 KiB for the exact ref/legacy cap in paypal-link-live:v2; the owner record stays inside Redis.
   // What a buyer does inside what they bought (lib/buyer-actions.ts): the
   // heaviest is a post or comment that tells up to eleven people, their
   // devices pushed at once and waited on (their read at most
@@ -3354,6 +3365,9 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "integration") + STORE_ALLOWANCES[tier].integration * VAULT_REFUSED_PASS + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS,
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "integration"] },
+      // An affiliate kit, one integration: its counters fenced on the store being live (Codex P-20261120-1412), at KIT_COMMANDS_MOST.
+      { file: "lib/affiliate-kit-rules.ts", names: ["KIT_COMMANDS_MOST"] },
+      { file: "lib/affiliate-kit.ts", names: ["KIT_COUNTS", "kitCounts(store, \"take\"", "kitCounts(store, \"back\""] },
       { file: "lib/metered-limits.ts", names: ["withinService", "withinServiceWhy"] },
       { file: "app/api/store/affiliates/paypal/route.ts", names: ['withinServiceWhy("paypal-pay", store.handle, 6, 3600, store, paypalPressUnits(sizes))', "bookSizes(store)", "maxDuration = 60"] },
       { file: "lib/paypal-payouts.ts", names: ["payWithPayPal", "holdLock(lock)", "withLock(`nl:pp:${statsId}:lock`, 120, 5_000", "readBook(store, undefined, { titles: false })", "paypalPressUnits", "PAYPAL_PRESS_BASE_UNITS", "PAYPAL_PRESS_UNIT_COMMANDS"] },

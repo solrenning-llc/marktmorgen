@@ -48,7 +48,8 @@ export default async function StudioDealsPage({ searchParams }: Params) {
   ]);
   const seen = visiblePipelines(inventory.pipelines, view.role, access);
   const seenStages = new Set(seen.flatMap((p) => p.stages.map((stage) => stage.id)));
-  const shown = { pipelines: seen.map((p) => ({ id: p.id, name: p.name, stages: p.stages })), deals: inventory.deals.filter((deal) => seenStages.has(deal.stage)), stages: inventory.stages.filter((stage) => seenStages.has(stage.id)) };
+  // The ids of stages taken away go only to someone who sees every pipeline, so a copy never takes one (copyPipeline).
+  const shown = { pipelines: seen.map((p) => ({ id: p.id, name: p.name, stages: p.stages, ...(!restricted && p.moved ? { moved: p.moved } : {}) })), deals: inventory.deals.filter((deal) => seenStages.has(deal.stage)), stages: inventory.stages.filter((stage) => seenStages.has(stage.id)) };
   const viewOnly = seen.filter((p) => p.access === "view").map((p) => p.id);
   const hidden = inventory.pipelines.length - seen.length;
   const fields = loadedFields ?? [];

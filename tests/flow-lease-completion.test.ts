@@ -10,7 +10,7 @@
 import { readAction } from "@/lib/flow-rules";
 import { enroll, forgetWorkflowPerson, saveFlow, sendDueSteps } from "@/lib/flows";
 import { upsertContact } from "@/lib/contacts";
-import { forgetCrmPerson, personReturned, readDeals, readStages, readValues, writeDeal, writeFields } from "@/lib/crm";
+import { forgetCrmPerson, personReturned, readDeals, readStages, readValues, writeDeal, writeFields, readStageView } from "@/lib/crm";
 import { writeForm } from "@/lib/form-store";
 import { parseForm } from "@/lib/forms";
 import { personKey } from "@/lib/person-key";
@@ -50,6 +50,7 @@ async function main(): Promise<void> {
     { id: "src001", name: "Came from", type: "text", options: [] },
   ]);
   const stages = await readStages(statsId);
+  const view = await readStageView(statsId);
   const talking = stages.find((s) => s.name === "Talking")!;
   const offer = stages.find((s) => s.name === "Offer sent")!;
   await writeForm(statsId, parseForm({ id: "applyform1", name: "Coaching application", fields: [{ id: "q1mail", type: "email", label: "Email", required: true }, { id: "q2what", type: "short", label: "What?", required: false }] })!);
@@ -94,7 +95,7 @@ async function main(): Promise<void> {
 
   const value = async (email: string) => (await readValues(statsId, personKey(statsId, email), fields)).lvl001 ?? "";
   is("the field is set for those on the list, not for somebody who is not", [await value("ana@example.com"), await value("ben@example.com"), await value("nobody@example.com")], ["Pro", "Pro", ""]);
-  const deals = await readDeals(statsId, stages);
+  const deals = await readDeals(statsId, view);
   is("Ana gets a new deal in the stage; Ben's open deal moves there", [
     deals.filter((d) => d.email === "ana@example.com").map((d) => [d.title, d.stage]),
     deals.filter((d) => d.email === "ben@example.com").map((d) => [d.id, d.stage, d.cents]),

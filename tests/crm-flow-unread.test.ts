@@ -13,7 +13,7 @@
 import { enroll, saveFlow, sendDueSteps } from "@/lib/flows";
 import { personOf, readRun } from "@/lib/flow-runs";
 import { upsertContact } from "@/lib/contacts";
-import { readDeals, readStages, readValues, writeFields } from "@/lib/crm";
+import { readDeals, readStages, readValues, writeFields, readStageView } from "@/lib/crm";
 import { writeForm } from "@/lib/form-store";
 import { parseForm } from "@/lib/forms";
 import { personKey } from "@/lib/person-key";
@@ -64,6 +64,7 @@ async function main(): Promise<void> {
   const statsId = store.statsId!;
   const fields = await writeFields(statsId, [{ id: "lvl001", name: "Level", type: "choice", options: ["Beginner", "Pro"] }]);
   const stages = await readStages(statsId);
+  const view = await readStageView(statsId);
   await writeForm(statsId, parseForm({ id: "fieldform1", name: "Field", fields: [{ id: "q1mail", type: "email", label: "Email", required: true }] })!);
   await writeForm(statsId, parseForm({ id: "dealform01", name: "Deal", fields: [{ id: "q1mail", type: "email", label: "Email", required: true }] })!);
   const fieldFlow = await saveFlow(store, { name: "Field step", trigger: "form", formId: "fieldform1", active: true, steps: [{ delayHours: 0, action: { do: "field", field: "lvl001", value: "Pro" } }, { delayHours: 0, subject: "After the field", body: "B" }] }, { activate: true });
@@ -96,7 +97,7 @@ async function main(): Promise<void> {
   is("the run waits to be tried again, not held", bea?.run.status, "waiting");
   is("the step waits at step 0, once, saying why", [bea?.run.step, bea?.run.waits, bea?.run.note], [0, 1, "Your deals board could not be read; tried again in a few minutes."]);
   is("nothing is logged as uncertain or failed", bea?.events.filter((e) => e.state === "uncertain" || e.state === "failed").length, 0);
-  is("no deal was written", (await readDeals(statsId, stages)).filter((d) => d.email === "bea@example.com").length, 0);
+  is("no deal was written", (await readDeals(statsId, view)).filter((d) => d.email === "bea@example.com").length, 0);
   done();
 }
 

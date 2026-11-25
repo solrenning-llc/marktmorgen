@@ -13,8 +13,8 @@
  *   - somebody signed out is refused.
  */
 import { NextRequest } from "next/server";
-import { DEFAULT_STAGES, boardTotals, fieldValue, newCrmId, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
-import { pageMark, readDeals, readFields, readValues, valuesOf } from "@/lib/crm";
+import { DEFAULT_STAGES, boardTotals, fieldValue, newCrmId, parseDeal, parseFields, parseStages, DEFAULT_VIEW } from "@/lib/crm-rules";
+import { pageMark, readDeals, readFields, readValues, valuesOf, readStageView } from "@/lib/crm";
 import { personKey } from "@/lib/person-key";
 import { listAsCsv } from "@/lib/free";
 import { plainRead, upsertContact } from "@/lib/contacts";
@@ -60,10 +60,10 @@ async function main(): Promise<void> {
   is("without a lost stage, refused", parseStages(DEFAULT_STAGES.filter((s) => s.kind !== "lost")), null);
 
   part("A deal, and the board");
-  const deal = parseDeal({ id: "abcdefghij", title: "Coaching\tpackage", email: "Dana@Example.com", cents: 150_000.4, stage: "talk00", note: "Line one\r\nLine two" }, DEFAULT_STAGES);
+  const deal = parseDeal({ id: "abcdefghij", title: "Coaching\tpackage", email: "Dana@Example.com", cents: 150_000.4, stage: "talk00", note: "Line one\r\nLine two" }, DEFAULT_STAGES, {});
   is("read safely", [deal?.title, deal?.email, deal?.cents, deal?.note], ["Coaching package", "dana@example.com", 150_000, "Line one\nLine two"]);
-  is("no stage the store has, no deal", parseDeal({ id: "abcdefghij", title: "x", stage: "gone00" }, DEFAULT_STAGES), null);
-  is("a negative value is none", parseDeal({ id: "abcdefghij", title: "x", stage: "lead00", cents: -5 }, DEFAULT_STAGES)?.cents, 0);
+  is("no stage the store has, no deal", parseDeal({ id: "abcdefghij", title: "x", stage: "gone00" }, DEFAULT_STAGES, {}), null);
+  is("a negative value is none", parseDeal({ id: "abcdefghij", title: "x", stage: "lead00", cents: -5 }, DEFAULT_STAGES, {})?.cents, 0);
   is(
     "each stage added up",
     boardTotals(DEFAULT_STAGES, [deal!, { ...deal!, id: "bbbbbbbbbb", cents: 50_000 }]).map((t) => [t.stage.id, t.count, t.cents]),
@@ -99,7 +99,7 @@ async function main(): Promise<void> {
   const store = (await storeForEmail(OWNER))!;
   const id = made.deal.id as string;
   const moved = await call_({ action: "deal", version: made.version, deal: { ...made.deal, stage: "won000" } });
-  is("moved on", [moved.ok, (await readDeals(store.statsId, DEFAULT_STAGES))[0]?.stage], [true, "won000"]);
+  is("moved on", [moved.ok, (await readDeals(store.statsId, DEFAULT_VIEW))[0]?.stage], [true, "won000"]);
   is("no title, refused", (await call_({ action: "deal", deal: { title: " ", stage: "lead00" } })).error, "title");
   is("an id that is not one of theirs, refused", (await call_({ action: "deal", deal: { id: "zzzzzzzzzz", title: "x", stage: "lead00" } })).error, "unknown");
 
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   const stagesNow = [otherOpen, { id: "done00", name: "Signed", kind: "won" }, { id: "nope00", name: "No", kind: "lost" }];
   is("stages without a won one, refused", (await call_({ action: "stages", stages: stagesNow.filter((s) => s.kind !== "won") })).error, "stages");
   is("stages saved", (await call_({ action: "stages", stages: stagesNow })).ok, true);
-  is("a deal in a stage that is gone moves to the first open one", (await readDeals(store.statsId, stagesNow as never))[0]?.stage, "pitch0");
+  is("a deal in a stage that is gone moves to the first open one", (await readDeals(store.statsId, await readStageView(store.statsId!)))[0]?.stage, "pitch0");
 
   is("fields saved", (await call_({ action: "fields", fields: fields.map((f) => ({ ...f })) })).ok, true);
   is("a field sent twice by name, refused", (await call_({ action: "fields", fields: [{ id: "aaaaaa", name: "A", type: "text" }, { id: "bbbbbb", name: "a", type: "text" }] })).error, "fields");

@@ -30,7 +30,7 @@ import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type ErasureScope } from "@/lib/erasure-rules";
 import { leadsKey, parseContact } from "@/lib/contacts";
-import { readDeals, readFields, readPersonTasks, readStages, readValues } from "@/lib/crm";
+import { readDeals, readFields, readPersonTasks, readStageView, readValues } from "@/lib/crm";
 import { readPersonNotes } from "@/lib/buyer-profile";
 import { readForms, readResponses } from "@/lib/form-store";
 import { listRequests } from "@/lib/payment-request-store";
@@ -326,10 +326,10 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return [{ email: s.email, ...kept }];
   },
   "lib/crm.ts": async (s) => {
-    const [fields, stages, tasks] = await Promise.all([readFields(s.statsId), readStages(s.statsId), readPersonTasks(s.statsId, s.person)]);
+    const [fields, view, tasks] = await Promise.all([readFields(s.statsId), readStageView(s.statsId), readPersonTasks(s.statsId, s.person)]);
     const values = await readValues(s.statsId, s.person, fields);
-    const deals = (await readDeals(s.statsId, stages)).filter((d) => d.email && same(d.email, s.email));
-    const stageName = new Map(stages.map((st) => [st.id, st.name]));
+    const deals = (await readDeals(s.statsId, view)).filter((d) => d.email && same(d.email, s.email));
+    const stageName = new Map(view.stages.map((st) => [st.id, st.name]));
     return [
       ...fields.filter((f) => values[f.id]).map((f) => ({ field: f.name, value: values[f.id] })),
       // Who of the team the deal is given to is that teammate's, not yours.

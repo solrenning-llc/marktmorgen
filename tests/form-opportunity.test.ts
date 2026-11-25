@@ -4,7 +4,7 @@ import { parseForm, type FormResponse } from "@/lib/forms";
 import { addResponse, writeForm, dropForm } from "@/lib/form-store";
 import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { DEFAULT_STAGES, MAX_DEALS, type Deal } from "@/lib/crm-rules";
+import { MAX_DEALS, type Deal, DEFAULT_VIEW } from "@/lib/crm-rules";
 import { dealVersion, readDeals } from "@/lib/crm";
 import { putMember } from "@/lib/team";
 import { POST } from "@/app/api/store/form-opportunity/route";
@@ -31,13 +31,13 @@ async function main() {
   is("answer key order does not change response identity", formOpportunityRef(statsId, form.id, { ...response, answers: { first: "a", second: "b" } }), formOpportunityRef(statsId, form.id, { ...response, answers: { second: "b", first: "a" } }));
   const replies = await Promise.all([send(), send(ref, { note: "Competing review" })]);
   const records = await Promise.all(replies.map(reply => reply.json()));
-  is("simultaneous requests create one deal and return the same ID", [records.map(record => record.state).sort(), new Set(records.map(record => record.deal?.id)).size, (await readDeals(statsId, DEFAULT_STAGES)).length], [["created", "existing"], 1, 1]);
-  const kept = (await readDeals(statsId, DEFAULT_STAGES))[0];
+  is("simultaneous requests create one deal and return the same ID", [records.map(record => record.state).sort(), new Set(records.map(record => record.deal?.id)).size, (await readDeals(statsId, DEFAULT_VIEW)).length], [["created", "existing"], 1, 1]);
+  const kept = (await readDeals(statsId, DEFAULT_VIEW))[0];
   const edited = await editCrm(new NextRequest("https://marktmorgen.com/api/store/crm", { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": store.sid, cookie: SESSION_COOKIE + "=" + session }, body: JSON.stringify({ action: "deal", version: dealVersion(String((await redis.pipeline([["HGET", "nl:crm:deals:" + statsId, kept.id]]))[0])), deal: { ...kept, note: "Later work", stage: "won000", formResponseRef: "f".repeat(64) } }) }));
-  is("ordinary edits preserve the server-owned origin", [(await edited.json()).ok, (await readDeals(statsId, DEFAULT_STAGES))[0]?.formResponseRef], [true, ref]);
+  is("ordinary edits preserve the server-owned origin", [(await edited.json()).ok, (await readDeals(statsId, DEFAULT_VIEW))[0]?.formResponseRef], [true, ref]);
   const again = await (await send()).json();
-  is("retry returns existing opportunity without undoing later edits", [again.state, again.deal.note, again.deal.stage, (await readDeals(statsId, DEFAULT_STAGES)).length], ["existing", "Later work", "won000", 1]);
-  is("a made-up response cannot create an opportunity", [(await (await send("a".repeat(64))).json()).error, (await readDeals(statsId, DEFAULT_STAGES)).length], ["response_gone", 1]);
+  is("retry returns existing opportunity without undoing later edits", [again.state, again.deal.note, again.deal.stage, (await readDeals(statsId, DEFAULT_VIEW)).length], ["existing", "Later work", "won000", 1]);
+  is("a made-up response cannot create an opportunity", [(await (await send("a".repeat(64))).json()).error, (await readDeals(statsId, DEFAULT_VIEW)).length], ["response_gone", 1]);
 
   part("Unknown replies are recoverable without duplication");
   const second = { ...response, at: response.at + 1 }; await addResponse(statsId, form.id, second, ROOM);
@@ -48,13 +48,13 @@ async function main() {
     is("lost confirmation does not claim failure before write", (await (await send(secondRef)).json()).error, "conversion_unconfirmed");
   } finally { redis.pipeline = original; }
   const recovered = await (await send(secondRef)).json();
-  is("retry after a lost reply finds the saved deal", [recovered.state, (await readDeals(statsId, DEFAULT_STAGES)).length], ["existing", 2]);
+  is("retry after a lost reply finds the saved deal", [recovered.state, (await readDeals(statsId, DEFAULT_VIEW)).length], ["existing", 2]);
   const unavailableResponse = { ...response, at: response.at + 20 }; await addResponse(statsId, form.id, unavailableResponse, ROOM);
   const unavailableRef = formOpportunityRef(statsId, form.id, unavailableResponse);
   for (const mode of ["unsupported", "malformed"]) {
     try {
       redis.pipeline = async commands => { if (commands.some(command => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:form-opportunity:v1"))) { if (mode === "unsupported") throw new Error("Script unavailable"); return [null]; } return original.call(redis, commands); };
-      is("unsupported script or unknown result never falls back to an ordinary write", [(await (await send(unavailableRef)).json()).error, (await readDeals(statsId, DEFAULT_STAGES)).length], ["conversion_unconfirmed", 2]);
+      is("unsupported script or unknown result never falls back to an ordinary write", [(await (await send(unavailableRef)).json()).error, (await readDeals(statsId, DEFAULT_VIEW)).length], ["conversion_unconfirmed", 2]);
     } finally { redis.pipeline = original; }
   }
   await putMember(store, "supportunique@example.com", "support");
@@ -71,18 +71,18 @@ async function main() {
   const collidingRef = "1234567890" + "a".repeat(54);
   const fixture: Deal = { ...kept, id: collidingRef.slice(0,10), formResponseRef: "b".repeat(64) };
   await redis.pipeline([["HSET", "nl:crm:deals:collision", fixture.id, JSON.stringify(fixture)]]);
-  let collisionRefused = false; try { await createFormOpportunity("collision", collidingRef, fixture, DEFAULT_STAGES, ROOM); } catch { collisionRefused = true; }
-  is("identifier collisions never return or overwrite an unrelated deal", [collisionRefused, (await readDeals("collision", DEFAULT_STAGES))[0].formResponseRef], [true, "b".repeat(64)]);
+  let collisionRefused = false; try { await createFormOpportunity("collision", collidingRef, fixture, DEFAULT_VIEW, ROOM); } catch { collisionRefused = true; }
+  is("identifier collisions never return or overwrite an unrelated deal", [collisionRefused, (await readDeals("collision", DEFAULT_VIEW))[0].formResponseRef], [true, "b".repeat(64)]);
   for (let i = 0; i < 50; i++) await addResponse(statsId, form.id, { ...response, at: response.at + 100 + i }, ROOM);
-  is("unconverted responses outside the visible window remain unavailable", [(await (await send(formOpportunityRef(statsId, form.id, third))).json()).error, (await readDeals(statsId, DEFAULT_STAGES)).length], ["response_gone", 2]);
+  is("unconverted responses outside the visible window remain unavailable", [(await (await send(formOpportunityRef(statsId, form.id, third))).json()).error, (await readDeals(statsId, DEFAULT_VIEW)).length], ["response_gone", 2]);
   const oldRetry = await (await send(ref, { title: "", stage: "removed" })).json();
-  is("committed conversions remain recoverable after the source ages out without replaying draft edits", [oldRetry.state, oldRetry.deal?.note, oldRetry.deal?.stage, (await readDeals(statsId, DEFAULT_STAGES)).length], ["existing", "Later work", "won000", 2]);
-  is("recovery remains scoped to the store", await readFormOpportunity("different-store", ref, DEFAULT_STAGES), null);
+  is("committed conversions remain recoverable after the source ages out without replaying draft edits", [oldRetry.state, oldRetry.deal?.note, oldRetry.deal?.stage, (await readDeals(statsId, DEFAULT_VIEW)).length], ["existing", "Later work", "won000", 2]);
+  is("recovery remains scoped to the store", await readFormOpportunity("different-store", ref, DEFAULT_VIEW), null);
   for (const malformed of [[], [undefined], [123], ["{"], [JSON.stringify(fixture)]]) {
     let refused = false;
     try {
       redis.pipeline = async commands => commands.some(command => command[0] === "HGET" && command[1] === key) ? malformed : original.call(redis, commands);
-      await readFormOpportunity(statsId, ref, DEFAULT_STAGES);
+      await readFormOpportunity(statsId, ref, DEFAULT_VIEW);
     } catch { refused = true; } finally { redis.pipeline = original; }
     is("unconfirmed or conflicting reads never claim recovery", refused, true);
   }
@@ -99,8 +99,8 @@ async function main() {
   is("a stored submission keeps its identity independently of answer key order", refA, formOpportunityRef(statsId, form.id, { ...identifiedA, answers: { second: "b", first: "a" } }));
   is("server IDs are scoped by store and form", [refA === formOpportunityRef("other-store", form.id, identifiedA), refA === formOpportunityRef(statsId, "otherform0", identifiedA)], [false, false]);
   is("invalid IDs retain the legacy fingerprint", formOpportunityRef(statsId, form.id, { ...response, id: "invalid" }), ref);
-  const distinct = await Promise.all([createFormOpportunity("distinct-submissions", refA, kept, DEFAULT_STAGES, ROOM), createFormOpportunity("distinct-submissions", refB, kept, DEFAULT_STAGES, ROOM)]);
-  is("identical distinct submissions can create separate reviewed opportunities", [distinct.map(result => result.state), (await readDeals("distinct-submissions", DEFAULT_STAGES)).length], [["created", "created"], 2]);
+  const distinct = await Promise.all([createFormOpportunity("distinct-submissions", refA, kept, DEFAULT_VIEW, ROOM), createFormOpportunity("distinct-submissions", refB, kept, DEFAULT_VIEW, ROOM)]);
+  is("identical distinct submissions can create separate reviewed opportunities", [distinct.map(result => result.state), (await readDeals("distinct-submissions", DEFAULT_VIEW)).length], [["created", "created"], 2]);
   done();
 }
 main().catch(error => { console.error(error); process.exit(1); });

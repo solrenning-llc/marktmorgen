@@ -86,7 +86,7 @@ async function main(): Promise<void> {
   const allowed = await crm("sam@example.com", { action: "stages", stages: [{ id: "wnew01", name: "New", kind: "open" }, { id: "wtlk01", name: "Talking", kind: "open" }, { id: "wwon01", name: "Won", kind: "won" }, { id: "wlost1", name: "Lost", kind: "lost" }] });
   is("someone who may change the first pipeline still can", allowed.status, 200);
 
-  part("A deal in no pipeline is moved only by someone who may change the first one");
+  part("A deal in no pipeline is never moved by a pipeline change");
   const coaching = { id: "coach1", name: "Coaching", stages: [{ id: "cnew01", name: "New", kind: "open" }, { id: "cwon01", name: "Won", kind: "won" }, { id: "clst01", name: "Lost", kind: "lost" }] };
   is("(the owner adds Coaching)", (await crm(owner, { action: "pipeline", pipeline: coaching, moves: {} })).status, 200);
   await redisPipeline([["HSET", dealsKey, "orphan0001", JSON.stringify({ id: "orphan0001", title: "Orphan", email: "", cents: 5, stage: "orph01", note: "", createdAt: 1, updatedAt: 1 })]]);
@@ -94,7 +94,8 @@ async function main(): Promise<void> {
   const renamed = await crm("sam@example.com", { action: "pipeline", pipeline: { ...coaching, name: "Coaching 2" }, moves: {} });
   is("Sam, who may only see Workshops, renames Coaching: the deal stays where it was", [renamed.status, JSON.parse(String((await redisPipeline([["HGET", dealsKey, "orphan0001"]]))[0])).stage], [200, "orph01"]);
   const byOwner = await crm(owner, { action: "pipeline", pipeline: { ...coaching, name: "Coaching" }, moves: {} });
-  is("the owner's change still brings it back to the first pipeline's first open stage", [byOwner.status, JSON.parse(String((await redisPipeline([["HGET", dealsKey, "orphan0001"]]))[0])).stage], [200, "wnew01"]);
+  // No pipeline change reads or writes a deal (lib/crm-rules.ts nextStageMoves): a deal in no pipeline stays as it was.
+  is("the owner's change leaves it where it was too", [byOwner.status, JSON.parse(String((await redisPipeline([["HGET", dealsKey, "orphan0001"]]))[0])).stage], [200, "orph01"]);
 
   part("A record holding anything that is not a restriction opens nothing");
   for (const raw of [{ wkshp1: "VIEW" }, { WKSHP1: "none" }, { wkshp1: "view", other: "none" }]) {
@@ -405,7 +406,7 @@ async function main(): Promise<void> {
   await redisPipeline([["SET", pipesKey, JSON.stringify(lineUp)]]);
   const calm = await crm("sam@example.com", { action: "stages", stages: [...checked.stages] });
   is("with nothing in between, the first pipeline's stages are saved", [calm.status, (await readPipelines(statsId))[0].id], [200, checked.id]);
-  is("the route checks, and writeStages writes, the same pipeline", readFileSync("app/api/store/crm/route.ts", "utf8").includes("await writeStages(statsId, stages, store, first)"), true);
+  is("the route checks, and writeStages writes, the same pipeline", readFileSync("app/api/store/crm/route.ts", "utf8").includes("await writeStages(statsId, stages, store, first, payer, "), true);
 
   part("Round 8: an access record that cannot be read adds no pipeline either");
   // One pipeline only, so the plan has room for another and only the access is in the way.

@@ -11,7 +11,7 @@ import { readAction } from "@/lib/flow-rules";
 import { parseFlowList } from "@/lib/flow-list";
 import { enroll, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
 import { upsertContact } from "@/lib/contacts";
-import { dealBytes, dealSlot, readDealExact, readDeals, readStages, writeDeal, writeDealOver } from "@/lib/crm";
+import { dealBytes, dealSlot, readDealExact, readDeals, readStages, writeDeal, writeDealOver, readStageView } from "@/lib/crm";
 import { dataKey } from "@/lib/store-data";
 import { releaseLock, takeLock } from "@/lib/redis-lock";
 import { putMember, removeMember, setMemberRole } from "@/lib/team";
@@ -52,6 +52,7 @@ async function main(): Promise<void> {
   const statsId = store.statsId!;
   const list = store.listId!;
   const stages = await readStages(statsId);
+  const view = await readStageView(statsId);
   const open = stages.find((s) => s.kind === "open")!;
 
   part("Read and kept");
@@ -71,7 +72,7 @@ async function main(): Promise<void> {
   await upsertContact(list, "nodeal@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
   for (const email of [...people, "nodeal@example.com"]) await enroll(store, email, { joined: true });
   for (let i = 0; i < 4; i += 1) await run();
-  const deals = await readDeals(statsId, stages);
+  const deals = await readDeals(statsId, view);
   const count = (who: string) => deals.filter((d) => d.assignee === who && d.stage === open.id).length;
   is("each open deal goes to whoever had the fewest: two each in the end", [count(OWNER), count(MAYA), count(PAT)], [2, 2, 2]);
   is("someone with no open deal: no deal is made for them", deals.filter((d) => d.email === "nodeal@example.com").length, 0);
@@ -86,7 +87,7 @@ async function main(): Promise<void> {
     await enroll(store, email, { joined: true });
   }
   for (let i = 0; i < 4; i += 1) await run();
-  const after = await readDeals(statsId, stages);
+  const after = await readDeals(statsId, view);
   // The owner holds 2 open deals and Maya 3 (with the one she keeps), so the one Pat held goes to the owner.
   is("a deal held by someone who left the team goes to whoever on it has the fewest", after.find((d) => d.id === "patkept001")!.assignee, OWNER);
   is("a deal held by someone still on the team keeps them", after.find((d) => d.id === "mayakept01")!.assignee, MAYA);
@@ -98,24 +99,24 @@ async function main(): Promise<void> {
   await upsertContact(list, "h@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
   await enroll(store, "h@example.com", { joined: true });
   for (let i = 0; i < 4; i += 1) await run();
-  is("a deal held by someone who can no longer see orders goes to someone who can: only the owner now", (await readDeals(statsId, stages)).find((d) => d.id === "tiedeal001")!.assignee, OWNER);
+  is("a deal held by someone who can no longer see orders goes to someone who can: only the owner now", (await readDeals(statsId, view)).find((d) => d.id === "tiedeal001")!.assignee, OWNER);
   is("with only the owner left, the workflow's review says every deal goes to them", flowConfigurationIssues((await readFlows(list))[0], { products: [], courses: [], forms: [], fields: [], stages, flows: [], assignees: [OWNER] }).some((i) => i.includes("No one besides you can be responsible for deals, so every deal goes to you.")), true);
 
   part("Never over what the creator did meanwhile");
   // A deal is written only over the exact record read just before: one the board changed meanwhile is left as it is.
   await writeDeal(statsId, { id: "racedeal01", title: "Race", email: "race@example.com", cents: 0, stage: open.id, note: "", createdAt: 3, updatedAt: 3 }, ROOM);
-  const read = await readDealExact(statsId, "racedeal01", stages);
+  const read = await readDealExact(statsId, "racedeal01", view);
   await writeDeal(statsId, { ...read.deal!, note: "Typed on the board, ".repeat(25), updatedAt: 4 }, ROOM);
   is("a write over a copy the board changed meanwhile writes nothing", await writeDealOver(statsId, { ...read.deal!, assignee: PAT, updatedAt: 5 }, read.raw!, ROOM), "changed");
   const slotNow = async (id: string) => Number((await redis.pipeline([["HGET", dataKey(ROOM)!, dealSlot(id)]]))[0]);
-  is("the store's data room counts the record as the board left it, never the copy read before", await slotNow("racedeal01"), dealBytes((await readDealExact(statsId, "racedeal01", stages)).deal!));
-  is("and what the creator typed stays", [(await readDealExact(statsId, "racedeal01", stages)).deal!.note.startsWith("Typed on the board"), (await readDealExact(statsId, "racedeal01", stages)).deal!.assignee ?? null], [true, null]);
-  const again = await readDealExact(statsId, "racedeal01", stages);
+  is("the store's data room counts the record as the board left it, never the copy read before", await slotNow("racedeal01"), dealBytes((await readDealExact(statsId, "racedeal01", view)).deal!));
+  is("and what the creator typed stays", [(await readDealExact(statsId, "racedeal01", view)).deal!.note.startsWith("Typed on the board"), (await readDealExact(statsId, "racedeal01", view)).deal!.assignee ?? null], [true, null]);
+  const again = await readDealExact(statsId, "racedeal01", view);
   is("over the record as it is now, it is written", await writeDealOver(statsId, { ...again.deal!, assignee: PAT, updatedAt: 6 }, again.raw!, ROOM), "saved");
   is("a deal that is gone is never made again by a write over it", await writeDealOver(statsId, { ...again.deal!, id: "gonedeal01" }, again.raw!, ROOM), "changed");
   // The script that refuses the write says how long the record there now is, so its room is sized in the same step:
   // no second read, and so no gap where that read fails and the slot keeps the size of a copy never written.
-  const stale = await readDealExact(statsId, "racedeal01", stages);
+  const stale = await readDealExact(statsId, "racedeal01", view);
   await writeDeal(statsId, { ...stale.deal!, note: "Typed again on the board. ".repeat(15), updatedAt: 7 }, ROOM);
   const seen: string[] = [];
   const plain = redis.pipeline;
@@ -132,7 +133,7 @@ async function main(): Promise<void> {
   is(
     "a write that lost the race sizes the room from the script's answer, without reading the deal again",
     [lostRace, seen.some((c) => c.startsWith("HGET nl:crm:deals:")), await slotNow("racedeal01")],
-    ["changed", false, dealBytes((await readDealExact(statsId, "racedeal01", stages)).deal!)],
+    ["changed", false, dealBytes((await readDealExact(statsId, "racedeal01", view)).deal!)],
   );
 
   part("One run shares at a time");
@@ -142,7 +143,7 @@ async function main(): Promise<void> {
   const other = await takeLock(`nl:flow-rotate:${statsId}`, 120, 0);
   await enroll(store, "late@example.com", { joined: true });
   await run();
-  is("while another run shares, nobody is given the deal", (await readDealExact(statsId, "latedeal01", stages)).deal!.assignee ?? null, null);
+  is("while another run shares, nobody is given the deal", (await readDealExact(statsId, "latedeal01", view)).deal!.assignee ?? null, null);
   await releaseLock(other);
   // Tried again a few minutes later, as a deals board that could not be read is.
   const realNow = Date.now;
@@ -155,7 +156,7 @@ async function main(): Promise<void> {
   } finally {
     Date.now = realNow;
   }
-  is("once it let go, the deal is shared", typeof (await readDealExact(statsId, "latedeal01", stages)).deal!.assignee, "string");
+  is("once it let go, the deal is shared", typeof (await readDealExact(statsId, "latedeal01", view)).deal!.assignee, "string");
 
   part("Said in words");
   const studio = readFileSync("components/email-studio.tsx", "utf8");

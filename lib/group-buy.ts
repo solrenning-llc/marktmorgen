@@ -153,7 +153,9 @@ const retryKey = (sid: string) => `nl:grp:${sid}:refunds:retry`;
  * this cap, and the store's nl:grp: keys go with the store.
  */
 const RETRY_CAP = 100;
-const REFUND_ID = /^re_[A-Za-z0-9]{3,252}$/;
+// A refund's id is re_ for cards and pyr_ for some other payment methods (#5285 row #4458, #5010 row 177): both are
+// refunds, and both are kept on the retry list and tried again from it.
+const REFUND_ID = /^(re|pyr)_[A-Za-z0-9]{3,252}$/;
 const PAYMENT_ID = /^pi_[A-Za-z0-9]{3,252}$/;
 const now = () => Math.floor(Date.now() / 1000);
 

@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { cameFrom } from "@/lib/came-from";
 import { broadcastCampaign, stepCampaign } from "@/lib/mail-links";
 import { broadcastMoney, flowMoney, moneyByCampaign, readMailRevenuePaid, readMailVisits, type MailMoney } from "@/lib/mail-revenue";
-import type { Store } from "@/lib/store";
+import { claimHandle, ensureStatsId, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 
 const ID = "0123456789abcdef01234567";
@@ -83,27 +83,38 @@ test("a JSON revenue cache keeps own special names, normal totals and currencies
   assert.equal(Object.hasOwn(Object.prototype, "sales"), false);
 });
 
-test("visits rebuilt from real campaign counts keep a special id as an own JSON field", async () => {
+// The visits are kept through the store's fence (#5010 row 112), so these two read a real, live store's own statsId.
+async function liveStore(): Promise<Store> {
   redis.clear();
-  const result = await readMailVisits(store, ["__proto__", "constructor"]);
+  const owner = "mail-revenue-proto@example.test";
+  assert.equal((await claimHandle(owner, "mailrevproto", "Fictional mail", "")).ok, true);
+  await ensureStatsId(owner);
+  const made = (await storeForEmail(owner))!;
+  assert.ok(made.statsId);
+  return made;
+}
+
+test("visits rebuilt from real campaign counts keep a special id as an own JSON field", async () => {
+  const live = await liveStore();
+  const result = await readMailVisits(live, ["__proto__", "constructor"]);
   assert.ok(result);
   assert.equal(Object.hasOwn(result, "__proto__"), true);
   assert.equal(Object.hasOwn(result, "constructor"), true);
   assert.deepEqual(result, Object.fromEntries([["__proto__", 0], ["constructor", 0]]));
-  const kept = JSON.parse(String(redis.run(["GET", `nl:stats:${STATS}:mailvisits`]))) as Record<string, number>;
+  const kept = JSON.parse(String(redis.run(["GET", `nl:stats:${live.statsId}:mailvisits`]))) as Record<string, number>;
   assert.equal(Object.hasOwn(kept, "__proto__"), true);
   assert.equal(kept.__proto__, 0);
 });
 
 test("an inherited visit count is not a cached reading and its getter is never used", async () => {
-  redis.clear();
-  redis.run(["SET", `nl:stats:${STATS}:mailvisits`, "{}", "EX", 600]);
+  const live = await liveStore();
+  redis.run(["SET", `nl:stats:${live.statsId}:mailvisits`, "{}", "EX", 600]);
   const before = new Map([[ID, Object.getOwnPropertyDescriptor(Object.prototype, ID)]]);
   let calls = 0;
   let result: Record<string, number> | null = null;
   try {
     Object.defineProperty(Object.prototype, ID, { get() { calls += 1; return 999; }, configurable: true });
-    result = await readMailVisits(store, [ID]);
+    result = await readMailVisits(live, [ID]);
   } finally {
     restore(Object.prototype, before);
   }

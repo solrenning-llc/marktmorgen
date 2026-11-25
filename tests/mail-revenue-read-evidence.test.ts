@@ -15,6 +15,10 @@ const creator = {
   stripeAccountId: "synthetic-mail-revenue-evidence",
   statsId: "stats_MailRevenueEvidence",
   currency: "usd",
+  // The kept copies are written through the store's fence (#5010 row 112), which names the store by its id.
+  email: "mail-revenue-evidence@example.test",
+  sid: "0123456789abcdef0123456789abcdef",
+  extra: false,
 } as Store;
 
 const report: MailRevenue = {
@@ -90,9 +94,25 @@ async function main(): Promise<void> {
   const fresh = Array.from({ length: 90 }, (_, day) => day === 89 ? [5, 0, 0, 7, 0, 0] : [0, 0, 0, 0, 0, 0]);
   is(
     "a valid cache missing a newer email is read afresh rather than hiding every count",
-    await withReplies([[JSON.stringify({ [cached]: 3 })], fresh, ["OK"]], () => readMailVisits(creator, [cached, newer])),
+    await withReplies([[JSON.stringify({ [cached]: 3 })], fresh, [1]], () => readMailVisits(creator, [cached, newer])),
     { value: { [cached]: 5, [newer]: 7 }, calls: 3 },
   );
+  // The fresh counts are kept only through the store's fence (Codex L-20261119-1738, #5010 row 112): a store gone or
+  // being erased (0) keeps nothing and the counts are not shown. An answer that is not the exact 1 nor 0 (a plain OK,
+  // no answer) does not tell whether the store is live: nothing is kept, and the counts read are shown (Claude 1's
+  // LEVE on #5254, 7090698011: only "gone" proves the erasure).
+  is(
+    "fresh visits whose fenced keep answers the store gone or being erased are unknown, not shown",
+    await withReplies([[JSON.stringify({ [cached]: 3 })], fresh, [0]], () => readMailVisits(creator, [cached, newer])),
+    { value: null, calls: 3 },
+  );
+  for (const [label, answer] of [["a plain OK", "OK"], ["no answer", null]] as const) {
+    is(
+      `fresh visits whose fenced keep answers ${label} are shown, though not known to be kept`,
+      await withReplies([[JSON.stringify({ [cached]: 3 })], fresh, [answer]], () => readMailVisits(creator, [cached, newer])),
+      { value: { [cached]: 5, [newer]: 7 }, calls: 3 },
+    );
+  }
 
   done();
 }

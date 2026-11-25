@@ -473,10 +473,13 @@ export const EMAILS_PROBE_WORK: ReadWork = { commands: 3, bytes: 0, sent: 0, str
  * And when what they sold is not kept: every page of sales, the PayPal sales
  * counted first, kept again. The copy kept is known only once it is made, so
  * it is set aside at MAIL_REVENUE_BYTES and settled at its size (`keptBytes`).
+ * Kept again only while the store is live (#5010 row 112): the plain SET is
+ * an EVAL of store-cache-live:v3 with its HGET, GET and SET billed beside it,
+ * so 6 commands where it was 3.
  */
 export function mailRevenueColdWork(paypalSales: number, keptBytes = MAIL_REVENUE_BYTES): ReadWork {
   const paypal = Math.min(paypalSales, 10 * 100);
-  return { commands: 3, bytes: paypal * PAYPAL_PAID_BYTES + keptBytes, sent: 0, stripePages: MAIL_REVENUE_PAGES, roundTrips: 2 };
+  return { commands: 6, bytes: paypal * PAYPAL_PAID_BYTES + keptBytes, sent: 0, stripePages: MAIL_REVENUE_PAGES, roundTrips: 2 };
 }
 
 // ---------------------------------------------------------------- what buyers bought next

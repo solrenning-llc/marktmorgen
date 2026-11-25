@@ -39,6 +39,7 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { listingFinder, productIds, recordListings } from "@/lib/catalog";
 import { plainAmount } from "@/lib/money";
 import { csvCell as platformCsvCell } from "@/lib/csv";
@@ -468,7 +469,13 @@ export async function readToday(store: Store, now = Date.now()): Promise<Today> 
         return { sales: own.length, cents: own.reduce((n, sale) => n + sale.cents, 0) };
       })
       .catch(() => null);
-    if (sales) await redisPipeline([["SET", todaySalesKey(statsId, date), JSON.stringify(sales), "EX", TODAY_SALES_SECONDS]]);
+    // Kept only while the store is live, in one step with its fence (Codex L-20261119-1830, #5010 row 129): a store erased while Stripe or
+    // PayPal was read gets no money cache back, and the late total is not shown ("not read just now"). When the fence
+    // cannot tell ("unknown"), nothing is kept and the total read is shown: only "gone" proves the erasure.
+    if (sales) {
+      const kept = await setWhileStoreLive(store, todaySalesKey(statsId, date), JSON.stringify(sales), TODAY_SALES_SECONDS).catch(() => "unknown" as const);
+      if (kept === "gone") sales = null;
+    }
   }
   return {
     date,

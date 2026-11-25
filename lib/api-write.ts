@@ -44,9 +44,69 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { API_WRITE_UNITS } from "@/lib/store-allowance-rules";
 import { DataRoomError } from "@/lib/store-data";
 import { emailDocument, emailParagraphs } from "@/lib/email-document";
+import { createHash } from "node:crypto";
 
 export const ADDS_PER_DAY = 2_000;
 export const GIVES_PER_DAY = 1_000;
+
+/**
+ * What an API write still owes after the write itself went through (defects #3979, #4035 and #4077): the sequences a
+ * contact added or a label added starts, and the access email a product given with `notify: true` sends. Written
+ * before the write, cleared once the follow-up is done, so a retry of the same request after a lost reply or a failed
+ * start finishes it, once (a sequence's start is claimed per person and sequence, lib/flows.ts startFlows; the email
+ * is claimed by the one DEL that removes this note). Named by a one-way hash of the address, never the address, and
+ * gone by itself after OWE_SECONDS.
+ *
+ *   nl:api:owe:<listId>:<hash>     JSON { j: joined, t: labels } for a contact on the list
+ *   nl:api:owe:<statsId>:<hash>    "1": the access email of one product given to one address
+ */
+export const OWE_SECONDS = 86_400;
+const oweKey = (scope: string, what: string) => `nl:api:owe:${scope}:${createHash("sha256").update(`nimbus-api-owe:${scope}:${what}`).digest("hex").slice(0, 32)}`;
+/**
+ * The commands one API request sends for its note at the most: the note read with the contact (one GET), written
+ * before the write (one SET) and cleared after it (one DEL), or for a product given written (SET) and claimed (DEL).
+ * Priced, with one more sequence check (a label request that also finishes a contact's owed "joined"), on every API
+ * request of each plan (tests/plan-cost-registry.ts, line api-write-owed; tests/api-write-follow-up-cost.test.ts).
+ */
+export const OWE_COMMANDS = 3;
+
+type Owed = { joined: boolean; tags: string[] };
+
+/** A contact's owed moments, read exactly: nil is none; anything else that is not the note's shape is unknown (null). */
+function readOwed(raw: unknown): Owed | null {
+  if (raw === null) return { joined: false, tags: [] };
+  if (typeof raw !== "string" || raw.length > 4_096) return null;
+  try {
+    const value = JSON.parse(raw) as { j?: unknown; t?: unknown };
+    if (!value || typeof value !== "object" || typeof value.j !== "boolean" || !Array.isArray(value.t) || value.t.some((t) => typeof t !== "string")) return null;
+    return { joined: value.j, tags: value.t as string[] };
+  } catch {
+    return null;
+  }
+}
+
+const sameLabel = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+const unionLabels = (a: string[], b: string[]) => [...a, ...b.filter((t) => !a.some((h) => sameLabel(h, t)))];
+
+/** Writes a contact's owed moments before the write that makes them; only exactly "OK" lets the write go on. */
+async function noteOwed(key: string, owed: Owed): Promise<boolean> {
+  const [reply] = await redisPipeline([["SET", key, JSON.stringify({ j: owed.joined, t: owed.tags }), "EX", OWE_SECONDS]]);
+  return reply === "OK";
+}
+
+/**
+ * Starts what a contact is owed, each moment once: "joined" and each label still on the contact (`labels`). The note
+ * goes only when every start went through; otherwise it stays, and the request says to try again.
+ */
+async function settleOwed(store: Store, email: string, key: string, owed: Owed, labels: string[]): Promise<boolean> {
+  let ok = true;
+  if (owed.joined && !(await enroll(store, email, { joined: true }))) ok = false;
+  for (const tag of owed.tags.filter((t) => labels.some((l) => sameLabel(l, t)))) {
+    if (!(await enroll(store, email, { joined: false, tag }))) ok = false;
+  }
+  if (ok) await redisPipeline([["DEL", key]]);
+  return ok;
+}
 
 export type WriteError =
   | "email"
@@ -109,8 +169,12 @@ export async function addLead(store: Store, body: Record<string, unknown>): Prom
   const name = typeof body.name === "string" ? body.name.replace(/\s+/g, " ").trim().slice(0, MAX_CONTACT_NAME) : "";
   const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId;
   if (!listId) return fail("list_full");
-  const [before] = await redisPipeline([["HGET", leadsKey(listId), email]]);
+  // The contact and what an earlier try of a write still owes them, read together (#3979, #4077).
+  const owe = oweKey(listId, email);
+  const [before, owedRaw] = await redisPipeline([["HGET", leadsKey(listId), email], ["GET", owe]]);
   const had = parseContact(before);
+  const earlier = readOwed(owedRaw);
+  if (!earlier) return fail("unavailable");
   if (!had && !(await withinLimit("api-add", store.sid ?? store.handle, ADDS_PER_DAY, 86_400))) return fail("daily_limit");
   // A contact written is API_WRITE_UNITS of the window's API requests, the request itself one of them.
   if (!had) {
@@ -118,14 +182,30 @@ export async function addLead(store: Store, body: Record<string, unknown>): Prom
     const taken = await takeAllowance(store, "api", API_WRITE_UNITS - 1);
     if (!taken.ok) return refusedFigure(taken);
   }
-  const [outcome] = await importContactRows(listId, [{ email, name, tags }], store);
-  if (outcome === "left") return fail("unsubscribed");
-  if (outcome === "full") return fail("list_full");
-  const fresh = { ...store, listId };
-  if (outcome === "added") await enroll(fresh, email, { joined: true });
-  for (const tag of tags.filter((t) => !had?.tags.some((h) => h.toLowerCase() === t.toLowerCase()))) {
-    await enroll(fresh, email, { joined: false, tag });
+  // What this write starts, noted before it is written, beside what an earlier try still owes: a lost reply or a
+  // failed start then leaves the note, and the retry, which finds the contact already there, starts it.
+  const fresh = tags.filter((t) => !had?.tags.some((h) => sameLabel(h, t)));
+  const owed: Owed = { joined: earlier.joined || !had, tags: unionLabels(earlier.tags.filter((t) => had?.tags.some((h) => sameLabel(h, t))), fresh) };
+  const noted = earlier.joined || earlier.tags.length > 0;
+  if ((owed.joined && !earlier.joined) || fresh.length > 0) {
+    if (!(await noteOwed(owe, owed))) return fail("unavailable");
+  } else if (!noted) {
+    // Nothing owed and nothing new: the write alone, as before.
+    const [outcome] = await importContactRows(listId, [{ email, name, tags }], store);
+    if (outcome === "left") return fail("unsubscribed");
+    if (outcome === "full") return fail("list_full");
+    return { ok: true, value: { email, status: outcome === "added" ? "added" : "already" } };
   }
+  const [outcome] = await importContactRows(listId, [{ email, name, tags }], store);
+  if (outcome === "left" || outcome === "full") {
+    // Not on the list, or no longer agreeing: nothing can start, and nothing is owed.
+    await redisPipeline([["DEL", owe]]);
+    return fail(outcome === "left" ? "unsubscribed" : "list_full");
+  }
+  // "joined" only for somebody this write or an earlier try of it added; never for somebody already there.
+  const due: Owed = { joined: outcome === "added" || earlier.joined, tags: owed.tags };
+  const labels = unionLabels(had?.tags ?? [], tags);
+  if (!(await settleOwed({ ...store, listId }, email, owe, due, labels))) return fail("unavailable");
   return { ok: true, value: { email, status: outcome === "added" ? "added" : "already" } };
 }
 
@@ -139,10 +219,19 @@ export async function changeLeadLabels(store: Store, body: Record<string, unknow
   // Removing existing labels creates no enrollment; keep this cleanup path available.
   if (add.length > 0 && store.period?.funded === true && !(await reservePaidResourceWindow(store))) return fail("unavailable");
   if (!store.listId) return fail("not_on_list");
-  const [raw] = await redisPipeline([["HGET", leadsKey(store.listId), email]]);
+  // A request that only takes labels away starts nothing and stays open while a plan is unpaid (addsLabels): it reads
+  // no note and finishes nothing an earlier try owes.
+  const owe = oweKey(store.listId, email);
+  const [raw, owedRaw] = add.length > 0 ? await redisPipeline([["HGET", leadsKey(store.listId), email], ["GET", owe]]) : [...(await redisPipeline([["HGET", leadsKey(store.listId), email]])), null];
   const before = parseContact(raw);
   if (!before) return fail("not_on_list");
-  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  const earlier = readOwed(owedRaw);
+  if (!earlier) return fail("unavailable");
+  const same = sameLabel;
+  // Each label this request adds, noted before it is written beside what an earlier try owes (#3979, #4077).
+  const fresh = add.filter((a) => !before.tags.some((t) => same(t, a)));
+  const owed: Owed = { joined: earlier.joined, tags: unionLabels(earlier.tags.filter((t) => before.tags.some((h) => same(h, t))), fresh) };
+  if (fresh.length > 0 && !(await noteOwed(owe, owed))) return fail("unavailable");
   let after = before.tags;
   await changeLabels(store.listId, [email], (tags) => {
     const kept = tags.filter((t) => !remove.some((r) => same(r, t)));
@@ -150,9 +239,7 @@ export async function changeLeadLabels(store: Store, body: Record<string, unknow
     after = next;
     return next.length === tags.length && next.every((t, i) => same(t, tags[i])) ? "same" : next;
   }, store);
-  for (const tag of add.filter((a) => !before.tags.some((t) => same(t, a)) && after.some((t) => same(t, a)))) {
-    await enroll(store, email, { joined: false, tag });
-  }
+  if ((owed.joined || owed.tags.length > 0) && !(await settleOwed(store, email, owe, owed, after))) return fail("unavailable");
   return { ok: true, value: { email, labels: after } };
 }
 
@@ -226,52 +313,79 @@ export async function giveAccess(
   const before = await notDeleted();
   if (before === null) return fail("unavailable");
   if (!before) return fail("deleted");
+  // The access email an earlier try of this request still owes (#4035): its gift went through, its answer did not.
+  const owe = oweKey(statsId, `${email}\n${product.id}`);
   const already = (await importedFor({ ...store, statsId, pastBuyers: true }, email)).some((p) => p.productId === product.id);
-  if (already) return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
+  if (already) {
+    // Only the one request whose DEL removes the note sends it: a second retry, or one racing it, sends nothing.
+    const emailed = notify && (await claimOwed(owe)) ? await sendGiven(store, product, email, notDeleted) : false;
+    return { ok: true, value: { email, product: product.id, status: "already", emailed } };
+  }
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return fail("unavailable");
   if (!(await withinLimit("api-give", store.sid, GIVES_PER_DAY, 86_400))) return fail("daily_limit");
   const taken = await takeAllowance(store, "api", API_WRITE_UNITS - 1);
   if (!taken.ok) return refusedFigure(taken);
+  // The email asked for, noted before the gift: whatever happens after the gift, a retry finds it owed.
+  if (notify) {
+    const [noted] = await redisPipeline([["SET", owe, "1", "EX", OWE_SECONDS]]);
+    if (noted !== "OK") return fail("unavailable");
+  }
   // Checked again where it is written, in the same step (GRANT_UNLESS_ERASED): somebody deleted since gets nothing.
   const answers = await grantUnlessErased(statsId, `api:${keyId}`, [{ email, productId: product.id, items }], { key: suppressedKey(listId), print: (e) => suppressionPrint(listId, e) }, store).catch((error: unknown) => {
     if (error instanceof DataRoomError) throw error;
     return null;
   });
   if (!answers) return fail("unavailable");
-  if (answers[0] === "erased") return fail("deleted");
+  if (answers[0] === "erased") {
+    if (notify) await claimOwed(owe);
+    return fail("deleted");
+  }
   if (!store.pastBuyers) await setPastBuyers(storeRef(store));
-  if (answers[0] !== "new") return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
+  if (answers[0] !== "new") {
+    // Given meanwhile by something else: the email goes only with a new one, as before.
+    if (notify) await claimOwed(owe);
+    return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
+  }
+  const emailed = notify && (await claimOwed(owe)) ? await sendGiven(store, product, email, notDeleted) : false;
+  return { ok: true, value: { email, product: product.id, status: "given", emailed } };
+}
 
-  let emailed = false;
+/** Takes the note of an owed email: true only when this DEL removed it (exactly 1), so it is sent once at the most. */
+async function claimOwed(key: string): Promise<boolean> {
+  const [gone] = await redisPipeline([["DEL", key]]);
+  return gone === 1;
+}
+
+/** The access email of a product given, inside the store's emails, never to somebody deleted, a paused store or past the day. */
+async function sendGiven(store: Store, product: { id: string; title: string; course?: unknown }, email: string, notDeleted: () => Promise<boolean | null>): Promise<boolean> {
   // And just before the email, as an import's emails are: deleted since, or unknown, nothing is sent.
   const day = mailDay();
   // A pause read in an unknown shape is not "no pause" (CX-123 rule 24, Claude 6's MEDIUM on #2687): no email.
-  if (notify && (await pauseForSending(store.sid)) === null && (await notDeleted()) === true && (await reserveDay(1, day))) {
-    if ((await reserveMoved(store, 1)) < 1) await releaseDay(1, day);
-    else {
-      const a = accessWords(store.language);
-      const base = storeBase(store);
-      const text = [
-        a.given(store.name, product.title),
-        "",
-        ...(product.course ? [a.startCourse(`${base}/course/${product.id}`), ""] : []),
-        a.openOrders(`${base}/orders`, email, store.name),
-        "",
-        a.why(store.name),
-        a.sentBy(store.name),
-      ].join("\n");
-      const subject = a.subject(product.title, store.name).slice(0, 200);
-      emailed = await sendEmail({ meter: { by: "monthly" },
-        from: `"${store.name.replace(/["\\<>\r\n]/g, "").trim().slice(0, 60) || "A store"} via Marktmorgen" <${senderAddress()}>`,
-        to: email,
-        subject,
-        text,
-        html: givenEmailHtml(store, subject, text),
-        replyTo: store.email,
-      });
-    }
+  if (!store.sid || (await pauseForSending(store.sid)) !== null || (await notDeleted()) !== true || !(await reserveDay(1, day))) return false;
+  if ((await reserveMoved(store, 1)) < 1) {
+    await releaseDay(1, day);
+    return false;
   }
-  return { ok: true, value: { email, product: product.id, status: "given", emailed } };
+  const a = accessWords(store.language);
+  const base = storeBase(store);
+  const text = [
+    a.given(store.name, product.title),
+    "",
+    ...(product.course ? [a.startCourse(`${base}/course/${product.id}`), ""] : []),
+    a.openOrders(`${base}/orders`, email, store.name),
+    "",
+    a.why(store.name),
+    a.sentBy(store.name),
+  ].join("\n");
+  const subject = a.subject(product.title, store.name).slice(0, 200);
+  return await sendEmail({ meter: { by: "monthly" },
+    from: `"${store.name.replace(/["\\<>\r\n]/g, "").trim().slice(0, 60) || "A store"} via Marktmorgen" <${senderAddress()}>`,
+    to: email,
+    subject,
+    text,
+    html: givenEmailHtml(store, subject, text),
+    replyTo: store.email,
+  });
 }
 
 /** Takes back a product the API gave. Anything else (a sale, an import, a gift) is not the API's to take. */

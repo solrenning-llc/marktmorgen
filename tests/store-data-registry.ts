@@ -345,6 +345,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:api:k:@lib/api-keys.ts": { what: "The lookup an API request makes", parts: [capped(20 * KEY, "A key's lookup for each of the store's keys (MAX_KEYS).", src("lib/api-key-rules.ts", "MAX_KEYS"))] },
   "nl:api:keys:@lib/api-keys.ts": { what: "The store's API keys", parts: [capped(20 * KB, "MAX_KEYS records.", src("lib/api-key-rules.ts", "MAX_KEYS"))] },
   "nl:api:hold:@lib/api-keys.ts": { what: "Which of the store's API keys are paused (the team's two-step rule, a maker who left or whose role changed) or were turned back on (owner C3-100)", parts: [capped(1 * KB, "One short mark for each of MAX_KEYS keys; a revoked key's mark goes with it.", src("lib/api-key-rules.ts", "MAX_KEYS"))] },
+  // One note a request at the most (a contact's owed moments, or one product's owed email), up to 2 * MAX_CONTACT_TAGS labels of MAX_TAG_LENGTH, gone in a day.
+  "nl:api:owe:@lib/api-write.ts": short("What an API write still owes after the write went through (a sequence's start, the access email), by a one-way hash of the address, a day", "api", 1, KB),
   "nl:api:used:@lib/api-keys.ts": { what: "When each of the store's API keys was last used, kept apart from its record", parts: [capped(1 * KB, "One time for each of MAX_KEYS keys; a revoked key's goes with it.", src("lib/api-key-rules.ts", "MAX_KEYS"))] },
   "nl:course:@lib/assignment.ts": { what: "A course's assignments, the work handed in and what came back", room: ["lib/assignment.ts"], parts: [per("studio", 1, KEY, "The creator told of new work, an hour.")] },
   "nl:tasks:bytes:@lib/assignment.ts": { what: "What a store's students keep handed in, in bytes", parts: [capped(KEY, "One count a store.")] },

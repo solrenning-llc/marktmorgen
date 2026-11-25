@@ -3,7 +3,7 @@ import { handleForDomain } from "@/lib/domains";
 import { SITE_URL } from "@/lib/site-url";
 import { AFFILIATE_CODE_PATTERN, VIA_COOKIE_SECONDS, viaCookieName, viaCookieValue } from "@/lib/affiliate-setting";
 import { needsConsent } from "@/lib/pixels";
-import { dynamicPolicy, isDynamicPage, isEmbedPage, isEventRoomPage, isStorePage, newNonce, roomPermissions } from "@/lib/csp";
+import { dynamicPolicy, isDynamicPage, isEmbedPage, isEventRoomPage, isStorePage, isVatWordsPage, newNonce, roomPermissions } from "@/lib/csp";
 import { fromAnotherSite } from "@/lib/request-guard";
 import { isPlatformHost, requestHost } from "@/lib/request-origin";
 import { ZOOM_ARRIVAL_COOKIE, ZOOM_ARRIVAL_SECONDS, arrivedForZoom } from "@/lib/zoom-arrival";
@@ -237,7 +237,7 @@ function withPolicy(path: string, headers: Headers): Policy | null {
   // The card pasted into a creator's site may be framed by it, and needs
   // neither (lib/embed-rules.ts).
   const room = isEventRoomPage(path);
-  const policy = dynamicPolicy(newNonce(), { store: isStorePage(path), room, embed: isEmbedPage(path) });
+  const policy = dynamicPolicy(newNonce(), { store: isStorePage(path), room, embed: isEmbedPage(path), selfOnly: isVatWordsPage(path) });
   headers.set("content-security-policy", policy);
   return { csp: policy, room };
 }

@@ -27,6 +27,8 @@ import { STORAGE_BRAKE_BYTES, storageWords } from "@/lib/storage-quota";
 import { NON_PAYING_DATA_ROOM_BYTES, dataRoomListWords, dataWords } from "@/lib/store-data-rules";
 import { INVITE_PROGRAM_OPEN, INVITE_PAUSE_NOTICE, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS, INVITE_SHARE_PERCENT } from "@/lib/creator-invite-rules";
 import { feeWords, planPriceWords } from "@/lib/fee-words";
+import { VAT_REFUSED_PLACES_WORDS, termsLastUpdated, vatCanTurnOn, vatFeeWords } from "@/lib/vat-fee-words";
+import { PerRequest } from "@/components/per-request";
 import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { HELD_DAYS } from "@/lib/community-approval-rules";
 import { COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
@@ -38,10 +40,16 @@ export const metadata: Metadata = {
     "Terms of Service for Marktmorgen: the creator store at marktmorgen.com, what a creator is responsible for when they sell through it, and how payment works.",
 };
 
+/** The day these Terms' own text last changed; the VAT paragraph moves the shown date when it first appears. */
+const TERMS_UPDATED_ON = "2026-11-10";
+
 export default function TermsPage() {
   const domains = isDomainsConfigured();
+  const vat = vatFeeWords();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="November 10, 2026">
+    <LegalPage title="Terms of Service" lastUpdated={termsLastUpdated(TERMS_UPDATED_ON, vat)}>
+      {/* Built ahead of time while no VAT switch can turn on; per request once one can (lib/vat-fee-words.ts). */}
+      {vatCanTurnOn() ? <PerRequest /> : null}
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -169,6 +177,17 @@ export default function TermsPage() {
           is told when you do not publish it, and it is not published if you do
           not answer within {HELD_DAYS} days.
         </p>
+        {vat ? (
+          <>
+            <p id="vat-collected" className="scroll-mt-24">
+              <strong className="text-black">{vat.title}.</strong>{" "}
+              {vat.terms.join(" ")}
+            </p>
+            <p>{vat.refusedLead.terms}</p>
+            <ul className="list-disc pl-6">{vat.refused.map((item) => <li key={item}>{item === VAT_REFUSED_PLACES_WORDS ? <>{item}:<ul className="list-disc pl-6">{vat.refusedPlaces.map((place) => <li key={place}>{place}</li>)}</ul></> : `${item}.`}</li>)}</ul>
+            <p>{vat.example.join(" ")}</p>
+          </>
+        ) : null}
         <p id="plan-past-end" className="scroll-mt-24">
           <strong className="text-black">Payment plans end when agreed.</strong>{" "}
           When a buyer pays on a payment plan, we tell your Stripe account when

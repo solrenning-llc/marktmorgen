@@ -14,9 +14,11 @@
  *   3. the owner's commercial review names that very registration, dated, not after today.
  * The switches are separate: neither reads the other's registration or review. Nothing here opens sales:
  * PLANS_ON_SALE, OPENING_REQUESTED, DEEMED_SUPPLIER_RECORDS, the tax gate, art. 9a's records, the commercial review in
- * lib/commercial-margin.ts and stripePlatformEligibilityReady keep every store closed by themselves. Imports nothing,
- * so the checkouts import it without a cycle.
+ * lib/commercial-margin.ts and stripePlatformEligibilityReady keep every store closed by themselves. Imports only
+ * lib/deemed-supplier.ts, which imports nothing, so the checkouts import it without a cycle; by a relative path, since
+ * next.config.ts reaches it through lib/csp.ts and does not resolve "@/".
  */
+import { recordedTreatment } from "./deemed-supplier";
 
 /** Collecting EU VAT (and the art. 196 reverse charge): false until a reviewer checks the whole EU treatment. */
 export const EU_VAT_COLLECT_REVIEWED = false;
@@ -38,6 +40,15 @@ export const VAT_COMMERCIAL_REVIEWS: readonly VatCommercialReview[] = [];
 
 /** The Member States accepted as the OSS Member State of identification, with their ISO 3166-1 numeric code. */
 export const OSS_IDENTIFICATION_CODES: Readonly<Record<string, string>> = { IE: "372" };
+
+/**
+ * The currency the non-Union OSS return is made out in: the euro (Directive 2006/112/EC art. 365), which every Member
+ * State of identification above uses. A Member State outside the euro area may require its own currency, so adding
+ * one to OSS_IDENTIFICATION_CODES must revisit this: tests/eu-vat-collect-card.test.ts fails until it does.
+ */
+export const OSS_RETURN_CURRENCY = "eur";
+/** The currency of the UK VAT return: the pound (VAT Notice 700/21, 4.1: "expressed in sterling"). */
+export const UK_RETURN_CURRENCY = "gbp";
 
 /** What a switch may be asked with besides the clock: tests only (a checkout passes it through whole, never a bare yes). */
 export type SwitchInput = {
@@ -105,3 +116,22 @@ export function vatSwitchProblems(jurisdiction: "EU" | "UK", input: SwitchInput 
 export const euVatCollectOn = (input: SwitchInput = {}): boolean => vatSwitchProblems("EU", input).length === 0;
 /** Whether UK VAT may be collected now: UK_VAT_COLLECT_REVIEWED, the UK registration and the owner's review together. */
 export const ukVatCollectOn = (input: SwitchInput = {}): boolean => vatSwitchProblems("UK", input).length === 0;
+
+/**
+ * Whether a VAT switch can turn on in this build at all: only while EU_VAT_COLLECT_REVIEWED or UK_VAT_COLLECT_REVIEWED
+ * is true. Both are constants, so while both are false no clock or date turns a switch on before a new deploy. The
+ * Terms and the pricing page render per request exactly when this is true (lib/vat-fee-words.ts), and the proxy gives
+ * them the nonce policy on the same answer (lib/csp.ts, isDynamicPage).
+ */
+export const vatCanTurnOn = (): boolean => EU_VAT_COLLECT_REVIEWED || UK_VAT_COLLECT_REVIEWED;
+
+/**
+ * Whether a place's VAT is collected now: its deemed-supplier record says "collect" (lib/deemed-supplier.ts,
+ * DEEMED_SUPPLIER_RECORDS unless `records` is given, for tests) and its whole switch is on. The one condition the
+ * checkout charges on (lib/eu-vat-collect.ts) and the Terms and pricing words show on (lib/vat-fee-words.ts), so no page
+ * says VAT is collected where the checkout does not collect it (#5086, Claude 1 coord's MEDIUM 1).
+ */
+export function vatCollecting(place: "EU" | "UK", records?: unknown, vatSwitch: SwitchInput = {}): boolean {
+  if (recordedTreatment(place, ...(records === undefined ? [] : [records])) !== "collect") return false;
+  return place === "EU" ? euVatCollectOn(vatSwitch) === true : ukVatCollectOn(vatSwitch) === true;
+}

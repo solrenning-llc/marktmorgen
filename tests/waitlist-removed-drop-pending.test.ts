@@ -7,7 +7,8 @@
  *    goes, the note stays until the drop is confirmed, the route says cleanupPending, and asking again finishes it.
  * 2. A join that passed its coming-soon check before the product was removed wrote its address after the drop. Now
  *    the drop unmarks first and the join's write is fenced by the mark in one script.
- * 3. A three-key DEL that answered 4 was taken as done. Each reply is now held to its range.
+ * 3. A three-key DEL that answered 4 was taken as done. Each reply is now held to its range (a four-key DEL since the
+ *    index of unconfirmed places goes with the list, so an answer of 5 is the one out of range).
  * 4. An erasure walked every coming-soon mark without counting it. The marks are now counted in its size, capped, and
  *    an oversized set is unknown.
  * 5. The drop and the hold are paid before anything goes (WAITLIST_DROP_UNITS), and the drop gives back the waitlist's
@@ -176,7 +177,7 @@ test("an impossible reply never proves the waitlist gone, and the note that lead
   const base: Pipeline = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands) => {
     const replies = await base(commands);
-    return commands.map((c, i) => (c[0] === "DEL" && c[1] === `nl:wl:${sid}:${pid}` ? 4 : replies[i]));
+    return commands.map((c, i) => (c[0] === "DEL" && c[1] === `nl:wl:${sid}:${pid}` ? 5 : replies[i]));
   }) as Pipeline;
   try {
     await assert.rejects(waitlist.dropWaitlist(sid, pid), UnknownReplyError);

@@ -1332,28 +1332,70 @@ export class MemoryRedis {
           return 1;
         }
         // lib/waitlist.ts WAIT_CONFIRM: a waitlist entry written back only while its confirmation link exists and the entry still holds what was read.
-        if (key.startsWith("-- marktmorgen:waitlist-confirm:v2\n") && args[0] === "2" && args.length === 6) {
-          const [, link, list, email, entry, read] = args;
+        if (key.startsWith("-- marktmorgen:waitlist-confirm:v3\n") && args[0] === "3" && args.length === 7) {
+          const [, link, list, index, email, entry, read] = args;
           this.scriptCalls += 1;
           if (this.run(["EXISTS", link]) === 0) return 0;
           this.scriptCalls += 1;
           if (this.run(["HGET", list, email]) !== read) return 0;
           this.run(["HSET", list, email, entry]);
           this.scriptCalls += 1;
+          this.run(["ZREM", index, email]);
+          this.scriptCalls += 1;
           return 1;
         }
         // lib/waitlist.ts WAIT_JOIN: a join's place written only while its product is still coming soon (#4462).
-        // -1 when no longer coming soon; "" as the place read writes only if still absent (HSETNX), else only over it.
-        if (key.startsWith("-- marktmorgen:waitlist-join:v2\n") && args[0] === "2" && args.length === 7) {
-          const [, soon, list, product, email, read, entry] = args;
+        // -1 when no longer coming soon; "" as the place read writes only if still absent and under the ceiling (-2 at
+        // it), else only over the place read; an unconfirmed place's end goes into the index of unconfirmed places.
+        if (key.startsWith("-- marktmorgen:waitlist-join:v3\n") && args[0] === "3" && args.length === 10) {
+          const [, soon, list, index, product, email, read, entry, max, ends] = args;
           this.scriptCalls += 1;
           if (this.run(["SISMEMBER", soon, product]) === 0) return -1;
-          this.scriptCalls += 1;
-          if (read === "") return this.run(["HSETNX", list, email, entry]);
-          if (this.run(["HGET", list, email]) !== read) return 0;
+          if (read === "") {
+            this.scriptCalls += 1;
+            if (this.run(["HEXISTS", list, email]) === 1) return 0;
+            this.scriptCalls += 1;
+            if ((this.run(["HLEN", list]) as number) >= Number(max)) return -2;
+          } else {
+            this.scriptCalls += 1;
+            if (this.run(["HGET", list, email]) !== read) return 0;
+          }
           this.run(["HSET", list, email, entry]);
           this.scriptCalls += 1;
+          if (ends !== "") {
+            this.run(["ZADD", index, Number(ends), email]);
+            this.scriptCalls += 1;
+          }
           return 1;
+        }
+        // lib/waitlist.ts WAIT_PRUNE: up to `most` unconfirmed places of the index whose confirm link ended by `now` are
+        // dropped, each answered with the place as kept; a place confirmed, gone or unreadable only loses its index line.
+        if (key.startsWith("-- marktmorgen:waitlist-prune:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, list, index, nowText, most] = args;
+          const out: string[] = [];
+          const due = this.run(["ZRANGEBYSCORE", index, "-inf", Number(nowText), "LIMIT", 0, Number(most)]) as string[];
+          this.scriptCalls += 1;
+          for (const who of due) {
+            const raw = this.run(["HGET", list, who]) as string | null;
+            this.scriptCalls += 1;
+            if (raw !== null) {
+              let entry: Record<string, unknown> | null = null;
+              try {
+                const value = JSON.parse(raw) as unknown;
+                entry = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+              } catch {
+                entry = null;
+              }
+              if (entry && entry.ok === 0 && entry.w === 2) {
+                this.run(["HDEL", list, who]);
+                this.scriptCalls += 1;
+                out.push(who, raw);
+              }
+            }
+            this.run(["ZREM", index, who]);
+            this.scriptCalls += 1;
+          }
+          return out;
         }
         // lib/contacts.ts CAS_HSET: each contact set only while it still holds what was read (its SHA-1, "" for none), in one step.
         if (key.startsWith("-- marktmorgen:contact-cas-hset:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
@@ -2748,25 +2790,64 @@ export class MemoryRedis {
           if (this.run(["HGET", batch, field]) !== expected) return 0;
           return this.run(["HDEL", batch, field]);
         }
-        // lib/stock-alerts.ts ADD_PLACE: a new place only while absent and under the ceiling; else only over the entry read.
-        if (key.startsWith("-- marktmorgen:stock-alert-add:v1\n") && args[0] === "1" && args.length === 7) {
-          const [, list, field, expected, next, max, seconds] = args;
+        // lib/stock-alerts.ts ADD_PLACE: a new place only while absent and under the ceiling, else only over the entry
+        // read; its end goes into the index of ends (none for a place kept from before ends were kept); the list and the
+        // index last `keep` seconds after the write.
+        if (key.startsWith("-- marktmorgen:stock-alert-add:v3\n") && args[0] === "2" && args.length === 9) {
+          const [, list, index, field, expected, next, max, ends, keep] = args;
           const current = this.run(["HGET", list, field]);
           if (expected === "") {
             if (current !== null) return 0;
             if ((this.run(["HLEN", list]) as number) >= Number(max)) return -1;
           } else if (current !== expected) return 0;
           this.run(["HSET", list, field, next]);
-          this.run(["EXPIRE", list, seconds]);
+          if (ends !== "") this.run(["ZADD", index, Number(ends), field]);
+          this.run(["EXPIRE", list, keep]);
+          this.run(["EXPIRE", index, keep]);
           return 1;
         }
         // lib/stock-alerts.ts CONFIRM_PLACE: a back-in-stock place confirmed only over exactly the entry read.
-        if (key.startsWith("-- marktmorgen:stock-alert-confirm:v1\n") && args[0] === "1" && args.length === 6) {
-          const [, list, field, expected, next, seconds] = args;
+        if (key.startsWith("-- marktmorgen:stock-alert-confirm:v3\n") && args[0] === "2" && args.length === 8) {
+          const [, list, index, field, expected, next, ends, keep] = args;
           if (this.run(["HGET", list, field]) !== expected) return 0;
           this.run(["HSET", list, field, next]);
-          this.run(["EXPIRE", list, seconds]);
+          if (ends !== "") this.run(["ZADD", index, Number(ends), field]);
+          this.run(["EXPIRE", list, keep]);
+          this.run(["EXPIRE", index, keep]);
           return 1;
+        }
+        // lib/stock-alerts.ts DROP_ENDED: the asking address's own ended place over exactly what was read, then up to
+        // `most` others of the index whose kept end passed, each answered with its kept text; an unreadable one only
+        // loses its index line, one asked or confirmed again has its line set right.
+        if (key.startsWith("-- marktmorgen:stock-alert-drop:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, list, index, nowText, most, asker, own] = args;
+          const now = Number(nowText);
+          const out: string[] = [];
+          if (own !== "" && this.run(["HGET", list, asker]) === own) {
+            this.run(["HDEL", list, asker]);
+            this.run(["ZREM", index, asker]);
+            out.push(asker, own);
+          }
+          const due = this.run(["ZRANGEBYSCORE", index, "-inf", now, "LIMIT", 0, Number(most)]) as string[];
+          for (const who of due) {
+            const raw = this.run(["HGET", list, who]) as string | null;
+            let ends: number | null = null;
+            if (raw !== null) {
+              try {
+                const entry = JSON.parse(raw) as { x?: unknown };
+                if (entry && typeof entry === "object" && typeof entry.x === "number") ends = entry.x;
+              } catch {
+                ends = null;
+              }
+            }
+            if (raw !== null && ends !== null && ends <= now) {
+              this.run(["HDEL", list, who]);
+              out.push(who, raw);
+            }
+            if (ends === null || ends <= now) this.run(["ZREM", index, who]);
+            else this.run(["ZADD", index, ends, who]);
+          }
+          return out;
         }
         // lib/closed-store-data.ts BATCH_SWAP: one batch entry rewritten, or dropped when the new text is empty, only
         // over exactly the text read.

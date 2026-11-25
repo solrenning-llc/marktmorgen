@@ -16,6 +16,8 @@ import {
   confirmStockAlert,
   confirmedForRestock,
   forgetStockAlertPerson,
+  stillWaiting,
+  stockAlertAddresses,
   leaveStockAlert,
   stockAlertsOf,
 } from "@/lib/stock-alerts";
@@ -74,7 +76,10 @@ async function main(): Promise<void> {
   is("two different links, each 48 hex characters", [ALERT_TOKEN.test(dana.confirm), ALERT_TOKEN.test(dana.leave), dana.confirm !== dana.leave, dana.again], [true, true, true, false]);
   is("nobody to email before the confirmation", await confirmedForRestock(store, pid), []);
   const listKey = `nl:sa:${sid}:${pid}`;
-  is("the list ends by itself", redis.run(["TTL", listKey]) as number > WAIT_SECONDS - 5, true);
+  // The list lasts a year after its latest write, as before ends were kept: a place's room is held until it is
+  // dropped, left or cleared (Claude 2 main's M2 on #5124), so the list never lapses under a place still counted.
+  is("the list ends by itself", (redis.run(["TTL", listKey]) as number) > WAIT_SECONDS - 5, true);
+  is("its place ends with its confirm link", (JSON.parse(redis.run(["HGET", listKey, "dana@example.com"]) as string) as { x: number }).x <= Math.floor(Date.now() / 1000) + CONFIRM_SECONDS, true);
   const tokenKeys = redis.keys().filter((k) => k.startsWith("nl:sa:t:"));
   is("both links are kept, each ending by itself", [tokenKeys.length, ...tokenKeys.map((k) => (redis.run(["TTL", k]) as number) > 0)], [2, true, true]);
   const ttls = tokenKeys.map((k) => redis.run(["TTL", k]) as number).sort((a, b) => a - b);
@@ -85,6 +90,7 @@ async function main(): Promise<void> {
   is("another store's page confirms nothing", await confirmStockAlert(dana.confirm, elsewhere), { ok: false });
   is("confirmed", await confirmStockAlert(dana.confirm, store), { ok: true, productId: pid });
   is("now on the restock list, normalised", await confirmedForRestock(store, pid), ["dana@example.com"]);
+  is("a confirmed place lasts a year, and the list with it", (redis.run(["TTL", listKey]) as number) > WAIT_SECONDS - 5, true);
   is("pressing again changes nothing", await confirmStockAlert(dana.confirm, store), { ok: true, productId: pid });
 
   part("Asking again keeps one place");
@@ -244,6 +250,53 @@ async function main(): Promise<void> {
     is("one gets the last place", results.filter((r) => r.ok).length, 1);
     is("the other is told the list is full", results.filter((r) => !r.ok).map((r) => !r.ok && r.reason), ["full"]);
     is("the list holds exactly its ceiling", redis.run(["HLEN", lastKey]), MAX_STOCK_ALERTS);
+  }
+
+  part("A place nobody confirmed stops counting after its confirm link ends, and an ask lengthens only its own place (Codex X6 on #3616)");
+  {
+    const deadKey = `nl:sa:${sid}:${pid2}`;
+    redis.run(["DEL", deadKey]);
+    const DAY = 86_400_000;
+    // One address asked and confirmed 300 days ago: its place, and so the list, have 65 days left.
+    const old = await askStockAlert({ store, productId: pid2, email: "old@example.com", left: 0 });
+    if (!old.ok) throw new Error("not asked");
+    is("the old place confirmed", await confirmStockAlert(old.confirm, store), { ok: true, productId: pid2 });
+    const kept = JSON.parse(redis.run(["HGET", deadKey, "old@example.com"]) as string) as Record<string, number>;
+    const oldEnds = Math.floor(Date.now() / 1000) + 65 * 86_400;
+    redis.run(["HSET", deadKey, "old@example.com", JSON.stringify({ ...kept, at: kept.at - 300 * 86_400, ok: kept.ok - 300 * 86_400, ...("x" in kept ? { x: oldEnds } : {}) })]);
+    if (redis.run(["TYPE", `${deadKey}:x`]) === "zset") redis.run(["ZADD", `${deadKey}:x`, oldEnds, "old@example.com"]);
+    for (const k of [deadKey, `${deadKey}:x`]) if (redis.run(["EXISTS", k]) === 1) redis.run(["EXPIRE", k, 65 * 86_400]);
+    // One address asked 8 days ago and never confirmed: its confirm link is spent, so its place no longer counts.
+    const stale = await askStockAlert({ store, productId: pid2, email: "stale@example.com", left: 0, now: Date.now() - 8 * DAY });
+    if (!stale.ok) throw new Error("not asked");
+    const held = JSON.stringify({ at: 1, ok: 1, t: "a".repeat(48), x: Math.floor(Date.now() / 1000) + 30 * 86_400 });
+    for (let i = 0; i < MAX_STOCK_ALERTS - 2; i += 1) redis.run(["HSET", deadKey, `held${i}@example.com`, held]);
+    is("the list is at its ceiling with the stale place", redis.run(["HLEN", deadKey]), MAX_STOCK_ALERTS);
+    const roomBefore = (await dataUsed(store))?.used ?? Number.NaN;
+    const fresh = await askStockAlert({ store, productId: pid2, email: "fresh@example.com", left: 0 });
+    is("a new address takes the place the stale one held", fresh.ok, true);
+    is("the stale place is gone, the new one is there", [redis.run(["HEXISTS", deadKey, "stale@example.com"]), redis.run(["HEXISTS", deadKey, "fresh@example.com"]), redis.run(["HLEN", deadKey])], [0, 1, MAX_STOCK_ALERTS]);
+    is("the stale place's leave link went with it", await leaveStockAlert(stale.leave, store), false);
+    const roomAfter = (await dataUsed(store))?.used ?? Number.NaN;
+    is("its room came back: the store holds no more than before, besides the new place's confirm link", roomAfter - roomBefore < 400, true);
+    is("the new ask did not lengthen the old place's own end (65 days)", (JSON.parse(redis.run(["HGET", deadKey, "old@example.com"]) as string) as { x: number }).x, oldEnds);
+    is("the old place is still on the restock list", (await confirmedForRestock(store, pid2)).includes("old@example.com"), true);
+  }
+
+  part("A confirmed place that has ended is not waiting any more, for the restock job's readers too");
+  {
+    const endKey = `nl:sa:${sid}:${pid}`;
+    redis.run(["DEL", endKey, `${endKey}:x`]);
+    const gone = await askStockAlert({ store, productId: pid, email: "gone@example.com", left: 0 });
+    const live = await askStockAlert({ store, productId: pid, email: "live@example.com", left: 0 });
+    if (!gone.ok || !live.ok) throw new Error("not asked");
+    await confirmStockAlert(gone.confirm, store);
+    await confirmStockAlert(live.confirm, store);
+    // gone@ confirmed a year and a day ago: its place has ended.
+    const kept = JSON.parse(redis.run(["HGET", endKey, "gone@example.com"]) as string) as Record<string, number>;
+    redis.run(["HSET", endKey, "gone@example.com", JSON.stringify({ ...kept, x: Math.floor(Date.now() / 1000) - 86_400 })]);
+    is("the restock job's list says only the live place is confirmed", (await stockAlertAddresses(store, pid)).map((a) => [a.email, a.confirmed]).sort(), [["gone@example.com", false], ["live@example.com", true]]);
+    is("and just before an email, only the live place is still waiting", (await stillWaiting(store, pid, ["gone@example.com", "live@example.com"])).map((t) => t !== null), [false, true]);
   }
 
   done();

@@ -3061,8 +3061,12 @@ export const COST_LINES: CostLine[] = [
       // A join's place is written in WAIT_JOIN, fenced by the coming-soon mark (#4462, 16 November 2026; since the merge
       // of main of 18 November 2026, over main's exact join): one EVAL and at most WAIT_JOIN_CALLS inside it, a coming-soon
       // check more where the HSETNX of a new place or the HASH_SWAP_IF of a place asked again was, inside the join's own
-      // request (withinStore "waitlist-ip").
-      { file: "lib/waitlist.ts", names: ["WAIT_JOIN", "WAIT_JOIN_CALLS", "withinStore(\"waitlist-ip\""] },
+      // request (withinStore "waitlist-ip"). Since the follow-up to Codex X6's LOW on #3616, WAIT_JOIN also checks the
+      // ceiling (HEXISTS, HLEN) and writes an unconfirmed place's line in the index of unconfirmed places (ZADD); a join
+      // that finds the list full first drops at most WAIT_DROP_ENDED ended unconfirmed places in WAIT_PRUNE (one EVAL
+      // and at most WAIT_PRUNE_CALLS inside it), then one DEL of their links to leave and one give-back of their room,
+      // all inside the same request. A confirmation's WAIT_CONFIRM takes the place's line out (one ZREM more).
+      { file: "lib/waitlist.ts", names: ["WAIT_JOIN", "WAIT_JOIN_CALLS", "WAIT_PRUNE", "WAIT_PRUNE_CALLS", "WAIT_DROP_ENDED", "withinStore(\"waitlist-ip\""] },
       // A link of a sent email that goes through its redirect (124 [F2-EDIT-SENT-LINKS], 6 November 2026): one request, counted before the change is read.
       { file: "app/go/[handle]/[id]/[link]/route.ts", names: ["takePublicRequest(store, \"public\", Date.now(), SENT_LINK_REQUEST_UNITS)", "readSentLinks(id)"] },
       { file: "lib/sent-link-rules.ts", names: ["SENT_LINK_REQUEST_UNITS = 1"] },

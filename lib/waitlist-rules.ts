@@ -59,8 +59,13 @@ export type WaitEntry = {
    * Its link to leave was counted as if the store had the longest handle
    * (#2576). A place without it was written before and counted with the
    * store's real handle, so it gives its link back at the shortest one.
+   *
+   * 2: the same, and counted with a line in the list's index of unconfirmed places too (lib/waitlist.ts, endsKey), so a
+   * place nobody confirmed before its confirm link ended can be dropped by the next join that finds the list full
+   * (Codex X6's LOW on #3616, the same shape here). One digit either way, so a place is the same size with or without
+   * its line.
    */
-  w?: 1;
+  w?: 1 | 2;
 };
 
 export function parseEntry(raw: unknown): WaitEntry | null {
@@ -68,7 +73,7 @@ export function parseEntry(raw: unknown): WaitEntry | null {
   try {
     const v = JSON.parse(raw) as Record<string, unknown>;
     if (typeof v.t !== "string") return null;
-    return { at: Number(v.at) || 0, ok: Number(v.ok) || 0, c: v.c === true, ...(v.c === true && v.k === true ? { k: true } : {}), t: v.t, ...(v.w === 1 ? { w: 1 as const } : {}) };
+    return { at: Number(v.at) || 0, ok: Number(v.ok) || 0, c: v.c === true, ...(v.c === true && v.k === true ? { k: true } : {}), t: v.t, ...(v.w === 1 ? { w: 1 as const } : v.w === 2 ? { w: 2 as const } : {}) };
   } catch {
     return null;
   }

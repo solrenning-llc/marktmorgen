@@ -142,6 +142,8 @@ async function waitlists(): Promise<void> {
     for (let i = 0; i + 1 < (flat as string[]).length; i += 2) {
       const [email, raw] = [(flat as string[])[i], (flat as string[])[i + 1]];
       places += dataBytes([email, raw], 1);
+      // A place counted with a line in the index of unconfirmed places (WaitEntry.w 2) gives that line's room back too.
+      if (JSON.parse(raw).w === 2) places += dataBytes([email, "0000000000"], 1);
       links += dataBytes([waitlistTokenKey(JSON.parse(raw).t), JSON.stringify({ s: store.statsId, h: "x".repeat(LONGEST_HANDLE), p: productId, e: email, k: "leave" })], 1);
     }
     return { places, links };

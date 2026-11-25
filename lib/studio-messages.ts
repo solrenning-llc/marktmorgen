@@ -46,7 +46,7 @@ export const STUDIO_MESSAGES: Record<string, string> = {
   // The store's files in the host's file store are counted once a day (lib/blob-tally.ts), and today's count did not finish.
   storage_daily: "We count your store's files once a day, and today's count did not finish. Keep your file and try again tomorrow.",
   // The studio's picture door, capped before it signs (lib/picture-door.ts).
-  pictures_waiting: "Your store has many pictures uploaded in the last day that are not on a product, link or page yet, so this upload did not start. Add those pictures where you want them, or try again later.",
+  pictures_waiting: "Your store has many uploaded pictures that are not on a product, link or page yet, so this upload did not start. Add the ones from today where you want them, or try again later. Unused pictures are deleted on their own about 30 days after upload, which makes room again.",
   pictures_hourly: "Your store has started many picture uploads in the last hour, so this upload did not start. Try again in an hour.",
   pictures_unavailable: "We could not check your store's picture uploads just now, so this upload did not start. Try again in a moment.",
   // A page whose read did not come back in a known shape (lib/sales-page-store.ts readPage): nothing is decided from it.

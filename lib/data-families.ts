@@ -89,6 +89,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk", "nl:held:refused:", "nl:held:silent:", "nl:held:answered:",
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:", "nl:forget:files",
   "nl:phone:st:", "nl:picture-r2:drop", "nl:pictures:doors:", "nl:pinv:", "nl:pathlead:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan-refund:next", "nl:plan-withdraw:", "nl:plan:closing:",
+  "nl:pictures:taken:", "nl:pictures:unclaimed",
   "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:late-told:", "nl:plans:lock", "nl:plans:pending", "nl:plans:retry",
   "nl:pm:c:", "nl:pm:day:", "nl:pm:done:", "nl:pm:r:", "nl:pm:t:",
   "nl:pod:by:*", "nl:pod:n:", "nl:pod:ok:", "nl:podnote:walk", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:pace:", "nl:pp:press:", "nl:pp:settle:after", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
@@ -397,9 +398,12 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:person:": E, "nl:person:find:": X(1),
   "nl:pfunnel:done:": E, "nl:pfunnel:seen:": E, "nl:pfunnels:": E,
   "nl:phone:cfg:": E, "nl:phone:seen:": X(40), "nl:phone:st:": E,
-  // A store's picture uploads not yet put on anything (lib/picture-door.ts): expires a day after its last note.
   "nl:picture-r2:drop": C,
-  "nl:pictures:doors:": X(1),
+  // A store's picture uploads not yet put on anything (lib/picture-door.ts): each note goes when taken or swept, 30 days after its door
+  // or later behind the sweep's backlog; the list has no expiry (Codex G, Codex X6 on #3347) and goes with its store, named by its files' folder.
+  "nl:pictures:doors:": E,
+  // A picture's mark that a record took it (lib/picture-door.ts, takenKey): a day.
+  "nl:pictures:taken:": X(1),
   "nl:pinv:": Cr(30),
   "nl:pkg:": T("nl:pkg:s:"), "nl:pkg:s:": E, "nl:pkg:t:": T("nl:pkg:s:"),
   "nl:held:stores": I, "nl:held:retry:": Cr(2), "nl:held:month:": Cr(400), "nl:held:walk": C, "nl:held:refused:": Cr(3), "nl:held:silent:": Cr(3), "nl:held:answered:": Cr(3),
@@ -511,6 +515,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // Consent state is token-keyed, encrypted, and expires after 600 seconds; the registry conservatively prices one day.
   "nl:teams:state:": X(1),
   "nl:tasks:bytes:": E, "nl:tasks:doors": C, "nl:tasks:held": C, "nl:tasks:taken:": X(1),
+  "nl:pictures:unclaimed": C,
   "nl:team:": E, "nl:team:invite:": X(7), "nl:team:lock:": E, "nl:team:log:": E, "nl:team:of:": D("prepare"),
   "nl:tben:": E, "nl:tben:given:": E, "nl:tben:who:": E,
   "nl:ticket:in:": X(401),

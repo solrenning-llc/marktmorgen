@@ -328,6 +328,36 @@ export class MemoryRedis {
           }
           return [n, e];
         }
+        // lib/picture-door.ts RETURN_TO_DOOR: each picture back on its store list and the unclaimed list, its taken mark dropped.
+        if (key.startsWith("-- marktmorgen:picture-door-return:v1\n")) {
+          const keyCount = Number(args[0]);
+          const unclaimed = args[1];
+          let n = 0;
+          for (let i = 2; i <= keyCount; i += 2) {
+            const path = args[keyCount + i - 1];
+            const at = args[keyCount + i];
+            this.scriptCalls += 3;
+            this.run(["ZADD", args[i], at, path]);
+            this.run(["ZADD", unclaimed, at, path]);
+            this.run(["DEL", args[i + 1]]);
+            n += 1;
+          }
+          return n;
+        }
+        if (key.startsWith("-- marktmorgen:picture-sweep-restore:v1\n")) {
+          const keyCount = Number(args[0]);
+          const index = args[1];
+          let restored = 0;
+          for (let i = 2; i <= keyCount; i += 2) {
+            const path = args[keyCount + i - 1];
+            const score = args[keyCount + i];
+            const note = this.run(["ZSCORE", args[i], path]);
+            if (note !== null && Number(note) === Number(score) && this.run(["EXISTS", args[i + 1]]) === 0) {
+              restored += Number(this.run(["ZADD", index, "NX", score, path]));
+            }
+          }
+          return restored;
+        }
         // lib/assistant-reminder.ts FORGET_PERSON: a person's reminder sessions read, checked and deleted in one step.
         if (key.startsWith("-- marktmorgen:assist-reminder-forget:v1\n") && args[0] === "1" && args.length === 3) {
           const [, who, prefix] = args;

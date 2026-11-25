@@ -133,7 +133,7 @@ import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { SALE_TEXT_LIMITS, SALES_ID_LENGTH, SALES_PAGE, SALES_SAFE_ID_LENGTH, SALES_TITLE_IDS } from "@/lib/api-sales";
 import { BUMP_KEYS, MAX_BUNDLE_ITEMS, MAX_DELIVERED } from "@/lib/bundle-rules";
 import { MAX_TITLE_LENGTH as SALES_LISTING_TITLE } from "@/lib/catalog-rules";
-import { RESEND_TIMEOUT_MS, STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
+import { BLOB_TIMEOUT_MS, RESEND_TIMEOUT_MS, STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
@@ -853,6 +853,18 @@ export const TASK_DOOR_COST =
   + TASK_SWEEP_COMMANDS * COMMAND + 2 * TASK_WORK_BYTES * DB_BYTE
   // The put token is tallied before it is made (lib/blob.ts, lib/blob-tally.ts): two commands, 16 November 2026.
   + BLOB_TALLY_WRITE_COMMANDS * COMMAND;
+/**
+ * Wall seconds one hand-in (app/api/store/course/task/route.ts) holds its function at the most: the wait for the
+ * lock on the student's work (oneHandInAtATime, HAND_IN_WAIT_MS), then one head of the file (headFile) and at most
+ * one delete (deleteFile: a refused file, a file not handed in, or the one replaced; the ways out are exclusive),
+ * each under BLOB_TIMEOUT_MS. Worked out from the constants (AC (ee)); tests/task-hand-in-wall.test.ts recomputes it
+ * and counts the route's calls (Claude 1's LOW on #3135; the coordinator's option (A), 23 November 2026).
+ */
+/** lib/assignment.ts's HAND_IN_WAIT_MS, held equal by tests/task-hand-in-wall.test.ts (that file is read, not loaded: it opens Redis). */
+export const TASK_HAND_IN_WAIT_MS = 5_000;
+export const TASK_HAND_IN_SECONDS = TASK_HAND_IN_WAIT_MS / 1000 + 2 * (BLOB_TIMEOUT_MS / 1000);
+/** What one hand-in holds past the wait shape a buyer action is priced at (UNIT_COST.buyer): those seconds at 2 GB. */
+export const TASK_HAND_IN_EXTRA_WALL = Math.max(0, TASK_HAND_IN_SECONDS - SHAPES.wait.seconds) * MEMORY_SECOND;
 /**
  * One certificate of completion drawn as a PDF file (app/[handle]/certificate/[id]/pdf/route.ts): the store and the
  * certificate (or the sample's course and listing) read, its two counts (REQUEST_COMMANDS each), the fonts embedded and the page drawn at a
@@ -3417,7 +3429,18 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/lesson-comments-rules.ts", names: ["COMMENTS_PER_DAY", "COMMENTS_PER_MINUTE"] },
       { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR", "CHALLENGE_WRITES_PER_HOUR"] },
     ],
-    basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
+    basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them. A hand-in can hold its function past the wait shape (the lock on the student's work, then a head and a delete of its file): those seconds are priced on line buyer-actions-hand-in-wall.",
+  },
+  {
+    id: "buyer-actions-hand-in-wall",
+    feature: "A hand-in's wall time past the wait shape a buyer action is priced at: the lock on the student's work, then one head and at most one delete of its file (Claude 1's LOW on #3135, 23 November 2026)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].buyer * TASK_HAND_IN_EXTRA_WALL,
+    sources: [
+      { file: "lib/assignment.ts", names: ["oneHandInAtATime", "HAND_IN_WAIT_MS"] },
+      { file: "lib/fetch-timeout.ts", names: ["BLOB_TIMEOUT_MS"] },
+      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "oneHandInAtATime", "headFile(path)", "deleteFile("] },
+    ],
+    basis: "Every buyer action of the window taken as a hand-in that waits the whole HAND_IN_WAIT_MS for the lock and then waits BLOB_TIMEOUT_MS on the head of its file and again on one delete (TASK_HAND_IN_SECONDS), held at 2 GB; the ten seconds of the wait shape are already in line buyer-actions, so only the seconds past them are here. The file store's operations themselves are priced with the assignment door (TASK_DOOR_COST).",
   },
   {
     id: "webhooks",

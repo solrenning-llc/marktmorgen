@@ -14,7 +14,8 @@ process.env.STRIPE_SECRET_KEY = "sk_test_quiet_erasure";
 process.env.RESEND_API_KEY = "re_test_quiet_coverage";
 process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 
-const now = Date.now();
+// Whole seconds, as Stripe's `created` always is: lib/quiet-sales.ts refuses a fractional one as a reply it does not know (#4744).
+const now = Math.floor(Date.now() / 1000) * 1000;
 const day = 86_400_000;
 let handle = "";
 let emails = 0;

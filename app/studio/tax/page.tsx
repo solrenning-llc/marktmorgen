@@ -103,7 +103,7 @@ export default async function StudioTaxPage({ searchParams }: Params) {
             ) : registrations.list.length === 0 ? (
               <p className="mt-3 text-ink-soft">Stripe lists no active tax registrations on your account.</p>
             ) : (
-              <div className="mt-3 overflow-x-auto">
+              <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Tax registrations, as a table">
                 <table className="w-full text-left text-sm">
                   <caption className="sr-only">Tax registrations active on your Stripe account</caption>
                   <thead>

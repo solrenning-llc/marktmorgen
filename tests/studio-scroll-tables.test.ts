@@ -36,6 +36,27 @@ for (const file of [...tsxFiles("components"), ...tsxFiles(join("app", "studio")
 is("wide tables in sideways-scrolling boxes are found", wide >= 8, true);
 is("every one is a focusable, named region", unreachable, []);
 
+// Codex X6's LOW and Claude 6's LOW on #4641 (6912175925, 6911460830; board #5285): the match above needs a
+// `min-w-[...]` table, so a sideways-scrolling box around a table without one was never checked, though such a box
+// scrolls as soon as its columns do not fit (app/studio/tax/page.tsx, components/path-board.tsx). Every box that scrolls
+// sideways and holds a table takes the focus and has a name.
+part("2.1.1: every sideways-scrolling box around a table, whatever its width class, takes the focus and has a name");
+const unreachableAny: string[] = [];
+let boxes = 0;
+for (const file of [...tsxFiles("components"), ...tsxFiles(join("app", "studio"))]) {
+  const source = readFileSync(file, "utf8");
+  const pattern = /<div\b([^>]*\boverflow-x-auto\b[^>]*)>\s*<table\b/g;
+  for (let match = pattern.exec(source); match; match = pattern.exec(source)) {
+    boxes += 1;
+    const attrs = match[1];
+    if (!/tabIndex=\{0\}/.test(attrs) || !/role="region"/.test(attrs) || !/aria-label(ledby)?=/.test(attrs)) {
+      unreachableAny.push(`${file}:${source.slice(0, match.index).split("\n").length}`);
+    }
+  }
+}
+is("boxes around any table are found, more than the wide ones", boxes > wide, true);
+is("every one is a focusable, named region", unreachableAny, []);
+
 part("landmark-unique: the roles table's region is not named as its section");
 const team = readFileSync(join("components", "team-manager.tsx"), "utf8");
 const heading = /<h2 id="roles-title"[^>]*>\s*([^<]+?)\s*</.exec(team)?.[1] ?? "";

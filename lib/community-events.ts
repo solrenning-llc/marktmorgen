@@ -57,7 +57,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, countWithin, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { emailKey } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -1071,9 +1071,11 @@ export async function forgetRsvpsPerson(id: string, who: string, email: string, 
   if (listed.length > MAX_KEPT_EVENTS) throw new UnknownReplyError(what);
   const events = listed;
   if (!events.length) return 0;
-  const replies = repliesFor(await redisPipeline([...events.map((e) => ["HDEL", rsvpKey(id, e), who]), ["DEL", ...events.map((e) => accessKey(id, e, email))]]), events.length + 1);
+  const commands = [...events.map((e) => ["HDEL", rsvpKey(id, e), who]), ["DEL", ...events.map((e) => accessKey(id, e, email))]];
+  const replies = repliesFor(await redisPipeline(commands), events.length + 1);
   if (!replies) throw new UnknownReplyError(what);
-  const counts = replies.map(countOf);
+  // Each HDEL at most its one field, the DEL at most its keys (countWithin; row 72 of #5010).
+  const counts = replies.map((reply, i) => countWithin(reply, commands[i]));
   if (counts.some((n) => n === null)) throw new UnknownReplyError(what);
   // Each place's room comes back only where this deletion removed it (an exact 1), as cancelRsvp gives it.
   const gone = events.filter((_, i) => counts[i] === 1);

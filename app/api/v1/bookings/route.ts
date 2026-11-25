@@ -5,6 +5,7 @@ import { BOOKING_FIELDS, bookings } from "@/lib/api-read";
 /**
  * GET /api/v1/bookings — paid calls and session seats, each at the time it is booked for now. With
  * Stripe connected it takes the further API requests its most costs, before reading (lib/api-read-rules.ts).
+ * `has_more` is true when Stripe holds older checkouts the read did not reach (issue #4049), as GET /api/v1/codes.
  */
 export async function GET(request: Request) {
   const store = await apiStore(request);
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
   try {
     const found = await bookings(store, (more, taken) => takeMoreApi(store, more, taken));
     if (found instanceof Response) return found;
-    return apiOkFields(request, { data: found });
+    return apiOkFields(request, { data: found.rows, has_more: found.hasMore });
   } catch (error) {
     console.error("api: bookings failed", error);
     return apiError(502, "unavailable", "Bookings could not be read just now. Try again in a moment.");

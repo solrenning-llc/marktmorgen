@@ -1309,8 +1309,9 @@ export const COMMUNITY_DEVICES_READ = {
  *   independent durable refund date ends this retry once its existing window elapsed (N1 on #3499), without
  *   authorizing a telling while the notice mark is unknown. If both dates are unreadable, the look remains unknown like the paid record or capture,
  *   inside the job's 25 orders a store a run; that storage-failure reconciliation is not certified as a bounded retry;
- * - lookCommandsPerFailedTry: each try after the first looks at the order again: the GET of its paid record and the
- *   ZADD and EXPIRE of its refund mark, besides one read of the capture from PayPal, which bills no API call; and
+ * - lookCommandsPerFailedTry: each try after the first looks at the order again: the GET of its paid record and its
+ *   refund mark, one fenced script since #5242 (PAYPAL_TAKEN_BACK_MARK_IF_LIVE: the EVAL and its EXISTS, HEXISTS, ZADD
+ *   and EXPIRE, 5; a ZADD and an EXPIRE, 2, before), besides one read of the capture from PayPal, which bills no API call; and
  *   emitEvent up to the read that failed, inside the webhook unit's own commands (UNIT_COST.webhook);
  * - notSentCommandsAtMost: once, at the last try, the "Not sent" lines (lib/webhooks.ts notSentLines): the SET NX of
  *   the event's mark and, when its answer is lost, the GET that reads it back (lib/claim-mark.ts; Codex L and Codex U
@@ -1328,7 +1329,7 @@ export const PAYPAL_REFUND_TELL_RETRY = {
   putBackCommandsPerTry: 4,
   /** One HGET of the immutable backKey observation, only when the notice's date cannot be read. */
   unknownNoticeDateReadCommands: 1,
-  lookCommandsPerFailedTry: 3,
+  lookCommandsPerFailedTry: 6,
   notSentCommandsAtMost: 2 + 2 * MAX_ENDPOINTS + 2 + 1,
 } as const;
 /**
@@ -1865,13 +1866,16 @@ export const PAYPAL_REFUND_WATCH = {
 /**
  * The refund kept for good by the same watch (lib/paypal-sales.ts, watchPayPal, backKey; #3464, Claude 7's MÉDIO):
  * each look at an order PayPal says is refunded in full writes it to nl:ppsell:back:<stats> with one ORDER_WRITE
- * script (lib/order-data.ts, orderWrite) carrying one HSETNX, charged to the store's room:
+ * script behind the store's live fence (lib/order-data.ts, orderWriteIfStoreLive, ORDER_WRITE_IF_STORE_LIVE, since
+ * #5242) carrying one HSETNX, charged to the store's room:
  * - scriptsPerRefundLook / writesPerScript: one script, one write;
- * - commandsPerScriptAtMost: the EVAL and the script's own calls for one HSETNX field at its dearest (EXISTS, TYPE,
- *   HEXISTS and HSTRLEN before, the HSETNX, HEXISTS and HSTRLEN after, the room's two HGETs and its HSET): 11;
- * - markCommandsPerRefundLookAtMost: each look that reaches the write first runs the take-back marks again, the refund
- *   set's ZADD and EXPIRE and, for a capture reversed, failed or declined, the reversed set's ZADD and EXPIRE: at most 4
- *   a look, on the first look and on every retry (Claude 6 on #3464, MEDIUM);
+ * - commandsPerScriptAtMost: the EVAL and the script's own calls for one HSETNX field at its dearest (the fence's
+ *   EXISTS and HEXISTS, then EXISTS, TYPE, HEXISTS and HSTRLEN before, the HSETNX, HEXISTS and HSTRLEN after, the
+ *   room's two HGETs and its HSET): 13 (11 before the fence of #5242);
+ * - markCommandsPerRefundLookAtMost: each look that reaches the write first runs the take-back marks again, each one
+ *   fenced script (PAYPAL_TAKEN_BACK_MARK_IF_LIVE, #5242: the EVAL and its EXISTS, HEXISTS, ZADD and EXPIRE, 5): the
+ *   refund set's and, for a capture reversed, failed or declined, the reversed set's: at most 10 a look (4 before the
+ *   fence), on the first look and on every retry (Claude 6 on #3464, MEDIUM);
  * - retryWritesPerFailedLook: a write not known landed puts the order back on the watch an hour on, only while the
  *   store is live (PAYPAL_WATCH_IF_LIVE: the EVAL and its EXISTS, HEXISTS and ZADD, 4 commands; Codex G-1144) and
  *   tells nothing, so its worst is the marks, one script and that fenced write an hour (looksPerDayAtMost, the watch's own hourly look),
@@ -1883,8 +1887,8 @@ export const PAYPAL_REFUND_WATCH = {
 export const PAYPAL_REFUND_KEPT = {
   scriptsPerRefundLook: 1,
   writesPerScript: 1,
-  commandsPerScriptAtMost: 11,
-  markCommandsPerRefundLookAtMost: 4,
+  commandsPerScriptAtMost: 13,
+  markCommandsPerRefundLookAtMost: 10,
   retryWritesPerFailedLook: 4,
   looksPerDayAtMost: 24,
   daysAtMost: 400,
@@ -1920,15 +1924,15 @@ export const PAYPAL_PENDING_SWEEP = {
  * owed, never lost: what the payment gave is still taken back, and the order stays on the watch, looked at again
  * tellAgainAfterSeconds later (REFUND_TELL_AGAIN_SECONDS, lib/paypal-sales.ts), the watch's hourly pace, so no more
  * looks a day than PAYPAL_REFUND_WATCH.looksPerOrderPerDayAtMost and none past its daysWatchedAtMost. Each such look
- * makes, besides PAYPAL_REFUND_WATCH's commands of a look, the refund mark's ZADD and EXPIRE again
- * (markCommandsPerOwedLook), the paid purchase's HGET again (recordReadsPerOwedLook), at most one write of what is
+ * makes, besides PAYPAL_REFUND_WATCH's commands of a look, the refund mark again, one fenced script (the EVAL and its
+ * EXISTS, HEXISTS, ZADD and EXPIRE since #5242: markCommandsPerOwedLook), the paid purchase's HGET again (recordReadsPerOwedLook), at most one write of what is
  * already taken back (writesPerOwedLookAtMost: an SREM or an HSET a second time, harmless twice) and the telling again
  * (ownNoteReadsPerRefund and emitEvent's own reads, the webhook unit's WEBHOOK_ERASED_READ_COMMANDS among them; its
  * event id is the capture's, so it is sent once). A scheduled job's work, bounded by its schedule and the batch, a
  * company fixed cost (NOT_A_COST.REFUND_WATCH_BATCH), not a plan's allowance; its dollar figure is not yet a line of
  * lib/llc-fixed-costs.ts, so it is not certified, never zero. Held by tests/paypal-refund-erased.test.ts.
  */
-export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1, tellAgainAfterSeconds: 3_600, markCommandsPerOwedLook: 2, recordReadsPerOwedLook: 1, writesPerOwedLookAtMost: 1 } as const;
+export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1, tellAgainAfterSeconds: 3_600, markCommandsPerOwedLook: 5, recordReadsPerOwedLook: 1, writesPerOwedLookAtMost: 1 } as const;
 /**
  * The copy a reading of the buyers leaves, stored for its whole life (lib/segments.ts, LEDGER_SECONDS: an hour since
  * the owner's C3-80 (b); Codex R1 on #3226): BUYER_LEDGER_BYTES at Upstash's GB-month rate for that hour. Only a

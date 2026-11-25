@@ -136,17 +136,22 @@ async function main(): Promise<void> {
   const held = async (email: string) => (await importedFor((await storeForEmail("owner@example.com"))!, email)).length;
   const watched = async (order: string) => (await redis.pipeline([["ZSCORE", watchKey, order]]))[0] !== null;
 
-  /** The mark's key goes between its ZADD and its EXPIRE, as when its TTL runs out right then: the EXPIRE answers 0. */
+  /**
+   * The mark answered with its EXPIRE at 0 and its key gone. Since #5242 the mark is one fenced script
+   * (PAYPAL_TAKEN_BACK_MARK_IF_LIVE), so its ZADD and EXPIRE can no longer be split by the key running out; the reader
+   * must still never take an EXPIRE that is not 1 as a written mark. The script runs for real, then its key is deleted
+   * and the answer comes back as { ZADD's count, 0 }.
+   */
   const dropBetween = async (key: string, run: () => Promise<Awaited<ReturnType<typeof watchPayPal>>>) => {
     const real = redis.pipeline.bind(redis);
     let dropped = 0;
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      const [add, expire] = commands;
-      if (commands.length === 2 && add[0] === "ZADD" && add[1] === key && expire[0] === "EXPIRE" && expire[1] === key) {
-        const [added] = await real([add]);
+      const [only] = commands;
+      if (commands.length === 1 && only[0] === "EVAL" && String(only[1]).startsWith("-- marktmorgen:paypal-taken-back-mark-if-live:v1") && only[5] === key) {
+        const [answer] = await real(commands);
         await real([["DEL", key]]);
         dropped++;
-        return [added, ...(await real([expire]))];
+        return [[Array.isArray(answer) ? answer[0] : answer, 0]];
       }
       return real(commands);
     }) as typeof redis.pipeline;
@@ -168,7 +173,7 @@ async function main(): Promise<void> {
     await dueNow(bought.order);
     const told = refunds.length;
     const { result, dropped } = await dropBetween(key, () => watchPayPal(store, Date.now() + 10_000, on));
-    is("control: the key went between the ZADD and the EXPIRE", dropped, 1);
+    is("control: the mark answered its EXPIRE at 0, its key gone", dropped, 1);
     is("the order stays watched", await watched(bought.order), true);
     is("nothing is taken back", [result.revoked, await held(email)], [0, 1]);
     is("no refund is told", refunds.length, told);

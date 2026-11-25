@@ -189,8 +189,10 @@ async function main(): Promise<void> {
   // reading the replies, then, with nothing granted yet, took the order off its watch. A mark that was never written
   // left nothing to stop the retry, so a refunded order was handed over for good. Now the two replies are read
   // exactly (each 0 or 1); anything else keeps the order on the watch, looked at again in an hour.
+  // Since #5242 the mark is one fenced script (PAYPAL_TAKEN_BACK_MARK_IF_LIVE) answering { ZADD's count, EXPIRE's }: the
+  // same shapes are given as that one answer, and "no reply at all" as no answer to the pipeline.
   const markWrite = (c: Commands) =>
-    c.length === 2 && c[0][0] === "ZADD" && c[0][1] === `nl:ppsell:refunded:${statsId}` && c[1][0] === "EXPIRE";
+    c.length === 1 && c[0][0] === "EVAL" && String(c[0][1]).startsWith("-- marktmorgen:paypal-taken-back-mark-if-live:v1") && c[0][5] === `nl:ppsell:refunded:${statsId}`;
   for (const [label, applied, reply] of [
     ["no reply at all, not written", false, []],
     ["one reply of two, not written", false, [1]],
@@ -211,7 +213,7 @@ async function main(): Promise<void> {
       if (faulted === 0 && markWrite(c)) {
         faulted += 1;
         if (applied) await pipeline(c);
-        return [...reply];
+        return reply.length === 0 ? [] : [[...reply]];
       }
       return pipeline(c);
     }) as typeof redis.pipeline;

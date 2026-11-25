@@ -139,10 +139,18 @@ export function LicenceKeyEditor({ product, handle }: { product: Product; handle
     ].filter(Boolean);
     toast(added === 1 ? "1 key added." : `${count(added)} keys added.`);
     const served = Number(data.served) || 0;
+    const unread = Number(data.unread) || 0;
     setUploadNote(
       [
         skipped.length ? `Skipped: ${skipped.join(", ")}.` : null,
         served ? `${count(served)} waiting ${served === 1 ? "buyer was" : "buyers were"} given a key and emailed it.` : null,
+        // Never "nobody waits" when the line did not read, and never a buyer left out without a word (#5285).
+        data.waitingUnknown === true
+          ? "We could not read the list of buyers waiting for a key just now, so none of them got one. They get theirs the next time you add new keys."
+          : null,
+        unread
+          ? `${count(unread)} waiting ${unread === 1 ? "buyer's order" : "buyers' orders"} could not be read, so ${unread === 1 ? "that buyer has" : "those buyers have"} no key yet and ${unread === 1 ? "keeps their" : "keep their"} place in line. Write to support@marktmorgen.com.`
+          : null,
       ]
         .filter(Boolean)
         .join(" ") || null,
@@ -389,7 +397,8 @@ export function LicenceKeyEditor({ product, handle }: { product: Product; handle
         <p className="mt-2 text-ink-soft">
           Your software can ask whether a key is one this product gave and is still good. It answers{" "}
           <code className="font-mono">valid</code>, <code className="font-mono">revoked</code> or{" "}
-          <code className="font-mono">unknown</code>, and nothing about the buyer. Up to 120 checks a minute from one IP address.
+          <code className="font-mono">unknown</code>, and nothing about the buyer. If it cannot check a key just now, it answers
+          with an error instead, so your app can ask again. Up to 120 checks a minute from one IP address.
         </p>
         <code className="mt-2 block break-all rounded-[var(--r-sm)] bg-sand px-3 py-2 font-mono text-xs text-ink">{`GET ${checkUrl}THE-KEY`}</code>
       </details>

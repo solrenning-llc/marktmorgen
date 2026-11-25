@@ -474,6 +474,10 @@ export type UploadResult = {
   left: number;
   /** Waiting buyers given a key by this upload. */
   served: number;
+  /** Waiting buyers whose record did not read: given nothing, they keep their place in the line (#5285, rule 24). */
+  unread: number;
+  /** The line of waiting buyers did not read at all: nobody was given a key from it, never "nobody waits". */
+  waitingUnknown: boolean;
 };
 
 /**
@@ -523,9 +527,9 @@ export async function addKeys(store: Store, product: Listing, keys: string[], or
   if (notKept.length) await giveData(store, [{ slot, bytes: weigh(notKept) }]);
   // A top-up means the next low pool is worth another warning.
   if (added > 0) await redisPipeline([["DEL", warnedKey(store, product)]]);
-  const served = added > 0 ? await serveWaiting(store, product, origin) : 0;
+  const waiting = added > 0 ? await serveWaiting(store, product, origin) : { served: 0, unread: 0, unknown: false };
   const [after] = await redisPipeline([["LLEN", poolKey(store, product)]]);
-  return { added, known, overflow, left: Number(after) || 0, served };
+  return { added, known, overflow, left: Number(after) || 0, served: waiting.served, unread: waiting.unread, waitingUnknown: waiting.unknown };
 }
 
 /** Takes every key still in the pool out, so none of them is ever given. */
@@ -1131,8 +1135,11 @@ export async function checkKey(store: Store, product: Listing, key: string): Pro
   if (!store.statsId || !isRedisConfigured()) return "unknown";
   if (key.length < MIN_KEY_LENGTH || key.length > MAX_KEY_LENGTH) return "unknown";
   const [raw] = await redisPipeline([["HGET", infoKey(store, product), key]]);
+  // No record at all: never given. A record that is there but does not read is not known, never "never given": it
+  // throws, and the check answers that it could not check right now (#5285, rule 24), as issuedKeys and readSale do.
+  if (raw === null) return "unknown";
   const info = parseInfo(key, raw);
-  if (!info) return "unknown";
+  if (!info) throw new UnknownReplyError("a license key's record");
   return info.revokedAt ? "revoked" : "valid";
 }
 
@@ -1219,17 +1226,40 @@ async function tellCreatorEmpty(store: Store, product: Listing, reference: strin
   }).catch((error) => console.error("telling a creator about a waiting buyer failed", error));
 }
 
-/** Gives every waiting buyer a key from a fresh upload, and emails it. */
-async function serveWaiting(store: Store, product: Listing, origin: string): Promise<number> {
+/**
+ * A waiting buyer's address, as keyForSale writes their record (`{ e, at }`; an order with no address writes ""), or
+ * null when the record does not read: then they are given nothing, never a key on an empty address that would reach
+ * neither their email nor their orders page, which finds keys by the address (#5285, rule 24).
+ */
+function waitingEmail(raw: string): string | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const email = (value as Record<string, unknown>).e;
+  return typeof email === "string" ? email : null;
+}
+
+/**
+ * Gives every waiting buyer a key from a fresh upload, and emails it. A line that does not read is not "nobody waits"
+ * (unknown), and a buyer whose record does not read keeps their place, counted (unread), so the creator is told.
+ */
+async function serveWaiting(store: Store, product: Listing, origin: string): Promise<{ served: number; unread: number; unknown: boolean }> {
   const [raw] = await redisPipeline([["HGETALL", waitingKey(store, product)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
+  const flat = stringList(raw);
+  if (!flat || flat.length % 2 !== 0) return { served: 0, unread: 0, unknown: true };
   let served = 0;
+  let unread = 0;
   for (let i = 0; i + 1 < flat.length; i += 2) {
-    const reference = String(flat[i]);
-    let email = "";
-    try {
-      email = String((JSON.parse(String(flat[i + 1])) as { e?: unknown }).e ?? "");
-    } catch {}
+    const reference = flat[i];
+    const email = waitingEmail(flat[i + 1]);
+    if (email === null) {
+      unread += 1;
+      continue;
+    }
     const given = await keyForSale(store, product, reference, email);
     // A sale refunded while it waited is given nothing, and lets its place go: the next buyer is still served.
     if (!given) continue;
@@ -1255,5 +1285,5 @@ async function serveWaiting(store: Store, product: Listing, origin: string): Pro
       idempotencyKey: `nimbus-key:${store.statsId}:${product.id}:${reference}`,
     }).catch((error) => console.error("emailing a waiting buyer their key failed", error));
   }
-  return served;
+  return { served, unread, unknown: false };
 }

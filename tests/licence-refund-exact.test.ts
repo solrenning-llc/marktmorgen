@@ -327,9 +327,11 @@ async function main(): Promise<void> {
       if (commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === infoOf && commands[0][2] === checked) return [odd];
       return real(commands);
     }) as typeof redis.pipeline;
-    const status = await checkKey(store, app, checked);
+    // Not "unknown" either, which says "never given" (#5285): a record that is there and does not read throws, and the
+    // route answers that it could not check right now.
+    const status = await checkKey(store, app, checked).then((answer) => answer, (error) => (error instanceof Error ? error.name : "threw"));
     redis.pipeline = real;
-    is(`${label}: the check answers unknown`, status, "unknown");
+    is(`${label}: the check is not known, never valid, revoked or never given`, status, "UnknownReplyError");
   }
 
   part("6e. Same pattern: the buyer's key is never shown good or revoked from a record of another shape");

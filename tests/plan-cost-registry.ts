@@ -862,6 +862,17 @@ export const TASK_DOOR_COST =
  */
 export const CERTIFICATE_PDF_READ = CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + (16 + 2 * (1 + SHARE_COMMANDS_PER_REQUEST)) * COMMAND + 64_000 * DB_BYTE + CERTIFICATE_PDF_MAX_BYTES * ORIGIN_PER_BYTE;
 /**
+ * The first product a creator wrote in the studio, drawn as a tagged PDF (app/api/store/first-product/pdf/route.ts,
+ * 490 [PP1] unit 2): the guard's session, store and role (twenty commands, as a studio request), its count, the
+ * outline worked out again, the fonts embedded and every page drawn at two seconds of CPU (0.58 s measured cold for
+ * the longest guide: one-letter words, letters with combining marks, the widest letters or the most line breaks, at
+ * FIRST_PRODUCT_MAX_PART a part; the line layout measures each word once since the independent review of 12 November
+ * 2026, which had measured 2.1 s when it measured the whole line again for each word) held four seconds at 2 GB,
+ * and the file sent (100 KB; 35 KB measured). Taken as FIRST_PRODUCT_PDF_UNITS studio requests, the rest of them
+ * before it is drawn, held above it in tests/first-product-pdf.test.ts. Kept nowhere: no database bytes.
+ */
+export const FIRST_PRODUCT_PDF_READ = CALL + 2 * CPU_SECOND + 4 * MEMORY_SECOND + (20 + 2 * TAKE_COMMANDS) * COMMAND + 100_000 * ORIGIN_PER_BYTE;
+/**
  * One reading of a booking page's open times, besides the page's own request (app/[handle]/book/[product]/page.tsx:
  * slotsForProduct, and a booking's move, slotsForMove; both read lib/calls.ts readBusy), at the most, for a store of
  * `listings` call products (traffic audit, 9 November 2026). Taken as bookTimesUnits(listings) of the store's
@@ -3099,6 +3110,10 @@ export const COST_LINES: CostLine[] = [
       // A new calendar's first reading, fenced on the settings (newFeedFenceUsd).
       { file: "lib/calendar-sync.ts", names: ["NEW_FEED_READING_FENCE_COMMANDS", "KEEP_NEW_FEED_READING"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
+      // The first product's PDF takes FIRST_PRODUCT_PDF_UNITS studio requests, the rest before it is drawn (490 [PP1]; FIRST_PRODUCT_PDF_READ).
+      { file: "app/api/store/first-product/pdf/route.ts", names: ["countStudio(store, null, FIRST_PRODUCT_PDF_UNITS - 1)", "FIRST_PRODUCT_BODY_BYTES"] },
+      { file: "lib/first-product-pdf.ts", names: ["FIRST_PRODUCT_PDF_UNITS = 4", "FIRST_PRODUCT_LONG_WORD = 40"] },
+      { file: "lib/first-product-limits.ts", names: ["FIRST_PRODUCT_MAX_TEXT = 60_000", "FIRST_PRODUCT_MAX_PART = 4_000"] },
       // Many sales at once (767 [STN14] unit 4): one studio request for each order asked, taken before any counter or send (review of #3543).
       { file: "app/api/store/sales-bulk/route.ts", names: ["countStudio(store, null, extra)", "asked.references.length - 1"] },
       // Contact paste admits its complete command/transfer work before any contact read or atomic import write; same studio figure, no extra allowance.

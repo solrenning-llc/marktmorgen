@@ -49,6 +49,7 @@ export const HELP_AREAS: readonly HelpArea[] = [
   { folder: "discord", name: "Discord", icon: "gamepad", answer: "can-my-buyers-get-into-my-discord-server", mentions: "Discord", feature: "discord-access" },
   { folder: "disputes", name: "Disputed purchases", icon: "alert", answer: "who-handles-refunds-and-disputes", mentions: "dispute" },
   { folder: "email", name: "Email", icon: "mail", answer: "can-i-email-the-people-on-my-list", mentions: "email", feature: "email" },
+  { folder: "first-product", name: "Make your first product", icon: "file", answer: "what-file-can-i-sell-and-how-big", mentions: "file" },
   { folder: "forms", name: "Forms, surveys and quizzes", icon: "list", answer: "can-i-add-a-form-a-survey-or-a-quiz", mentions: "form" },
   { folder: "funnels", name: "Funnels", icon: "ladder", answer: "how-do-i-build-a-funnel", mentions: "funnel", feature: "funnels" },
   { folder: "growth", name: "Growth", icon: "chart", answer: "how-do-i-choose-a-growth-goal-and-see-what-to-do-next", mentions: "goal" },

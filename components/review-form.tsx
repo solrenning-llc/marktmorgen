@@ -41,6 +41,7 @@ export function ReviewForm({
   back,
   notice,
   lang = "en",
+  closed = false,
 }: {
   handle: string;
   /** The hidden fields that prove the order. */
@@ -53,6 +54,11 @@ export function ReviewForm({
   notice: string | null;
   /** The store's language (lib/store-language.ts); English when left out. */
   lang?: LanguageCode;
+  /**
+   * The order is older than REVIEW_SAVE_SECONDS (lib/review-proof.ts), so the route saves nothing (#5400): the page says
+   * so instead of drawing fields that could not be saved, and a review already saved can still be deleted.
+   */
+  closed?: boolean;
 }) {
   const code = parseLanguage(lang);
   const g = GIVING_WORDS[code];
@@ -62,7 +68,8 @@ export function ReviewForm({
   // Asking before a delete (Claude 6's audit 21; WCAG 3.3.4, 3.3.6): with the review there, the question takes the
   // delete button's place below and no sentence is shown here; with no review left to delete, the sentence says so.
   const asking = notice === "confirmDelete" && existing !== null;
-  const said = known && notice && !asking ? { text: g.reviewNotices[notice] ?? known.text, alert: known.alert } : null;
+  // With the form closed, its own sentence below already says why; the route's "late" is not said twice.
+  const said = known && notice && !asking && !(closed && notice === "late") ? { text: g.reviewNotices[notice] ?? known.text, alert: known.alert } : null;
   // "Keep my review" goes back to this same page, opened on the sentence that says nothing was deleted.
   const keepHref = reviewPagePath(handle, back, door, product.id, "kept", `r-${product.id}-said`);
   const hidden = (
@@ -87,6 +94,11 @@ export function ReviewForm({
           {said.text}
         </p>
       ) : null}
+      {closed ? (
+        <p id={`r-${product.id}-closed`} className="st-muted text-sm leading-relaxed">
+          {g.reviewNotices.late}
+        </p>
+      ) : (
       <form action="/api/store/review" method="post" className="space-y-4">
         {hidden}
         <input type="hidden" name="action" value="save" />
@@ -166,6 +178,7 @@ export function ReviewForm({
         </button>
         <p className="st-muted max-w-[46ch] text-xs leading-relaxed">{g.reviewPublic(storeName)}</p>
       </form>
+      )}
       {existing && asking ? (
         // The question after the first press. The answer's address opens the page on it (#r-…-delete) and tabindex -1
         // lets it take focus there, so a screen reader reads the question and what goes at once, and a second Enter

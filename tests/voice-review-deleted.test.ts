@@ -14,6 +14,7 @@ import { readReview, reviewId } from "@/lib/reviews";
 import { TAKE_COMMANDS } from "./plan-cost-registry";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
+import { nextReviewMonth } from "./review-saves-world";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_voice_review_deleted_only";
@@ -45,6 +46,8 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 }) as typeof fetch;
 
 async function send(fields: Record<string, string>) {
+  // Each save as in its own month: the cap on an order's saves (#5010 row 180) is not what this test is about.
+  if (fields.action !== "delete") nextReviewMonth();
   const form = new FormData();
   for (const [k, v] of Object.entries({ handle: HANDLE, product: productId, session_id: SESSION, back: "review", ...fields })) form.set(k, v);
   return POST(new NextRequest("https://marktmorgen.com/api/store/review", { method: "POST", body: form, headers: { origin: "https://marktmorgen.com", host: "marktmorgen.com" } }));

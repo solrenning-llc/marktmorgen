@@ -13,7 +13,9 @@
 import { type Review, studioReviews } from "@/lib/reviews";
 import { readListings } from "@/lib/catalog";
 import { STORE_ID_PATTERN, type Store, dropQuotes, keepQuotes, storeRef } from "@/lib/store";
-import { MAX_STORE_QUOTES, type StoreQuote, quoteText } from "@/lib/store-quotes-rules";
+import { MAX_STORE_QUOTES, QUOTES_REFRESH_SECONDS, type StoreQuote, quoteText } from "@/lib/store-quotes-rules";
+import { withinLimit } from "@/lib/request-guard";
+export { QUOTES_REFRESH_SECONDS } from "@/lib/store-quotes-rules";
 
 /** Words shorter than this say too little to quote. */
 const MIN_QUOTE = 20;
@@ -45,6 +47,18 @@ export async function refreshStoreQuotes(store: Store): Promise<void> {
   } catch (error) {
     console.error("keeping a store's newest reviews failed", error);
   }
+}
+
+/**
+ * refreshStoreQuotes at most once a store in QUOTES_REFRESH_SECONDS, after a buyer's review write
+ * (app/api/store/review; #5010 row 180): the refresh reads LOOK_AT reviews, so it is priced once an hour a store in
+ * the cost line "review-writes", not once a write. A refresh skipped leaves the quotes as they were until the next
+ * one; a deleted review's words never stay, since the route takes its quote off first (dropReviewQuote). A count that
+ * cannot be read skips it, never refreshes on a guess.
+ */
+export async function refreshStoreQuotesHourly(store: Store): Promise<void> {
+  const due = await withinLimit("quotes-refresh", storeRef(store), 1, QUOTES_REFRESH_SECONDS).catch(() => false);
+  if (due) await refreshStoreQuotes(store);
 }
 
 /**

@@ -83,6 +83,8 @@ import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
 import { VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { DELIVERY_WRITE_MAX_BYTES } from "@/lib/webhook-limits";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
+import { REVIEW_SAVES_PER_ORDER_MONTH } from "@/lib/review-summary";
+import { QUOTES_REFRESH_SECONDS } from "@/lib/store-quotes-rules";
 import { CONTACT_COMMANDS_MOST, CONTACT_READ_BYTES } from "@/lib/contacts";
 import { MAX_CART } from "@/lib/cart-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
@@ -1592,6 +1594,58 @@ export function creatorCardFenceCost(allowances: Record<AllowanceKind, number>):
  */
 export const REQUEST_COMMANDS = 1 + SHARE_COMMANDS_PER_REQUEST;
 
+/**
+ * A buyer's review write at its worst (app/api/store/review; #5010 row 180), each part measured end to end in
+ * tests/review-route-units.test.ts, every command as Upstash bills it and every byte the replies move, the work left
+ * for after the answer included: a save (a first review with a photo, or a rewrite that replaces the photo and the words
+ * while the studio's summary is being read), a deletion, the refund's mark, and one refresh of the store page's quotes
+ * (LOOK_AT reviews of the longest words), which runs at most once an hour a store (QUOTES_REFRESH_SECONDS).
+ */
+export const REVIEW_WRITE_WORST = {
+  save: { commands: 86, bytes: 144_000 },
+  remove: { commands: 43, bytes: 76_000 },
+  mark: { commands: 27, bytes: 77_000 },
+  refresh: { commands: 56, bytes: 60_000 },
+} as const;
+
+/**
+ * Store months of orders whose buyers may write a review in one month: every door refuses a save or rewrite of an order
+ * paid more than REVIEW_SAVE_SECONDS ago (lib/review-proof.ts: MAX_ASK_DAYS + the link's 60 days, 90 days; the orders
+ * page's door too, Claude 5 iZByNH on #5400), so a month's writes come from orders bought over about 121 days, which
+ * touch at most this many store months of ORDERS_INCLUDED each.
+ */
+export const REVIEW_DOOR_MONTHS = 6;
+/**
+ * The deletes priced for an order's store month (Claude 5 ia5d's MEDIUM 2 and Claude 5 iZByNH's MEDIUM on #5400):
+ * one for each save. Deleting is never refused, and an order can delete in one month reviews it saved over several, so
+ * no month's deletes are bounded by that month's saves; but a delete removes a review one save made, and a review is
+ * deleted once, so deletes never outnumber saves. Each save is therefore priced with the delete it can later need, in
+ * the month of the save: a month with many deletes of older reviews spends what the months of their saves already
+ * priced. Saves themselves are bounded (REVIEW_SAVES_PER_ORDER_MONTH an order, REVIEW_DOOR_MONTHS store months of
+ * orders, every door refusing an order older than REVIEW_SAVE_SECONDS).
+ */
+export const REVIEW_DELETES_PER_ORDER_MONTH = REVIEW_SAVES_PER_ORDER_MONTH;
+
+/**
+ * The line "review-writes": every order the doors leave open saving its review REVIEW_SAVES_PER_ORDER_MONTH times,
+ * deleting it as often, and having its refund marked, plus one refresh of the quotes an hour for a 31-day month.
+ */
+export function reviewWritesMonthlyUsd(tier: Tier): number {
+  const refreshes = Math.ceil((31 * 86_400) / QUOTES_REFRESH_SECONDS) * request("light", REVIEW_WRITE_WORST.refresh.commands, REVIEW_WRITE_WORST.refresh.bytes);
+  return reviewWritesOrdersUsd(tier) + refreshes;
+}
+
+/**
+ * The part of "review-writes" that follows the plan's included orders (ORDERS_INCLUDED, linearly): the writes. A plan
+ * that includes fewer orders has fewer buyers who can write, so tests/limits-proposal-table.ts usageCents scales this
+ * part with the orders figure, as it scales the orders line itself; the hourly refresh does not depend on orders.
+ */
+export function reviewWritesOrdersUsd(tier: Tier): number {
+  const orders = REVIEW_DOOR_MONTHS * ORDERS_INCLUDED[tier];
+  const per = (w: { commands: number; bytes: number }) => request("heavy", w.commands, w.bytes);
+  return orders * (REVIEW_SAVES_PER_ORDER_MONTH * per(REVIEW_WRITE_WORST.save) + REVIEW_DELETES_PER_ORDER_MONTH * per(REVIEW_WRITE_WORST.remove) + per(REVIEW_WRITE_WORST.mark));
+}
+
 /** What one request costs: its call, CPU, memory, database commands and the bytes it moves through the database. */
 export function request(shape: keyof typeof SHAPES, commands: number, bytes = 0): number {
   const { seconds, cpu } = SHAPES[shape];
@@ -3072,6 +3126,20 @@ export const COST_LINES: CostLine[] = [
     basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. An affiliate's own page (lib/affiliate-page-admission.ts) and the store's map (lib/store-sitemap.ts) count what they would read first, with a few commands, and take that many of the window's requests before reading it (lib/public-read-rules.ts; affiliatePageRead, affiliateLoadRead and sitemapRead held in tests/plan-cost-registry.test.ts), so neither reads past the window; the affiliate program's book is worked out for all its affiliates at most every BOOK_FRESH_SECONDS and kept that long (lib/affiliate-book-snapshot.ts), the load that works it out paying for it in full outside its connection's share of the day, every other load paying for its own part. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count. A buyer's stamped copy or a PDF's preview kept in the store's storage measures the store first (a Blob and an R2 listing of at most MEASURE_LIST_PAGES pages each): STORAGE_MEASURE_UNITS of these requests, taken before it lists, refused without them (nothing is listed or kept); a store found without room is not measured again for NO_ROOM_NOTE_SECONDS by any of its copies or previews; and a copy stamped on the fly for a store without room (never the file unstamped) is held at flyHoldUnits before its original is read, the function's whole time, two processors' CPU and every byte read and sent, and settled at the work measured; refused, the buyer is asked to try again (lib/stamp-cost-rules.ts). The open cart's count of its limited products (513 [PF1], unit 3, 2 November 2026) adds at most MAX_CART reads, and asks the creator's Stripe account, which costs us nothing but the wait, only about a hold that ran out, at most MAX_CHECKS times a product; a hold settled, by being counted sold or let go, is not asked about again; a count that settles holds writes at most one HDEL and one STOCK_SELL a product whatever their number (STOCK_PAGE_SETTLE_COMMANDS_MOST, besides its read), and pages counting at the same time each pay their own inside their own request, the one that comes second counting nothing (Claude 5's MÉDIO on #4472; tests/stock-settle-pages.test.ts); a sale still written the old way (a field each) is read and counted, never written, by a page's count (Claude 7's MÉDIO on #4472; tests/stock-sell-cost.test.ts). A sign-up's contact is written only over the row it was decided from (lib/contacts.ts): without a race one round is at most CONTACT_COMMANDS_MOST.upsertRound commands (a script is one plus its CONTACT_WRITE_CALLS calls; a waitlist confirmation's, fenced by its link since #4268, plus its CONTACT_FENCED_WRITE_CALLS, the fence's PTTL and TIME more, and the round is priced at that dearer one), inside a later page's commands. A sign-up a public request pays for (the list's or the waitlist's confirmation): its first round with the read back of an answer in another shape is at most CONTACT_COMMANDS_MOST.upsertPublic, inside the later page's commands that request pays for; each round more, after a row changed meanwhile, first takes one public request of the store's (payRound, takePublicRequest), at most upsertRound commands inside it, or is not made and the sign-up is refused for the visitor to try again (Codex Z on #3448, 6751568157; held with contended runs in tests/contacts-write-cost.test.ts). A waitlist's confirm press (app/api/store/waitlist/confirm/route.ts) does more than its page's one request pays for when it writes: it reads the link and the store, then the link and the entry again, writes the entry back only while its link and the entry are still there (WAIT_CONFIRM, #4268: one EVAL and at most WAIT_CONFIRM_CALLS calls inside it) and signs the address up (upsertPublic), at most 26 commands measured against the page's 18; so before it writes anything it takes WAIT_CONFIRM_UNITS more of the store's public requests (takePublicRequest), or writes nothing and is refused, and the whole press, that request's own count included, stays inside the two it is paid by (held in tests/waitlist-confirm-cost.test.ts). An order's sign-up goes round up to three times (CONTACT_COMMANDS_MOST.upsert), inside its own line, order-contact-write. An unsubscribe (CONTACT_COMMANDS_MOST.unsubscribe), a purchase noted, the links' tokens (tokens(n)) and a taken-back permission are held the same way.",
   },
   {
+    id: "review-writes",
+    feature: "A buyer's review written, rewritten or deleted, and the store page's quotes refreshed after it (#5010 row 180, 23 November 2026)",
+    monthlyUsd: reviewWritesMonthlyUsd,
+    sources: [
+      { file: "lib/review-proof.ts", names: ["REVIEW_SAVE_SECONDS"] },
+      { file: "lib/review-summary.ts", names: ["REVIEW_SAVES_PER_ORDER_MONTH"] },
+      { file: "lib/store-quotes-rules.ts", names: ["QUOTES_REFRESH_SECONDS"] },
+      { file: "lib/store-quotes.ts", names: ["refreshStoreQuotesHourly", 'withinLimit("quotes-refresh", storeRef(store), 1, QUOTES_REFRESH_SECONDS)'] },
+      { file: "lib/review-ask.ts", names: ["MAX_ASK_DAYS"] },
+      { file: "app/api/store/review/route.ts", names: ['withinMonthWhy("review-saves", proof.reference, REVIEW_SAVES_PER_ORDER_MONTH', "refreshStoreQuotesHourly(store)"] },
+    ],
+    basis: "Each part of a review write measured at its worst in tests/review-route-units.test.ts (REVIEW_WRITE_WORST, Upstash billing of a script: 1 and each redis.call in its text). One order saves its review at most REVIEW_SAVES_PER_ORDER_MONTH times in the store's month (the route reads the count first and answers savedEnough past it; the save is counted only under the product's lock, just before it writes, so a busy or full save never uses it, and one that then finds no room gives it back), and each save is priced with the delete it can later need (REVIEW_DELETES_PER_ORDER_MONTH, one a save, in the month of the save: deleting is never refused and an order may delete in one month reviews saved over several, but a delete removes a review one save made, so deletes never outnumber saves; Claude 5 ia5d and Claude 5 iZByNH on #5400), and has its refund marked once; the month's save is counted per order whatever the product, since one order can hand over up to MAX_DELIVERED products (the buyer is told a review from this order was already saved); the orders whose buyers can write in a month are REVIEW_DOOR_MONTHS store months of ORDERS_INCLUDED, because every door (the checkout session, the ask link and the orders page) refuses a save or rewrite of an order paid more than REVIEW_SAVE_SECONDS ago (MAX_ASK_DAYS + the link's 60 days; tests/review-save-window.test.ts). The quotes' refresh runs at most once an hour a store, 744 in a 31-day month. The request each write takes is still counted in public-requests too, and a press that writes nothing (refused past the month's save, busy, a deletion with nothing to delete, a refund already marked) stays inside that one request (COMMANDS.laterPage + COMMANDS.laterCount and PAGE_BYTES, held in the same test).",
+  },
+  {
     id: "page-readings",
     feature: "How a page was read: time on page, reading depth, the store page item by item (639 [GL7](25), 4 November 2026)",
     monthlyUsd: (tier) => readingsCost(REQUESTS_PER_VISIT * VISITS_INCLUDED[tier] + EXTRA_REQUESTS[tier]),
@@ -4409,6 +4477,8 @@ export const SCOPES: Record<string, ScopeClass> = {
   "manage-leave": PUBLIC, "manage-open": PUBLIC, "move-open": PUBLIC, "podcast-link-ip": PUBLIC, review: PUBLIC, "review-view": PUBLIC,
   "store-search": PUBLIC, "thanks-view": PUBLIC, "tier-switch": PUBLIC, tip: PUBLIC, "pay-request": PUBLIC, "pay-request-view": PUBLIC, "agreement-sign": PUBLIC, "agreement-view": PUBLIC, "waitlist-ip": PUBLIC, "welcome-open": PUBLIC,
   "course-start-order": BURST("public-requests"), "review-order": BURST("public-requests"), "join-address": BURST("public-requests"),
+  // A buyer's review writes (#5010 row 180): the saves an order makes in the store's month and the quotes' hourly refresh, priced in line review-writes.
+  "quotes-refresh": line("review-writes"), "review-saves": line("review-writes"),
   "waitlist-address": BURST("public-requests"), "numbers-link": BURST("public-requests"), preview: BURST("public-requests"),
   // "Email me when it's back" (623 [SZ7]): asking and confirming are public requests; its confirmation and restock emails are the store's own, taken before they go.
   "stock-alert-ip": PUBLIC, "stock-alert-link": PUBLIC, "stock-alert-address": BURST("public-requests"),

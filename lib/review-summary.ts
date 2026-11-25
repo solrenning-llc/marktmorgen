@@ -177,3 +177,13 @@ export function hiddenLine(summary: Summary): string {
   return `${summary.hidden} ${summary.hidden === 1 ? "review" : "reviews"} hidden by the creator`;
 }
 
+/**
+ * How many times one order may save its review in one of the store's months (app/api/store/review; #5010 row 180):
+ * one, so a review written this month is changed again next month. Deleting a review is never counted against it, and
+ * a save that wrote nothing (busy, full, no room) does not use it. The buyer's words for it (reviewNotices.savedEnough
+ * in lib/buyer-words/giving.ts) name this bound; tests/review-route-units.test.ts holds them to it. With the review request sent up to
+ * MAX_ASK_DAYS after an order (lib/review-ask.ts) and its link open 60 days (lib/review-proof.ts), this bounds a
+ * month's review writes, which the cost line "review-writes" of tests/plan-cost-registry.ts prices at their worst
+ * (REVIEW_DOOR_MONTHS store months of orders).
+ */
+export const REVIEW_SAVES_PER_ORDER_MONTH = 1;

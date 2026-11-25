@@ -104,6 +104,7 @@ function keptPhotoCount(raw: unknown): number {
   return typeof raw === "string" && /^\d{1,6}$/.test(raw) ? Math.min(Number(raw), MAX_REVIEW_PHOTOS) : MAX_REVIEW_PHOTOS;
 }
 export const REVIEW_STORES_KEY = "nl:rev:stores";
+export { REVIEW_SAVES_PER_ORDER_MONTH } from "@/lib/review-summary";
 
 /** One buyer's review of one product, always the same id, whatever order they write it from. */
 export function reviewId(statsId: string, productId: string, email: string): string {
@@ -358,13 +359,21 @@ export type SaveInput = {
    * the review's MAX_REVIEW_PHOTOS slots, before any put is made.
    */
   photo?: boolean;
+  /**
+   * Admits this save, under the product's lock, after every read that could refuse it and just before the store's room
+   * is taken and the review written (app/api/store/review: one of the order's REVIEW_SAVES_PER_ORDER_MONTH saves in the
+   * store's month; Claude 2 lpgvy's MEDIUM 2 on #5400). A busy lock, a full product or an unreadable reply never reach
+   * it, so they never use the month's save. "over": nothing is written ({ state: "over" }); "unknown": thrown, nothing
+   * written. A save it admitted that then finds no room answers "noroom", and the caller gives the count back.
+   */
+  admit?: () => Promise<"ok" | "over" | "unknown">;
 };
 
 /**
  * `photoGranted`: a slot for the new photo was counted on the review by this very write, so the caller may now put
  * it, once; false when none was asked for or the review has had MAX_REVIEW_PHOTOS. Nothing else allows a put.
  */
-export type SaveResult = { state: "created" | "updated"; review: Review; photoGranted: boolean } | { state: "full" | "noroom" | "busy" | "invalid" };
+export type SaveResult = { state: "created" | "updated"; review: Review; photoGranted: boolean } | { state: "full" | "noroom" | "busy" | "invalid" | "over" };
 
 /**
  * Where a product's reviews are counted in the store's data room
@@ -464,6 +473,9 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
       // the store's room as it was, never half (rule 24; review of #3862).
       const entry = review.pi ? await payEntry(statsId, review.pi, `${review.productId}|${id}`) : null;
       const grown = reviewBytes(review) - reviewBytes(before) + countBytes;
+      const admitted = input.admit ? await input.admit() : "ok";
+      if (admitted === "over") return { state: "over" };
+      if (admitted !== "ok") throw new UnknownReplyError("this save's admission");
       if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
       // Words rewritten (perhaps to take something out): the AI summary built from the old words goes, in the same request.
       // A review hidden or refunded was never counted by one (lib/review-ai-summary-rules.ts, summaryInputs): it takes none away.

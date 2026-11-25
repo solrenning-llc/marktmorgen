@@ -29,6 +29,7 @@ import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { PERSON_DATA } from "@/lib/person-data";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
+import { nextReviewMonth } from "./review-saves-world";
 import { blobControl } from "./review-photo-limit-blob";
 import { files } from "./failure-cleanup-world";
 import { done, is, part } from "./check";
@@ -77,6 +78,8 @@ function forgetOrderHour(): void {
 
 async function send(session: string, fields: Record<string, string>) {
   forgetOrderHour();
+  // Each save as in its own month: the cap on an order's saves (#5010 row 180) is not what this test is about.
+  if (fields.action !== "delete") nextReviewMonth();
   const form = new FormData();
   for (const [k, v] of Object.entries({ handle: HANDLE, product: productId, session_id: session, back: "review", rating: "5", text: "Great recipes.", ...fields })) form.set(k, v);
   return POST(new NextRequest("https://marktmorgen.com/api/store/review", { method: "POST", body: form, headers: { origin: "https://marktmorgen.com", host: "marktmorgen.com" } }));

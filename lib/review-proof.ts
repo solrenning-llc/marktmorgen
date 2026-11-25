@@ -40,6 +40,7 @@ import { isSettled } from "@/lib/instant-pay";
 import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
+import { MAX_ASK_DAYS } from "@/lib/review-ask";
 import { REVIEW_STORES_KEY, markRefunded } from "@/lib/reviews";
 import { refreshStoreQuotes } from "@/lib/store-quotes";
 import type { Listing, Store } from "@/lib/store";
@@ -55,6 +56,13 @@ const INVOICE_ID = /^in_[A-Za-z0-9]{6,200}$/;
 export const REVIEW_LINK_PATTERN = /^[0-9a-f]{48}$/;
 /** How long the link in a review request keeps working. */
 export const REVIEW_LINK_SECONDS = 60 * 86_400;
+/**
+ * How long after an order a review of it can be saved or changed, through any door (Claude 5 iZByNH's MEDIUM on #5400):
+ * a review request goes out up to MAX_ASK_DAYS after the order and its link is open REVIEW_LINK_SECONDS, so the orders
+ * page's door, whose link never expires, is held to the same window. That keeps the orders whose buyers can write in
+ * one month to the store months the cost line "review-writes" prices. Deleting a review is never refused.
+ */
+export const REVIEW_SAVE_SECONDS = MAX_ASK_DAYS * 86_400 + REVIEW_LINK_SECONDS;
 
 export type Proof = {
   reference: string;

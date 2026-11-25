@@ -273,7 +273,16 @@ export async function productsTool(store: Store, data: StatsData, w: Window, met
     if (held instanceof Response) skipped = true;
     else settle = held;
   }
-  const paths = skipped ? null : await readPaths(store.statsId).catch(() => null);
+  let readFailed = false;
+  const paths = skipped
+    ? null
+    : await readPaths(store.statsId).catch(() => {
+        readFailed = true;
+        return null;
+      });
+  // A kept record measured above zero bytes (or a read that failed) that does not come back as buyer paths is
+  // unknown, never "no path data": said in bought_next_note, not shown as the empty case (#4133).
+  const unreadable = !skipped && paths === null && (readFailed || pathSize > 0);
   const ids = paths ? [...Object.keys(paths.starts), ...Object.entries(paths.next).flatMap(([from, steps]) => [from, ...steps.map((step) => step.id)])] : [];
   const { titles, named } = await titlesFor(store, ids, new Map(data.products.map((p) => [p.id, p.title])), meter?.charge ?? null, most);
   const name = (id: string) => titles.get(id) ?? id;
@@ -309,7 +318,11 @@ export async function productsTool(store: Store, data: StatsData, w: Window, met
       }))
       .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0) || b.page_views - a.page_views),
     bought_next: shown,
-    ...(skipped || over ? { bought_next_note: "What buyers bought next was not read: your store's API requests left did not cover it." } : {}),
+    ...(skipped || over
+      ? { bought_next_note: "What buyers bought next was not read: your store's API requests left did not cover it." }
+      : unreadable
+        ? { bought_next_note: "What buyers bought next could not be read just now. Null here is unavailable, not none." }
+        : {}),
   };
 }
 

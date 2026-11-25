@@ -42,7 +42,7 @@ import { EMAIL_GROWTH_BYTES } from "@/lib/sent-links";
 import { broadcastMoney, flowMoney, keptMailRevenueBytes, readMailRevenuePaid } from "@/lib/mail-revenue";
 import { flowsBytes, readFlows } from "@/lib/flows";
 import { readFlowStatsStrict } from "@/lib/flow-stats";
-import { listCounts } from "@/lib/contacts";
+import { listCountsExact } from "@/lib/contacts";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
 import { type Charge, type Hold, chargeBook, invoicesSettled } from "@/lib/api-read";
 import {
@@ -431,7 +431,7 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
     grew.units += more;
     return { ok: true };
   };
-  const [counts, heads, flows] = await Promise.all([listCounts(store.listId), readMeasuredHeads(sizes, regrow), readFlows(store.listId)]);
+  const [counts, heads, flows] = await Promise.all([listCountsExact(store.listId), readMeasuredHeads(sizes, regrow), readFlows(store.listId)]);
   if (grew.refused) return grew.refused;
   if (!heads.ok) throw new Error("the emails could not be read");
   const broadcasts = heads.heads;
@@ -466,7 +466,10 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
   const revenue = revenueRead === "refused" ? null : revenueRead;
   return {
     currency: store.currency,
-    list: { people: counts.total, agreed_to_hear: counts.agreed, left: counts.left, can_be_emailed: counts.mailable },
+    // Read exactly (issue #4079): counts that could not be read are null, with counts_unavailable true, never 0.
+    list: counts
+      ? { people: counts.total, agreed_to_hear: counts.agreed, left: counts.left, can_be_emailed: counts.mailable, counts_unavailable: false }
+      : { people: null, agreed_to_hear: null, left: null, can_be_emailed: null, counts_unavailable: true },
     emails: broadcasts.map((b) => {
       const money = broadcastMoney(revenue, b.id);
       return {

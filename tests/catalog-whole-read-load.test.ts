@@ -16,8 +16,8 @@
  * checks below change to a ceiling that does not grow with the catalog.
  * Nothing here changes MAX_PRODUCTS or any other limit.
  */
-import { readAllListings, searchStore, STORE_PAGE_SIZE } from "@/lib/catalog";
-import { MAX_PRODUCTS, listingReads } from "@/lib/catalog-rules";
+import { listingReads, readAllListings, searchStore, STORE_PAGE_SIZE } from "@/lib/catalog";
+import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { listingsToRead } from "@/lib/catalog-read-count";
 import { LISTING_READ_BYTES } from "@/lib/read-ceilings";
 import { type Store, addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";

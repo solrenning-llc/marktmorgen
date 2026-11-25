@@ -6,13 +6,19 @@ const CLI=fileURLToPath(new URL("./node_modules/@guidepup/setup/bin/guidepup",im
 /** Only preparation is repeatable; the real reader and speech assertions run once. */
 export async function setupOwnedReader(options={}){
  const {env=process.env,platform=process.platform,run=spawnSync,
-  wait=ms=>new Promise(resolve=>setTimeout(resolve,ms))}=options;
+  wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),
+  write=text=>process.stdout.write(text)}=options;
  if(env.GITHUB_ACTIONS!=="true"||!ownedRepositoryEnv(env)||
     env.AX2_PUBLIC_DISPOSABLE_RUNNER!=="true"||!["darwin","win32"].includes(platform))
   throw Error("Reader setup requires the owned disposable public CI runner");
  function attempt(){
-  return run(process.execPath,[CLI,"setup","--ci"],{encoding:"utf8",timeout:210000,maxBuffer:1024*1024,
+  const result=run(process.execPath,[CLI,"setup","--ci"],{encoding:"utf8",timeout:210000,maxBuffer:1024*1024,
    stdio:["ignore","pipe","pipe"],env});
+  // Keep the setup's own output and exit in the job log: job 130230171597
+  // failed after 340 s with no recorded cause.
+  write(String(result.stdout??"")+String(result.stderr??"")+
+   "Reader preparation attempt: "+JSON.stringify({status:result.status??null,signal:result.signal??null,error:result.error?String(result.error):null})+"\n");
+  return result;
  }
  function succeeded(result){return result.status===0&&!result.signal&&!result.error;}
  const first=attempt();

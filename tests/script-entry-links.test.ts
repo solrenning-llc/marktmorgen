@@ -44,6 +44,19 @@ try {
   is("and exits 1 through the link", readerLinked.status, 1);
   const readerImported = node(["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(reader).href)}); console.log("imported");`]);
   is("an import runs nothing (control)", readerImported.out + readerImported.err, "imported\n");
+
+  part("reader asset install");
+  const assets = join(process.cwd(), "tooling", "screen-reader", "install-reader-assets.mjs");
+  const assetsRefused = node([assets]);
+  is("real path refuses off the owned runner (control)", assetsRefused.err.includes("Real reader assets are unavailable"), true);
+  is("and exits 1", assetsRefused.status, 1);
+  const assetsLink = join(dir, "assets-link.mjs");
+  symlinkSync(assets, assetsLink);
+  const assetsLinked = node([assetsLink]);
+  is("through a link refuses the same way", assetsLinked.err.includes("Real reader assets are unavailable"), true);
+  is("and exits 1 through the link", assetsLinked.status, 1);
+  const assetsImported = node(["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(assets).href)}); console.log("imported");`]);
+  is("an import runs nothing (control)", assetsImported.out + assetsImported.err, "imported\n");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

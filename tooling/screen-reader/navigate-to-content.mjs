@@ -22,7 +22,7 @@ export async function navigateToContent(reader,page,kind,foreground){
     return null;
    }
   }
-  let switches=0;
+  let switches=0,dismissedSearch=false,readerDismissedSearch=false;
   async function confirmForeground(stage,canSwitch=true,activatePage=false){
    let changed=false,activated=false;
    for(;;){
@@ -30,6 +30,16 @@ export async function navigateToContent(reader,page,kind,foreground){
     const windowTitle=(await reader.lastSpokenPhrase()).replace(/\s+/g," ").trim().toLowerCase();
     console.log("AX2_NVDA_WINDOW_FOCUS:"+JSON.stringify({attempt:switches,stage,pageTitle,windowTitle}));
     if(windowTitle.startsWith(pageTitle))return changed;
+    if(canSwitch&&windowTitle==="search"&&!dismissedSearch&&!readerDismissedSearch){
+     // NVDA itself reported exactly the Windows Search window. Alt+Escape never
+     // closes it (jobs 130459016785, 130370897920, 130070456398: ten switches,
+     // ten "Search" reports), so close only that window once per navigation,
+     // as when the native snapshot observes it, then prove the page title again.
+     readerDismissedSearch=true;changed=true;
+     await reader.perform({keyCode:[WindowsKeyCodes.Escape],modifiers:[]},{capture:false});
+     await new Promise(resolve=>setTimeout(resolve,500));
+     continue;
+    }
     if(activatePage&&!activated){
      // The exact native title check observed that another application owns the
      // foreground. Reactivate the already selected page, then prove its title;
@@ -64,7 +74,6 @@ export async function navigateToContent(reader,page,kind,foreground){
   await observeNativeForeground("after exit focus mode");
   await reader.perform({keyCode:[WindowsKeyCodes.Home],modifiers:[WindowsModifiers.Control]});
   const resetForeground=await observeNativeForeground("after document reset");
-  let dismissedSearch=false;
   if(typeof resetForeground==="string"&&resetForeground.replace(/\s+/g," ").trim().toLowerCase()==="search"){
    // Windows Search can take the foreground when Ctrl+Home is sent. Close
    // only that exactly observed window, then let NVDA's title gate prove the
@@ -94,14 +103,20 @@ export async function navigateToContent(reader,page,kind,foreground){
    marker.style.cssText="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap";
    document.body.prepend(marker);
   });
-  let opened=false;
+  let opened=false,empty=false;
   for(let attempt=0;attempt<3;attempt++){
    await cancel();await pause();
    await reader.perform({keyCode:MacOSKeyCodes.Escape},{capture:false});await pause();
    await reader.perform(voiceOverKeyCodeCommands.openItemChooser,{capture:true});
-   if((await reader.lastSpokenPhrase()).toLowerCase().includes("item chooser")){opened=true;break;}
+   const announced=(await reader.lastSpokenPhrase()).toLowerCase();
+   // The chooser lists what VoiceOver knew when it opened. One announced with
+   // no items can never match a typed filter (job 129906932167 typed into
+   // "Item Chooser menu 0 items" until it failed), so close and reopen it
+   // within the same three attempts.
+   empty=/\b0 items\b/.test(announced);
+   if(announced.includes("item chooser")&&!empty){opened=true;break;}
   }
-  if(!opened)throw Error("VoiceOver item chooser was not announced");
+  if(!opened)throw Error(empty?"VoiceOver item chooser listed no items":"VoiceOver item chooser was not announced");
   let selected=false;
   for(let attempt=0;attempt<3&&!selected;attempt++){
    for(const character of "web content"){

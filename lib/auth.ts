@@ -477,7 +477,8 @@ export async function dropSecondStep(email: string, gone: (mark: string) => bool
   if (!isRedisConfigured()) return 0;
   const owned = await sessionsKey(normaliseEmail(email));
   const [members] = await redisPipeline([["SMEMBERS", owned]]);
-  const keys = stringList(members);
+  // Every member a session's key, as endAllSessions reads it (Claude 6 z5v4's LEVE on #5144): any other is never DELed.
+  const keys = sessionMembers(members);
   if (!keys) throw new SessionsUnknownError("an account's sessions");
   if (!keys.length) return 0;
   const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
@@ -504,6 +505,18 @@ export async function dropSecondStep(email: string, gone: (mark: string) => bool
 function removedEach(replies: unknown, commands: number): boolean {
   const answers = repliesFor(replies, commands);
   return answers !== null && answers.every((answer) => countOf(answer) === 0 || countOf(answer) === 1);
+}
+
+/** A session's key, as openSession names it (sessionKey): the only shape an account's sessions set holds. */
+const SESSION_KEY = /^nl:auth:session:[0-9a-f]{40}$/;
+
+/**
+ * An account's sessions set read exactly (rule 24; Codex G, #4287 item 4): every member a session's key, or null.
+ * A member in any other shape is never deleted as a key: the set is unknown, and nothing is closed.
+ */
+function sessionMembers(reply: unknown): string[] | null {
+  const keys = stringList(reply);
+  return keys && keys.every((key) => SESSION_KEY.test(key)) ? keys : null;
 }
 
 const sessionsKey = async (email: string) =>
@@ -1001,7 +1014,7 @@ export async function endAllSessions(email: string): Promise<number | null> {
   try {
     const [members] = await redisPipeline([["SMEMBERS", owned]]);
     // The set is the only way to the sessions (audit SG2, rule 30): unread, it is kept and nothing is deleted.
-    const keys = stringList(members);
+    const keys = sessionMembers(members);
     if (!keys) throw new SessionsUnknownError("an account's sessions");
     const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
     // Only the sessions read leave the set (#4263, as dropSecondStep does): a login landing between the read and these
@@ -1032,7 +1045,7 @@ export async function endOtherSessions(email: string, keep: string | undefined):
     const kept = await sessionKey(keep);
     const [members] = await redisPipeline([["SMEMBERS", owned]]);
     // As endAllSessions: the set is the only way to the sessions, so an unread one closes nothing.
-    const keys = stringList(members);
+    const keys = sessionMembers(members);
     if (!keys) throw new SessionsUnknownError("an account's sessions");
     const others = keys.filter((key) => key !== kept);
     if (!others.length) return 0;

@@ -38,6 +38,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { dataBytes } from "@/lib/store-data-rules";
 import { takeData } from "@/lib/store-data";
 import { sendEmail } from "@/lib/email";
@@ -93,22 +94,34 @@ const unavailable = (): Created => ({ ok: false, reason: "unavailable", message:
  * A request's record written in one step on the Redis side, only while its
  * write lock still holds the writer's token: "new" only when no record is
  * there yet, "edit" only over the record still there, with its open entry
- * and its reminder kept in step (an empty score takes the entry off). 1
- * written; 0 the lock is no longer the writer's; 2 the record is not as the
- * mode needs (already made, or gone: erased or deleted). The first line names
+ * and its reminder kept in step (an empty score takes the entry off), and
+ * only while its store is live by the rule of lib/live-fence.ts
+ * (store-cache-live:v3): its id key still holds this store's own ref and no
+ * erasing mark is on that ref (Codex T-20261119-1230, row 93 of #5010;
+ * Claude 6 i51q on #5248: after moveAccount the id key still exists, so
+ * EXISTS alone would let a write built on the old ref through). A request
+ * held up while its store's erasure began never writes a buyer's email,
+ * name, amount or note back. 1 written; 0 the lock is no longer the
+ * writer's; 2 the record is not as the mode needs (already made, or gone:
+ * erased or deleted); 3 the store is gone or being erased. The first line names
  * it for the local stand-in (lib/redis-memory.ts).
  */
 const SAVE =
   '-- marktmorgen:payreq-save:v1\n' +
   'if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end\n' +
+  'if redis.call("GET", KEYS[5]) ~= ARGV[10] or redis.call("HEXISTS", KEYS[6], ARGV[9]) == 1 then return 3 end\n' +
   'local there = redis.call("EXISTS", KEYS[2])\n' +
   'if (ARGV[2] == "new" and there ~= 0) or (ARGV[2] ~= "new" and there ~= 1) then return 2 end\n' +
   'redis.call("SET", KEYS[2], ARGV[3], "EX", ARGV[4])\n' +
   'if ARGV[2] == "edit" then\n' +
-  '  if ARGV[6] == "" then redis.call("ZREM", KEYS[3], ARGV[5]) else redis.call("ZADD", KEYS[3], ARGV[6], ARGV[5]) end\n' +
-  '  if ARGV[8] == "" then redis.call("ZREM", KEYS[4], ARGV[7]) else redis.call("ZADD", KEYS[4], ARGV[8], ARGV[7]) end\n' +
+  '  if ARGV[6] == "" then redis.call("ZREM", KEYS[3], ARGV[5]) elseif ARGV[6] ~= "-" then redis.call("ZADD", KEYS[3], ARGV[6], ARGV[5]) end\n' +
+  '  if ARGV[8] == "" then redis.call("ZREM", KEYS[4], ARGV[7]) elseif ARGV[8] ~= "-" then redis.call("ZADD", KEYS[4], ARGV[8], ARGV[7]) end\n' +
   'end\n' +
   'return 1';
+
+/** The commands SAVE runs to check that the store is live (its id key's GET against its ref, and its erasing mark's HEXISTS), priced
+ * in tests/plan-cost-registry.ts, line payment-request-erasure-fence. */
+export const PAYREQ_FENCE_COMMANDS = 2;
 
 /**
  * Writes a request's record under its write lock (SAVE): "saved"; "lost" when
@@ -116,21 +129,30 @@ const SAVE =
  * when the record is not as `mode` needs, so nothing was written either. A
  * reply of another shape throws UnknownReplyError (rule 24): never "saved".
  */
-async function writeRecord(held: fencedLock.Held, request: PaymentRequest, mode: "new" | "edit", now: number): Promise<"saved" | "lost" | "gone"> {
+async function writeRecord(held: fencedLock.Held, store: Pick<Store, "email" | "sid" | "extra" | "statsId">, request: PaymentRequest, mode: "new" | "edit", now: number, keepIndex = false): Promise<"saved" | "lost" | "gone"> {
+  const fence = await storeLiveFence(store);
+  // A payment request is kept only under a store with an id (createRequest refuses one without), so its fence is the
+  // id key's own ref; a fence for a store from before ids has no ref to hold and writes nothing.
+  if (fence.statsId !== "") return "gone";
   const member = `${request.sid}|${request.id}`;
-  const open = mode === "edit" && statusOf(request, now) === "open" ? String(request.expiresAt) : "";
-  const next = mode === "edit" ? nextReminderAt(request, now) : null;
+  // A change that leaves what the indexes are read from as it was (keepIndex) leaves them alone: "-" tells SAVE not to
+  // touch them, two commands fewer (row 141 of #5010, coordinator ca12). A write-back that only fixes the indexes
+  // (lib/payment-requests.ts, sendDueReminders) never passes it, so they are always rewritten there.
+  const open = keepIndex ? "-" : mode === "edit" && statusOf(request, now) === "open" ? String(request.expiresAt) : "";
+  const reminder = mode === "edit" && !keepIndex ? nextReminderAt(request, now) : null;
+  const next = keepIndex ? "-" : reminder === null ? "" : String(reminder);
   const reply = exactReply.repliesFor(
     await redisPipeline([[
-      "EVAL", SAVE, 4, held.key, recordKey(request.id), openKey(request.sid), DUE,
-      held.token, mode, JSON.stringify(request), keepSeconds(request, now), request.id, open, member, next === null ? "" : String(next),
+      "EVAL", SAVE, 6, held.key, recordKey(request.id), openKey(request.sid), DUE, fence.live, fence.erasing,
+      held.token, mode, JSON.stringify(request), keepSeconds(request, now), request.id, open, member, next,
+      fence.field, fence.ref,
     ]]),
     1,
   );
   const answer = reply?.[0];
   if (answer === 1) return "saved";
   if (answer === 0) return "lost";
-  if (answer === 2) return "gone";
+  if (answer === 2 || answer === 3) return "gone";
   throw new exactReply.UnknownReplyError("writing a payment request");
 }
 
@@ -217,7 +239,7 @@ export async function createRequest(store: Store, draft: RequestDraft, now = Dat
       await undo();
       return room.reason === "full" ? { ok: false, reason: "full", message: room.message } : unavailable();
     }
-    if ((await writeRecord(held, request, "new", now)) !== "saved") {
+    if ((await writeRecord(held, store, request, "new", now)) !== "saved") {
       await undo();
       return unavailable();
     }
@@ -300,10 +322,11 @@ export async function requestOf(store: Pick<Store, "sid">, id: string): Promise<
  * written. A write that does not answer exactly throws UnknownReplyError.
  */
 export async function changeRequest<T>(
-  store: Pick<Store, "sid">,
+  store: Pick<Store, "email" | "sid" | "extra" | "statsId">,
   id: string,
   change: (current: PaymentRequest) => { next: PaymentRequest | null; answer: T },
   now = Date.now(),
+  options: { reindex?: boolean } = {},
 ): Promise<{ request: PaymentRequest; answer: T } | null> {
   if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
   return withLock(writeKey(id), 10, 5_000, async (held) => {
@@ -312,7 +335,10 @@ export async function changeRequest<T>(
     const { next, answer } = change(current);
     if (next) {
       // Written back as it now is, for the rest of the days it is kept, its open entry and reminder in step.
-      const written = await writeRecord(held, next, "edit", now);
+      // What the open and reminder indexes are read from (statusOf, nextReminderAt): unchanged, they stay as written.
+      const same = !options.reindex && next.state === current.state && next.expiresAt === current.expiresAt &&
+        next.autoReminders === current.autoReminders && next.sent.length === current.sent.length && next.sent.every((at, i) => at === current.sent[i]);
+      const written = await writeRecord(held, store, next, "edit", now, same);
       if (written === "gone") return null;
       if (written === "lost") throw new fencedLock.LockBusyError("a payment request's lock ran out before its change was written");
     }

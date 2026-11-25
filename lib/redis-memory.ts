@@ -2112,15 +2112,16 @@ export class MemoryRedis {
         }
         // lib/payment-request-store.ts SAVE: a request's record written only while its write lock is the writer's,
         // "new" only when absent, "edit" only over the record still there, with its open entry and reminder in step.
-        if (key.startsWith("-- marktmorgen:payreq-save:v1\n") && args[0] === "4" && args.length === 13) {
-          const [, lock, target, open, due, token, mode, value, seconds, id, openScore, member, dueScore] = args;
+        if (key.startsWith("-- marktmorgen:payreq-save:v1\n") && args[0] === "6" && args.length === 17) {
+          const [, lock, target, open, due, storeId, erasing, token, mode, value, seconds, id, openScore, member, dueScore, erasingField, ref] = args;
           if (this.run(["GET", lock]) !== token) return 0;
+          if (this.run(["GET", storeId]) !== ref || Number(this.run(["HEXISTS", erasing, erasingField])) === 1) return 3;
           const there = Number(this.run(["EXISTS", target]));
           if ((mode === "new" && there !== 0) || (mode !== "new" && there !== 1)) return 2;
           this.run(["SET", target, value, "EX", seconds]);
           if (mode === "edit") {
-            this.run(openScore === "" ? ["ZREM", open, id] : ["ZADD", open, openScore, id]);
-            this.run(dueScore === "" ? ["ZREM", due, member] : ["ZADD", due, dueScore, member]);
+            if (openScore !== "-") this.run(openScore === "" ? ["ZREM", open, id] : ["ZADD", open, openScore, id]);
+            if (dueScore !== "-") this.run(dueScore === "" ? ["ZREM", due, member] : ["ZADD", due, dueScore, member]);
           }
           return 1;
         }

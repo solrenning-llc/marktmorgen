@@ -188,7 +188,7 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
       const next = nextReminderAt(request, now);
       if (next === null || next > now) {
         // Closed, expired or not yet due: written back as it is now, which takes it off the list or puts it at its day.
-        await changeRequest(store!, id, (current) => ({ next: current, answer: null }), now).catch(() => null);
+        await changeRequest(store!, id, (current) => ({ next: current, answer: null }), now, { reindex: true }).catch(() => null);
         counts.skipped += 1;
         continue;
       }

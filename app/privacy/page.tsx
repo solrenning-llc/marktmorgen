@@ -7,6 +7,7 @@ import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { CLOSING_DAYS, ERASE_WITHIN_DAYS } from "@/lib/plan-closing-rules";
 import { EXIT_NOTICE_DAYS } from "@/lib/exit-redirect-rules";
 import { MAX_SUBMISSION_KEEP_DAYS } from "@/lib/submission-rules";
+import { PLAN_TITLES } from "@/lib/plan";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
@@ -116,7 +117,7 @@ export default function PrivacyPage() {
         </p>
         <p>
           <strong className="text-black">An update to something you bought.</strong>{" "}
-          A creator on Pro can tell the buyers of one of their products, at
+          A creator on the {PLAN_TITLES.pro} or {PLAN_TITLES.scale} plan can tell the buyers of one of their products, at
           most once a week, that it was updated and where to get the new
           version. The addresses are read from the creator&apos;s own Stripe
           account when they press send, kept with us only until the email has
@@ -815,7 +816,7 @@ export default function PrivacyPage() {
         </p>
         <p>
           <strong className="text-black">Emails from a creator.</strong> A
-          creator on the Pro plan can email the people on their list who agreed
+          creator on the {PLAN_TITLES.pro} or {PLAN_TITLES.scale} plan can email the people on their list who agreed
           to hear from them: those who checked the box when they got something
           free or bought, and those the creator imports after confirming that
           each of them agreed. We send those emails on the creator&apos;s

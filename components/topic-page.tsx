@@ -417,7 +417,7 @@ function Related({ slugs }: { slugs: string[] }) {
                 <span className="min-w-0">
                   <span className="flex flex-wrap items-center gap-2 font-semibold text-ink">
                     {p.menu!.label}
-                    {p.plan === "pro" ? <span className="tag tag-brand">Pro</span> : null}
+                    {p.plan === "pro" ? <span className="tag tag-brand">{PLAN_TITLES.pro}</span> : null}
                   </span>
                   <span className="mt-0.5 block text-sm text-ink-soft">{p.menu!.description}</span>
                 </span>

@@ -23,6 +23,7 @@
  * write within IDEMPOTENCY_COMMANDS.
  */
 import { createHash } from "node:crypto";
+import { dataBytes } from "@/lib/store-data-rules";
 import { UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS } from "@/lib/spend-cost-table";
 
 export const IDEMPOTENCY_HEADER = "Idempotency-Key";
@@ -41,8 +42,32 @@ const RECORD_ROOM_BYTES = 256;
  */
 export const MAX_IDEMPOTENCY_RECORD_BYTES = MAX_KEPT_ANSWER_BYTES + RECORD_ROOM_BYTES;
 const recordBytes = (record: string) => new TextEncoder().encode(record).length;
-/** Database commands one keyed write adds at most: read the record, claim it, keep the answer. */
-export const IDEMPOTENCY_COMMANDS = 3;
+/**
+ * Database commands one keyed write adds at most: read the record, claim it, then, for an answer about a person, drop
+ * the index's ended lines, list this one, set the index's expiry and read the erasure's mark (ZREMRANGEBYSCORE, ZADD,
+ * EXPIRE, ZSCORE: lib/api-idempotency.ts, unit 3), and keep the answer. A claim whose reply is unknown sends fewer:
+ * read the record, claim it, read it again and let go of this try's own claim (#3537). The keep is one EVAL
+ * (KEEP_IDEMPOTENT_IF_CLAIM, Codex L on #3542) that runs at most a GET of the record, a ZSCORE of the erasure's mark
+ * and the SET: four billed commands where a plain SET XX was one, so 7 became 10.
+ */
+export const IDEMPOTENCY_COMMANDS = 10;
+/**
+ * Bytes one keyed write moves beyond its record and its index line: the keep's script text (about 300 bytes), its two
+ * key names, this request's pending claim (under 160 bytes) and its arguments, rounded up to 2 KiB (Codex L on #3542).
+ */
+export const IDEMPOTENCY_KEEP_OVERHEAD_BYTES = 2_048;
+/**
+ * The most one keyed write adds to a person's index, as dataBytes counts what is kept (tests/store-data-registry.ts,
+ * nl:api:idem:p:): at worst every keyed write is about another address, so each makes a new index, its name (a store
+ * id of 32 hex and the address's hash of 64) and one line (a key's hash of 64, scored by a 13-digit time). Review of
+ * #3542 (Claude 3 cloud F): 128 bytes covered the line only.
+ */
+export const PERSON_INDEX_LINE_BYTES = dataBytes([
+  // The index's name: the family's 14 characters, the store id's 32, a colon and the address's hash of 64.
+  "0".repeat(14 + 32 + 1 + 64),
+  "0".repeat(64),
+  String(9_999_999_999_999),
+], 2);
 
 export type KeyRead = { kind: "none" } | { kind: "key"; key: string } | { kind: "invalid"; message: string };
 
@@ -178,15 +203,18 @@ export function afterWrite(fp: string, startedAt: number, status: number, body: 
 
 /**
  * The most the header can cost a store in a month, in micro-dollars, before it is turned on: every API request of
- * the plan's month (`apiRequests`, lib/store-allowance-rules.ts) sent with a key, each adding its three commands,
- * moving its largest record twice (write and read) and keeping it, counted as if kept the whole month (it is kept
- * 24 hours). Upstash pay-as-you-go figures with no free quota (lib/spend-cost-table.ts). Rounded up.
+ * the plan's month (`apiRequests`, lib/store-allowance-rules.ts) sent with a key, each adding its IDEMPOTENCY_COMMANDS
+ * commands, moving its largest record and its line in the person's index twice (write and read) and its keep's script
+ * and claim once (IDEMPOTENCY_KEEP_OVERHEAD_BYTES), and keeping the record and the line,
+ * counted as if kept the whole month (they are kept 24 hours). Upstash pay-as-you-go figures with no free quota
+ * (lib/spend-cost-table.ts). Rounded up.
  */
 export function idempotencyWorstMicroUsd(apiRequests: number): number {
   if (!Number.isSafeInteger(apiRequests) || apiRequests < 0) throw new Error("a plan's API requests must be a whole number");
-  const gb = (apiRequests * MAX_IDEMPOTENCY_RECORD_BYTES) / 1e9;
+  const gb = (apiRequests * (MAX_IDEMPOTENCY_RECORD_BYTES + PERSON_INDEX_LINE_BYTES)) / 1e9;
   const commands = (apiRequests * IDEMPOTENCY_COMMANDS * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS) / 1e6;
-  const transfer = 2 * gb * UPSTASH_MICRO_USD_PER_GB_TRANSFER;
+  // The keep's script and claim travel once with each keyed write; they are not kept.
+  const transfer = (2 * gb + (apiRequests * IDEMPOTENCY_KEEP_OVERHEAD_BYTES) / 1e9) * UPSTASH_MICRO_USD_PER_GB_TRANSFER;
   const storage = gb * UPSTASH_MICRO_USD_PER_GB_MONTH;
   return Math.ceil(commands + transfer + storage);
 }

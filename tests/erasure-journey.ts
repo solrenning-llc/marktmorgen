@@ -35,6 +35,7 @@ export type Sent = { to: string; subject: string; text: string };
 /** Keys whose change a deletion is allowed to leave: what pays for it, what records that it happened, what it keeps on purpose. */
 const ALLOWED: { pattern: RegExp; why: string }[] = [
   { pattern: /^nl:erased:/, why: "the fingerprint of the deleted address (lib/suppression.ts)" },
+  { pattern: /^nl:api:idem:p:/, why: "the erasure's mark in the person's index of kept API answers, for a day, so a keyed write that passed its check before the deletion keeps no answer about them (lib/api-idempotency.ts)" },
   { pattern: /^nl:crm:co:gone:[0-9a-f]+:[0-9a-f]{32}$/, why: "a one-way fingerprint that the person was deleted, so no company's undo or link puts them back, gone by itself in GONE_SECONDS (lib/crm-companies.ts)" },
   { pattern: /^nl:team:log:/, why: "the activity log's line of a deletion from the studio, without the address" },
   { pattern: /^nl:(allow|rl|rlm|traffic|free:pool|fp|pool|usage|studio|spend|ses|mail:day|mail:used):/, why: "counts that pay for the work and limit it" },

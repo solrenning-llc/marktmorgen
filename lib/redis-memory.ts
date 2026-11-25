@@ -274,6 +274,23 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/api-idempotency.ts KEEP_IDEMPOTENT_IF_CLAIM: a keyed write's answer replaces only its own pending claim, and
+        // for an answer about a person only while no erasure has marked them (Codex L on #3542).
+        if (key.startsWith("-- marktmorgen:api-idempotency-keep:v1\n") && (args[0] === "1" || args[0] === "2")) {
+          const count = Number(args[0]);
+          if (args.length !== 1 + count + 4) return -1;
+          const [record, index] = args.slice(1, 1 + count);
+          const [mine, value, seconds, mark] = args.slice(1 + count);
+          this.scriptCalls += 1;
+          if (this.run(["GET", record]) !== mine) return 0;
+          if (count === 2) {
+            this.scriptCalls += 1;
+            if (this.run(["ZSCORE", index, mark]) !== null) return 0;
+          }
+          this.scriptCalls += 1;
+          this.run(["SET", record, value, "EX", seconds]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:contact-import:v1\n")) {
           if (args[0] !== "4" || args.length <= 5 || (args.length - 5) % 6 !== 0) throw new Error("invalid contact import");
           const [, contacts, erased, agreed, unsub, ...rows] = args;

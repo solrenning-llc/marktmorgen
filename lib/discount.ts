@@ -416,11 +416,15 @@ function currencyOption(row: Record<string, unknown>, currency: string): number 
 export async function codesMayTakeOff(account: string | null, currency: string): Promise<MayComeOff[]> {
   if (!account) return [{ kind: "unknown" }];
   try {
-    const page = await onAccount("GET", account, "/promotion_codes?limit=100&active=true&expand[]=data.promotion.coupon&expand[]=data.promotion.coupon.currency_options", undefined, API_VERSION);
-    if (page.has_more === true || !Array.isArray(page.data)) return [{ kind: "unknown" }];
+    const raw = await onAccount("GET", account, "/promotion_codes?limit=100&active=true&expand[]=data.promotion.coupon&expand[]=data.promotion.coupon.currency_options", undefined, API_VERSION);
+    // Read in its exact shape (lib/stripe-list.ts), as listCodes reads it: no own `data` list or no `has_more`
+    // true/false throws, and only has_more false is the whole list; a page with more, or with a row that cannot be
+    // read, is unknown, never taken for every code (#5285 row #3252, LEVE 3).
+    const page = readStripePage(raw);
+    if (page.hasMore || page.unreadable > 0) return [{ kind: "unknown" }];
     let percent = 0;
     let cents = 0;
-    for (const row of page.data as Record<string, unknown>[]) {
+    for (const row of page.rows as Record<string, unknown>[]) {
       const off = readOff(row);
       if (!off) return [{ kind: "unknown" }];
       if (off.kind === "percent") percent = Math.max(percent, off.percent);

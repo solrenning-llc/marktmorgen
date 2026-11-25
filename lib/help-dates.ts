@@ -103,7 +103,7 @@ export const HELP_DATES: Readonly<Record<string, HelpDates>> = {
   "how-do-live-events-in-the-community-work": { created: "2026-09-27", updated: "2026-09-28", digest: "b3fa6257132c" },
   "can-i-run-an-affiliate-program": { created: "2026-09-28", updated: "2026-11-22", digest: "5dd055a2000a" },
   "can-i-connect-zapier-make-or-my-own-server": { created: "2026-09-27", updated: "2026-11-12", digest: "91ea33bb230f" },
-  "how-do-i-approve-changes-my-ai-assistant-prepared": { created: "2026-11-12", updated: "2026-11-12", digest: "d25603957cbe" },
+  "how-do-i-approve-changes-my-ai-assistant-prepared": { created: "2026-11-12", updated: "2026-11-23", digest: "18958a6c7f9f" },
   "can-i-sell-software-with-license-keys": { created: "2026-09-28", updated: "2026-09-28", digest: "1f5f0f948089" },
   "can-i-put-the-buyers-email-on-a-pdf": { created: "2026-09-27", updated: "2026-11-04", digest: "116248b43d58" },
   "does-it-work-on-a-phone": { created: "2026-09-18", updated: "2026-09-30", digest: "4605608f74fd" },

@@ -897,7 +897,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "How do I approve changes my AI assistant prepared?",
         a: [
-          `An AI assistant connected to your store with a key you allowed to prepare changes never changes your store by itself. What it prepares waits on \u201cWhat the AI proposes\u201d, at /studio/agent; there is no link to it in your studio yet. You or an admin can open it.`,
+          `An AI assistant connected to your store with a key you allowed to prepare changes never changes your store by itself. What it prepares waits on \u201cWhat the AI proposes\u201d, at /studio/agent, linked from the API keys card in your studio. You or an admin can open it.`,
           `Under \u201cWaiting for you\u201d, each proposal shows \u201cNow\u201d beside \u201cWould become\u201d. Press \u201cConfirm\u201d to make the change, or \u201cDecline\u201d and nothing changes. Proposals wait ${WAITING_DAYS} days.`,
           `Every change you confirm is listed under \u201cWhat the AI did\u201d. You can put a change back with \u201cUndo\u201d for ${UNDO_DAYS} days, unless it was changed again since.`,
         ],

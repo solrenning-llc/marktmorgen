@@ -619,11 +619,12 @@ export async function openLockedSession(email: string, until: number, now = Date
  */
 export async function endRecoveryAccess(email: string): Promise<void> {
   if (!(await endRecoveryLock(email))) return;
-  if (await endLocked(email)) {
+  const ended = await endLocked(email);
+  if (ended === "ended") {
     await tell(email, "What your recovery address opened was closed", "Your account was just logged in with your sign-in email, a code or a passkey, so the browsers that got in through your recovery address were logged out.");
     return;
   }
-  await tell(email, "Log out of all devices to close what your recovery address opened", `Your account was just logged in with your sign-in email, a code or a passkey, but the browsers that got in through your recovery address could not be logged out just now. ${STILL_LOCKED}`);
+  await tell(email, "Log out of all devices to close what your recovery address opened", `Your account was just logged in with your sign-in email, a code or a passkey, but the browsers that got in through your recovery address could not be logged out just now. ${ended === "kept" ? STILL_LOCKED : NOT_KEPT}`);
 }
 
 /**
@@ -633,60 +634,113 @@ export async function endRecoveryAccess(email: string): Promise<void> {
 export const STILL_LOCKED = `Until they are logged out, ${LOCKED_LIST} stay locked for them. Log them out now: choose “Log out of all devices” at the bottom of your studio.`;
 
 /**
- * Logs out every session opened without the second step. False, with
- * nothing logged out or deleted, when they could not be read in their exact
- * shape (audit SG2, finding 5): the set is the only way to them, so it is
- * kept, and the account is marked with the moment, so that every locked
- * session opened before it stays locked until it ends, past its day too
- * (lockedUntil; review of #2556: the day alone would set them free).
+ * Said instead when they could not be logged out and the account's mark that keeps them locked past their day
+ * could not be confirmed either (review of #4491): never that they stay locked.
  */
-async function endLocked(email: string, now = Date.now()): Promise<boolean> {
-  const [members] = await redisPipeline([["SMEMBERS", lockedSetKey(email)]]);
+export const NOT_KEPT = "We also could not confirm that they are still locked. Log them out now: choose “Log out of all devices” at the bottom of your studio.";
+
+/**
+ * Logs out every session opened without the second step: "ended". "kept",
+ * with nothing logged out or deleted, when they could not be read in their exact
+ * shape or the read failed (audit SG2, finding 5; review of #4491): the set is
+ * the only way to them, so it is kept, and the account is marked with the
+ * moment, so that every locked session opened before it stays locked until it
+ * ends, past its day too (lockedUntil; review of #2556: the day alone would set
+ * them free). "unkept" when that mark could not be confirmed either: they are
+ * never said to stay locked then. Never throws once the reset day is called
+ * off before it (cancelReset), so a failure never leaves them unmarked unsaid.
+ */
+async function endLocked(email: string, now = Date.now()): Promise<"ended" | "kept" | "unkept"> {
+  // A read that fails is a read not done (review of #4491): kept locked as one in another shape, never thrown past
+  // the mark, as the reset day is already called off.
+  const members = await redisPipeline([["SMEMBERS", lockedSetKey(email)]]).then(
+    ([reply]) => reply,
+    () => {
+      console.error("reading the sessions let in without a second step failed");
+      return undefined;
+    },
+  );
   const sessions = stringList(members);
   if (!sessions) {
     console.error("logging out the sessions let in without a second step failed");
-    await keepLocked(email, now);
-    return false;
+    return (await keepLocked(email, now)) ? "kept" : "unkept";
   }
-  // Each logout read as endSession answers it (CX-123 rule 24): only one confirmed loses its lock and its place in
-  // the list. One not confirmed (a delete answering in another shape, or a failure) may still be open: its lock and
-  // its place stay, and the account is kept locked as when the list cannot be read, so it stays locked past its day
-  // and the owner is never told it was logged out.
+  // Each logout read as endSession answers it (CX-123 rule 24; issue #4364): only one confirmed loses its lock and its
+  // place in the list. One not confirmed (a delete answering in another shape, or a failure) may still be open: its
+  // lock and its place stay, and the account is kept locked as when the list cannot be read, so it stays locked past
+  // its day and the owner is never told it was logged out.
   const open: string[] = [];
   for (const session of sessions) if ((await endSession(session)) !== true) open.push(session);
   if (open.length) {
     const ended = sessions.filter((session) => !open.includes(session));
-    if (ended.length) await redisPipeline([["DEL", ...ended.map((session) => lockedKey(session))], ["SREM", lockedSetKey(email), ...ended]]);
-    await keepLocked(email, now);
-    return false;
+    console.error("logging out the sessions let in without a second step was not confirmed for every one of them; those stay locked");
+    // The mark first, then the clearing of those logged out (review of #4491): a clearing that fails leaves a lock
+    // on a session that is gone, which opens nothing; one that threw before the mark would set the others free.
+    const kept = await keepLocked(email, now);
+    if (ended.length) {
+      await redisPipeline([["DEL", ...ended.map((session) => lockedKey(session))], ["SREM", lockedSetKey(email), ...ended]]).catch(() =>
+        console.error("clearing the locks of the sessions logged out failed"),
+      );
+    }
+    return kept ? "kept" : "unkept";
   }
-  await redisPipeline([["DEL", lockedSetKey(email), ...sessions.map((session) => lockedKey(session))]]);
+  // Only the sessions read leave the set, with their locks (Codex X6's LOW on #4491): one let in after the read keeps its
+  // place, the only way to it. A clean-up that fails is said and passed over, as the other path's: every session read
+  // was logged out, so the call-off says so (a lock left on a session that is gone opens nothing).
+  if (sessions.length) {
+    await redisPipeline([["DEL", ...sessions.map((session) => lockedKey(session))], ["SREM", lockedSetKey(email), ...sessions]]).catch(() =>
+      console.error("clearing the locks of the sessions logged out failed"),
+    );
+  }
   // A passkey removal one of them asked for stays: only "Keep it" calls one off (lib/passkeys.ts).
-  return true;
+  return "ended";
 }
 
 /**
  * Keeps an account's locked sessions locked when they could not all be logged out (endLocked): the list is kept
  * and the account is marked with the moment, so that every locked session opened before it stays locked until it
- * ends, past its day too (lockedUntil, keptListed).
+ * ends, past its day too (lockedUntil, keptListed). True only when all three replies are confirmed in their exact
+ * shape: the mark "OK", the account listed (KEEP_ANY: 1, or 0 for "*") and the set's expiry (0 when it is gone, 1).
+ * Answered in another shape, or failed, the same three commands are sent once more (each is idempotent), and false
+ * when they are not confirmed either (review of #4491, CX-123 rule 24): whoever says so to the owner then never says
+ * they stay locked. Never throws: it runs after the reset day is called off (cancelReset).
  */
-async function keepLocked(email: string, now: number): Promise<void> {
-  // Not read, only kept: the set outlives every session in it, so a lock that lapses on its day (one written
-  // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
-  const [, listed] = await redisPipeline([
-    ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
-    // Listed by a one-way tag of the account, never its address: once, at most KEPT_ANY_MAX (KEEP_ANY).
-    ["EVAL", KEEP_ANY, 1, KEPT_ANY_KEY, accountTag(email), KEPT_ANY_MAX, SESSION_TTL_SECONDS + 86_400],
-    ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
-  ]);
+async function keepLocked(email: string, now: number): Promise<boolean> {
+  const keep = () =>
+    redisPipeline([
+      // Not read, only kept: the set outlives every session in it, so a lock that lapses on its day (one written
+      // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
+      ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
+      // Listed by a one-way tag of the account, never its address: once, at most KEPT_ANY_MAX (KEEP_ANY).
+      ["EVAL", KEEP_ANY, 1, KEPT_ANY_KEY, accountTag(email), KEPT_ANY_MAX, SESSION_TTL_SECONDS + 86_400],
+      ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
+    ]).then(
+      // A pipeline in another shape (cut short, a reply too many, a hole) is answered but unknown: [].
+      (replies): unknown[] => repliesFor(replies, 3) ?? [],
+      () => {
+        console.error("marking the account's locked sessions as kept locked failed");
+        return null;
+      },
+    );
+  const zeroOrOne = (reply: unknown) => countOf(reply) === 0 || countOf(reply) === 1;
+  const confirmed = (replies: unknown[] | null) => replies !== null && replies.length === 3 && replies[0] === "OK" && zeroOrOne(replies[1]) && zeroOrOne(replies[2]);
+  let replies = await keep();
+  if (!confirmed(replies)) replies = await keep();
+  const kept = confirmed(replies);
+  if (!kept) console.error("the mark that keeps an account's locked sessions locked past their day was not confirmed");
   // The list past its ceiling ("*", or an answer of another shape): every session with no lock of its own now
   // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
-  // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept.
-  if (listed !== 1) {
+  // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept. Not counted when
+  // nothing answered, nor when the replies as a whole are in another shape (Codex X6's LOW on #4491): nothing says the
+  // list was written then.
+  if (replies && replies.length === 3 && countOf(replies[1]) !== 1) {
     console.error("too many accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until the sessions' last day");
     const month = new Date(now).toISOString().slice(0, 7);
-    await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]);
+    await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]).catch(() =>
+      console.error("counting the list past its ceiling failed"),
+    );
   }
+  return kept;
 }
 
 /**
@@ -694,9 +748,11 @@ async function keepLocked(email: string, now: number): Promise<void> {
  * or pressed Cancel. The locked sessions are logged out: true. "kept-locked"
  * when they could not be read, so they were not logged out and stay locked
  * until they end (endLocked); whoever says so to the owner never says they
- * were logged out (review of #2556).
+ * were logged out (review of #2556). "not-kept" when, besides, the mark that
+ * keeps them locked could not be confirmed: never said to stay locked (review
+ * of #4491).
  */
-export async function cancelReset(email: string, why: "login" | "studio" | "recovery"): Promise<boolean | "kept-locked"> {
+export async function cancelReset(email: string, why: "login" | "studio" | "recovery"): Promise<boolean | "kept-locked" | "not-kept"> {
   const called = await withTwoStep(email, async (held) => {
     const record = await read(email);
     if (!record || record.reset === 0) return false;
@@ -714,9 +770,11 @@ export async function cancelReset(email: string, why: "login" | "studio" | "reco
   await tell(
     email,
     "Two-step login stays on for your Marktmorgen account",
-    ended ? `${canceled}, and the browsers let in without it were logged out.` : `${canceled}, but the browsers let in without it could not be logged out just now. ${STILL_LOCKED}`,
+    ended === "ended"
+      ? `${canceled}, and the browsers let in without it were logged out.`
+      : `${canceled}, but the browsers let in without it could not be logged out just now. ${ended === "kept" ? STILL_LOCKED : NOT_KEPT}`,
   );
-  return ended ? true : "kept-locked";
+  return ended === "ended" ? true : ended === "kept" ? "kept-locked" : "not-kept";
 }
 
 /**

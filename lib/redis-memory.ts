@@ -744,6 +744,16 @@ export class MemoryRedis {
           this.run(["SET", seen, "pending", "EX", seenSeconds]);
           return 1;
         }
+        // lib/checkout-recovery.ts MOVE_STOP_LINK_IF_NOTED: a moved member's stop link, written only while its erasure
+        // note is still there (#5010 row 103); each inner call counted as Upstash bills it.
+        if (key.startsWith("-- marktmorgen:move-stop-link-if-noted:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, notes, link, noted, grant, seconds] = args;
+          this.scriptCalls += 1;
+          if (this.run(["ZSCORE", notes, noted]) === null) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", link, grant, "EX", seconds]);
+          return 1;
+        }
         // lib/phone-alerts.ts PHONE_STATE_IF_LISTED: devices' last sends, each kept only while it is still on its store's list.
         if (key.startsWith("-- marktmorgen:phone-state-if-listed:v1\n") && args[0] === "2" && args.length >= 5 && (args.length - 3) % 2 === 0) {
           const [, list, states, ...pairs] = args;

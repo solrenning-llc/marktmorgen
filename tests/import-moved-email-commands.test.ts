@@ -4,8 +4,8 @@
  * MEDIUM 1). Counted on the real send paths, a member's first email (runImport) and their reminder
  * (sendMoveReminders), every command recorded: the store's deleted people read (one HMGET: suppressedAmong), the
  * creator's list's rows (one HMGET: leftListAmong), the stop mark (one EXISTS: remindersStoppedAmong), and the stop
- * link written with its three erasure notes (lib/checkout-recovery.ts moveStopLink, lib/erasure-index.ts
- * noteForErasure). Synthetic only: Stripe and the sender are stand-ins for fetch, Redis is lib/redis-memory.ts.
+ * link written with its three erasure notes, only while its note is still there (an EVAL with its ZSCORE and SET;
+ * lib/checkout-recovery.ts moveStopLink, lib/erasure-index.ts noteForErasure). Synthetic only: Stripe and the sender are stand-ins for fetch, Redis is lib/redis-memory.ts.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { MOVED_EMAIL_EXTRA_COMMANDS, addRows, finishUpload, runImport, sendMoveReminders, startImport } from "@/lib/imports";
@@ -35,8 +35,11 @@ const GUARDS: [string, (c: (string | number)[]) => boolean][] = [
   ["the list's rows", (c) => c[0] === "HMGET" && String(c[1]).startsWith("nl:store:leads:")],
   ["the stop mark", (c) => c[0] === "EXISTS" && String(c[1]).startsWith("nl:recover:off:")],
   ["the stop link's erasure notes", (c) => String(c[1]).startsWith("nl:erase:ix:")],
-  ["the stop link", (c) => c[0] === "SET" && String(c[1]).startsWith("nl:recover:link:")],
+  // Written only while its erasure note is there (#5010 row 103): one EVAL, billed with its ZSCORE and its SET.
+  ["the stop link", (c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:move-stop-link-if-noted:v1\n")],
 ];
+/** The calls a guard's script makes inside Redis, billed one by one as Upstash bills a script (its ZSCORE and SET). */
+const INNER: Record<string, number> = { "the stop link": 2 };
 const original = redis.pipeline.bind(redis);
 async function recorded<T>(run: () => Promise<T>): Promise<{ result: T; commands: (string | number)[][] }> {
   const commands: (string | number)[][] = [];
@@ -51,7 +54,7 @@ async function recorded<T>(run: () => Promise<T>): Promise<{ result: T; commands
   }
 }
 const guardsIn = (commands: (string | number)[][]) => Object.fromEntries(GUARDS.map(([name, test]) => [name, commands.filter(test).length]));
-const total = (counts: Record<string, number>) => Object.values(counts).reduce((s, n) => s + n, 0);
+const total = (counts: Record<string, number>) => Object.entries(counts).reduce((s, [name, n]) => s + n * (1 + (INNER[name] ?? 0)), 0);
 
 async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_move_only_a_stand_in";

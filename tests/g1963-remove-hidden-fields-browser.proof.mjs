@@ -7,10 +7,9 @@ const {chromium}=createRequire(import.meta.url)('playwright-core');
 const source = `import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {CreatorCardEditor} from './components/creator-card-editor';
-import {CONTACT_WORDS} from './lib/buyer-words/contact';
 const card={on:true,name:'Original name',title:'',email:'creator@example.com',phone:'',website:'',note:''};
 window.syntheticCard=card;
-createRoot(document.getElementById('root')).render(<CreatorCardEditor initial={card} handle="synthetic" storeName="Synthetic" words={CONTACT_WORDS.en.card} address="example.com/@synthetic/contact" look={{className:'st-page',style:{},lang:'en'}}/>);`;
+createRoot(document.getElementById('root')).render(<CreatorCardEditor initial={card} handle="synthetic" storeName="Synthetic" language="en" address="example.com/@synthetic/contact" look={{className:'st-page',style:{},lang:'en'}}/>);`;
 const built = await build({stdin:{contents:source,resolveDir:process.cwd(),loader:'tsx'},bundle:true,platform:'browser',format:'iife',jsx:'automatic',write:false,alias:{'@':process.cwd()},define:{'process.env.NODE_ENV':'"development"','process.env':'{}'},logLevel:'error'});
 const script=built.outputFiles[0].text;
 const server=createServer((req,res)=>{

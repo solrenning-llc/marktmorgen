@@ -779,7 +779,7 @@ export function StatsPanel({
       ) : null}
 
       {range !== "all" && insightContext?.promotionProducts?.length ? (
-        <PromotionPlanner key={range} data={data} range={range} products={insightContext.promotionProducts} />
+        <PromotionPlanner key={range} data={data} range={range} products={insightContext.promotionProducts} spendUnread={spendsUnread !== null} />
       ) : null}
 
       {range !== "all" && insights.length ? (

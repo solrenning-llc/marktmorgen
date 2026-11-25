@@ -114,7 +114,7 @@ export const LEVER_TOGGLE_SPECS: Record<LeverKey, LeverSpec> = {
   recovery: {
     key: "recovery",
     title: "Checkout recovery",
-    path: "#recovery",
+    path: "#checkout-reminders",
     permission: "settings",
     setting: { route: "/api/store/recovery" },
     spend: "plan-capped",

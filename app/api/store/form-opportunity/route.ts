@@ -4,7 +4,7 @@ import { can } from "@/lib/team-roles";
 import { readForm, readResponses } from "@/lib/form-store";
 import { FORM_ID } from "@/lib/forms";
 import { CrmSchemaReadUnavailable, readStages } from "@/lib/crm";
-import { MAX_DEAL_CENTS, MAX_DEAL_NOTE, MAX_DEAL_TITLE, parseDeal, readFollowUp } from "@/lib/crm-rules";
+import { MAX_DEAL_CENTS, MAX_DEAL_NOTE, MAX_DEAL_TITLE, dealEmailFits, parseDeal, readFollowUp } from "@/lib/crm-rules";
 import { readTeam } from "@/lib/team";
 import { StoreFullError } from "@/lib/store-full";
 import { MAX_CONVERTIBLE_FORM_RESPONSES, createFormOpportunity, readFormOpportunity, formOpportunityRef } from "@/lib/form-opportunity";
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     if (!response) return refuse("response_gone", 409);
     const raw = body.deal && typeof body.deal === "object" && !Array.isArray(body.deal) ? body.deal as Record<string, unknown> : {};
     if (typeof raw.title !== "string" || !raw.title.trim() || raw.title.length > MAX_DEAL_TITLE) return refuse("title");
-    if (typeof raw.note !== "string" || raw.note.length > MAX_DEAL_NOTE || typeof raw.email !== "string" || raw.email.length > 254 || (raw.email.trim() && !/^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/.test(raw.email.trim()))) return refuse("invalid");
+    if (typeof raw.note !== "string" || raw.note.length > MAX_DEAL_NOTE || typeof raw.email !== "string" || raw.email.length > 254 || !dealEmailFits(raw.email) || (raw.email.trim() && !/^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/.test(raw.email.trim()))) return refuse("invalid");
     if (typeof raw.cents !== "number" || !Number.isSafeInteger(raw.cents) || raw.cents < 0 || raw.cents > MAX_DEAL_CENTS) return refuse("invalid");
     const follow = readFollowUp(raw);
     if (!follow.ok) return refuse(follow.error);
@@ -46,6 +46,9 @@ export async function POST(request: NextRequest) {
     const now = Math.floor(Date.now() / 1000);
     const deal = parseDeal({ ...raw, ...follow.value, id: body.responseRef.slice(0, 10), createdAt: now, updatedAt: now }, stages);
     if (!deal) return refuse("invalid");
+    // An address the deal would not keep (one that grows past 254, or past 64 before the "@", once lowercased) is refused,
+    // never kept empty without a word (coordinator's LOW 3 on #2048, 32nd batch).
+    if (raw.email.trim() && !deal.email) return refuse("invalid");
     const result = await createFormOpportunity(store.statsId, body.responseRef, deal, stages, store);
     if (result.state === "full") return refuse("full");
     return Response.json({ ok: true, state: result.state, deal: result.deal });

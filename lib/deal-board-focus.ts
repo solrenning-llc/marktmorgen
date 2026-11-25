@@ -14,7 +14,7 @@ export function neighborAfterRemoval(ids: readonly string[], removed: string): s
 }
 
 /** The deal editor's field each refusal is about (3.3.1); a refusal not listed is about no one field. */
-export const DEAL_ERROR_FIELDS: Readonly<Record<string, DraftField>> = { title: "title", value: "value", followup: "nextAction", date: "dueDate", assignee: "assignee", stage: "stage" };
+export const DEAL_ERROR_FIELDS: Readonly<Record<string, DraftField>> = { title: "title", email: "email", value: "value", followup: "nextAction", date: "dueDate", assignee: "assignee", stage: "stage" };
 
 /** The id of the deal editor's field a refusal is about, or null. */
 export function dealErrorField(error: string): string | null {

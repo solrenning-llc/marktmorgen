@@ -58,6 +58,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:coursegone:", "nl:courses:drip", "nl:courses:lock", "nl:crefund:told:",
   "nl:creators:responses", "nl:crm:co:lock:", "nl:crm:erased:", "nl:crm:fields:", "nl:crm:gen:", "nl:crm:pacc:lock:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:", "nl:dsched:tell",
   "nl:crm:co:gone:",
+  "nl:crm:lock:",
   "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dripstart:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:files:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:fly:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
@@ -275,6 +276,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:crm:co:": E, "nl:crm:co:lock:": X(1), "nl:crm:deals:": E, "nl:crm:erased:": X(31), "nl:crm:fields:": E, "nl:crm:gen:": X(31), "nl:crm:pacc:": E, "nl:crm:pacc:lock:": X(1), "nl:crm:pipes:": E, "nl:crm:stages:": E, "nl:crm:tasklock:": X(1), "nl:crm:taskrecount:": X(1), "nl:crm:tasks:": E, "nl:crm:v:": E,
   // A person deleted from the store, kept off the store's companies (#4026), on its own line so main's edits above do not conflict.
   "nl:crm:co:gone:": E,
+  // The HubSpot deals import's store lock (#2048), on its own line for the same reason (AC (q)).
+  "nl:crm:lock:": X(1),
   // ---------------------------------------------------------------- d-f
   "nl:data:": E,
   "nl:dc:addr:": E, "nl:dc:due": I, "nl:dc:lock": C, "nl:dc:mem:": E, "nl:dc:ok:": E, "nl:dc:prod:": E, "nl:dc:srv:": E, "nl:dc:state:": X(1),

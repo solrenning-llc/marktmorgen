@@ -5,7 +5,7 @@ import { useLeaveGuard } from "@/components/leave-guard";
 import { confirmedFormOpportunity, formDealDraft, matchingFormDeals, formDealMatchKey, type FormDealMatch } from "@/lib/form-deal";
 import { crmAnswer } from "@/lib/crm-response";
 import { fieldPrefix, readMoney, type Currency } from "@/lib/money";
-import { MAX_DEAL_CENTS, MAX_DEAL_NOTE, MAX_DEAL_TITLE, readFollowUp, type Stage } from "@/lib/crm-rules";
+import { MAX_DEAL_CENTS, MAX_DEAL_NOTE, MAX_DEAL_TITLE, dealEmailFits, readFollowUp, type Stage } from "@/lib/crm-rules";
 import type { FormDef, FormResponse } from "@/lib/forms";
 
 export function FormResponseDeal({ form, response, responseRef, stages, sid, currency, assignees, existingDeals, existingDealsAvailable = false, onRecorded, onClose }: { existingDealsAvailable?: boolean; onRecorded?: (deal: FormDealMatch) => void; responseRef: string; existingDeals: FormDealMatch[]; currency: string; assignees: string[]; form: FormDef; response: FormResponse; stages: Stage[]; sid: string; onClose: () => void }) {
@@ -23,7 +23,7 @@ export function FormResponseDeal({ form, response, responseRef, stages, sid, cur
   useLeaveGuard(!saved);
   async function save(recover = false) {
     if (!existingDealsAvailable || busy || saved || (uncertain && !recover) || needsAcknowledgment || !draft.title.trim() || !draft.stage) return;
-    if (draft.email.trim() && !/^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/.test(draft.email.trim())) { setError("Enter a valid contact email or leave it empty."); return; }
+    if (draft.email.trim() && (!/^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/.test(draft.email.trim()) || !dealEmailFits(draft.email))) { setError("Enter a valid contact email or leave it empty."); return; }
     const cents = draft.value.trim() ? readMoney(draft.value, currency as Currency) : 0;
     if (cents === null || cents > MAX_DEAL_CENTS) { setError("Enter a valid estimated value in the store currency, or leave it empty."); return; }
     const follow = readFollowUp(draft);

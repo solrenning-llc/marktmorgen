@@ -101,6 +101,30 @@ async function main() {
   is("invalid IDs retain the legacy fingerprint", formOpportunityRef(statsId, form.id, { ...response, id: "invalid" }), ref);
   const distinct = await Promise.all([createFormOpportunity("distinct-submissions", refA, kept, DEFAULT_STAGES, ROOM), createFormOpportunity("distinct-submissions", refB, kept, DEFAULT_STAGES, ROOM)]);
   is("identical distinct submissions can create separate reviewed opportunities", [distinct.map(result => result.state), (await readDeals("distinct-submissions", DEFAULT_STAGES)).length], [["created", "created"], 2]);
+
+  part("Coordinator's LOW 3 on #2048 (32nd batch): an address the deal would not keep whole is refused, never kept empty");
+  {
+    const mailOwner = "longmailforms@example.com";
+    await claimHandle(mailOwner, "longmailforms", "Long Mail Forms", ""); await ensureStatsId(mailOwner); await ensureStoreId(mailOwner);
+    const mailStore = (await storeForEmail(mailOwner))!; const mailStats = mailStore.statsId!;
+    const mailSession = await openSession(mailOwner);
+    await writeForm(mailStats, form);
+    await addResponse(mailStats, form.id, response, ROOM);
+    const mailRef = formOpportunityRef(mailStats, form.id, response);
+    const sendMail = (email: string) => POST(new NextRequest("https://marktmorgen.com/api/store/form-opportunity", { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": mailStore.sid, cookie: SESSION_COOKIE + "=" + mailSession }, body: JSON.stringify({ form: form.id, responseRef: mailRef, deal: { ...draft, assignee: mailOwner, email } }) }));
+    // "\u0130" (capital I with a dot) lowercases to two units: within 254 as sent, past it once lowercased; and 40 of
+    // them before the "@" are within 64 as sent, 80 once lowercased.
+    const pastAll = `${"a".repeat(64)}@${"\u0130".repeat(120)}.com`;
+    const pastLocal = `${"\u0130".repeat(40)}@example.com`;
+    is("control: both are within the limits as sent and past them once lowercased", [pastAll.length <= 254, pastAll.toLowerCase().length > 254, pastLocal.split("@")[0].toLowerCase().length > 64], [true, true, true]);
+    for (const [name, email] of [["past 254", pastAll], ["past 64 before the @", pastLocal]] as const) {
+      const refused = await sendMail(email);
+      is(`an address ${name} once lowercased is refused as invalid`, [refused.status, (await refused.json()).error], [400, "invalid"]);
+    }
+    is("and no deal was made for it", (await readDeals(mailStats, DEFAULT_STAGES)).length, 0);
+    const plain = await (await sendMail("Lead@Example.com")).json();
+    is("control: a plain address is kept, lowercased", [plain.state, plain.deal?.email], ["created", "lead@example.com"]);
+  }
   done();
 }
 main().catch(error => { console.error(error); process.exit(1); });

@@ -88,14 +88,23 @@ export const DEFAULT_STAGES: Stage[] = [
   { id: "lost00", name: "Lost", kind: "lost" },
 ];
 
-/** One line as the deals board keeps it: controls made spaces, spaces made one, trimmed (exported for a workflow step, lib/flow-rules.ts). */
+/**
+ * A lone UTF-16 surrogate made U+FFFD, the replacement character, which JSON writes as 3 bytes, where a lone surrogate
+ * is written escaped, as 6 (coordinator's MEDIUM 2 on #2048, 18th batch). Run after any cut, since a cut can split a
+ * pair. A string with none is returned as it is.
+ */
+export const wellFormed = (value: string) => value.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+
+/** One line as the deals board keeps it: controls made spaces, spaces made one, trimmed, no lone surrogate (exported for a workflow step, lib/flow-rules.ts). */
 export const oneLine = (value: unknown, max: number) =>
   typeof value === "string"
-    ? value
-        .replace(/[\u0000-\u001f\u007f]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, max)
+    ? wellFormed(
+        value
+          .replace(/[\u0000-\u001f\u007f]+/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, max),
+      )
     : "";
 
 /** A new id: six letters and digits for a field or a stage, ten for a deal. */
@@ -235,6 +244,19 @@ export function parseStages(raw: unknown): Stage[] | null {
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 
+/**
+ * Whether an address sent for a deal is kept whole: none, or a full address (EMAIL) of at most 254 characters as one
+ * line once lowercased, as parseDeal keeps it. The board refuses a longer one as the address (app/api/store/crm, "email"), so parseDeal never cuts it or
+ * keeps it empty without a word (coordinator's LOW 3 on #2048, 29th batch).
+ */
+export const dealEmailFits = (value: unknown) => {
+  if (typeof value !== "string") return true;
+  const lowered = oneLine(value, Number.MAX_SAFE_INTEGER).toLowerCase();
+  // An address that is not a full one (jane@x, a@b@c.com) is refused as the address too, never kept empty without a
+  // word, as the form-opportunity route already does (coordinator's triple audit of #2048 @bbd4481d5d, LOW 4).
+  return lowered === "" || (lowered.length <= 254 && EMAIL.test(lowered));
+};
+
 /** A deal as sent or stored, made safe; null without a title or a stage the store has. */
 export function parseDeal(raw: unknown, stages: readonly Stage[]): Deal | null {
   if (!raw || typeof raw !== "object") return null;
@@ -243,15 +265,20 @@ export function parseDeal(raw: unknown, stages: readonly Stage[]): Deal | null {
   const title = oneLine(value.title, MAX_DEAL_TITLE);
   const stage = typeof value.stage === "string" && stages.some((s) => s.id === value.stage) ? value.stage : "";
   if (!id || !title || !stage) return null;
-  const email = oneLine(value.email, 254).toLowerCase();
+  // Lowercased first, then held at 254 (coordinator's LOW L1 on #2048, 26th batch): "\u0130" lowercases to two units,
+  // so an address cut at 254 before toLowerCase could come back longer, past what DEAL_JSON_MAX_BYTES counts.
+  const lowered = oneLine(value.email, 254).toLowerCase();
+  const email = lowered.length <= 254 ? lowered : "";
   const cents = typeof value.cents === "number" && Number.isFinite(value.cents) ? Math.max(0, Math.min(MAX_DEAL_CENTS, Math.round(value.cents))) : 0;
   const note =
     typeof value.note === "string"
-      ? value.note
-          .replace(/\r\n?/g, "\n")
-          .replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/g, " ")
-          .trim()
-          .slice(0, MAX_DEAL_NOTE)
+      ? wellFormed(
+          value.note
+            .replace(/\r\n?/g, "\n")
+            .replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/g, " ")
+            .trim()
+            .slice(0, MAX_DEAL_NOTE),
+        )
       : "";
   const at = (v: unknown) => (typeof v === "number" && Number.isInteger(v) && v > 0 ? v : 0);
   const follow = readFollowUp(value);
@@ -288,8 +315,11 @@ export function readFollowUp(raw: Record<string, unknown>): { ok: true; value: F
   }
   if (raw.assignee !== undefined) {
     if (typeof raw.assignee !== "string") return { ok: false, error: "assignee" };
-    const email = raw.assignee.trim().toLowerCase();
-    if (email && (email.length > 254 || !EMAIL.test(email))) return { ok: false, error: "assignee" };
+    // Well formed, as every other text of a deal (coordinator's MEDIUM on #2048, 22nd batch): a lone surrogate, which
+    // JSON writes as 6 bytes, is the replacement character, and a control character, which JSON writes as 6 too and
+    // no address has, is refused, so a stored deal stays within DEAL_JSON_MAX_BYTES (lib/hubspot-import.ts).
+    const email = wellFormed(raw.assignee.trim().toLowerCase());
+    if (email && (email.length > 254 || /[\u0000-\u001f\u007f]/.test(email) || !EMAIL.test(email))) return { ok: false, error: "assignee" };
     out.assignee = email;
   }
   if (out.dueDate && !out.nextAction) return { ok: false, error: "followup" };

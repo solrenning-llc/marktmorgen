@@ -1,0 +1,577 @@
+/**
+ * Moving from HubSpot, the deals half on the server (639 [GL7](10), unit 2,
+ * added 4 November 2026): a deals file HubSpot exported, read by the rules
+ * of lib/hubspot-csv.ts, made into the store's own pipelines, stages and
+ * deals (lib/crm.ts). No screen yet; the route is
+ * app/api/store/import/hubspot.
+ *
+ * What it keeps to:
+ *
+ *   - Nothing that exists is renamed, moved or deleted. A pipeline of the
+ *     file whose name the store already uses (any case) is that pipeline; a
+ *     stage likewise, within its pipeline; a deal with no pipeline in the
+ *     file goes to the store's first pipeline, whatever its name. A file's
+ *     won or lost stage with no stage of that name goes to the pipeline's
+ *     own won or lost stage, and the summary says so. Only the open stages
+ *     and pipelines the store does not have are made, within the plan's
+ *     pipelines (pipelineLimit) and MAX_STAGES a pipeline, and only for the
+ *     deals that will come in: the rows refused or already here are set
+ *     aside first, so they never take a pipeline's place. A deal past them
+ *     is refused with what to do.
+ *   - Never twice: each deal's id here is worked out from HubSpot's Record
+ *     ID (hubSpotDealId), and its note says "From HubSpot, Record ID X." A
+ *     deal whose id is here and whose note says so is already here: listed
+ *     by row and name, never added again nor overwritten, whatever the
+ *     creator changed on it since. One whose id is here but whose note does
+ *     not say so is refused with a sentence, never taken for the same deal.
+ *     Two HubSpot accounts can use the same Record ID for different deals:
+ *     the list of deals already here, with the name each has here, is how
+ *     the creator sees that. A deal the creator deleted here comes back if
+ *     the file is brought in again, as with every other import.
+ *   - The close date has no field of its own here (a deal's due date is the
+ *     creator's next follow-up), so it goes in the note: "Closed on
+ *     YYYY-MM-DD (from HubSpot)." for a won or lost deal, "Expected to close
+ *     on ..." for an open one, as HubSpot's own close date means for those.
+ *   - Whole or nothing: a file with more new deals than the store has room
+ *     for (MAX_DEALS), past the store's data room, or past the month's rows
+ *     an import may bring in (lib/import-limits.ts, takeImportRows) is
+ *     refused whole and nothing is written: the room is taken first, then
+ *     the rows, then the pipelines and every deal are written in one step
+ *     (lib/crm.ts, IMPORT_CRM_DEALS). When that step writes nothing (the
+ *     pipelines changed, a deal's id was taken, the store filled up, or the
+ *     lock ran out or could not be confirmed, so the step was never sent),
+ *     the room and the rows go back. When whether it wrote
+ *     cannot be confirmed, both stay counted, as for what was written.
+ *   - One import of deals or change of pipelines at a time per store, under
+ *     the store's CRM lock (lib/crm.ts, takeCrmLock): every change of
+ *     pipelines or stages on the board takes it too, so the board never
+ *     removes a stage from deals it read before an import wrote some there.
+ *     The next one waits a moment, then is refused. A single deal saved on
+ *     the board does not take the lock: the one step writes only over the
+ *     pipelines record read before, and only when every deal's id is still
+ *     free and every deal fits; otherwise nothing is written.
+ *   - No workflow starts: a deal brought in from a file is not a deal
+ *     entering a stage (lib/deal-stage-trigger.ts), so nobody is emailed.
+ *
+ * A deal keeps the first address in its associated-contacts column, when
+ * the column has one; deleting that person deletes the deal, as every deal
+ * (lib/crm.ts, forgetCrmPerson).
+ */
+import { createHash } from "node:crypto";
+import { CRM_LOCK_COMMANDS_MOST, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, CrmDealsFull, CrmLockLost, CrmPersonErased, CrmSchemaConflict, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, importRoom, importSnapshot, readDealMarks, takeCrmLock, writeImport } from "@/lib/crm";
+import { type Deal, type Pipeline, type Stage, MAX_DEALS, MAX_PIPELINE_NAME, MAX_PIPELINES, MAX_STAGE_NAME, MAX_STAGES, allStages, newCrmId, parseDeal, parsePipelines, pipelineLimit } from "@/lib/crm-rules";
+import { ADDRESS_NOT_KEPT_REASON, HUBSPOT_LABELS, type HubSpotDealDraft, type HubSpotRefusal, STAGE_PAST_REASON, hubSpotDealColumns, hubSpotFileOf, oneLine, pipelineRoomReason, planHubSpotDeals, tooManyDealsSentence } from "@/lib/hubspot-csv";
+import { BATCH_BYTES, giveImportRows, takeImportRows } from "@/lib/imports";
+import { IMPORT_WORST_BYTES_PER_ROW, rowsWords } from "@/lib/import-limits";
+import { type Held, LockBusyError, releaseLock } from "@/lib/redis-lock";
+import { DataRoomError, dataKey, monthOf, needData } from "@/lib/store-data";
+import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { contentRoomFor, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
+import { largerPlanFor } from "@/lib/larger-plan";
+import type { Store } from "@/lib/store";
+
+/** The rows a file sent here may have, the header apart: twice what a store holds, for the rows refused or already there. */
+export const HUBSPOT_MAX_ROWS = MAX_DEALS * 2;
+/** The columns a row may have. */
+export const HUBSPOT_MAX_COLUMNS = 200;
+/** The longest cell taken as it arrives; one longer refuses the file (nothing is cut). */
+export const HUBSPOT_MAX_CELL = 2_000;
+
+/** A HubSpot Record ID as it is kept: letters and digits (HubSpot's are digits). */
+const RECORD_ID = /^[0-9A-Za-z_-]{1,40}$/;
+const ID_LETTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
+
+/** A deal's id here for a HubSpot Record ID: always the same one, so a deal brought in twice is found. */
+export function hubSpotDealId(recordId: string): string {
+  const digest = createHash("sha256").update(`hubspot-deal:${recordId}`).digest();
+  let id = "";
+  for (let i = 0; id.length < 10; i += 1) id += ID_LETTERS[digest[i] % ID_LETTERS.length];
+  return id;
+}
+
+/** The note a deal brought in from HubSpot carries. */
+export function hubSpotDealNote(recordId: string, closeDate: string | null, closed: boolean): string {
+  const lines = [`From HubSpot, Record ID ${recordId}.`];
+  if (closeDate) lines.push(closed ? `Closed on ${closeDate} (from HubSpot).` : `Expected to close on ${closeDate} (from HubSpot).`);
+  return lines.join("\n");
+}
+
+export type HubSpotFile = { header: string[]; rows: string[][]; lines?: number[] };
+
+export type HubSpotImportSummary = {
+  /** False for a dry run: nothing was written. */
+  written: boolean;
+  pipelinesCreated: { name: string; stages: string[] }[];
+  /** Open stages made in a pipeline the store already had. */
+  stagesCreated: { pipeline: string; stage: string }[];
+  /** A won or lost stage of the file that went to the pipeline's own won or lost stage. */
+  stagesJoined: { pipeline: string; from: string; to: string }[];
+  added: number;
+  alreadyThere: number;
+  /** Each deal already here: its row, its name in the file and its name here. */
+  alreadyThereDeals: { line: number; title: string; here: string }[];
+  refused: HubSpotRefusal[];
+  /** What a deal came in without (an amount, a close date, a second person), and why. */
+  notices: { line: number; note: string }[];
+  ignored: string[];
+  /**
+   * Set only when the lists above would make the answer longer than HUBSPOT_SENT_MAX_BYTES, which a file the route
+   * takes never does (tests/hubspot-import.test.ts): the counts are sent, the lists left out (hubSpotAnswerBody).
+   */
+  listsLeftOut?: true;
+};
+
+export type HubSpotImportRefusal =
+  | "not_hubspot"
+  | "no_record_id"
+  | "too_many"
+  | "deals_full"
+  | "busy"
+  | "lock_lost"
+  | "changed"
+  | "erased"
+  | "store_full"
+  | "rows_month"
+  | "unavailable"
+  | "unconfirmed";
+
+export type HubSpotImportResult = { ok: true; summary: HubSpotImportSummary } | { ok: false; reason: HubSpotImportRefusal; message: string; limit?: number };
+
+/** What each refusal says, with what to do. */
+export const HUBSPOT_IMPORT_WORDS: Record<Exclude<HubSpotImportRefusal, "too_many" | "store_full" | "rows_month">, string> = {
+  deals_full: `Your store reached its ${MAX_DEALS.toLocaleString("en-US")} deals while this file was being brought in, so nothing was brought in. Delete deals you no longer need, then bring the file in again.`,
+  not_hubspot:
+    'This is not a deals file exported from HubSpot with English column names. In HubSpot, export your deals list, choose English under "Language of column headers", then bring that file in.',
+  no_record_id:
+    "This deals file has no Record ID column, so deals brought in from it could be brought in twice. In HubSpot, export your deals list with all properties, so the file has the Record ID column, then bring that file in.",
+  // The lock is taken by another import and by every change of pipelines on the board: the sentence names neither.
+  busy: "Your deals or pipelines are being changed right now, so nothing was brought in. Wait a moment, then bring the file in again.",
+  lock_lost: "Saving could not start in time, so nothing was brought in. Bring the file in again.",
+  changed: "Your pipelines changed while this file was being brought in, so nothing was brought in. Bring the file in again.",
+  erased: "Someone in this file asked your store to delete their data while it was being brought in, so nothing was brought in. Bring the file in again: their deal comes in without their email address.",
+  unavailable: "Your deals could not be read just now, so nothing was brought in. Try again in a minute.",
+  unconfirmed: "Saving could not be confirmed. Bring the same file in again: deals already here are never added twice.",
+};
+
+/** What a deal of a person deleted from the store came in without, said without the address. */
+export const ERASED_NOTE = "This deal came in without an email address: the person HubSpot associated with it asked your store to delete their data.";
+
+const refuse = (reason: HubSpotImportRefusal, message: string, limit?: number): HubSpotImportResult => ({ ok: false, reason, message, ...(limit === undefined ? {} : { limit }) });
+
+type Planned = { summary: HubSpotImportSummary; pipelines: Pipeline[] | null; deals: Deal[] };
+
+/** A fresh id no taken one has. */
+function freshId(taken: Set<string>): string {
+  for (;;) {
+    const id = newCrmId();
+    if (!taken.has(id)) {
+      taken.add(id);
+      return id;
+    }
+  }
+}
+
+
+type DealsPlan = Extract<ReturnType<typeof planHubSpotDeals>, { ok: true }>;
+
+/** The line a deal brought in from HubSpot Record ID `recordId` carries in its note. */
+const fromLine = (recordId: string) => `From HubSpot, Record ID ${recordId}.`;
+
+/**
+ * The file's plan against the store as it stands: first the rows set aside
+ * (no or unreadable Record ID, already here, or another deal's place), then
+ * the pipelines and stages for the deals left only, then those deals. The
+ * pipelines after the import are null when none changes. Pure but for the
+ * ids it makes.
+ */
+function planAgainst(
+  store: Store,
+  plan: DealsPlan,
+  snapshot: { pipelines: Pipeline[]; dealIds: Set<string> },
+  marks: Map<string, { title: string; note: string }>,
+  nowSeconds: number,
+): Planned {
+  const refused: HubSpotRefusal[] = [...plan.refused];
+  const alreadyThereDeals: HubSpotImportSummary["alreadyThereDeals"] = [];
+  const coming: (HubSpotDealDraft & { id: string })[] = [];
+  for (const draft of plan.deals) {
+    if (!draft.recordId) {
+      refused.push({ line: draft.line, column: HUBSPOT_LABELS.recordId, value: "", reason: "This deal has no Record ID, so bringing the file in again would add it twice. Export the deals from HubSpot again with the Record ID column filled in, then bring that file in." });
+      continue;
+    }
+    if (!RECORD_ID.test(draft.recordId)) {
+      refused.push({ line: draft.line, column: HUBSPOT_LABELS.recordId, value: draft.recordId, reason: "This Record ID is not one HubSpot writes (letters and digits, up to 40), so the deal was not brought in. Export the deals from HubSpot again, then bring that file in." });
+      continue;
+    }
+    const id = hubSpotDealId(draft.recordId);
+    if (snapshot.dealIds.has(id)) {
+      const mark = marks.get(id);
+      if (mark && mark.note.split("\n").includes(fromLine(draft.recordId))) alreadyThereDeals.push({ line: draft.line, title: draft.title, here: mark.title });
+      else
+        refused.push({
+          line: draft.line,
+          column: HUBSPOT_LABELS.recordId,
+          value: draft.recordId,
+          reason: `A deal here already holds the place of HubSpot Record ID ${draft.recordId}, but its note does not say it came from that record, so this row was not brought in. If that deal is this one, there is nothing to do. If not, open it on your deals board and check its note, then bring the file in again.`,
+        });
+      continue;
+    }
+    coming.push({ ...draft, id });
+  }
+
+  // Pipelines and stages only for the deals that will come in, in the file's order.
+  const limit = Math.min(pipelineLimit(store, nowSeconds), MAX_PIPELINES);
+  const pipelineRoom = Math.max(0, limit - snapshot.pipelines.length);
+  const next: Pipeline[] = snapshot.pipelines.map((p) => ({ ...p, stages: [...p.stages] }));
+  const pipeIds = new Set(next.map((p) => p.id));
+  const stageIds = new Set(allStages(next).map((s) => s.id));
+  const usedLabels = new Map<string, Set<string>>();
+  for (const draft of coming) {
+    const key = draft.pipeline.toLowerCase();
+    if (!usedLabels.has(key)) usedLabels.set(key, new Set());
+    usedLabels.get(key)!.add(draft.stage.toLowerCase());
+  }
+  /** By pipeline name (lower case), each file stage's label (lower case) to the stage it goes to; null for a pipeline past the plan's. */
+  const route = new Map<string, Map<string, string> | null>();
+  const pipelinesCreated: HubSpotImportSummary["pipelinesCreated"] = [];
+  const stagesCreated: HubSpotImportSummary["stagesCreated"] = [];
+  const stagesJoined: HubSpotImportSummary["stagesJoined"] = [];
+  let made = 0;
+  for (const proposed of plan.pipelines) {
+    const key = proposed.name.toLowerCase();
+    const used = usedLabels.get(key);
+    if (!used) continue;
+    const map = new Map<string, string>();
+    const existing = next.find((p) => p.name.toLowerCase() === key);
+    if (existing) {
+      for (const stage of proposed.stages.filter((s) => s.fromFile && used.has(s.name.toLowerCase()))) {
+        const label = stage.name.toLowerCase();
+        const same = existing.stages.find((s) => s.name.toLowerCase() === label);
+        if (same) map.set(label, same.id);
+        else if (stage.kind !== "open") {
+          const own = existing.stages.find((s) => s.kind === stage.kind) as Stage;
+          map.set(label, own.id);
+          stagesJoined.push({ pipeline: existing.name, from: stage.name, to: own.name });
+        } else if (existing.stages.length < MAX_STAGES) {
+          const added: Stage = { id: freshId(stageIds), name: stage.name, kind: "open" };
+          // After the pipeline's last open stage, before its won and lost ones.
+          let at = 0;
+          existing.stages.forEach((s, i) => { if (s.kind === "open") at = i + 1; });
+          existing.stages.splice(at, 0, added);
+          map.set(label, added.id);
+          stagesCreated.push({ pipeline: existing.name, stage: stage.name });
+        }
+      }
+    } else if (made < pipelineRoom) {
+      made += 1;
+      // Its open stages that deals come into, and its won and lost ones, as the file names them.
+      const stages = proposed.stages.filter((s) => s.kind !== "open" || !s.fromFile || used.has(s.name.toLowerCase()));
+      // A pipeline here always has an open stage, even when every deal coming into it is closed.
+      if (!stages.some((s) => s.kind === "open")) stages.unshift(proposed.stages.find((s) => s.kind === "open") ?? { name: "New", kind: "open", fromFile: false });
+      const pipeline: Pipeline = { id: freshId(pipeIds), name: proposed.name, stages: stages.map((s) => ({ id: freshId(stageIds), name: s.name, kind: s.kind })) };
+      next.push(pipeline);
+      stages.forEach((s, i) => { if (s.fromFile) map.set(s.name.toLowerCase(), pipeline.stages[i].id); });
+      pipelinesCreated.push({ name: pipeline.name, stages: pipeline.stages.map((s) => s.name) });
+    } else {
+      route.set(key, null);
+      continue;
+    }
+    route.set(key, map);
+  }
+
+  const stages = allStages(next);
+  const deals: Deal[] = [];
+  const notices: HubSpotImportSummary["notices"] = [];
+  for (const draft of coming) {
+    const map = route.get(draft.pipeline.toLowerCase());
+    if (!map) {
+      refused.push({ line: draft.line, column: HUBSPOT_LABELS.deals.pipeline, value: draft.pipeline, reason: pipelineRoomReason(pipelineRoom) });
+      continue;
+    }
+    const stage = map.get(draft.stage.toLowerCase());
+    if (!stage) {
+      refused.push({ line: draft.line, column: HUBSPOT_LABELS.deals.stage, value: draft.stage, reason: STAGE_PAST_REASON });
+      continue;
+    }
+    const closed = stages.find((s) => s.id === stage)?.kind !== "open";
+    const deal = parseDeal({ id: draft.id, title: draft.title, email: draft.email, cents: draft.cents ?? 0, stage, note: hubSpotDealNote(draft.recordId, draft.closeDate, closed), createdAt: nowSeconds, updatedAt: nowSeconds }, stages);
+    if (!deal) {
+      refused.push({ line: draft.line, column: HUBSPOT_LABELS.deals.title, value: draft.title, reason: "This deal could not be read. Check its name and stage in HubSpot, then export again." });
+      continue;
+    }
+    // An address the deal would not keep exactly as read is refused with its row, never kept cut or empty, so the dry
+    // run says what the save does (coordinator's LOW 2 on #2048, 29th batch). The address is not said back.
+    if (deal.email !== draft.email) {
+      refused.push({ line: draft.line, column: HUBSPOT_LABELS.deals.associatedContact, value: "", reason: ADDRESS_NOT_KEPT_REASON });
+      continue;
+    }
+    deals.push(deal);
+    for (const note of [draft.amountNote, draft.closeDateNote, draft.emailNote]) if (note) notices.push({ line: draft.line, note });
+  }
+  refused.sort((a, b) => a.line - b.line);
+
+  const changed = pipelinesCreated.length > 0 || stagesCreated.length > 0;
+  const checked = changed ? parsePipelines(next) : null;
+  if (changed && !checked) throw new CrmSchemaReadUnavailable();
+  return {
+    summary: { written: false, pipelinesCreated, stagesCreated, stagesJoined, added: deals.length, alreadyThere: alreadyThereDeals.length, alreadyThereDeals, refused, notices, ignored: plan.ignored },
+    pipelines: checked,
+    deals,
+  };
+}
+
+/**
+ * The most one stored deal's JSON weighs (parseDeal, lib/crm-rules.ts): its title (90), note (500) and next action
+ * (200) at 3 bytes a UTF-16 unit, the most one takes in JSON once control characters are gone (a new line or a quote
+ * is 2) and a lone surrogate, which JSON would write as 6, is the replacement character (wellFormed, lib/crm-rules.ts);
+ * its two addresses at 254 characters, every one but "@" and "." at 3 bytes (the address rule takes any character
+ * but a space and "@", such as a Chinese one, and a lone surrogate in either is the replacement character: oneLine
+ * for the deal's address, readFollowUp for the assignee's; coordinator's MEDIUM on #2048, 22nd batch); its form
+ * reference, ids, stage, due date, the largest amount, two dates of 16 digits and the keys: 4,170 bytes, rounded up.
+ * tests/hubspot-import.test.ts holds a deal at every cap under it.
+ */
+export const DEAL_JSON_MAX_BYTES = 4_200;
+
+/**
+ * The most one stored deal moves through the database, read or written: lib/redis.ts sends and reads it over HTTP in
+ * JSON, where the deal's own JSON is a string, so it is escaped once more (coordinator's MEDIUM on #2048, 22nd batch:
+ * the reads below were priced at DEAL_JSON_MAX_BYTES, the weight kept, not the weight moved). JSON.stringify moves a
+ * stored quote as four bytes (5,420 at every cap in quotes), but how Upstash encodes its answer is not documented
+ * here, and an encoder that escapes "<", ">" or "&" as \u003c moves each as six (Claude 5 ibqho's LOW on #2048,
+ * 7081226904), so every character of the text fields and both addresses at their caps is counted at six bytes, as
+ * lib/api-read-rules.ts prices an answer: 1,298 characters and the due date's 10, over the 319 bytes the rest of a
+ * deal moves (ids, keys, numbers, all plain ASCII letters and digits no encoder escapes): 8,167 bytes, rounded up.
+ * tests/hubspot-import.test.ts computes the bound and holds a deal at every cap in quotes under it.
+ */
+export const DEAL_MOVED_MAX_BYTES = 8_200;
+
+/**
+ * What one address's check against the store's deleted people moves at the most (suppressedAmong, one HMGET of a print
+ * a field): the 32-character print sent, the second it holds back (16 digits at the most) and the reply's framing.
+ * A file's addresses are read before the store's MAX_DEALS is checked, so all HUBSPOT_MAX_ROWS of them are priced
+ * (coordinator's LOW a on #2048, 18th batch).
+ */
+export const HUBSPOT_PRINT_BYTES = 64;
+
+/**
+ * What a dry run reads at the most (Claude 5's cost MEDIUM on #2048): the store's pipelines and the ids of its deals
+ * (the snapshot), its deleted people's prints for the file's addresses, and every deal the file names that is already
+ * here, whole (readDealMarks), each at DEAL_MOVED_MAX_BYTES. Priced as the check it is counted as (tests/plan-cost-registry.ts,
+ * line clickfunnels, "import-preview-month").
+ */
+export const HUBSPOT_CHECK_BYTES = MAX_DEALS * (DEAL_MOVED_MAX_BYTES + 32) + HUBSPOT_MAX_ROWS * HUBSPOT_PRINT_BYTES + 64 * 1024;
+
+/**
+ * The commands one dry-run request sends at the most, the route's own (session, allowances) included, and the one
+ * HMGET of the file's addresses against the store's deleted people (suppressedAmong), sent only when the file names an
+ * address: 14 without it, 15 with it (coordinator's LOW a on #2048, 18th batch; tests/hubspot-import.test.ts counts both).
+ */
+export const HUBSPOT_CHECK_COMMANDS = 15;
+
+/**
+ * The most one save sends and reads beyond what its rows are priced at (coordinator's LOWs b and c on #2048, 18th
+ * batch). A save is one of the month's import starts (app/api/store/import/hubspot/route.ts, "import-start-month"),
+ * priced at the dearer of a start and this (tests/plan-cost-registry.ts, line imports). Everything a dry run reads is
+ * read before the month's rows are taken, so a save refused there, or one with nothing to write, has read it all:
+ * HUBSPOT_CHECK_BYTES, which holds every deal already here at DEAL_MOVED_MAX_BYTES, more than the
+ * IMPORT_WORST_BYTES_PER_ROW a row is priced at. Then the CRM lock taken and let go (CRM_LOCK_COMMANDS_MOST), the data
+ * room read (two HMGET), the month's rows taken and maybe given back (three), and the room's take (one); and each new
+ * deal's own write past the bytes its row is priced at, at most MAX_DEALS deals in one save.
+ */
+export const HUBSPOT_SAVE_COMMANDS = HUBSPOT_CHECK_COMMANDS + CRM_LOCK_COMMANDS_MOST + 6;
+export const HUBSPOT_SAVE_BYTES = HUBSPOT_CHECK_BYTES + MAX_DEALS * Math.max(0, DEAL_MOVED_MAX_BYTES + 64 - IMPORT_WORST_BYTES_PER_ROW);
+
+/** The most a request to the route weighs as it arrives (app/api/store/import/hubspot, guardStoreWrite): the upload's. */
+export const HUBSPOT_BODY_BYTES = BATCH_BYTES;
+
+/**
+ * The most the answer to one request says for one row of the file beyond what it repeats of the file itself
+ * (coordinator's MEDIUM on #2048, 29th batch). Every text of the answer taken from the file (a deal's name, a stage, a
+ * pipeline, a Record ID, an amount or a close date as written, a column not brought in) is said at most once, made one
+ * line and well formed first. Each character of it weighs in JSON no more than it did in the request, except a byte of
+ * the request that is not UTF-8, which is read as the replacement character and so comes back as three bytes
+ * (coordinator's LOW 4 on #2048, 32nd batch): those texts are held at HUBSPOT_ECHO_FACTOR times HUBSPOT_BODY_BYTES. A
+ * refusal names its column as HubSpot labels it, never as the file spells it (lib/hubspot-csv.ts).
+ * What a row adds on top: a refusal's longest reason (about 350 characters, the Record ID within it at 40) with its
+ * line, column and keys; or a deal already here with the name it has here (90 characters at 3 bytes each); or a deal
+ * that comes in with its three notices at the most (an amount, a close date, its addresses: the kept one at 254
+ * characters at 3 bytes each), each with its line of up to 16 digits: 1,279 bytes measured at the most, held at 2,048.
+ * tests/hubspot-import.test.ts measures each kind of row at its worst under it.
+ */
+export const HUBSPOT_ROW_SENT_BYTES = 2_048;
+
+/**
+ * How many bytes of the answer one byte of the request can come back as: three, a byte that is not UTF-8 being read as
+ * the replacement character (U+FFFD, three bytes); every other character comes back at most as long as it came.
+ */
+export const HUBSPOT_ECHO_FACTOR = 3;
+
+/**
+ * The most the answer says of pipelines and stages: at most MAX_PIPELINES pipelines, each made with up to MAX_STAGES
+ * stages, or with up to MAX_STAGES stages made in it or joined to its won or lost one, every name at 3 bytes a
+ * character with its keys.
+ */
+export const HUBSPOT_PIPELINES_SENT_BYTES = MAX_PIPELINES * (MAX_PIPELINE_NAME * 3 + 32 + MAX_STAGES * (MAX_STAGE_NAME * 3 + 8) + MAX_STAGES * (MAX_PIPELINE_NAME * 3 + 2 * MAX_STAGE_NAME * 3 + 48));
+
+/**
+ * The most one answer of the route weighs (coordinator's MEDIUM on #2048, 29th batch: a file of 757,129 bytes was
+ * answered with 1,436,478, and nothing priced what was sent or received): what it repeats of the file
+ * (HUBSPOT_ECHO_FACTOR times HUBSPOT_BODY_BYTES), HUBSPOT_ROW_SENT_BYTES for each of HUBSPOT_MAX_ROWS rows, the
+ * pipelines' part and the summary's own keys and counts. Priced on every dry run and save with the request's own bytes (tests/plan-cost-registry.ts,
+ * HUBSPOT_REQUEST_WIRE), and held by the code: an answer that would weigh more is sent with its counts only
+ * (hubSpotAnswerBody), so what is sent never passes what is priced.
+ */
+export const HUBSPOT_SENT_MAX_BYTES = HUBSPOT_ECHO_FACTOR * HUBSPOT_BODY_BYTES + HUBSPOT_MAX_ROWS * HUBSPOT_ROW_SENT_BYTES + HUBSPOT_PIPELINES_SENT_BYTES + 1_024;
+
+/** Said when the lists of an answer are left out to keep it within HUBSPOT_SENT_MAX_BYTES. */
+export const HUBSPOT_LISTS_LEFT_OUT = "The list of rows is too long to show, so only the counts are shown. Bring the file in as two smaller files to see each row.";
+
+/** The answer the route sends for a summary, never past HUBSPOT_SENT_MAX_BYTES (counted as sent, in UTF-8). */
+export function hubSpotAnswerBody(summary: HubSpotImportSummary): string {
+  const whole = JSON.stringify({ ok: true, summary });
+  if (Buffer.byteLength(whole) <= HUBSPOT_SENT_MAX_BYTES) return whole;
+  return JSON.stringify({ ok: true, summary: { ...summary, alreadyThereDeals: [], refused: [], notices: [], ignored: [], listsLeftOut: true }, message: HUBSPOT_LISTS_LEFT_OUT });
+}
+
+/** What the data room counts for a slot's own field while it is there (TAKE_DATA, lib/store-data.ts). */
+const NEW_FIELD_BYTES = 64;
+
+/** A whole count of bytes as the room keeps it, or null: anything else is unknown. */
+const roomCount = (value: unknown): number | null => {
+  if (value === null) return 0;
+  if (typeof value !== "string" || !/^(0|[1-9][0-9]{0,15})$/.test(value)) return null;
+  const n = Number(value);
+  return Number.isSafeInteger(n) ? n : null;
+};
+
+/**
+ * What the store's data room holds now, as TAKE_DATA (lib/store-data.ts) counts it before it decides: the kept
+ * total less every month's hold already over (its bytes and its own field's 64), which the script lets go on its
+ * next run (Revisor 2 on #2048). Null when any reply is not in its shape: unknown, never empty.
+ */
+async function liveDataUsed(store: Store, now: number): Promise<number | null> {
+  const key = dataKey(store);
+  if (!key) return null;
+  const head = repliesFor(await redisPipeline([["HMGET", key, "#", "~"]]).catch(() => null), 1)?.[0];
+  if (!Array.isArray(head) || head.length !== 2) return null;
+  const total = roomCount(head[0]);
+  const listed = head[1];
+  if (total === null || (listed !== null && typeof listed !== "string")) return null;
+  const month = monthOf(now);
+  const over = (typeof listed === "string" ? listed : "").split(",").filter((m: string) => /^\d{4}-\d{2}$/.test(m) && m < month);
+  if (!over.length) return total;
+  const held = repliesFor(await redisPipeline([["HMGET", key, ...over.map((m) => `~${m}`)]]).catch(() => null), 1)?.[0];
+  if (!Array.isArray(held) || held.length !== over.length) return null;
+  let lapsed = 0;
+  for (const raw of held) {
+    const n = roomCount(raw);
+    if (n === null) return null;
+    if (n > 0) lapsed += n + 64;
+  }
+  return Math.max(0, total - lapsed);
+}
+
+/**
+ * Brings a HubSpot deals file into the store's CRM, or, with `write` false,
+ * says what it would do (the dry run: nothing is written, no lock, no rows
+ * counted). `bytes` is what the request carried, counted with the rows.
+ */
+export async function importHubSpotDeals(store: Store, file: HubSpotFile, options: { write: boolean; statedCurrency?: string; bytes?: number; now?: number }): Promise<HubSpotImportResult> {
+  const now = options.now ?? Date.now();
+  const nowSeconds = Math.floor(now / 1000);
+  if (hubSpotFileOf(file.header) !== "deals") {
+    const columns = hubSpotDealColumns(file.header);
+    if (columns.title >= 0 && columns.stage >= 0 && columns.recordId < 0) return refuse("no_record_id", HUBSPOT_IMPORT_WORDS.no_record_id);
+    return refuse("not_hubspot", HUBSPOT_IMPORT_WORDS.not_hubspot);
+  }
+  const statsId = store.statsId;
+  if (!statsId) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
+
+  let held: Held | null = null;
+  let counted = 0;
+  try {
+    if (options.write) held = await takeCrmLock(statsId);
+    const snapshot = await importSnapshot(statsId);
+    // The file's pipelines may be as many as a store holds, less the store's own ones the file does not name.
+    const firstPipeline = snapshot.pipelines[0].name;
+    const pipelineAt = hubSpotDealColumns(file.header).pipeline;
+    const named = new Set(file.rows.map((r) => ((pipelineAt >= 0 ? oneLine(r[pipelineAt]) : "") || firstPipeline).toLowerCase()));
+    const fileRoom = MAX_PIPELINES - snapshot.pipelines.filter((p) => !named.has(p.name.toLowerCase())).length;
+    // The deals that really come in are counted below, once the rows already here or past a pipeline are set aside.
+    const plan = planHubSpotDeals(file, { currency: store.currency, statedCurrency: options.statedCurrency ?? "", pipelineRoom: fileRoom, dealRoom: Number.POSITIVE_INFINITY, firstPipeline });
+    if (!plan.ok) return refuse("too_many", plan.sentence);
+    // A person deleted from the store is never brought back by a file (app/privacy/delete: "no import puts you back";
+    // Claude 5 on #2048): their deal comes in without the address, and neither the deal nor the summary names it. One
+    // HMGET of the store's prints, read exactly (an unknown reply refuses); checked again where the deals are written.
+    const addresses = [...new Set(plan.deals.map((d) => d.email).filter((e) => e))];
+    const erasedNow = await suppressedAmong(store.listId, addresses);
+    for (const d of plan.deals) {
+      if (d.email && erasedNow.has(d.email)) {
+        d.email = "";
+        d.emailNote = ERASED_NOTE;
+      }
+    }
+    // A pipeline past what a store holds is past the plan's too: its rows say the plan's room.
+    const planRoom = Math.max(0, Math.min(pipelineLimit(store, nowSeconds), MAX_PIPELINES) - snapshot.pipelines.length);
+    for (const r of plan.refused) if (r.reason === pipelineRoomReason(fileRoom)) r.reason = pipelineRoomReason(planRoom);
+    const taken = [...new Set(plan.deals.flatMap((d) => (d.recordId && RECORD_ID.test(d.recordId) && snapshot.dealIds.has(hubSpotDealId(d.recordId)) ? [hubSpotDealId(d.recordId)] : [])))];
+    const marks = await readDealMarks(statsId, taken);
+    const { summary, pipelines, deals } = planAgainst(store, plan, snapshot, marks, nowSeconds);
+    if (snapshot.dealIds.size + deals.length > MAX_DEALS) return refuse("too_many", tooManyDealsSentence(deals.length, MAX_DEALS - snapshot.dealIds.size));
+    if (!held) return { ok: true, summary };
+
+    // The room, from one cheap read, before anything is taken (Claude 1 on #2048): every change an import takes is
+    // by difference (importRoom), so their sum is exactly what it grows the store by. A file that cannot fit is
+    // refused here, before the month's rows and before the room's work for each deal, so sending it again and again
+    // costs a read each time. A room that cannot be read is unknown, never empty: refused as unavailable. The
+    // per-deal take below still decides, in one step; this only refuses what it would surely refuse.
+    const room = importRoom(snapshot.raw, pipelines, deals);
+    // Each new slot's own field is counted too, as TAKE_DATA counts it (64 bytes, lib/store-data.ts; Claude 5 on #2048):
+    // every deal here is new (an id already here is never written over), and the pipelines' slot is new only when the
+    // store has no pipelines record yet. Counted short of that, a file could pass here and take the month's rows and
+    // the room's work for each deal before the take refused it.
+    const newFields = deals.length + (pipelines && !snapshot.raw ? 1 : 0);
+    const grows = room.take.reduce((sum, change) => sum + change.bytes, 0) + NEW_FIELD_BYTES * newFields;
+    const used = await liveDataUsed(store, now);
+    if (used === null) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
+    if (grows > 0 && used + grows > contentRoomFor(store, nowSeconds)) return refuse("store_full", dataFullWords(used, dataRoomFor(store, nowSeconds), largerPlanFor(store, nowSeconds)));
+
+    // Nothing to write (every deal already here, no pipeline or stage to make): writeImport would return at once, so no
+    // month's rows are taken for it. A file sent again, as "unconfirmed" asks, never spends the month on deals already
+    // here (coordinator's MEDIUM 1 on #2048, 18th batch).
+    if (!pipelines && !deals.length) return { ok: true, summary: { ...summary, written: true } };
+    // The month's rows first, then the room: the room's work for each deal is done only for rows the month still has,
+    // so a file refused for the month costs nothing per deal (Codex J on #2048). Nothing is written until both are taken.
+    // Only the deals that really come in are counted, and the request's bytes in the same share: a row already here,
+    // refused or past a pipeline is written by nobody.
+    const share = file.rows.length > 0 ? Math.ceil(((options.bytes ?? 0) * deals.length) / file.rows.length) : 0;
+    const rows = await takeImportRows(store, Math.max(deals.length, 1), now, share);
+    if (!rows.ok) {
+      if (rows.reason === "unavailable") return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
+      return refuse("rows_month", `Your store can bring in ${rowsWords(rows.limit)} a month from files, and this file would go past that. Nothing was brought in. Bring it in when your next billing month starts, or bring in a smaller file.`, rows.limit);
+    }
+    counted = rows.counted;
+    await needData(store, room.take);
+    const listId = store.listId;
+    await writeImport(statsId, held, snapshot.raw, pipelines, deals, store, listId ? { key: suppressedKey(listId), print: (email) => suppressionPrint(listId, email) } : { key: suppressedKey("none"), print: () => "" });
+    counted = 0;
+    return { ok: true, summary: { ...summary, written: true } };
+  } catch (error) {
+    // The month's rows go back only when the step surely wrote nothing; unconfirmed, they stay counted, as the room does.
+    if (counted && (error instanceof CrmSchemaConflict || error instanceof CrmPersonErased || error instanceof CrmDealsFull || error instanceof CrmLockLost || error instanceof LockBusyError || error instanceof DataRoomError)) await giveImportRows(store, counted, now).catch(() => undefined);
+    if (error instanceof LockBusyError) return refuse("busy", HUBSPOT_IMPORT_WORDS.busy);
+    if (error instanceof CrmLockLost) return refuse("lock_lost", HUBSPOT_IMPORT_WORDS.lock_lost);
+    if (error instanceof DataRoomError) return refuse("store_full", error.message);
+    if (error instanceof CrmSchemaConflict) return refuse("changed", HUBSPOT_IMPORT_WORDS.changed);
+    if (error instanceof CrmPersonErased) return refuse("erased", HUBSPOT_IMPORT_WORDS.erased);
+    if (error instanceof UnknownReplyError) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
+    if (error instanceof CrmDealsFull) return refuse("deals_full", HUBSPOT_IMPORT_WORDS.deals_full);
+    if (error instanceof CrmSchemaReadUnavailable || error instanceof CrmDealReadUnavailable) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
+    if (error instanceof CrmSchemaWriteUnconfirmed || error instanceof CrmDealWriteUnconfirmed) return refuse("unconfirmed", HUBSPOT_IMPORT_WORDS.unconfirmed);
+    throw error;
+  } finally {
+    if (held) await releaseLock(held);
+  }
+}

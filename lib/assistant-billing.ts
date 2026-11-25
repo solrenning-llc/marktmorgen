@@ -338,18 +338,33 @@ function isOwnInvoice(row: Record<string, unknown>, subscriptionId: string): boo
 }
 
 /**
- * Whether any of the add-on's last payments was disputed. The page is read in its exact shape (lib/stripe-list.ts):
- * a disputed charge on any readable row is a yes; "none disputed" is said only when every row of the page is readable
- * (each with its charge, or none, and that charge's own disputed true or false). Otherwise it throws, and nothing is
- * written on it this run (syncAssistant leaves the store as it is). The page is the last three payments by design, so
- * more invoices after them do not make it incomplete. A row is readable only when it is proven this add-on's own
- * (isOwnInvoice): another subscription's dispute is never a yes, and a row not proven own makes "none disputed"
- * unknown, so it throws and the next pass reads again, rather than setting a stop on a list that is not this add-on's.
+ * How long after a payment a card dispute can still be opened, at the longest the card networks allow (540 days); the
+ * add-on's invoices of that time are read for a dispute, not only the last few.
  */
-async function disputed(subscriptionId: string): Promise<boolean> {
+export const DISPUTE_WINDOW_DAYS = 540;
+/**
+ * One page of them: a monthly add-on has about 18 invoices in the window, so 100 leaves room for proration or manual
+ * invoices.
+ */
+export const DISPUTE_INVOICES_PAGE = 100;
+
+/**
+ * Whether any of the add-on's payments inside DISPUTE_WINDOW_DAYS was disputed. The page is read in its exact shape
+ * (lib/stripe-list.ts): a disputed charge on any readable row is a yes; "none disputed" is said only when every row of
+ * the page is readable (each with its charge, or none, and that charge's own disputed true or false). Otherwise it
+ * throws, and nothing is written on it this run (syncAssistant leaves the store as it is). The page is every invoice of
+ * the add-on created inside DISPUTE_WINDOW_DAYS, the longest a card payment can still be disputed after it was made
+ * (#5285 row #4443, Codex X6: the last three alone missed a dispute on an older payment); more of them than one page
+ * reads (has_more) is unknown, so it throws, never "none disputed". A row is readable only when it is proven this
+ * add-on's own (isOwnInvoice): another subscription's dispute is never a yes, and a row not proven own makes "none
+ * disputed" unknown, so it throws and the next pass reads again, rather than setting a stop on a list that is not this
+ * add-on's.
+ */
+async function disputed(subscriptionId: string, nowSeconds = Date.now() / 1000): Promise<boolean> {
   const chargeOf = (row: Record<string, unknown>) => ownField(row, "charge");
+  const since = String(Math.floor(nowSeconds - DISPUTE_WINDOW_DAYS * 86_400));
   const read = readStripePage(
-    await onPlatformAt(INVOICE_VERSION, "GET", `/invoices?${new URLSearchParams({ subscription: subscriptionId, limit: "3", "expand[]": "data.charge" })}`),
+    await onPlatformAt(INVOICE_VERSION, "GET", `/invoices?${new URLSearchParams({ subscription: subscriptionId, "created[gte]": since, limit: String(DISPUTE_INVOICES_PAGE), "expand[]": "data.charge" })}`),
     (row) => {
       if (!isOwnInvoice(row, subscriptionId)) return false;
       if (!hasOwnField(row, "charge")) return false;
@@ -361,6 +376,7 @@ async function disputed(subscriptionId: string): Promise<boolean> {
   );
   if (read.rows.some((row) => { const charge = chargeOf(row); return plainObject(charge) && ownField(charge, "disputed") === true; })) return true;
   if (read.unreadable) throw new StripeListUnreadable("an add-on invoice not readable");
+  if (read.hasMore) throw new StripeListUnreadable("more add-on invoices in the dispute window than one page reads");
   return false;
 }
 
@@ -381,7 +397,7 @@ export async function syncAssistant(store: Store, subscription?: Record<string, 
     let current = subscription ?? (await readSubscription(id));
     if (!isOwnReply(current, id)) throw new NotOwnReply(id);
     let disputedAt = store.assistantPlan?.disputedAt ?? "";
-    if (!disputedAt && current.status === "active" && (await disputed(id))) {
+    if (!disputedAt && current.status === "active" && (await disputed(id, nowSeconds))) {
       disputedAt = new Date(nowSeconds * 1000).toISOString();
     }
     // On a store whose add-on was disputed, any add-on subscription Stripe still charges is ended, on every sync until

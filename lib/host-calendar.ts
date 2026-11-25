@@ -47,6 +47,7 @@ import { type GoogleCalendar, MAX_READ_CALENDARS, ProviderError, googleCalendars
 import { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } from "@/lib/team-scheduling-rules";
 import { hostId } from "@/lib/host-claims";
 import type { Store } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 
 /**
  * How long a reading is used before the calendar is asked again: fifteen
@@ -181,6 +182,64 @@ async function readConfig(host: string): Promise<Config | null> {
 async function writeConfig(host: string, config: Config): Promise<void> {
   const [saved] = repliesFor(await redisPipeline([["SET", cfgKey(host), JSON.stringify(config)]]), 1) ?? [];
   if (saved !== "OK") throw new UnknownReplyError("a host's calendar settings write");
+}
+
+/**
+ * A host's settings written for a store's request, only while that store is live (Codex L-20261121-0242, -0338 and
+ * -0431; #5010 rows 54 to 56). The settings are the person's across stores, but the request was authorized by one
+ * store, and addHostIcs, setHostCalendars and removeHostIcs each wait on a calendar, on Google or on their own read
+ * before they write: the last store's closing walk may delete hostCalendarKeys(host) meanwhile, and a plain SET then
+ * wrote the sealed private iCal address, the busy times, the Google calendar ids and the address back after the walk.
+ * One EVAL proves the store's fence (lib/live-fence.ts: its erasing mark absent, and its id key still holding its own
+ * ref, or, for a store from before ids, its owner's record still carrying its statsId) and writes in the same step:
+ * the settings, then, by ARGV[5], the new reading kept and the last failure forgotten ("ics"), the last reading
+ * forgotten ("choices"), or both forgotten ("remove"). 1: written; 0: the store is gone, moved or being erased, and
+ * nothing was written; -1: the owner's record does not parse (unknown). A person who still serves another store may
+ * repeat the change from that store; a request from the erased one never writes again.
+ */
+const HOST_CONFIG_IF_STORE_LIVE = `-- marktmorgen:host-config-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[2] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[3] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[2] then return 0 end
+end
+redis.call("SET", KEYS[3], ARGV[4])
+if ARGV[5] == "ics" then
+  redis.call("SET", KEYS[4], ARGV[6], "EX", ARGV[7])
+  redis.call("DEL", KEYS[5])
+elseif ARGV[5] == "choices" then
+  redis.call("DEL", KEYS[4])
+else
+  redis.call("DEL", KEYS[4], KEYS[5])
+end
+return 1`;
+
+type FencedWrite = { kind: "ics"; reading: string } | { kind: "choices" } | { kind: "remove" };
+
+/** Writes `config` for `host`, fenced on `store` (HOST_CONFIG_IF_STORE_LIVE): "kept", "gone", or throws when unknown. */
+async function writeConfigWhileLive(
+  store: Pick<Store, "email" | "sid" | "extra" | "statsId">,
+  host: string,
+  config: Config,
+  write: FencedWrite,
+): Promise<"kept" | "gone"> {
+  const what = "a host's calendar settings write, fenced on its store";
+  const fence = await storeLiveFence(store);
+  // A store from before ids with no statsId cannot be told from its owner's next store: nothing is written.
+  if (fence.statsId === null) throw new UnknownReplyError(what);
+  const reply = repliesFor(await redisPipeline([[
+    "EVAL", HOST_CONFIG_IF_STORE_LIVE, 5, fence.live, fence.erasing, cfgKey(host), goodKey(host), errKey(host),
+    fence.field, fence.statsId, fence.ref, JSON.stringify(config), write.kind, write.kind === "ics" ? write.reading : "", KEEP_SECONDS,
+  ]]), 1);
+  const answer = reply?.[0];
+  if (answer === 1) return "kept";
+  if (answer === 0) return "gone";
+  throw new UnknownReplyError(what);
 }
 
 /** Forgets a host's last reading and last failure, only on a count Redis answered for it. */
@@ -319,7 +378,8 @@ export async function hostSync(
     if (!hostSyncOn()) return result(source, "off", good, "Google Calendar sync is not switched on for hosts yet. Add your calendar's private iCal address instead.");
     let conn: Awaited<ReturnType<typeof hostConnectionView>>;
     try {
-      conn = options.known ? hostConnectionFrom(options.known.conn) : await hostConnectionView(store.statsId, host);
+      // A prefetch with no connection in it (hostCalendarView's, conn undefined) reads the connection here, as before.
+      conn = options.known && options.known.conn !== undefined ? hostConnectionFrom(options.known.conn) : await hostConnectionView(store.statsId, host);
     } catch {
       // A connection that could not be read is not a missing one: the host stays blocked, told the truth.
       return result(source, "failed", good, "Your Google Calendar connection could not be checked just now.");
@@ -399,7 +459,12 @@ export type HostCalendarView = {
 export async function hostCalendarView(store: Store, email: string, tz: string): Promise<HostCalendarView> {
   const host = hostId(email);
   const statsId = store.statsId ?? "";
-  const config = (statsId ? await readConfig(host) : null) ?? emptyConfig(email);
+  // The settings, last reading and last failure in one command, read once for the page and handed to hostSync below,
+  // which read the settings again (#5010 row 150 (b): the route's whole request, measured against its unit).
+  const kept = statsId && isRedisConfigured()
+    ? storedReply(await redisPipeline([["MGET", cfgKey(host), goodKey(host), errKey(host)]]), 3)
+    : null;
+  const config = (kept ? parseConfig(kept[0]) : null) ?? emptyConfig(email);
   let conn: Awaited<ReturnType<typeof hostConnectionView>> = null;
   let googleUnread = false;
   if (statsId) {
@@ -434,7 +499,7 @@ export async function hostCalendarView(store: Store, email: string, tz: string):
     const opened = unseal(config.ics, icsContext(host));
     ics = { provider: opened.ok ? providerOf(opened.value) : "Calendar", addedAt: config.icsAddedAt };
   }
-  const sync = await hostSync(store, email, tz, { refresh: false });
+  const sync = await hostSync(store, email, tz, { refresh: false, ...(kept ? { known: { cfg: kept[0], good: kept[1], err: kept[2], conn: undefined } } : {}) });
   return {
     email: config.email || email.toLowerCase(),
     source: config.source,
@@ -509,10 +574,9 @@ export async function setHostCalendars(store: Store, email: string, read: string
   if (chosen.length > MAX_READ_CALENDARS || chosen.some((id) => !ids.has(id))) return "calendars";
   if (write && !listed.some((c) => c.id === write && c.writable)) return "write";
   const config = (await readConfig(host)) ?? emptyConfig(email);
-  await writeConfig(host, { ...config, email: email.toLowerCase(), read: chosen, write });
-  // Read again at the next look, with the new choice.
-  await redisPipeline([["DEL", goodKey(host)]]);
-  return null;
+  // Kept, and the last reading forgotten so the next look reads the new choice, only while the store is live.
+  const kept = await writeConfigWhileLive(store, host, { ...config, email: email.toLowerCase(), read: chosen, write }, { kind: "choices" });
+  return kept === "kept" ? null : "unavailable";
 }
 
 export type AddIcsResult = { ok: true } | { ok: false; message: string };
@@ -538,29 +602,30 @@ export async function addHostIcs(store: Store, email: string, raw: string, tz: s
   }
   const host = hostId(email);
   const config = (await readConfig(host)) ?? emptyConfig(email);
-  await writeConfig(host, {
+  const reading: Good = { at: now, busy, source: "ics" };
+  // The sealed address, the busy times read and the forgotten failure, in one step, only while the store is live.
+  const kept = await writeConfigWhileLive(store, host, {
     ...config,
     email: email.toLowerCase(),
     source: "ics",
     ics: seal(url, icsContext(host)),
     icsAddedAt: new Date(now).toISOString(),
-  });
-  const reading: Good = { at: now, busy, source: "ics" };
-  await redisPipeline([
-    ["SET", goodKey(host), JSON.stringify(reading), "EX", KEEP_SECONDS],
-    ["DEL", errKey(host)],
-  ]);
+  }, { kind: "ics", reading: JSON.stringify(reading) });
+  if (kept === "gone") return { ok: false, message: "This store changed while the calendar was being read, so nothing was added." };
   return { ok: true };
 }
 
-/** Forgets a host's iCal address and what was read from it. */
-export async function removeHostIcs(store: Pick<Store, "statsId">, email: string): Promise<void> {
+/**
+ * Forgets a host's iCal address and what was read from it, in one step fenced on the store. A store gone, moved or
+ * being erased writes nothing: the closing walk has removed (or will remove) the settings, and what was asked for, the
+ * address forgotten, holds; a snapshot read before the walk is never written back after it.
+ */
+export async function removeHostIcs(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, email: string): Promise<void> {
   if (!store.statsId) return;
   const host = hostId(email);
   const config = await readConfig(host);
   if (!config) return;
-  await writeConfig(host, { ...config, ics: "", icsAddedAt: "", source: config.source === "ics" ? "none" : config.source });
-  await forgetReadings(host);
+  await writeConfigWhileLive(store, host, { ...config, ics: "", icsAddedAt: "", source: config.source === "ics" ? "none" : config.source }, { kind: "remove" });
 }
 
 /**

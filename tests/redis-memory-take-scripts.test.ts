@@ -23,6 +23,17 @@ const CASES: Record<string, Case[]> = {
     { what: "an id key holding another ref", setup: [["SET", "k:id", "ref2"], ["SET", "k:about", "old"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "0", "", "new", "ref1"] },
     { what: "an erasing store", setup: [["SET", "k:id", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:id", "k:erasing", "k:about"], argv: ["f1", "0", "", "new", "ref1"] },
   ],
+  "ad-spend-live:v1": [
+    { what: "an id key holding its ref, a fresh line", setup: [["SET", "k:live", "ref1"]], keys: ["k:live", "k:erasing", "k:spend"], argv: ["f1", "", "ref1", "fresh", "a1b2c3d4", "{}", 34560000] },
+    { what: "an id key holding its ref, a line kept once", setup: [["SET", "k:live", "ref1"]], keys: ["k:live", "k:erasing", "k:spend"], argv: ["f1", "", "ref1", "once", "a1b2c3d4", "{}", 34560000] },
+    { what: "a line already kept once", setup: [["SET", "k:live", "ref1"], ["HSET", "k:spend", "a1b2c3d4", "{}"]], keys: ["k:live", "k:erasing", "k:spend"], argv: ["f1", "", "ref1", "once", "a1b2c3d4", "{}", 34560000] },
+    { what: "an id key holding another ref", setup: [["SET", "k:live", "ref2"]], keys: ["k:live", "k:erasing", "k:spend"], argv: ["f1", "", "ref1", "fresh", "a1b2c3d4", "{}", 34560000] },
+    { what: "an owner's record carrying its statsId", setup: [["SET", "k:live", record("st1")]], keys: ["k:live", "k:erasing", "k:spend"], argv: ["f1", "st1", "", "fresh", "a1b2c3d4", "{}", 34560000] },
+    { what: "an owner's record of another store", setup: [["SET", "k:live", record("st2")]], keys: ["k:live", "k:erasing", "k:spend"], argv: ["f1", "st1", "", "fresh", "a1b2c3d4", "{}", 34560000] },
+    { what: "an owner's record that does not parse", setup: [["SET", "k:live", "{not json"]], keys: ["k:live", "k:erasing", "k:spend"], argv: ["f1", "st1", "", "fresh", "a1b2c3d4", "{}", 34560000] },
+    { what: "an erasing store", setup: [["SET", "k:live", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:live", "k:erasing", "k:spend"], argv: ["f1", "", "ref1", "once", "a1b2c3d4", "{}", 34560000] },
+    { what: "an unknown mode", setup: [["SET", "k:live", "ref1"]], keys: ["k:live", "k:erasing", "k:spend"], argv: ["f1", "", "ref1", "other", "a1b2c3d4", "{}", 34560000] },
+  ],
   "card-open-live:v1": [
     { what: "a live store", setup: [["SET", "k:id", "s1"]], keys: ["k:id", "k:erasing", "k:open"], argv: ["f1", "sess", 600] },
     { what: "no store", setup: [], keys: ["k:id", "k:erasing", "k:open"], argv: ["f1", "sess", 600] },

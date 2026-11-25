@@ -15,6 +15,7 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import * as adSpend from "@/lib/ad-spend";
+import { spendOwner } from "./spend-owner";
 import { StatsPanel } from "@/components/stats-panel";
 import { readStats, studioStats, type StatsData } from "@/lib/stats";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
@@ -38,7 +39,7 @@ const fixture = (async () => {
   await ensureStatsId(OWNER);
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
-  assert.equal((await adSpend.addSpend(statsId, { channel: "instagram", campaign: "", cents: 1200, from: today, to: today })).ok, true);
+  assert.equal((await adSpend.addSpend(statsId, { channel: "instagram", campaign: "", cents: 1200, from: today, to: today }, Date.now(), spendOwner(statsId))).ok, true);
   redis.run(["SET", `nl:metaads:conn:${statsId}`, JSON.stringify({ user: "10150000000000009", token: "sealed", accounts: [{ id: "act_111", name: "Harbor Ads", currency: "usd" }], account: "act_111", sid: store.sid, owner: { email: OWNER, handle: store.handle } })]);
   redis.run(["SET", `nl:stats:${statsId}:spend:meta`, JSON.stringify([META_LINE])]);
   const stats = await readStats(store, Date.now());

@@ -7,6 +7,7 @@
 import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/spend/route";
 import { addSpend, readSpends } from "@/lib/ad-spend";
+import { spendOwner } from "./spend-owner";
 import { spendStore } from "./ad-spend-remove-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -19,7 +20,7 @@ const realPipeline = redis.pipeline.bind(redis);
 async function seed(): Promise<string> {
   redis.clear();
   redis.pipeline = realPipeline as typeof redis.pipeline;
-  const added = await addSpend(statsId, { channel: "instagram", campaign: "spring", cents: 2500, from: day, to: day }, now);
+  const added = await addSpend(statsId, { channel: "instagram", campaign: "spring", cents: 2500, from: day, to: day }, now, spendOwner(statsId));
   if (!added.ok) throw new Error("seeding the spend failed");
   return added.spends[0].id;
 }

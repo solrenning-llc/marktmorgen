@@ -9,6 +9,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { addSpend } from "@/lib/ad-spend";
+import { isSpendWrite, spendOwner } from "./spend-owner";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 
@@ -24,7 +25,7 @@ async function rows(): Promise<number[]> {
   return (raw as string[]).filter((_, i) => i % 2 === 1).map((text) => (JSON.parse(text) as { cents: number }).cents);
 }
 async function withWrite<T>(answer: (commands: Command[]) => Promise<unknown>, run: () => Promise<T>): Promise<T> {
-  redis.pipeline = (async (commands: Command[]) => (commands.some((c) => c[0] === "HSET") ? answer(commands) : real(commands))) as typeof redis.pipeline;
+  redis.pipeline = (async (commands: Command[]) => (isSpendWrite(commands) ? answer(commands) : real(commands))) as typeof redis.pipeline;
   try {
     return await run();
   } finally {
@@ -38,7 +39,7 @@ test("a write whose round trip failed and that has not landed yet is unknown, ne
   const outcome = await withWrite(async (commands) => {
     pending.push(commands);
     throw new Error("synthetic: the client gave up; whether the write completes is unresolved");
-  }, () => addSpend(SID, LINE).then((result) => result, (error: unknown) => (error instanceof UnknownReplyError ? "unknown" : error)));
+  }, () => addSpend(SID, LINE, Date.now(), spendOwner(SID)).then((result) => result, (error: unknown) => (error instanceof UnknownReplyError ? "unknown" : error)));
   assert.equal(outcome, "unknown", "an unresolved write is never answered as known not saved");
   assert.deepEqual(await rows(), [], "nothing has landed yet");
   // Completing late, it is one line, and the creator was told to reload and see it, not to type it again.
@@ -51,20 +52,20 @@ test("control: a write whose round trip failed after it landed is removed by its
   const result = await withWrite(async (commands) => {
     await real(commands);
     throw new Error("synthetic: the write was applied and its receipt lost");
-  }, () => addSpend(SID, LINE));
+  }, () => addSpend(SID, LINE, Date.now(), spendOwner(SID)));
   assert.deepEqual(result, { ok: false, reason: "unavailable" });
   assert.deepEqual(await rows(), []);
 });
 
 test("control: a write that answered in another shape ran, and is refused as nothing saved", async () => {
   redis.clear();
-  const result = await withWrite(async () => [], () => addSpend(SID, LINE));
+  const result = await withWrite(async () => [], () => addSpend(SID, LINE, Date.now(), spendOwner(SID)));
   assert.deepEqual(result, { ok: false, reason: "unavailable" });
   assert.deepEqual(await rows(), []);
 });
 
 test("control: a healthy add is saved once", async () => {
   redis.clear();
-  assert.equal((await addSpend(SID, LINE)).ok, true);
+  assert.equal((await addSpend(SID, LINE, Date.now(), spendOwner(SID))).ok, true);
   assert.deepEqual(await rows(), [1200]);
 });

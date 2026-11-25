@@ -8,6 +8,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { addSpend } from "@/lib/ad-spend";
+import { spendOwner } from "./spend-owner";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
 import { store as redis } from "./redis-stub";
 
@@ -35,7 +36,7 @@ test("a prune that fails after the line is written still answers saved, never 'd
   }) as typeof redis.pipeline;
   let answer: Awaited<ReturnType<typeof addSpend>> | Error;
   try {
-    answer = await addSpend(SID, { channel: "tiktok", campaign: "", cents: 1200, from: today, to: today, op: OP }).catch((error: Error) => error);
+    answer = await addSpend(SID, { channel: "tiktok", campaign: "", cents: 1200, from: today, to: today, op: OP }, Date.now(), spendOwner(SID)).catch((error: Error) => error);
   } finally {
     redis.pipeline = real;
   }
@@ -47,7 +48,7 @@ test("a prune that fails after the line is written still answers saved, never 'd
 
 test("control: with the prune answered, the oldest line goes and the add is saved", async () => {
   await full();
-  const answer = await addSpend(SID, { channel: "tiktok", campaign: "", cents: 1200, from: today, to: today, op: OP });
+  const answer = await addSpend(SID, { channel: "tiktok", campaign: "", cents: 1200, from: today, to: today, op: OP }, Date.now(), spendOwner(SID));
   assert.equal(answer.ok, true);
   assert.equal((await real([["HEXISTS", KEY, "00000000"]]))[0], 0);
   assert.equal((await real([["HLEN", KEY]]))[0], MAX_SPEND_ENTRIES);

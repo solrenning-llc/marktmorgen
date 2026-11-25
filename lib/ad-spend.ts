@@ -20,12 +20,67 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type AdSpend, MAX_SPEND_ENTRIES, readSpend, type SpendUnread } from "@/lib/ad-spend-rules";
 import { metaLines } from "@/lib/meta-ads";
+import type { Store } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 
 const key = (statsId: string) => `nl:stats:${statsId}:spend`;
 const ID = /^(?:[a-f0-9]{8}|[a-f0-9]{32})$/;
 /** An add's operation id, as components/ad-spend-editor.tsx makes it (Codex Z on #2924; C1-20261107-2118-C4-1 item 5). */
 const OP = /^[a-f0-9]{32}$/;
 const KEEP_SECONDS = 400 * 86_400;
+
+/** The store a spend line is written for: its fence (lib/live-fence.ts) is read in the same step as the write. */
+export type SpendOwner = Pick<Store, "email" | "sid" | "extra" | "statsId">;
+
+/**
+ * One add's write, fenced on its store being live (Codex L-20261119-1621, row 100 of #5010): the studio's request read
+ * the store and its kept lines before the write, and a whole-store erasure that began or ended in between must not get
+ * the store's private campaign lines back. The rule of lib/live-fence.ts (store-cache-live:v3): the erasing field
+ * absent, and the id key holding this store's own ref, or, for a store kept from before ids, the owner's record still
+ * carrying its statsId. Then the write, HSETNX ("once", an add with the studio's operation id) or HSET ("fresh", an
+ * older page's add under a fresh id), and its EXPIRE, answered as the same two-number receipt as before: {written,
+ * expired}. {-1}: gone, moved or erasing, nothing written; {-2}: the owner's record does not parse, or the mode is
+ * neither once nor fresh, nothing written.
+ */
+export const SPEND_IF_STORE_LIVE = `-- marktmorgen:ad-spend-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return {-1} end
+if ARGV[2] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[3] then return {-1} end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return {-1} end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return {-2} end
+  if record["statsId"] ~= ARGV[2] then return {-1} end
+end
+local written
+if ARGV[4] == "once" then written = redis.call("HSETNX", KEYS[3], ARGV[5], ARGV[6])
+elseif ARGV[4] == "fresh" then written = redis.call("HSET", KEYS[3], ARGV[5], ARGV[6])
+else return {-2} end
+return {written, redis.call("EXPIRE", KEYS[3], ARGV[7])}`;
+
+/** Billed for one fenced write: the EVAL counted as 1, the two guard reads, the HSET or HSETNX and the EXPIRE. */
+export const SPEND_WRITE_COMMANDS = 5;
+
+/** The store was gone, moved or being erased when the write would have landed: nothing was written. */
+class SpendStoreGone extends Error {}
+
+/**
+ * The fenced write's receipt: the two numbers of the write and its EXPIRE as before, or null for any other answer.
+ * SpendStoreGone when the fence refused it (nothing written). A failed round trip rejects, as the pipeline did.
+ */
+async function fencedReceipt(owner: SpendOwner, statsId: string, mode: "once" | "fresh", id: string, value: string): Promise<unknown[] | null> {
+  if (owner.statsId !== statsId) throw new SpendStoreGone("a spend line asked for another store's statsId");
+  const fence = await storeLiveFence(owner);
+  if (fence.statsId === null) throw new SpendStoreGone("a store from before ids with no statsId cannot be fenced");
+  const outer = repliesFor(await redisPipeline([[
+    "EVAL", SPEND_IF_STORE_LIVE, 3, fence.live, fence.erasing, key(statsId),
+    fence.field, fence.statsId, fence.ref, mode, id, value, KEEP_SECONDS,
+  ]]), 1);
+  const inner = outer?.[0];
+  if (Array.isArray(inner) && inner.length === 1 && inner[0] === -1) throw new SpendStoreGone("the store is gone or being erased");
+  return Array.isArray(inner) ? repliesFor(inner, 2) : null;
+}
 
 /**
  * The typed entries of a hash's fields and values, whole or not at all (CX-123 rule 24; Codex Z on #2924): every
@@ -185,14 +240,13 @@ export async function spendsForReport(statsId: string | null, unreadAs: AdSpend[
  * nothing (0) proves only that it has not landed yet, so that outcome is unknown too; only an HDEL that removed the
  * line (1), or a write that answered in some shape (it ran), lets the add be refused as nothing saved.
  */
-async function written(statsId: string, id: string, value: string): Promise<boolean> {
+async function written(statsId: string, id: string, value: string, owner: SpendOwner): Promise<boolean> {
   let unresolved = false;
-  const receipt = await redisPipeline([
-    ["HSET", key(statsId), id, value],
-    ["EXPIRE", key(statsId), KEEP_SECONDS],
-  ]).then(
-    (replies) => repliesFor(replies, 2),
+  const receipt = await fencedReceipt(owner, statsId, "fresh", id, value).then(
+    (replies) => replies,
     (error: unknown) => {
+      // The fence refused it: nothing was written, so there is nothing to undo, and nothing is saved.
+      if (error instanceof SpendStoreGone) throw error;
       console.error("writing an ad spend line answered no receipt", error);
       unresolved = true;
       return null;
@@ -217,13 +271,11 @@ async function written(statsId: string, id: string, value: string): Promise<bool
  * other receipt, or none, is unknown and throws (UnknownReplyError), and the line is never undone: under an id the
  * tries share, an undoing could take away a try that saved. Trying the same add again is what is safe.
  */
-async function keptOnce(statsId: string, op: string, value: string): Promise<void> {
-  const receipt = await redisPipeline([
-    ["HSETNX", key(statsId), op, value],
-    ["EXPIRE", key(statsId), KEEP_SECONDS],
-  ]).then(
-    (replies) => repliesFor(replies, 2),
+async function keptOnce(statsId: string, op: string, value: string, owner: SpendOwner): Promise<void> {
+  const receipt = await fencedReceipt(owner, statsId, "once", op, value).then(
+    (replies) => replies,
     (error: unknown) => {
+      if (error instanceof SpendStoreGone) throw error;
       console.error("writing an ad spend line answered no receipt", error);
       return null;
     },
@@ -234,7 +286,8 @@ async function keptOnce(statsId: string, op: string, value: string): Promise<voi
 export async function addSpend(
   statsId: string,
   input: { channel: unknown; campaign?: unknown; cents: unknown; from: unknown; to: unknown; op?: unknown },
-  now = Date.now(),
+  now: number,
+  owner: SpendOwner,
 ): Promise<({ ok: true } & SpendRead) | { ok: false; reason: "channel" | "amount" | "days" | "unavailable" }> {
   const read = readSpend(input, now);
   if (!read.ok) return read;
@@ -247,13 +300,25 @@ export async function addSpend(
   if (op) {
     // An add with the studio's operation id: kept once under it, and not written again once it is kept.
     id = op;
-    if (!before.some((s) => s.id === op)) await keptOnce(statsId, op, JSON.stringify(read.spend));
+    if (!before.some((s) => s.id === op)) {
+      try {
+        await keptOnce(statsId, op, JSON.stringify(read.spend), owner);
+      } catch (error) {
+        // The store's erasure began or ended while the studio's add was under way: nothing written, nothing saved.
+        if (error instanceof SpendStoreGone) return { ok: false, reason: "unavailable" };
+        throw error;
+      }
+    }
   } else {
     // No operation id (an older page): a fresh id no kept line has, so this add's write and its undoing touch only
     // this add's own line.
     id = randomBytes(4).toString("hex");
     while (before.some((s) => s.id === id)) id = randomBytes(4).toString("hex");
-    if (!(await written(statsId, id, JSON.stringify(read.spend)))) return { ok: false, reason: "unavailable" };
+    const saved = await written(statsId, id, JSON.stringify(read.spend), owner).catch((error: unknown) => {
+      if (error instanceof SpendStoreGone) return false;
+      throw error;
+    });
+    if (!saved) return { ok: false, reason: "unavailable" };
   }
   const known = (before.some((s) => s.id === id) ? before : [...before, { id, ...read.spend }]).sort(byDay);
   const keep = known.slice(-MAX_SPEND_ENTRIES);

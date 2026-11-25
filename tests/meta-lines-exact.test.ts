@@ -10,6 +10,7 @@ import { test } from "node:test";
 import { NextRequest } from "next/server";
 import { metaLines } from "@/lib/meta-ads";
 import { addSpend, readSpends } from "@/lib/ad-spend";
+import { spendOwner } from "./spend-owner";
 import { askNumbers } from "@/lib/numbers-ask";
 import type { StatsData } from "@/lib/stats";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
@@ -46,7 +47,7 @@ const fixture = (async () => {
   await setSubscription(OWNER, { customerId: "cus_MetaLines01", subscriptionId: "sub_MetaLines01", active: true, tier: "pro", period: paidPeriod() });
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
-  const added = await addSpend(statsId, { channel: "instagram", campaign: "", cents: 1200, from: today, to: today });
+  const added = await addSpend(statsId, { channel: "instagram", campaign: "", cents: 1200, from: today, to: today }, Date.now(), spendOwner(statsId));
   assert.equal(added.ok, true);
   redis.run(["SET", connKey(statsId), JSON.stringify({ user: "10150000000000009", token: "sealed", accounts: [{ id: "act_111", name: "Harbor Ads", currency: "usd" }, { id: "act_222", name: "Other", currency: "usd" }], account: "act_111", sid: store.sid, owner: { email: OWNER, handle: store.handle } })]);
   redis.run(["SET", linesKey(statsId), JSON.stringify([META_LINE])]);

@@ -18,6 +18,7 @@ import { test } from "node:test";
 import { NextRequest } from "next/server";
 import { finishMeta, metaView } from "@/lib/meta-ads";
 import { addSpend } from "@/lib/ad-spend";
+import { spendOwner } from "./spend-owner";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as spendRoute } from "@/app/api/store/spend/route";
@@ -203,7 +204,7 @@ async function post(cookie: string, body: Record<string, unknown>): Promise<{ st
 test("the spend route says how many kept entries could not be read, and removes exactly those by key", async () => {
   const { statsId, cookie } = await fresh();
   redis.run(["DEL", connKey(statsId)]);
-  assert.equal((await addSpend(statsId, LINE)).ok, true);
+  assert.equal((await addSpend(statsId, LINE, Date.now(), spendOwner(statsId))).ok, true);
   redis.run(["HSET", spendKey(statsId), "deadbeef", "{"]);
   const refused = await post(cookie, { action: "add", ...LINE });
   assert.deepEqual([refused.status, refused.answer.error, refused.answer.unreadable], [503, "unread", 1], "the add is refused and says one entry could not be read");
@@ -218,7 +219,7 @@ test("the spend route says how many kept entries could not be read, and removes 
 test("removing unreadable entries: a hash read in no known shape removes nothing", async () => {
   const { statsId, cookie } = await fresh();
   redis.run(["DEL", connKey(statsId)]);
-  await addSpend(statsId, LINE);
+  await addSpend(statsId, LINE, Date.now(), spendOwner(statsId));
   redis.run(["HSET", spendKey(statsId), "deadbeef", "{"]);
   answerOnce((commands) => commands.length === 1 && commands[0][0] === "HGETALL", []);
   const removed = await post(cookie, { action: "remove-unreadable" }).finally(() => (redis.pipeline = real));
@@ -238,7 +239,7 @@ test("removing unreadable entries: an HDEL answered in no known shape is not 're
 test("removing unreadable entries control: with every entry readable, nothing is removed", async () => {
   const { statsId, cookie } = await fresh();
   redis.run(["DEL", connKey(statsId)]);
-  await addSpend(statsId, LINE);
+  await addSpend(statsId, LINE, Date.now(), spendOwner(statsId));
   const removed = await post(cookie, { action: "remove-unreadable" });
   assert.equal(removed.status, 200);
   assert.equal(redis.run(["HLEN", spendKey(statsId)]), 1);

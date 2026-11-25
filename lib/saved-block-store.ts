@@ -88,6 +88,11 @@ export async function readSection(statsId: string, id: string): Promise<SavedSec
 /**
  * Capacity and identity are checked with the write: a new section only while
  * the library has room, an edit only of a section that is still there.
+ * No application code writes with it any more: saved sections (writeSection)
+ * and saved sales filters (lib/sales-filters.ts) run SAVE_STORE_SECTION, which
+ * runs these same checks after the store's fence. It stays exported, unchanged,
+ * only for scripts/test_funnel_share_redis.py, which races these checks on a
+ * real Redis, and for tests/saved-section-store-erasure.test.ts.
  */
 export const SAVE_SECTION = `-- marktmorgen:saved-section:v1
 local kind = redis.call("TYPE", KEYS[1]).ok
@@ -107,8 +112,8 @@ return 1`;
  * (whose id key must hold ARGV[7], the store's ref) or the statsId its record must carry. Read in the same step as the
  * write, so a save that waited while the store was erased, started erasing or was moved writes nothing, and the erased
  * store's nl:sblocks: library is never made again. -4: gone, erasing or moved, nothing written; -5: the owner's record
- * did not parse (unknown); otherwise SAVE_SECTION's own answers. SAVE_SECTION itself stays as it is for the other
- * bounded hashes that use it (lib/sales-filters.ts).
+ * did not parse (unknown); otherwise SAVE_SECTION's own answers. It is also the write of a store's saved sales filters
+ * (lib/sales-filters.ts, #5285 row #5277).
  */
 export const SAVE_STORE_SECTION = `-- marktmorgen:saved-store-section:v1
 if redis.call("HGET", KEYS[3], ARGV[5]) then return -4 end

@@ -262,8 +262,12 @@ export function paidPeriodOf(invoice: Record<string, unknown>, email: string, in
   if (invoice.status !== "paid" || typeof invoice.id !== "string" || !INVOICE_ID.test(invoice.id)) return null;
   const line = membershipLineOf(invoice as Parameters<typeof membershipLineOf>[0]);
   const tot = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-  const cur = typeof invoice.currency === "string" ? invoice.currency.toLowerCase() : "";
-  if (!line || !(tot > 0) || !cur) return null;
+  if (!line) return null;
+  // A paid membership whose currency does not read is money that could not be read, never no payment: it throws, and
+  // the member is tried again (coordinator 7091257612, LEVE 2).
+  if (typeof invoice.currency !== "string" || !/^[a-z]{3}$/i.test(invoice.currency)) throw new Error("a paid invoice's currency could not be read");
+  const cur = invoice.currency.toLowerCase();
+  if (!(tot > 0)) return null;
   const direct = idOf(invoice.payment_intent);
   const named = INTENT_ID.test(direct) ? direct : INTENT_ID.test(intent) ? intent : "";
   const listed = soleListedPayment(invoice.payments);
@@ -328,6 +332,12 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
     query.append("expand[]", "data.payments");
     paid = ownInvoices(await onAccount("GET", account, `/invoices?${query}`), id, customer, "a paid invoice");
   }
+  // Its paid period read before any write too: an invoice whose money does not read throws here (membershipLineOf),
+  // so nothing is voided, kept or held on it, and the member is tried again the next day (f:).
+  const email = memberEmail(sub);
+  let period: PaidPeriod | null = null;
+  // Newest first, stopping at the first paid period: an older invoice is never read once a newer one answered.
+  if (!plan) for (const invoice of paid) if ((period = paidPeriodOf(invoice, email))) break;
   // A void each; a draft kept now and let go again on a release.
   if (!(await takeCalls(folder, open.length + 2 * drafts.length))) return "over";
   for (const invoice of open) {
@@ -337,12 +347,8 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
     await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id as string)}`, new URLSearchParams({ auto_advance: "false", "metadata[closing_draft]": String(endedAt) }), undefined, `closing-draft:${invoice.id}:${endedAt}`);
   }
   if (drafts.length) await redisPipeline([["HSET", workKey(folder), `d:${id}`, drafts.map((d) => d.id).join(",")]]);
-  const email = memberEmail(sub);
-  if (!plan) {
-    const period = paid.map((invoice) => paidPeriodOf(invoice, email)).find((p): p is PaidPeriod => p !== null) ?? null;
-    // The first reading is the one before any hold (HSETNX).
-    if (period) await redisPipeline([["HSETNX", paidKey(folder), id, JSON.stringify(period)]]);
-  }
+  // The first reading is the one before any hold (HSETNX).
+  if (period) await redisPipeline([["HSETNX", paidKey(folder), id, JSON.stringify(period)]]);
   await onAccount("POST", account, `/subscriptions/${encodeURIComponent(id)}`, holdBody(sub, endedAt), undefined, `closing-hold:${id}:${endedAt}`);
   // Set aside only now that it is held: a hold that failed leaves its refund's calls spent, never a second reserve.
   if (!plan) await redisPipeline([["HINCRBY", workKey(folder), "rcalls", REFUND_CALLS_PER_MEMBER]]);

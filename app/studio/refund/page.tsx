@@ -23,7 +23,7 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
 /** The tab's title says the outcome, so it is heard when the page opens after a confirmation (WCAG 2.4.2, 4.1.3). */
 export async function generateMetadata({ searchParams }: Params): Promise<Metadata> {
   const query = await searchParams;
-  const done = typeof query.done === "string" ? REFUND_DONE[query.done] : undefined;
+  const done = refundDoneOf(query.done);
   const withdrew = withdrawNoticeOf(query.withdraw);
   return { title: `${done ? done.title : withdrew ? withdrew.title : "Refund your payment"} — Marktmorgen`, robots: { index: false, follow: false } };
 }
@@ -35,6 +35,11 @@ const SHOWN_PER_DAY = 20;
 
 /** A payment's date, as the receipt shows it. */
 const paidOn = (seconds: number) => new Date(seconds * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/** A refund outcome only by a key the table owns: "constructor" and the like are no notice (Claude 5's LEVE D on #2849). */
+function refundDoneOf(value: unknown) {
+  return typeof value === "string" && Object.hasOwn(REFUND_DONE, value) ? REFUND_DONE[value] : undefined;
+}
 
 /** The answer of the withdrawal route (app/api/billing/withdraw), when the address carries a known one. */
 function withdrawNoticeOf(value: unknown) {
@@ -70,7 +75,7 @@ export default async function StudioRefundPage({ searchParams }: Params) {
   const name = store.name || store.handle;
   const back = `${studioPath(store)}#billing`;
   const owner = view.role === "owner";
-  const done = !owner ? REFUND_DONE.owner : typeof query.done === "string" ? REFUND_DONE[query.done] : undefined;
+  const done = !owner ? REFUND_DONE.owner : refundDoneOf(query.done);
   const finished = query.done === "refunded" || query.done === "ending";
   // A refund still being settled: no new confirmation until it is decided.
   const underway = owner && !finished ? await refundUnderway(store.sid).catch(() => true) : false;

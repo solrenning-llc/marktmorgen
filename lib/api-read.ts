@@ -24,7 +24,7 @@ import { productIds, readListing, readListings } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { memberPage } from "@/lib/community";
-import { readCourse } from "@/lib/course";
+import { readCourseExact } from "@/lib/course";
 import { studentPage } from "@/lib/learn";
 import { BOOK_STRIPE_PAGES, type Book, bookSizes, readBook } from "@/lib/affiliates";
 import { paidCalls } from "@/lib/calls";
@@ -250,12 +250,15 @@ async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolea
   return { page: { data, next: next === "0" ? null : next, ...(unreadable ? { unreadable } : {}) }, readBytes };
 }
 
+/** A page of the members, with how many it holds that could not be read (only when there are any), as the list's. */
+type MembersPage = Page<Record<string, unknown>> & { unreadable?: number };
+
 /**
  * The community's members, as the creator's own member list shows them: a
  * page at its most set aside before the scan, settled at what it read and
  * sends before anything is sent, as the list's.
  */
-export async function members(store: Store, cursor: string | null, hold: Hold): Promise<Page<Record<string, unknown>> | Response> {
+export async function members(store: Store, cursor: string | null, hold: Hold): Promise<MembersPage | Response> {
   const asked = listCursor(cursor, /^\d{1,20}$/);
   if (!asked.ok) return asked.refused;
   const id = store.community?.id;
@@ -276,6 +279,8 @@ export async function members(store: Store, cursor: string | null, hold: Hold): 
         last_seen_at: isoFromSeconds(m.seen),
       })),
       next: page.next === "0" ? null : page.next,
+      // A member who could not be read is left out and said (#4069), as GET /api/v1/leads says a contact.
+      ...(page.unreadable ? { unreadable: page.unreadable } : {}),
     };
     return { out, work: scannedPageWork(2, page.bytes, sentBytes(out)) };
   });
@@ -299,7 +304,9 @@ export async function students(
   // One product by id, which is one read — not every product in the store.
   const product = await readListing(store, productId);
   if (!product?.course) return null;
-  const course = await readCourse(product.course.id);
+  // Read exactly (issue #4068): only a confirmed absence is "not a course"; a reply that does not read (not JSON, not a
+  // course, or a course under another id) throws, so the route answers 502 unavailable, never 404 not_a_course.
+  const course = await readCourseExact(product.course.id, "a course's outline for its students");
   if (!course) return null;
   const lessons = course.modules.reduce((n, m) => n + m.lessons.length, 0);
   const start = cursor && /^\d{1,20}$/.test(cursor) ? cursor : "0";

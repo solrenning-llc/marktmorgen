@@ -345,6 +345,13 @@ export async function POST(request: NextRequest) {
       if (!owner && config.questions.length && !viewer.member?.qa) return back(`${home}/you`, "questions");
       if (!owner && !(await within(id, key, "comment"))) return back(postPage, "slow", "reply");
       const parent = field("parent", 12);
+      // Answering a comment the creator hid, or a reply in a thread whose first comment they hid, is gone for a
+      // member, as liking or reporting it is: nothing is written under it and its author is not told.
+      if (!owner && ITEM_ID.test(parent)) {
+        const above = await readComment(id, post.id, parent);
+        const root = above?.parent ? await readComment(id, post.id, above.parent) : above;
+        if (above?.hid || root?.hid) return back(postPage, "gone");
+      }
       // A space whose creator approves comments first (543 [CM2]): the comment
       // waits, seen only by its author and the creator; nobody is told of it yet.
       if (!owner && (await mustHold(id, (await approvalFor(id, post.sp)).comments, "c", viewer.member))) {
@@ -434,7 +441,11 @@ export async function POST(request: NextRequest) {
     if (action === "report") {
       if (owner) return back(fromPage, "forbidden");
       const commentId = field("comment", 12);
-      if (commentId && !(await readComment(id, post.id, commentId))) return back(postPage, "gone");
+      // A comment the creator hid is gone for a member, as a hidden post is: already dealt with, never queued again.
+      if (commentId) {
+        const reported = await readComment(id, post.id, commentId);
+        if (!reported || reported.hid) return back(postPage, "gone");
+      }
       if (!(await within(id, key, "report"))) return back(fromPage, "slow");
       const target = commentId ? ({ kind: "comment", post: post.id, comment: commentId } as const) : ({ kind: "post", post: post.id } as const);
       const added = await report(id, target, key, store);

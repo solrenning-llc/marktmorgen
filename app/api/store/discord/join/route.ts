@@ -2,7 +2,7 @@ import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { fromAnotherSite, limited, clientAddress } from "@/lib/request-guard";
+import { fromAnotherSite, limited, clientAddress, unknownLimit, limitUnknownResponse } from "@/lib/request-guard";
 import { readOrder } from "@/lib/store-checkout";
 import { ordersGrantExactly } from "@/lib/buyer-orders";
 import { authorizeUrl, isDiscordConfigured, redirectUri } from "@/lib/discord";
@@ -43,7 +43,9 @@ export async function POST(request: NextRequest) {
     return page("failed");
   }
   if (!server) return page("off");
-  if (!(await withinStore("discord-join", clientAddress(request), 20, 600, store, "buyer"))) return page("failed");
+  const room = await withinStore("discord-join", clientAddress(request), 20, 600, store, "buyer").catch(unknownLimit);
+  if (room === "unknown") return limitUnknownResponse();
+  if (!room) return page("failed");
 
   let email: string | null = null;
   if (sessionId) {
@@ -52,12 +54,15 @@ export async function POST(request: NextRequest) {
     if (order.state === "error") return page("failed");
     email = order.state === "paid" && !order.gift && !order.group ? order.email : null;
   } else if (token) {
-    // The orders link read exactly: not there is "none"; a reply that does not read, or no answer, is "failed".
+    // The orders link read exactly: not there is "link" (ask for a new one); a reply that does not read, or no answer, is "failed".
     const grant = await ordersGrantExactly(store, token).catch((error: unknown) => {
       console.error("reading an orders link for the Discord button failed", error);
       return "unknown" as const;
     });
     if (grant === "unknown") return page("failed");
+    // A link that is not there any more (it works for 24 hours) says nothing about what was bought: the buyer is told to
+    // ask for a new one, never "nothing bought with this address" (board #5285, row #2641).
+    if (grant === null) return page("link");
     email = grant;
   }
   if (!email) return page("none");

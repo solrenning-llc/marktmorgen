@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
     if (!store?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     if (body.action === "add") {
-      const notes = await addNote(store.statsId, body.day, body.text);
+      const notes = await addNote(store, body.day, body.text);
       if (!notes) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       return Response.json({ ok: true, notes }, { headers: { "Cache-Control": "no-store" } });
     }

@@ -350,7 +350,10 @@ test("an unrecognized sender value after the paid barrier keeps the confirmation
   assert.equal(kept.row.state, "dispatching"); assert.ok(kept.payload.message);
 });
 
-test("a refused paid confirmation leaves no shipment refusal summary, so the buyer's copy and erasure still work", async () => {
+test("in-memory fixture: a refused paid confirmation leaves no shipment refusal summary, so the buyer's copy and erasure still work", async () => {
+  // This runs on the in-memory stand-in (physicalPaidFixture), not the Lua. The same case on the real script, Redis 7,
+  // is scripts/test_order_confirmation_outbox_redis.py ("a refused paid confirmation keeps its own refused row and hold,
+  // writes no shipment refusal summary..."); Codex X6's LOW on #2544, board #5285.
   // Paid confirmations share the shipment Lua and its pool HASHes. A refusal
   // of one must keep the confirmation family's own refused row, never write a
   // shipment-family summary that shipment erasure and copy cannot own.

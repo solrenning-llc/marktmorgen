@@ -75,7 +75,10 @@ test("an unknown store lookup preserves due reminders", async () => {
   const counts = await run(async () => { throw new Error("synthetic store read timeout"); });
   assert.deepEqual(counts, { reminded: 0, confirmed: 0, dropped: 0 });
   assert.equal(lookups, 0);
-  assert.equal(mutations, 0, "an unknown store must not ZREM the due reminder");
+  assert.equal(writes.some((c) => c[0] === "ZREM"), false, "an unknown store must not ZREM the due reminder");
+  // Only put off, still queued (Claude 1 E's LEVE on #5103): one ZADD XX of the same member, later than now.
+  assert.deepEqual(writes.map((c) => [c[0], c[1], c[2], c[4]]), [["ZADD", REMINDER_QUEUE, "XX", member]]);
+  assert.ok(Number(writes[0][3]) > now, "an unknown store puts the reminder off, never forward");
 });
 
 test("an unknown single-session payment read preserves due reminders", async () => {
@@ -99,7 +102,10 @@ test("an unknown single-session payment read preserves due reminders", async () 
   const counts = await run(async () => store);
   assert.deepEqual(counts, { reminded: 0, confirmed: 0, dropped: 0 });
   assert.equal(stripeReads, 2, "the list is confirmed empty before the individual read fails");
-  assert.equal(mutations, 0, "an unknown payment read must not ZREM the due reminder");
+  assert.equal(writes.some((c) => c[0] === "ZREM"), false, "an unknown payment read must not ZREM the due reminder");
+  // Only put off, still queued (Claude 1 E's LEVE on #5103): one ZADD XX of the same member, later than now.
+  assert.deepEqual(writes.map((c) => [c[0], c[1], c[2], c[4]]), [["ZADD", REMINDER_QUEUE, "XX", member]]);
+  assert.ok(Number(writes[0][3]) > now, "an unknown payment read puts the reminder off, never forward");
 });
 
 test("a complete due pair is processed, with string and numeric scores", async () => {
@@ -113,7 +119,9 @@ test("a complete due pair is processed, with string and numeric scores", async (
 // Claude 3 (nuvem A) and Claude 7 on #2508: the two "keep the reminder" paths must give up, as the paidCalls path does,
 // once the reminder is hours late; otherwise one permanently failing read sits at the head of the queue for good.
 const HOURS = 3600_000;
-const late = `calls-evidence|harbor|cs_test_late00000000000000000000000|1|${now + 3600_000}`;
+// Hours late and of no use any more: its call began a minute ago. A timed reminder still of use is kept however late an
+// outage makes it (Codex X2, #4812, tests/call-reminder-outage-keep.test.ts); this one is not, so it is given up on.
+const late = `calls-evidence|harbor|cs_test_late00000000000000000000000|1|${now - 60_000}`;
 const zrems = () => writes.filter((c) => c[0] === "ZREM").map((c) => c.slice(2));
 
 test("a store read that keeps failing gives up once the reminder is hours late, and keeps the one still of use", async () => {

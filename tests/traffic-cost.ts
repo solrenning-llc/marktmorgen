@@ -114,8 +114,10 @@ export const COMMANDS = {
   /**
    * What a visitor new to the day adds, once: the visit, how long the day
    * is kept, and the store's all-time visitors. A month's first visit, and
-   * each hundredth after, writes five more (lib/traffic.ts, markMonth):
-   * a twentieth of a command to the visit, inside what is rounded up here.
+   * each hundredth after, writes eight more (lib/traffic.ts, markMonth: four,
+   * and the folder's owner through the store's fence, a script of three
+   * calls billed as four, since November 22, 2026; five before): under a
+   * tenth of a command to the visit, inside what is rounded up here.
    * Since October 11, 2026 also the expiry of the day's visitors, written
    * with the visitor new to the day rather than with every view. Since
    * November 11, 2026 the count that creates the day's record also gives it

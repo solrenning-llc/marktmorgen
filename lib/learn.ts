@@ -841,7 +841,9 @@ async function forgetEarlyDripMails(course: Course, email: string, start: number
  * bytes taken, so a new one is left off, as touchStudent leaves it without room, and the page writes it on the next
  * visit (Claude 6's LEVE on #3369).
  */
-async function redateStudent(course: Course, email: string, start: number, nowSeconds: number, stamp: number | null | "unknown"): Promise<void> {
+// Exported for tests/drip-redate-keeps-stamp.test.ts only: the drip job never passes "unknown" today (its strict ledger
+// throws instead), so that branch is held by a direct call (Claude 1's NIT on #5039).
+export async function redateStudent(course: Course, email: string, start: number, nowSeconds: number, stamp: number | null | "unknown"): Promise<void> {
   const key = studentsKey(course.id);
   const field = emailKey(email);
   const raw = repliesFor(await redisPipeline([["HGET", key, field]]), 1)?.[0];

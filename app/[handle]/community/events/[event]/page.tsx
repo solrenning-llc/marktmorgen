@@ -125,7 +125,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
                 <span className={`cm-badge ${!event.cancelled && !over && event.start <= now ? "cm-badge-creator ev-live" : event.cancelled ? "cm-badge-warn" : "cm-badge-accent"}`}>
                   {eventWhenIn(store, event, now)}
                 </span>
-                {mine === true && !over && !event.cancelled ? <span className="cm-badge cm-badge-accent">{w.youAreGoing}</span> : null}
+                {mine === true && allowed === true && !over && !event.cancelled ? <span className="cm-badge cm-badge-accent">{w.youAreGoing}</span> : null}
               </p>
               <h1 id={labelId} className="font-display mt-2 break-words text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">{event.title}</h1>
               <p className="mt-2 font-semibold">
@@ -161,6 +161,14 @@ export default async function CommunityEventPage({ params, searchParams }: Param
                 <p className="mt-1 text-sm">{w.productGone(store.name)}</p>
               )}
               <p className="mt-3 text-sm">{w.otherAddress}</p>
+              {/* A place taken while it was still theirs can always be given back (app/api/store/community/rsvp/route.ts). */}
+              {mine === true && !over && !event.cancelled ? (
+                <form action="/api/store/community/rsvp" method="post" className="mt-3">
+                  <Carry store={store} action="notgoing" from="feed" />
+                  <input type="hidden" name="event" value={event.id} />
+                  <button type="submit" className="cm-pill">{w.cancelRsvp}</button>
+                </form>
+              ) : null}
             </div>
           ) : event.cancelled ? (
             <p className="cm-flash cm-flash-warn mt-6">{w.canceledByCreator(store.name)}</p>

@@ -93,7 +93,9 @@ async function main() {
   };
   const late = await connectPOST(new NextRequest("https://marktmorgen.com/api/stripe/connect", { method: "POST", headers: posted, body: form() }));
   is("connect: the first account stays the store's", (await storeForEmail(email))?.stripeAccountId, FIRST);
-  is("connect: the late tab is not sent to onboard an account the store does not keep", said(late), "error");
+  // Since #5285 row #4335 the late tab onboards the account the store keeps, never its own unwritten one
+  // (tests/stripe-connect-race-kept.test.ts checks which account the link is for).
+  is("connect: the late tab is sent to onboard the account the store keeps", [late.status, late.headers.get("location")], [303, "https://connect.stripe.com/setup/synthetic"]);
 
   part("the write itself: made only while the store points at the account expected");
   await clearStripeAccount(email);

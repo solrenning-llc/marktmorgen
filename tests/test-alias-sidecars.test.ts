@@ -80,6 +80,17 @@ try {
     writeFileSync(join(here, "aliases", "zz-sim-broken.test.ts.json"), "{ not json");
     is("a file that does not parse is refused", thrown(() => testAliases("zz-sim-broken.test.ts", root, here)) !== "", true);
   }
+
+  part("A test added to the central list after the rule moves to its own file (#5285 row #2862, Codex X6's LOW on #2862)");
+  {
+    const tests = join(root, "tests");
+    const central = readFileSync(join(tests, "test-config.mjs"), "utf8");
+    is("the central list no longer names studio-list-unread-keeps-stats", central.includes("studio-list-unread-keeps-stats"), false);
+    const keys = ["next/headers", "next/navigation", "next/server"];
+    const own = testAliases("studio-list-unread-keeps-stats.test.ts", root, tests) as Record<string, string>;
+    const sibling = testAliases("studio-today-trips.test.ts", root, tests) as Record<string, string>;
+    is("it gets the same three stand-ins from its own file", keys.map((key) => own[key]), keys.map((key) => sibling[key]));
+  }
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

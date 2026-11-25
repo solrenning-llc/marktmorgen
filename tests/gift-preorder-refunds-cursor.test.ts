@@ -45,6 +45,18 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 const NOW = Math.floor(Date.now() / 1000);
+
+/** What a run wrote with console.error (the job's own log), the run's answer kept. */
+async function logged(run: () => Promise<number>): Promise<{ answer: number; lines: string[] }> {
+  const lines: string[] = [];
+  const real = console.error;
+  console.error = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
+  try {
+    return { answer: await run(), lines };
+  } finally {
+    console.error = real;
+  }
+}
 const ACCOUNT = "acct_1TestPassRef001";
 const OTHER_ACCOUNT = "acct_1TestPassRef002";
 
@@ -205,7 +217,10 @@ async function check(job: Job, base: number): Promise<void> {
   refunds[150] = { ...refunds[150], status: "pending", payment_intent: slow.pi, charge: { object: "charge", refunded: false } };
   is(`${job.name}: run 1 takes nothing back from a refund not final yet`, await job.run(), 0);
   is(`${job.name}: the kept pass carries the time of that refund`, JSON.parse(String(await read(job.pass))).waiting, base + 4000 - 150);
-  is(`${job.name}: run 2 ends the pass, still nothing taken back`, await job.run(), 0);
+  const waitingEnd = await logged(() => job.run());
+  is(`${job.name}: run 2 ends the pass, still nothing taken back`, waitingEnd.answer, 0);
+  // Claude 5's LOW on #3301: an anchor held by a row says so in the log at the end of each pass, never in silence.
+  is(`${job.name}: and the log says the anchor waits at that refund`, waitingEnd.lines.some((line) => line.includes(`the anchor waits at ${base + 4000 - 150}`)), true);
   is(`${job.name}: still held while it is pending`, await slow.holds(), true);
   is(`${job.name}: the anchor waits at that refund, not at the newest one the pass read`, await read(job.anchor), String(base + 4000 - 150));
   is(`${job.name}: and the pass is let go`, await read(job.pass), null);
@@ -229,8 +244,11 @@ async function check(job: Job, base: number): Promise<void> {
   is(`${job.name}: the one behind is no longer held`, await later.holds(), false);
   is(`${job.name}: the row not readable is never taken as a refund`, await unread.holds(), true);
   is(`${job.name}: a page whose last row is not readable goes on from its last readable one`, afters(), [null, id("g", 98), id("g", 198)]);
-  is(`${job.name}: run 2 ends the pass`, await job.run(), 0);
+  const unreadEnd = await logged(() => job.run());
+  is(`${job.name}: run 2 ends the pass`, unreadEnd.answer, 0);
   is(`${job.name}: the anchor stays where it was: the row not readable is read again`, await read(job.anchor), anchorBefore);
+  // Claude 6's LEVE on #3301: a row not readable holds the anchor, and the log says so at the end of the pass.
+  is(`${job.name}: and the log says a row not readable held the anchor`, unreadEnd.lines.some((line) => line.includes("the pass read a row not readable")), true);
   is(`${job.name}: and the pass is let go`, await read(job.pass), null);
   is(`${job.name}: still held while its row is not readable`, await unread.holds(), true);
   refunds[10] = { ...refunds[10], status: "succeeded" };

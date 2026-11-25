@@ -90,9 +90,18 @@ export function memberRulesFor(setting: MemberPrices | undefined, product: SaleC
   return setting.rules.filter((rule) => rule.all || rule.products.includes(product.id));
 }
 
-/** Every product whose holder would pay less for this one, once each. */
+/** Every product whose holder would pay less for this one, once each: never the product itself (qualifiesFor). */
 export function qualifyingFor(setting: MemberPrices | undefined, product: SaleCandidate): string[] {
-  return [...new Set(memberRulesFor(setting, product).flatMap((rule) => rule.by))];
+  return [...new Set(memberRulesFor(setting, product).flatMap((rule) => rule.by.filter((id) => qualifiesFor(id, product))))];
+}
+
+/**
+ * Whether holding `held` can lower this product's price: any other qualifying product, never the product itself. An
+ * "every product" rule, or a list naming the same product on both sides, would otherwise take its percentage off the
+ * very product that qualifies, for a buyer who holds it and buys it again (triple audit, 3rd batch, 7073298184).
+ */
+function qualifiesFor(held: string, product: SaleCandidate): boolean {
+  return held !== product.id;
 }
 
 /**
@@ -111,7 +120,7 @@ export function memberKeepsFloor(product: SaleCandidate, percent: number, floorC
 export function memberOffFrom(setting: MemberPrices | undefined, product: SaleCandidate, held: ReadonlySet<string>, floorCents: number): number {
   let best = 0;
   for (const rule of memberRulesFor(setting, product)) {
-    if (rule.percent > best && rule.by.some((id) => held.has(id)) && memberKeepsFloor(product, rule.percent, floorCents)) best = rule.percent;
+    if (rule.percent > best && rule.by.some((id) => qualifiesFor(id, product) && held.has(id)) && memberKeepsFloor(product, rule.percent, floorCents)) best = rule.percent;
   }
   return best;
 }

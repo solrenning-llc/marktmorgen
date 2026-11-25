@@ -21,6 +21,7 @@ import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
 import type { Store } from "@/lib/store";
 import type { StatsData } from "@/lib/stats";
 import type { AdSpend } from "@/lib/ad-spend-rules";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 /**
  * The weekly email to each creator whose store had visitors (lib/stats-report.ts).
@@ -53,6 +54,11 @@ const MAX_PER_RUN = 25;
 const TIME_BUDGET_MS = 45_000;
 
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   if (!(await cronAllowed(request))) {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }

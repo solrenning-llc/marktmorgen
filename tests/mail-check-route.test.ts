@@ -202,7 +202,7 @@ async function main(): Promise<void> {
   rejectRuns = true;
   const wrongType = await GET(request());
   is("a status write that fails still answers, saves the result and sends the owner's notice",
-    [wrongType.status, (JSON.parse(String(redis.run(["GET", LAST]) ?? "null")) as { ok?: boolean } | null)?.ok, control.notices.length, redis.run(["GET", LOCK])], [200, false, 1, null]);
+    [wrongType.status, (JSON.parse(String(redis.run(["GET", LAST]) ?? "null")) as { ok?: boolean } | null)?.ok, control.notices.length, redis.run(["GET", LOCK])], [500, false, 1, null]);
 
   part("Authorization and the existing lock still prevent work");
   reset();

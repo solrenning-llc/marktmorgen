@@ -81,7 +81,8 @@ import {
 import { readAllListings, readListings, readTitles } from "@/lib/catalog";
 import { priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { LINK_PROBLEMS, type LinkProblem, readLink } from "@/lib/product-link";
-import { MAX_ABOUT_LENGTH, cleanAbout, writeAbout } from "@/lib/product-about";
+import { MAX_ABOUT_LENGTH, cleanAbout } from "@/lib/product-about";
+import { writeStoreAbout } from "@/lib/product-about-live";
 import { BATCH_BYTES, BATCH_ROWS } from "@/lib/import-batches";
 import { ContactImportUnknownError, type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, leftListAmong, previewContactRows, readTags } from "@/lib/contacts";
 import { moveStopLink, remindersStoppedAmong } from "@/lib/checkout-recovery";
@@ -103,6 +104,7 @@ import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { inviteEmail, inviteMembers, keptAlready, moveFoot, movePostal, noteKept, dropReminder, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
 import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, REMIND_DAYS_BEFORE, readRenewal } from "@/lib/move-rules";
 import { type ContactConsent, consentFrom, readClickFunnelsStatus, readOrderStatus } from "@/lib/clickfunnels-csv";
+import { emailDocument, emailParagraphs } from "@/lib/email-document";
 
 export type ImportKind = "contacts" | "products" | "purchases" | "members";
 /** Where the file came from: any platform's spreadsheet, or ClickFunnels' own exports (lib/clickfunnels-csv.ts). */
@@ -426,6 +428,11 @@ export type ImportJob = {
    * and counter. Absent on imports started before it existed, which take from the month as they send.
    */
   held?: { n: number; window: string; monthly: boolean };
+  /**
+   * Why a failed import stopped, in words that name no row (failImport): kept on the job as well as in the report, so
+   * the report can still say it once its rows are deleted at their deadline (reportCsv). Absent before 22/11/2026.
+   */
+  reason?: string;
 };
 
 const jobKey = (id: string) => `nl:import:${id}`;
@@ -956,6 +963,22 @@ export async function cancelImport(store: Store, id: string): Promise<ImportJob 
 
 type Problem = { line: number; column: string; problem: string; value: string };
 
+/** The report holds source values: its deadline follows the import's start, never the last pass. */
+function reportEndsAt(job: ImportJob): number {
+  return Math.floor(job.at / 1000) + KEEP_SECONDS;
+}
+
+/** Why a paused import stopped once its keeping ran out (runImport). */
+export const PAUSED_STOP_WORDS = `This import waited ${KEEP_SECONDS / 86_400} days while the store's plan was not running, so it stopped. What was already brought in stays. Start the import again once the plan is running.`;
+/** What the report says once its rows are deleted (lib/person-data.ts: kept 14 days after the import began). */
+export const REPORT_GONE_WORDS = `The rows of this report were deleted ${KEEP_SECONDS / 86_400} days after the import began, as the privacy policy says.`;
+
+/** A failure's reason, which names no row: on the job (`reason`, read by reportCsv) and as a line of the report. */
+async function failWith(job: ImportJob, words: string): Promise<void> {
+  job.reason = words;
+  await note(job, [{ line: 0, column: "", problem: words, value: "" }], "errors");
+}
+
 async function note(job: ImportJob, problems: Problem[], kind: "errors" | "skipped"): Promise<void> {
   if (!problems.length) return;
   job.counts[kind] += problems.length;
@@ -965,7 +988,7 @@ async function note(job: ImportJob, problems: Problem[], kind: "errors" | "skipp
   if (length === null) throw new UnknownReplyError("the length of an import's report");
   const room = Math.max(0, MAX_REPORT_ROWS - length);
   const kept = problems.slice(0, room).map((p) => JSON.stringify([p.line, p.column, `${kind === "skipped" ? "Left out: " : ""}${p.problem}`, p.value.slice(0, 300)]));
-  if (kept.length) await redisPipeline([["RPUSH", errorsKey(job.id), ...kept], ["EXPIRE", errorsKey(job.id), KEEP_SECONDS]]);
+  if (kept.length) await redisPipeline([["RPUSH", errorsKey(job.id), ...kept], ["EXPIREAT", errorsKey(job.id), reportEndsAt(job)]]);
 }
 
 /**
@@ -1277,7 +1300,7 @@ async function productsStep(job: ImportJob, store: Store, rows: string[][]): Pro
     }
     const statsId = made.store.statsId;
     for (let i = 0; i < made.ids.length; i += 1) {
-      if (taking[i].about && statsId) await writeAbout(statsId, made.ids[i], taking[i].about, made.store);
+      if (taking[i].about && statsId) await writeStoreAbout(made.store, made.ids[i], taking[i].about);
     }
     job.counts.added += made.ids.length;
   }
@@ -1647,7 +1670,6 @@ async function membersStep(job: ImportJob, store: Store, rows: string[][], now =
   await note(job, problems, "errors");
 }
 
-const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 function displayName(name: string): string {
   return name.replace(/["\\<>\r\n]/g, "").trim().slice(0, 60) || "A store";
@@ -1659,11 +1681,9 @@ function senderAddress(): string {
 }
 
 /** A plain letter's HTML, a paragraph for each blank line of its text, marked with the store's language (WCAG 3.1.1). */
-function letterHtml(store: Pick<Store, "language">, text: string): string {
-  return `<div lang="${LANGUAGES[parseLanguage(store.language)].locale}" style="font-family:system-ui,sans-serif;line-height:1.5">${text
-    .split("\n\n")
-    .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
-    .join("")}</div>`;
+/** The letter as a whole HTML document beside its text, in the store's language, its subject as the title (AX274 Part A, item 5). */
+export function letterHtml(store: Pick<Store, "language">, subject: string, text: string): string {
+  return emailDocument({ lang: LANGUAGES[parseLanguage(store.language)].locale, title: subject, body: emailParagraphs(text) });
 }
 
 /** The one email a past buyer gets, when the creator ticked it: what moved, and how to open it. */
@@ -1879,7 +1899,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
       return "retry";
     }
   }
-  for (const message of sending) message.html = letterHtml(store, message.text);
+  for (const message of sending) message.html = letterHtml(store, message.subject, message.text);
   const sent = await sendBatch(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
   if (sent === "retry") {
     await giveBack();
@@ -1934,15 +1954,17 @@ export type ImportTrace = {
 
 /**
  * What the store's kept imports hold about one address, for the person's copy (lib/person-copy.ts, GDPR art. 15; C7
- * data-copy hunt): rows of a file still waiting to be brought in (RAW_DAYS) that name the address, the report of rows
+ * data-copy hunt): rows waiting to be brought in (RAW_DAYS) whose mapped email is the subject; secondary mentions are
+ * unread traces, never copied rows. Also the report of rows
  * not brought in (KEEP_SECONDS), the note of which row it was seen on, and whether an email to it still waits. Only
- * reads. Each read in its exact shape (CX-123 rule 24): an unknown answer throws UnknownReplyError, so the copy fails
+ * reads, except deleting a report whose original keeping has ended. Each read in its exact shape (CX-123 rule 24): an unknown answer throws UnknownReplyError, so the copy fails
  * rather than leave this out. What cannot be reached is said in `unread`, never left out in silence: a report line or
  * a batch of rows kept in an unreadable shape, and imports older than the store's last LIST_SIZE, which are kept for
  * KEEP_SECONDS but are no longer on its list.
  */
 export async function importTracesOf(store: Store, email: string, now = Date.now()): Promise<{ records: ImportTrace[]; unread: string[] }> {
   const address = normaliseEmail(email);
+  const subject = address.normalize("NFC");
   const records: ImportTrace[] = [];
   const unread: string[] = [];
   if (!address) return { records, unread };
@@ -1952,8 +1974,13 @@ export async function importTracesOf(store: Store, email: string, now = Date.now
   // Each cell's addresses compared whole: never a longer address that only contains theirs (Codex G on #4321).
   const names = (cells: string[]) => cells.some((cell) => namesAddress(cell, address));
   for (const job of jobs) {
-    const replies = repliesFor(await redisPipeline([["LRANGE", errorsKey(job.id), 0, MAX_REPORT_ROWS - 1], ["LLEN", rowsKey(job.id)], ["SMEMBERS", mailKey(job.id)]]), 3);
-    const errors = stringList(replies?.[0]);
+    // Old jobs may still hold a pre-deploy sliding-TTL report. The copy must apply the same deadline as reportCsv.
+    const reportExpired = now >= reportEndsAt(job) * 1000;
+    const reportRead: Command = reportExpired ? ["DEL", errorsKey(job.id)] : ["LRANGE", errorsKey(job.id), 0, MAX_REPORT_ROWS - 1];
+    const replies = repliesFor(await redisPipeline([reportRead, ["LLEN", rowsKey(job.id)], ["SMEMBERS", mailKey(job.id)]]), 3);
+    const deletedReport = reportExpired ? countOf(replies?.[0]) : 0;
+    if (deletedReport !== 0 && deletedReport !== 1) throw new UnknownReplyError("an expired import report deleted for a copy");
+    const errors = reportExpired ? [] : stringList(replies?.[0]);
     const batches = countOf(replies?.[1]);
     const mail = stringList(replies?.[2]);
     if (errors === null || batches === null || mail === null) throw new UnknownReplyError("an import's records about a person");
@@ -1973,6 +2000,7 @@ export async function importTracesOf(store: Store, email: string, now = Date.now
       if (names([value])) notBroughtIn.push({ row, column, problem, value });
     }
     const rowsWaiting: string[][] = [];
+    let mentionsWithoutOwnership = false;
     for (let i = 0; i < batches; i += 1) {
       const read = repliesFor(await redisPipeline([["LINDEX", rowsKey(job.id), i]]), 1);
       if (!read) throw new UnknownReplyError("an import's rows");
@@ -1983,8 +2011,15 @@ export async function importTracesOf(store: Store, email: string, now = Date.now
         unread.push(`Rows of the import "${job.file}" waiting to be brought in could not be read.`);
         continue;
       }
-      rowsWaiting.push(...batch.filter(names));
+      for (const row of batch) {
+        // Only the mapped email column establishes the subject of a contacts/purchases/members row.
+        // A mention in another cell is a trace to review, never permission to copy a different person's raw row.
+        const rowSubject = job.kind === "products" ? "" : normaliseEmail(row[1] ?? "").normalize("NFC");
+        if (rowSubject === subject) rowsWaiting.push(row);
+        else if (names(row)) mentionsWithoutOwnership = true;
+      }
     }
+    if (mentionsWithoutOwnership) unread.push("An import row mentions this address outside its mapped email field and needs review; its values were not copied.");
     const rowsSeen: ImportTrace["rowsSeen"] = [];
     let cursor = "0";
     do {
@@ -2053,15 +2088,18 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
       // Never longer than the record's own keeping (Claude 7 on #3980): past it, the paused import ends, says so, and
       // leaves the five-minute job's line, so a store nobody pays costs no pass after that. What was brought in stays.
       if (Date.now() - job.at > KEEP_SECONDS * 1000) {
-        await note(job, [{ line: 0, column: "", problem: `This import waited ${KEEP_SECONDS / 86_400} days while the store's plan was not running, so it stopped. What was already brought in stays. Start the import again once the plan is running.`, value: "" }], "errors");
+        // The report's rows are past their deadline and deleted below with the rest, so the reason is not written
+        // into it: reportCsv says it from the job itself (`reason`), and the count keeps the download offered.
+        job.reason = PAUSED_STOP_WORDS;
+        job.counts.errors += 1;
         job.state = "failed";
         job.finishedAt = Date.now();
-        await saveThenGiveBack([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]], job.sid, heldLeft(job), store);
+        await saveThenGiveBack([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id), errorsKey(id)]], job.sid, heldLeft(job), store);
         await releaseBusy(job);
         return job;
       }
       job.pausedUntil = Date.now() + PAUSED_IMPORT_CHECK_SECONDS * 1000;
-      const [, , , holder] = await redisPipeline([saveJob(job), ["EXPIRE", mailKey(id), KEEP_SECONDS], ["EXPIRE", errorsKey(id), KEEP_SECONDS], ["GET", busyKey(job.sid)]]);
+      const [, , , holder] = await redisPipeline([saveJob(job), ["EXPIRE", mailKey(id), KEEP_SECONDS], ["EXPIREAT", errorsKey(id), reportEndsAt(job)], ["GET", busyKey(job.sid)]]);
       // The store's one-import slot only while this import holds it.
       if (holder === id) await redisPipeline([["EXPIRE", busyKey(job.sid), KEEP_SECONDS]]);
       return job;
@@ -2076,7 +2114,7 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
         if (job.cursor.batch >= count) {
           // Rows let go before they were brought in (RAW_DAYS): say so, rather than call it done.
           if (job.done < job.total) {
-            await note(job, [{ line: 0, column: "", problem: `The rows waited more than ${RAW_DAYS} days to be brought in, so the rest were let go. Start the import again with the rows not brought in yet.`, value: "" }], "errors");
+            await failWith(job, `The rows waited more than ${RAW_DAYS} days to be brought in, so the rest were let go. Start the import again with the rows not brought in yet.`);
             job.state = "failed";
             job.finishedAt = Date.now();
             const back = heldLeft(job);
@@ -2118,7 +2156,7 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
             // brought in stays, nothing more is, and the import says why
             // rather than trying the same rows again every few minutes.
             if (!(error instanceof DataRoomError)) throw error;
-            await note(job, [{ line: 0, column: "", problem: error.message, value: "" }], "errors");
+            await failWith(job, error.message);
             // The contacts already brought in are of unknown age too: their next emails still go out in portions that double.
             if (job.kind === "contacts") await startRamp(job.sid, job.counts.added + (job.counts.maybeAdded ?? 0));
             job.state = "failed";
@@ -2209,8 +2247,18 @@ export async function advanceImports(deadline: number): Promise<{ worked: number
 
 /** The rows that were not brought in, as a spreadsheet: row, column, what was wrong, what it held. */
 export async function reportCsv(job: ImportJob): Promise<string> {
-  const [rows] = await redisPipeline([["LRANGE", errorsKey(job.id), 0, MAX_REPORT_ROWS - 1]]);
   const lines = [csvLine(["row", "column", "problem", "value"])];
+  if (Date.now() >= reportEndsAt(job) * 1000) {
+    // Also clean a pre-deploy report with a sliding TTL, without reading its personal values (Codex L-20261120-2243).
+    const gone = countOf(repliesFor(await redisPipeline([["DEL", errorsKey(job.id)]]), 1)?.[0]);
+    if (gone !== 0 && gone !== 1) throw new UnknownReplyError("an expired import report deleted");
+    // Said, never an empty file or "more rows like these, not listed" when none are listed; the reason a failed
+    // import stopped is read from the job, never guessed from its dates (Claude 2 upbeat, LEVE on #5063).
+    if (job.state === "failed" && typeof job.reason === "string" && job.reason) lines.push(csvLine([0, "", job.reason, ""]));
+    lines.push(csvLine(["", "", REPORT_GONE_WORDS, ""]));
+    return `\uFEFF${lines.join("\r\n")}\r\n`;
+  }
+  const [rows] = await redisPipeline([["LRANGE", errorsKey(job.id), 0, MAX_REPORT_ROWS - 1]]);
   for (const raw of Array.isArray(rows) ? rows : []) {
     try {
       const [line, column, problem, value] = JSON.parse(String(raw)) as [number, string, string, string];
@@ -2324,7 +2372,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
             to: letter.to,
             subject: letter.subject,
             text,
-            html: letterHtml(store, text),
+            html: letterHtml(store, letter.subject, text),
             replyTo: store.email,
             headers: { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
             tags: { ...moveTags(store), ...stopTags(store) },

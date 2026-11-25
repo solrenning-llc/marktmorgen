@@ -23,6 +23,19 @@ import { type MeetStore, accessFor, testKey, NotConnected } from "@/lib/meet-con
 import { eventId, googleCreate, googleDelete, googleMove, zoomCreate, zoomDelete, zoomMove } from "@/lib/meet-providers";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
+import { keepIfStoreLive } from "@/lib/live-fence";
+import { storeLiveFence } from "@/lib/store-live-cache";
+
+/**
+ * A test meeting's private link is kept locally only while its store is live and not being erased (Codex
+ * L-20261120-1540): a provider answering after the store's erasure began writes nothing back, and the creator is told
+ * the test meeting is unavailable. Kept with no expiry, as before, for a live store (lib/live-fence.ts
+ * keepIfStoreLive); any answer but "kept" is refused.
+ */
+async function keepTest(store: Store, key: string, test: TestMeeting): Promise<void> {
+  const kept = await keepIfStoreLive(await storeLiveFence(store), key, JSON.stringify(test)).catch(() => "unknown" as const);
+  if (kept !== "kept") throw new TestMeetingUnavailable();
+}
 
 export class TestMeetingUnavailable extends Error {
   constructor() { super("The test meeting could not be changed just now. Try again in a moment."); }
@@ -109,7 +122,7 @@ export async function makeTest(store: Store, provider: MeetProvider, now = Date.
   };
   const meeting = provider === "zoom" ? await zoomCreate(access.token, spec) : await googleCreate(access.token, spec);
   const test: TestMeeting = { id: meeting.id, link: meeting.link, start, end, madeAt: now };
-  await redisPipeline([["SET", testKey(statsId, provider), JSON.stringify(test)]]);
+  await keepTest(store, testKey(statsId, provider), test);
   return test;
 }
 
@@ -133,7 +146,7 @@ export async function moveTest(store: Store, provider: MeetProvider): Promise<Te
   if (provider === "zoom") await zoomMove(access.token, had.id, when);
   else await googleMove(access.token, had.id, when);
   const moved: TestMeeting = { ...had, start: when.start, end: when.end };
-  await redisPipeline([["SET", testKey(statsId, provider), JSON.stringify(moved)]]);
+  await keepTest(store, testKey(statsId, provider), moved);
   return moved;
 }
 

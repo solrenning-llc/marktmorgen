@@ -150,9 +150,13 @@ const invoicePaymentKnown = (invoiceId: string) => (row: Record<string, unknown>
  * The payments that paid an invoice, from Stripe's own list of them (GET /v1/invoice_payments, `invoice` filter: "List
  * all payments for an invoice"), read in full at STRIPE_LIST_VERSION, where the list exists. `paid` adds up to at least
  * the invoice's `amount_paid`, or it throws: money not found is never taken as none. `pending`: a payment of it is
- * still open, so more may yet be taken.
+ * still open, so more may yet be taken. Stripe's own default payment (`is_default` true), which it opens when the
+ * invoice is finalized and keeps for exactly the invoice's `amount_remaining`, is not one: with the plan ended it never
+ * resolves, so it would hold the plan in line for good, the creator never told and the entry kept with their address
+ * (#5285 row #3274, the LEVE of 6727386237). A payment taken on it later is still read and given back while the entry
+ * is looked at again (DONE_KEEP_DAYS). Any other open payment, or a default one for another amount, still holds.
  */
-async function paidParts(invoiceId: string, amountPaid: number): Promise<{ paid: { intent: string; paidAt: number }[]; pending: boolean }> {
+async function paidParts(invoiceId: string, amountPaid: number, amountRemaining: unknown): Promise<{ paid: { intent: string; paidAt: number }[]; pending: boolean }> {
   const rows = await allRows("/invoice_payments", new URLSearchParams({ invoice: invoiceId, limit: "100" }), invoicePaymentKnown(invoiceId), 5, INVOICE_PAYMENT_ID, STRIPE_LIST_VERSION);
   const paid = rows.filter((row) => row.status === "paid");
   const sum = paid.reduce((total, row) => total + (row.amount_paid as number), 0);
@@ -163,7 +167,9 @@ async function paidParts(invoiceId: string, amountPaid: number): Promise<{ paid:
     const intent = (row.payment as { payment_intent: string }).payment_intent;
     byIntent.set(intent, Math.max(byIntent.get(intent) ?? 0, (row.status_transitions as { paid_at: number }).paid_at));
   }
-  return { paid: [...byIntent].map(([intent, paidAt]) => ({ intent, paidAt })), pending: rows.some((row) => row.status === "open") };
+  const stripesOwnRest = (row: Record<string, unknown>) =>
+    ownField(row, "is_default") === true && wholeAtLeast(amountRemaining, 1) && ownField(row, "amount_requested") === amountRemaining;
+  return { paid: [...byIntent].map(([intent, paidAt]) => ({ intent, paidAt })), pending: rows.some((row) => row.status === "open" && !stripesOwnRest(row)) };
 }
 const metadataKnown = (row: Record<string, unknown>) => {
   const meta = ownField(row, "metadata");
@@ -194,10 +200,26 @@ export type Undo = {
   t?: 1;
   /** It was paid before the closing day began: it came too late to stop the closing, not after it began. */
   e?: 1;
+  /**
+   * One of its invoices is still open with an amount remaining (Stripe does not void an invoice with money on it): the
+   * settled entry is looked at again past DONE_KEEP_DAYS while one is, so a payment made on it later is given back
+   * (#5285 row #3274; Claude 7 xAF's LEVE on #5344): once every OPEN_RECHECK_DAYS, until OPEN_KEEP_DAYS.
+   */
+  o?: 1;
+  /** Past DONE_KEEP_DAYS, when an entry kept for an open invoice (o) is next looked at (ms). */
+  next?: number;
 };
 
 /** Stripe: a refund can fail up to 30 days after it was asked for (docs.stripe.com/refunds, "Handle failed refunds", read 30/10/2026). A settled one is looked at again until then, and a little after. */
 export const DONE_KEEP_DAYS = 40;
+/**
+ * An entry kept for an invoice still open with money left (Undo.o) is looked at again past DONE_KEEP_DAYS once a week,
+ * not on every run, and taken out a year after it was settled (Claude 2 lpgvy's LEVE on #5344): the daily job walks
+ * every entry inside its 20 seconds, so such entries, which Stripe can keep open for good, must not grow its work
+ * without a bound, and the job walks them after every plan not settled yet, which never waits behind them.
+ */
+export const OPEN_RECHECK_DAYS = 7;
+export const OPEN_KEEP_DAYS = 365;
 
 const shutKey = (handle: string) => `${SHUT_PREFIX}${createHash("sha256").update(handle.toLowerCase()).digest("hex").slice(0, 32)}`;
 
@@ -444,15 +466,29 @@ function readUndo(raw: unknown): Undo | null {
       ...(typeof value.done === "number" ? { done: value.done } : {}),
       ...(value.t === 1 ? { t: 1 as const } : {}),
       ...(value.e === 1 ? { e: 1 as const } : {}),
+      ...(value.o === 1 ? { o: 1 as const } : {}),
+      ...(typeof value.next === "number" && Number.isFinite(value.next) ? { next: value.next } : {}),
     };
   } catch {
     return null;
   }
 }
 
-/** Ends the subscription at once. True once Stripe says it is ended. */
+/**
+ * Ends the subscription at once. True once Stripe says it is ended. Each reply is read for this subscription and in its
+ * exact shape (CX-123 rules 24 and 30): one for another id, with no status, or whose start is not a whole number of
+ * seconds throws, and settleOne keeps the plan in line. A start read as 0 would make the store's own plan a plan for a
+ * closing store and give back what it was rightly paid; a reply for another plan, settle this one on its word.
+ */
 async function endIt(id: string): Promise<{ ended: boolean; created: number }> {
-  const over = (sub: Record<string, unknown>) => ({ ended: sub.status === "canceled" || sub.status === "incomplete_expired", created: Number(sub.created) || 0 });
+  const over = (sub: unknown) => {
+    const status = plainObject(sub) ? ownField(sub, "status") : undefined;
+    const created = plainObject(sub) ? ownField(sub, "created") : undefined;
+    if (!plainObject(sub) || ownField(sub, "id") !== id || typeof status !== "string" || !wholeAtLeast(created, 1)) {
+      throw new Error(`Stripe answered the subscription ${id} in another shape`);
+    }
+    return { ended: status === "canceled" || status === "incomplete_expired", created };
+  };
   try {
     // A DELETE is idempotent at Stripe by itself; no key is sent with it.
     const ended = over(await onPlatform("DELETE", `/subscriptions/${encodeURIComponent(id)}`, undefined, { version: AT }));
@@ -579,6 +615,8 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
     // plan is kept in line (catch below), never settled as having had no payment.
     const invoices = await allRows("/invoices", new URLSearchParams({ subscription: id, limit: "100" }), invoiceKnown(id), 10, OBJECT_ID);
     let settled = true;
+    // An invoice still open with an amount remaining, or one whose remaining amount does not read: still payable.
+    let openRest = false;
     let returned = 0;
     let disputed = 0;
     let currency = "usd";
@@ -587,6 +625,7 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
       if (!OBJECT_ID.test(invoiceId)) continue;
       // Read by invoiceKnown: amount_paid is a whole number whatever the status.
       const amountPaid = invoice.amount_paid as number;
+      if (invoice.status === "open" && amountPaid > 0 && ownField(invoice, "amount_remaining") !== 0) openRest = true;
       if (amountPaid === 0) {
         if (invoice.status === "open") {
           await onPlatform("POST", `/invoices/${encodeURIComponent(invoiceId)}/void`, new URLSearchParams(), { version: AT, idempotencyKey: `closing-plan-void:${invoiceId}` });
@@ -609,7 +648,8 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
       if (first) outcomes.push(first);
       else {
         // Paid in parts, or paid with no payment named: every payment of it, from its own list.
-        const parts = await paidParts(invoiceId, amountPaid);
+        // The plan is ended above, so Stripe's own default payment for what remains is not "more may yet be taken".
+        const parts = await paidParts(invoiceId, amountPaid, invoice.status === "open" ? ownField(invoice, "amount_remaining") : undefined);
         paidAt = Math.max(paidAt, ...parts.paid.map((one) => one.paidAt));
         if (Math.max(paidAt, created) * 1000 < cutoff) continue;
         for (const one of parts.paid) {
@@ -627,7 +667,18 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
       }
     }
     if (!settled) return keep("a refund is not made in full yet");
-    if (entry.done) return true;
+    if (entry.done) {
+      // A recheck keeps the mark of an invoice still open in line with what Stripe says now and, past DONE_KEEP_DAYS,
+      // sets the next look a week on (OPEN_RECHECK_DAYS).
+      const next = openRest && Date.now() - entry.done > DONE_KEEP_DAYS * 86_400_000 ? Date.now() + OPEN_RECHECK_DAYS * 86_400_000 : undefined;
+      if (Boolean(entry.o) !== openRest || next !== undefined || entry.next !== undefined) {
+        const { o: _open, next: _next, ...rest } = entry;
+        void _open;
+        void _next;
+        await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify({ ...rest, ...(openRest ? { o: 1 } : {}), ...(next !== undefined ? { next } : {}) })]]);
+      }
+      return true;
+    }
     // The store's own plan, started before its last plan ended and never paid since the closing day began: ended
     // so it can charge no more, and no letter (there is no payment to speak of, and it was not started anew).
     const own = before && returned === 0 && disputed === 0;
@@ -638,7 +689,7 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
       await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify(entry)]]);
     }
     // Settled: only its dates are kept, for a retry or a recheck to find (no address, no customer, no name).
-    await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify({ h: "", c: "", to: "", name: "", since: entry.since, ...(entry.ended ? { ended: entry.ended } : {}), at: entry.at, n: entry.n, done: Date.now(), t: 1, ...(entry.e ? { e: 1 } : {}) })]]);
+    await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify({ h: "", c: "", to: "", name: "", since: entry.since, ...(entry.ended ? { ended: entry.ended } : {}), at: entry.at, n: entry.n, done: Date.now(), t: 1, ...(entry.e ? { e: 1 } : {}), ...(openRest ? { o: 1 } : {}) })]]);
     return true;
   } catch (error) {
     return keep("Stripe did not answer", error);
@@ -666,8 +717,17 @@ export function planReturnedLetter(name: string, returned: number, disputed: num
 async function tell(id: string, entry: Undo, returned: number, disputed: number, currency: string): Promise<boolean> {
   let to = entry.to;
   if (!to && CUSTOMER_PATTERN.test(entry.c)) {
-    const customer = await onPlatform("GET", `/customers/${encodeURIComponent(entry.c)}`, undefined, { version: AT });
-    to = typeof customer.email === "string" ? customer.email : "";
+    // Read for this customer and its email in its exact shape (CX-123 rules 24 and 30): a reply for another customer
+    // is never written to, and one whose email does not read is never "no address" (the plan would be settled and its
+    // creator never told). A thrown read keeps the plan in line. Only a customer with no email, or a deleted one,
+    // has no address to tell.
+    const customer: unknown = await onPlatform("GET", `/customers/${encodeURIComponent(entry.c)}`, undefined, { version: AT });
+    const email = plainObject(customer) ? ownField(customer, "email") : undefined;
+    const deleted = plainObject(customer) && ownField(customer, "deleted") === true;
+    if (!plainObject(customer) || ownField(customer, "id") !== entry.c || (!deleted && email !== null && typeof email !== "string")) {
+      throw new Error(`Stripe answered the customer of ${id} in another shape`);
+    }
+    to = typeof email === "string" ? email : "";
   }
   const address = normaliseEmail(to);
   if (!EMAIL_PATTERN.test(address)) {
@@ -690,6 +750,9 @@ export async function retryPlanUndos(deadline: number): Promise<{ settled: numbe
   const ids = Array.isArray(fields) ? (fields as unknown[]).map(String) : [];
   let settled = 0;
   let left = 0;
+  // Plans not settled yet first: a payment still owed back never waits behind a recheck of a settled one (Claude 2
+  // lpgvy's LEVE on #5344).
+  const later: [string, Undo & { done: number }][] = [];
   for (const id of ids) {
     if (Date.now() > deadline) {
       left += 1;
@@ -697,14 +760,29 @@ export async function retryPlanUndos(deadline: number): Promise<{ settled: numbe
     }
     const [raw] = await redisPipeline([["HGET", UNDO_KEY, id]]);
     const entry = readUndo(raw);
-    // Settled long enough ago that no refund can still come back and no retry still come: taken out.
-    if (entry?.done && Date.now() - entry.done > DONE_KEEP_DAYS * 86_400_000) {
+    if (entry?.done) {
+      later.push([id, entry as Undo & { done: number }]);
+      continue;
+    }
+    if (await settleOne(id)) settled += 1;
+    else left += 1;
+  }
+  for (const [id, entry] of later) {
+    if (Date.now() > deadline) {
+      left += 1;
+      continue;
+    }
+    const age = Date.now() - entry.done;
+    // Settled long enough ago that no refund can still come back and no retry still come: taken out, unless one of its
+    // invoices is still open with an amount remaining, which can still be paid (o): then until OPEN_KEEP_DAYS.
+    if (age > DONE_KEEP_DAYS * 86_400_000 && (!entry.o || age > OPEN_KEEP_DAYS * 86_400_000)) {
+      if (entry.o) console.error(`closing-plan-guard: ${id} is taken out ${OPEN_KEEP_DAYS} days after it was settled, an invoice still open`);
       await redisPipeline([["HDEL", UNDO_KEY, id]]);
       continue;
     }
-    if (await settleOne(id, Boolean(entry?.done))) {
-      if (!entry?.done) settled += 1;
-    } else left += 1;
+    // Past DONE_KEEP_DAYS, an entry kept for an open invoice is looked at once a week.
+    if (age > DONE_KEEP_DAYS * 86_400_000 && entry.next !== undefined && entry.next > Date.now()) continue;
+    if (!(await settleOne(id, true))) left += 1;
   }
   return { settled, left };
 }

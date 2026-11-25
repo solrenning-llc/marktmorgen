@@ -5,6 +5,7 @@ import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { platformKey } from "@/lib/stripe-account";
 import { COMMISSION_LIVE } from "@/lib/plan";
 import { settleShares } from "@/lib/share-settle";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 export const maxDuration = 300;
 
@@ -14,6 +15,11 @@ export const maxDuration = 300;
  * can start it: only Vercel's scheduled call carries the secret.
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   if (!(await cronAllowed(request))) {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }
@@ -29,7 +35,10 @@ export async function GET(request: NextRequest) {
   try {
     const counts = await settleShares(Date.now() + 270_000);
     console.log(`shares: ${JSON.stringify(counts)}`);
-    return Response.json({ ok: counts.failed === 0, counts }, { headers: { "Cache-Control": "no-store" } });
+    // A failed settlement is a failed run over HTTP too (#4146, Codex U): the counts are kept, and the status is 500,
+    // as the affiliates, weekly and monthly jobs answer, so a scheduler or monitor never takes it for a good run.
+    if (counts.failed > 0) return Response.json({ ok: false, error: "failed", counts }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    return Response.json({ ok: true, counts }, { headers: { "Cache-Control": "no-store" } });
   } finally {
     await releaseMark("nl:share:lock", lock);
   }

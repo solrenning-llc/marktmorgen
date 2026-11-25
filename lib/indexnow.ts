@@ -17,8 +17,10 @@
  * lives here and in public/<key>.txt, which tests/indexnow.test.ts holds equal.
  *
  *   nl:indexnow:sent    the addresses already announced, a set
+ *   nl:indexnow:lock    one run at a time (lib/claim-mark.ts), let go when the run ends
  */
 import sitemap from "@/app/sitemap";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { SITE_URL } from "@/lib/site-url";
@@ -29,9 +31,13 @@ export const INDEXNOW_ENDPOINT = "https://api.indexnow.org/indexnow";
 export const INDEXNOW_BATCH = 10_000;
 const SENT_KEY = "nl:indexnow:sent";
 const TIMEOUT_MS = 10_000;
+/** One run at a time; kept past the route's time limit (maxDuration 60) and let go at the end (issue #4003). */
+const LOCK_KEY = "nl:indexnow:lock";
+const LOCK_SECONDS = 120;
 
 export type IndexNowResult =
   | { ok: true; announced: number }
+  | { ok: true; announced: 0; busy: true }
   | { ok: false; reason: "unavailable" | "refused"; status?: number };
 
 /** The body the protocol reads: the host, the key, where the key is served, and the addresses. */
@@ -62,6 +68,21 @@ export function sitemapUrls(): string[] {
  */
 export async function announceNewPages(send: typeof fetch = fetch): Promise<IndexNowResult> {
   if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
+  // One run at a time, on an exact claim, as the other scheduled jobs (issue #4003, Codex U): two runs at once (a
+  // retried invocation, a manual run beside the scheduled one) both read every address as not announced and both
+  // posted them. Held by another run is busy, with nothing sent; a claim that cannot be read sends nothing either.
+  const lock = claimValue();
+  const got = await claimMark(LOCK_KEY, LOCK_SECONDS, lock);
+  if (got === "taken") return { ok: true, announced: 0, busy: true };
+  if (got !== "ours") return { ok: false, reason: "unavailable" };
+  try {
+    return await announceUnder(send);
+  } finally {
+    await releaseMark(LOCK_KEY, lock);
+  }
+}
+
+async function announceUnder(send: typeof fetch): Promise<IndexNowResult> {
   const urls = sitemapUrls();
   if (!urls.length) return { ok: true, announced: 0 };
   // Read exactly (CX-123 rule 24): one reply an address, each 0 (not announced) or 1 (announced). Anything else is

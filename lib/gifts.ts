@@ -868,6 +868,12 @@ export async function revokeRefundedGifts(
     const anchor = Math.min(pass || (lost.complete && lost.resumed) ? newest : Math.max(newest, lostNewest), Math.max(waiting, since));
     const closed = repliesFor(await redisPipeline([...(unread ? [] : [["SET", anchorKey(sid), String(anchor)]]), ["DEL", passKey(sid)]]), unread ? 1 : 2);
     if (!closed) console.error("ending a pass over refunds for gifts was left unknown");
+    // A row that keeps failing never holds the anchor in silence (Claude 5's LOW and Claude 6's LEVE on #3301): the
+    // log says why the anchor did not move to the newest refund, each pass, so a row stuck for good is seen.
+    if (unread) console.error("reading refunds for gifts: the pass read a row not readable; the anchor stays where it was and the row is read again next pass");
+    else if (Number.isFinite(waiting) && Math.max(waiting, since) < newest) {
+      console.error(`reading refunds for gifts: the anchor waits at ${Math.max(waiting, since)} for a refund not finished or not handled; read again next pass`);
+    }
   }
   return revoked;
 }

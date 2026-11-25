@@ -393,7 +393,7 @@ export function SiteNav({ opening }: { opening: NavOpening }) {
             prefetch={false}
             href="/"
             onClick={closeAll}
-            className="shrink-0 rounded-[10px] py-1 pr-1"
+            className="inline-flex min-h-11 shrink-0 items-center rounded-[10px] pr-1"
             aria-label="Marktmorgen, home"
           >
             <Logo />

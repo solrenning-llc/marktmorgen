@@ -7,7 +7,7 @@
  * Every identifier here is a local synthetic stand-in.
  */
 import { claimHandle, ownerKey, storeRef, type Store } from "@/lib/store";
-import { setWhileStoreLive } from "@/lib/store-live-cache";
+import { pushWhileStoreLive, setWhileStoreLive } from "@/lib/store-live-cache";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -50,6 +50,26 @@ async function main(): Promise<void> {
   const withId = await shop("live-cache-d@example.com", "live-cache-d");
   is("kept", await setWhileStoreLive(withId, "nl:test:cache:d", "two", 60), "kept");
   is("and written", await read("nl:test:cache:d"), "two");
+
+  part("a line pushed onto a bounded list, by the same rule (pushWhileStoreLive; Codex L-20261120-2338)");
+  const list = async (key: string) => (await redis.pipeline([["LRANGE", key, 0, -1], ["TTL", key]])) as [string[], number];
+  is("kept, newest first, trimmed to its bound, renewed", await (async () => {
+    const answers = [await pushWhileStoreLive(withId, "nl:test:list:d", "one", 2, 60), await pushWhileStoreLive(withId, "nl:test:list:d", "two", 2, 60), await pushWhileStoreLive(withId, "nl:test:list:d", "three", 2, 60)];
+    const [lines, ttl] = await list("nl:test:list:d");
+    return [answers, lines, ttl > 0 && ttl <= 60];
+  })(), [["kept", "kept", "kept"], ["three", "two"], true]);
+  is("gone once the store is erasing: nothing pushed", await (async () => {
+    const { ERASING_KEY, erasingField } = await import("@/lib/store");
+    await redis.pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(withId)), "1"]]);
+    const answer = await pushWhileStoreLive(withId, "nl:test:list:d", "four", 2, 60);
+    await redis.pipeline([["HDEL", ERASING_KEY, await erasingField(storeRef(withId))]]);
+    return [answer, (await list("nl:test:list:d"))[0]];
+  })(), ["gone", ["three", "two"]]);
+  is("gone once its id key is another's: nothing pushed", await (async () => {
+    await redis.pipeline([["SET", `nl:store:id:${withId.sid}`, "someone-else@example.com"]]);
+    return [await pushWhileStoreLive(withId, "nl:test:list:d", "five", 2, 60), (await list("nl:test:list:d"))[0]];
+  })(), ["gone", ["three", "two"]]);
+  is("a store from before ids with no statsId: unknown, nothing pushed", await (async () => [await pushWhileStoreLive(noId, "nl:test:list:c", "x", 2, 60), await read("nl:test:list:c")])(), ["unknown", null]);
 
   done();
 }

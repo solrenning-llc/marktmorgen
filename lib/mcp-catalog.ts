@@ -107,19 +107,19 @@ const DRAFTS: readonly ToolDraft[] = [
   {
     name: "get_product_description",
     description: "One product's long description, exactly as the creator wrote it, with its title. Use list_products for the ids. It counts as a few of the store's API requests, set by the most it could read.",
-    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
+    inputSchema: { type: "object", properties: { product: { type: "string", minLength: 1, description: "The product's id, from list_products." } }, required: ["product"], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_sales_page",
     description: "One product's sales page as saved, block by block in page order (hero, benefits, FAQ, guarantee and the rest), with its search title and description. Testimonials are counted, never quoted. It counts as a few of the store's API requests, set by the most it could read.",
-    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
+    inputSchema: { type: "object", properties: { product: { type: "string", minLength: 1, description: "The product's id, from list_products." } }, required: ["product"], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_course_outline",
     description: "A course's modules and lessons in order, with each lesson's title, whether it is a free preview, whether it has text, its video and files by name, and when each module opens. It counts as a few of the store's API requests, set by the most it could read.",
-    inputSchema: { type: "object", properties: { product: { type: "string", description: "The course's product id, from list_products." } }, additionalProperties: false },
+    inputSchema: { type: "object", properties: { product: { type: "string", minLength: 1, description: "The course's product id, from list_products." } }, required: ["product"], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
@@ -128,9 +128,11 @@ const DRAFTS: readonly ToolDraft[] = [
     inputSchema: {
       type: "object",
       properties: {
-        product: { type: "string", description: "The course's product id, from list_products." },
-        lesson: { type: "string", description: "The lesson's id, from get_course_outline." },
+        product: { type: "string", minLength: 1, description: "The course's product id, from list_products." },
+        lesson: { type: "string", minLength: 1, description: "The lesson's id, from get_course_outline." },
       },
+      // Both are needed to find a lesson (issue #3931): `{}` is Invalid params before the key, never a request taken.
+      required: ["product", "lesson"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true },
@@ -138,13 +140,13 @@ const DRAFTS: readonly ToolDraft[] = [
   {
     name: "get_page_test",
     description: "How a product's page test is going (a second headline or a second version of the whole page): views, checkouts, sales and money of each version, and whether it has been won by the studio's own rule. It counts as a few of the store's API requests, set by the most it could read.",
-    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
+    inputSchema: { type: "object", properties: { product: { type: "string", minLength: 1, description: "The product's id, from list_products." } }, required: ["product"], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_page_reading",
     description: "How far down a product's sales page visitors read, block by block, the reasons visitors picked for not buying, and how far each video was watched. It counts as a few of the store's API requests, set by the most it could read.",
-    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
+    inputSchema: { type: "object", properties: { product: { type: "string", minLength: 1, description: "The product's id, from list_products." } }, required: ["product"], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
@@ -153,9 +155,10 @@ const DRAFTS: readonly ToolDraft[] = [
     inputSchema: {
       type: "object",
       properties: {
-        product: { type: "string", description: "The product's id, from list_products." },
+        product: { type: "string", minLength: 1, description: "The product's id, from list_products." },
         version: { type: "number", description: "Which earlier version, from the list (0 is the newest); left out, the list." },
       },
+      required: ["product"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true },
@@ -195,7 +198,7 @@ const DRAFTS: readonly ToolDraft[] = [
     inputSchema: {
       type: "object",
       properties: {
-        product: { type: "string", description: "The product's id, from list_products." },
+        product: { type: "string", minLength: 1, description: "The product's id, from list_products." },
         description: { type: "string", description: "The whole new description as plain text: a blank line starts a paragraph, a line starting with \"- \" is a point in a list." },
       },
       required: ["product", "description"],
@@ -210,7 +213,7 @@ const DRAFTS: readonly ToolDraft[] = [
     inputSchema: {
       type: "object",
       properties: {
-        product: { type: "string", description: "The product's id, from list_products." },
+        product: { type: "string", minLength: 1, description: "The product's id, from list_products." },
         title: { type: "string", description: "The whole new title, on one line." },
       },
       required: ["product", "title"],
@@ -225,7 +228,7 @@ const DRAFTS: readonly ToolDraft[] = [
     inputSchema: {
       type: "object",
       properties: {
-        product: { type: "string", description: "The product's id, from list_products." },
+        product: { type: "string", minLength: 1, description: "The product's id, from list_products." },
         summary: { type: "string", description: "The whole new summary, on one line; empty takes it off." },
       },
       required: ["product", "summary"],
@@ -246,3 +249,41 @@ export const MCP_TOOLS: readonly McpTool[] = DRAFTS.map((tool) => {
   const title = TITLES[tool.name] ?? "";
   return { ...tool, title, annotations: { ...tool.annotations, title } };
 });
+
+/** A property of a tool's inputSchema, in the subset this catalog writes: a type, and for a number maybe an enum. */
+type PropertySchema = { type?: unknown; enum?: unknown; minLength?: unknown };
+
+/**
+ * Why a tools/call's `arguments` do not match the named tool's own inputSchema, or null when they do (#4346): the
+ * arguments an object (or left out, as no arguments), no property the schema does not list (additionalProperties
+ * false), each one of its type ("string", or a finite "number"), within its enum, and every required one there. Null
+ * also for a name that is no tool: the route answers that on its own. Checked before the key or any read, so a call
+ * the contract forbids is never answered as a different reading.
+ */
+export function argumentsProblem(name: string, args: unknown): string | null {
+  const tool = MCP_TOOLS.find((one) => one.name === name);
+  if (!tool) return null;
+  // No arguments, sent as missing or as null, is an empty object: the MCP spec makes arguments optional, and a client
+  // that sends null for a tool without arguments is not refused (Claude 1's NIT on #5228).
+  if (args === undefined || args === null) args = {};
+  if (typeof args !== "object" || Array.isArray(args)) return "arguments must be an object";
+  const given = args as Record<string, unknown>;
+  const properties = tool.inputSchema.properties as Record<string, PropertySchema>;
+  for (const [key, value] of Object.entries(given)) {
+    const schema = Object.hasOwn(properties, key) ? properties[key] : undefined;
+    if (!schema) {
+      if (tool.inputSchema.additionalProperties === false) return `${key} is not an argument of ${name}`;
+      continue;
+    }
+    // A known argument sent as null is read as left out, as every reader in app/api/mcp/route.ts reads it (version:
+    // null is the list, as before #5228; Claude 5 ibuF's LOW on #5228). A required one is still required below.
+    if (value === null) continue;
+    if (schema.type === "string" && typeof value !== "string") return `${key} must be a string`;
+    // An empty id is no id (Claude 3 yLYhi's LEVE on #5413): a string shorter than the schema's minLength is refused.
+    if (schema.type === "string" && typeof schema.minLength === "number" && (value as string).length < schema.minLength) return `${key} must not be empty`;
+    if (schema.type === "number" && !(typeof value === "number" && Number.isFinite(value))) return `${key} must be a number`;
+    if (Array.isArray(schema.enum) && !schema.enum.includes(value)) return `${key} must be one of ${schema.enum.join(", ")}`;
+  }
+  for (const key of tool.inputSchema.required ?? []) if (!Object.hasOwn(given, key) || given[key] === null) return `${key} is required`;
+  return null;
+}

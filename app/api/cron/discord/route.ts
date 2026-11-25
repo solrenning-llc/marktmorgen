@@ -5,6 +5,7 @@ import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isDiscordConfigured } from "@/lib/discord";
 import { sweepDiscord } from "@/lib/discord-access";
 import { withCutoff } from "@/lib/fetch-timeout";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 /** Sixty seconds, as the other scheduled jobs; the lock (120 s) outlives it, so a killed run never overlaps the next. */
 export const maxDuration = 60;
@@ -17,6 +18,11 @@ const BUDGET_MS = 45_000;
  * and takes back what is no longer theirs. One run at a time.
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   // Every request it makes (Discord, Stripe) is given up by 57 s, inside maxDuration (lib/fetch-timeout.ts).
   return withCutoff(Date.now() + 57_000, () => run(request));
 }

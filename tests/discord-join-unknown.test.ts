@@ -10,11 +10,13 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { saveServer } from "@/lib/discord-store";
+import { seedDiscordServer as saveServer } from "./discord-server-fixture";
 import { storeKey } from "@/lib/learn";
 import { POST as join } from "@/app/api/store/discord/join/route";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
+import { discordWords } from "@/lib/buyer-words/discord";
+import { LANGUAGE_CODES } from "@/lib/store-language";
 
 process.env.DISCORD_CLIENT_ID = "400000000000000001";
 process.env.DISCORD_CLIENT_SECRET = "secret";
@@ -109,8 +111,20 @@ for (const shape of ["lost", "object", "number"] as const) {
   });
 }
 
-test(`an orders link that is not there is still "none"`, async () => {
+// An orders link that is not there any more (it works for 24 hours) is "link": the buyer is told to ask for a new one
+// on the store's orders page, never "nothing bought with this address" (board #5285, row #2641: the MÉDIO on #2641).
+test(`an orders link that is not there is "link", never "none"`, async () => {
   await shop();
-  assert.equal(await press({ token: "a".repeat(64) }), "none");
+  assert.equal(await press({ token: "a".repeat(64) }), "link");
   assert.deepEqual(written, []);
+});
+
+test(`every language says an expired orders link is expired, not that nothing was bought`, () => {
+  for (const code of LANGUAGE_CODES) {
+    const words = discordWords(code);
+    const gone = (words.notices as Record<string, { title: string; body: string } | undefined>).link;
+    assert.ok(gone?.title && gone.body, `${code}: a notice of its own`);
+    assert.notEqual(gone.title, words.notices.none.title, `${code}: not the "no purchase" notice`);
+    assert.match(gone.body, /24/, `${code}: says how long a link works`);
+  }
 });

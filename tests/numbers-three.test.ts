@@ -173,16 +173,21 @@ async function main(): Promise<void> {
     ["get_store", true],
   ]);
   const call = async (name: string, args: Record<string, unknown> = {}) => {
-    const got = (await answer({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name, arguments: args } }, made.key)).result as { content: { text: string }[]; isError: boolean };
-    return { error: got.isError, data: JSON.parse(got.content[0].text) as Record<string, unknown>, text: got.content[0].text };
+    const reply = await answer({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name, arguments: args } }, made.key);
+    // Arguments the tool's schema refuses are JSON-RPC Invalid params (-32602), before the key (#4346, #3931).
+    if (!reply.result) return { error: true, code: reply.error?.code, data: {} as Record<string, unknown>, text: JSON.stringify(reply.error ?? null) };
+    const got = reply.result as { content: { text: string }[]; isError: boolean };
+    return { error: got.isError, code: undefined, data: JSON.parse(got.content[0].text) as Record<string, unknown>, text: got.content[0].text };
   };
   // Every tool, read: none answers with an address, the store owner's included.
   // The tool that prepares a change needs a key allowed to (tests/agent-propose.test.ts); this read key is refused there.
   const readers = tools.filter((t) => t.annotations.readOnlyHint);
   const everything = await Promise.all(readers.map((t) => call(t.name)));
-  // Tools about one product, page or lesson (631 [AA1] units 9 to 14) need it named: with nothing, they say so as an error.
+  // Tools about one product, page or lesson (631 [AA1] units 9 to 14) need it named: their schema says so (issue #3931),
+  // so with nothing they are Invalid params, before the key and any read.
   const needs = new Set(["get_product_description", "get_sales_page", "get_course_outline", "get_lesson", "get_page_test", "get_page_reading", "get_page_versions"]);
   is("each answers, and none of them hands out anybody's address", [everything.every((r, i) => !r.error || needs.has(readers[i].name)), everything.some((r) => /@/.test(r.text))], [true, false]);
+  is("the tools about one product, with none named, are Invalid params", everything.filter((_, i) => needs.has(readers[i].name)).map((r) => r.code), [...needs].map(() => -32602));
   const channels = await call("get_revenue_by_channel", { days: 7 });
   is("revenue by channel for the days asked for", [channels.data.window, (channels.data.channels as { channel: string }[])[0]?.channel], ["last_7_days", "tiktok"]);
   const funnel = await call("get_funnel", { days: 90 });

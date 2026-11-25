@@ -51,7 +51,7 @@ function centralAliases(file,root,here){
   aliases['next/headers']=join(here,'blog-read-page-world.tsx');
   aliases['next/navigation']=join(here,'blog-read-page-world.tsx');
  }
- if(file==='studio-today-trips.test.ts'||file==='studio-today-removal-order.test.ts'||file==='studio-list-unread-keeps-stats.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/navigation']=join(here,'studio-today-navigation.ts');aliases['next/server']=join(here,'studio-today-next-server.ts');}
+ if(file==='studio-today-trips.test.ts'||file==='studio-today-removal-order.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/navigation']=join(here,'studio-today-navigation.ts');aliases['next/server']=join(here,'studio-today-next-server.ts');}
  if(file==='studio-passkeys-unread.test.ts'||file==='studio-lock-unread.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/navigation']=join(here,'studio-today-navigation.ts');aliases['next/server']=join(here,'studio-today-next-server.ts');}
  if(file==='service-counter-admission.test.ts')for(const name of ['redis','store-allowance','traffic'])aliases['@/lib/'+name]=join(here,'service-counter-admission-world.ts');
  if(file==='stream-hook-counter-admission.test.ts')for(const name of ['redis','stream','auto-captions'])aliases['@/lib/'+name]=join(here,'stream-hook-counter-admission-world.ts');
@@ -81,7 +81,7 @@ function centralAliases(file,root,here){
  if(['draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts','pf1-paypal-thanks-honest.test.ts','page-show-unknown.test.ts','page-show-unknown-b2.test.ts'].includes(file))aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='failure-cleanup-paths.test.ts'||file==='picture-owner-paths.test.ts'||file==='picture-owner-followup.test.ts'||file==='picture-door-replies.test.ts'||file==='encanto-tone-route.test.ts'||file==='picture-door-ceiling.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
  if(file==='alt-ai-order.test.ts'||file==='alt-ai-order-page.test.ts')aliases['@/lib/blob']=join(here,'alt-ai-order-world.ts');
- if(['review-g2-card-read-completeness.test.ts','creator-card-partial-read-g.test.ts','creator-card-remove-race-g.test.ts','creator-card-reload-delete-g.test.ts','creator-card-reload-held.test.ts','studio-team-two-step-unknown.test.ts','studio-import-unknown.test.ts','studio-calendar-unknown.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
+ if(['review-g2-card-read-completeness.test.ts','creator-card-partial-read-g.test.ts','creator-card-remove-race-g.test.ts','creator-card-reload-delete-g.test.ts','creator-card-reload-held.test.ts','studio-team-two-step-unknown.test.ts','studio-import-unknown.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='deals-page-hidden-channels.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='plan-invoices.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='meeting-disabled-settings.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');

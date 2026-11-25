@@ -53,6 +53,14 @@ is(
   true,
 );
 
+// Claude 6's LOW 2 on #4610 (6905126426; board #5285): the logo link was 40 px tall, `py-1` around the 32 px mark in a
+// flex row, so 32 + 8. It is at least 44 px tall (min-h-11) and centers the mark in it.
+const logo = /<a\b[^>]*aria-label="Marktmorgen, home"[^>]*>/.exec(nav)?.[0] ?? "";
+const logoClasses = (/class="([^"]*)"/.exec(logo)?.[1] ?? "").split(/\s+/);
+is("the logo link is found", logo !== "", true);
+is("the logo link is at least 44 px tall (min-h-11), with its mark centered", ["min-h-11", "items-center"].every((c) => logoClasses.includes(c)), true);
+is("and it is a flex box, so the height holds", logoClasses.includes("inline-flex") || logoClasses.includes("flex"), true);
+
 part("Landmarks: everything in the header is inside the header");
 const headerOpen = nav.indexOf("<header");
 const headerClose = nav.lastIndexOf("</header>");

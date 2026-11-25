@@ -3275,6 +3275,23 @@ export class MemoryRedis {
           return this.run(["DEL", target]);
         }
         if (key.startsWith("-- marktmorgen:host-claim:v2\n")) return this.hostClaim(args);
+        // lib/api-keys.ts CREATE_KEY_IF_LIVE: mirrors each redis.call, including early refusals.
+        if (key.startsWith("-- marktmorgen:api-key-create-live:v1\n") && args[0] === "4" && args.length === 11) {
+          const [, identity, erasing, list, lookup, ref, field, most, id, row, link] = args;
+          this.scriptCalls += 1;
+          const current = this.run(["GET", identity]);
+          if (typeof current !== "string" || current.toLowerCase() !== ref) return [0, 0, -1];
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return [0, 0, -1];
+          this.scriptCalls += 1;
+          const n = Number(this.run(["HLEN", list]));
+          if (n >= Number(most)) return [0, 0, Number(most) + 1];
+          this.scriptCalls += 1;
+          const added = Number(this.run(["HSET", list, id, row]));
+          this.scriptCalls += 1;
+          this.run(["SET", lookup, link]);
+          return ["OK", added, n + added];
+        }
         // lib/api-keys.ts RECORD_SWAP: each record written only over exactly the text read; nothing for one gone.
         if (key.startsWith("-- marktmorgen:api-key-record-swap:v1\n") && args[0] === "1" && (args.length - 2) % 3 === 0) {
           const [, list, ...triples] = args;

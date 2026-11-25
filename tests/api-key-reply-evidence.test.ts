@@ -251,6 +251,12 @@ test("the creation endpoint never says nothing changed after an unknown rollback
   redis.pipeline = async (commands) => {
     if (commands.length === 2 && commands[0]?.[0] === "DEL" && commands[1]?.[0] === "HDEL") { rollbacks += 1; return []; }
     const reply = await original(commands);
+    // The count after the write is lost, on either path that makes the key: the plain pipeline, or the store's
+    // fenced EVAL (makeKeyForStore, #4985), whose receipt then has no readable count. The write itself went through.
+    if (commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0][1]).includes("api-key-create-live")) {
+      const receipt = reply[0] as unknown[];
+      return [[receipt[0], receipt[1], undefined]];
+    }
     return commands.length === 3 && commands[0]?.[0] === "SET" && commands[1]?.[0] === "HSET" && commands[2]?.[0] === "HLEN" ? [reply[0], reply[1], undefined] : reply;
   };
   let response: Response;

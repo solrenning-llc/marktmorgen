@@ -33,9 +33,9 @@ import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
-import { type Affiliate, type Book, BOOK_STRIPE_PAGES, addPayoutOnce, bookSizes, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
+import { type Affiliate, type Book, BOOK_STRIPE_PAGES, addPayoutOnce, bookSizes, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook, readPayoutsExact } from "@/lib/affiliates";
 import { type BookSizes, bookWork } from "@/lib/api-read-rules";
-import { type BatchLine, batchTotal, owedLinesWhere, payoutNote } from "@/lib/affiliate-payouts";
+import { type BatchLine, batchTotal, dropPayFiles, keepPayFile, owedLinesWhere, payoutIdForFileLine, payoutNote, readPayFile } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { takeAllowance } from "@/lib/store-allowance";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -789,6 +789,103 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
     if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     console.error("paying affiliates with PayPal failed", error);
     return { ok: false, reason: "error" };
+  }
+}
+
+export type FileConfirmed =
+  /** written: lines written now, cents their amount; held: lines already in the book (a retry after a lost answer). */
+  | { ok: true; written: number; cents: number; held: number }
+  /**
+   * "unrecorded": the file paid a line whose affiliate has no record any more, so it could not go in the book. The
+   * other lines are written (or were already), the file is kept, and the answer says how many lines and how much
+   * could not be written, never whose (Codex N1 on #3906, MEDIUM): a partial confirmation never looks complete.
+   */
+  | { ok: false; reason: "unrecorded"; written: number; cents: number; held: number; unrecorded: number; unrecordedCents: number }
+  /**
+   * "file": no kept file under that id (never downloaded, already written down, run out or unreadable); "stale": one
+   * of its affiliates has a PayPal payment on its way or a payout written after the file was downloaded, so writing
+   * it would pay the same commission twice; "busy": the store's payouts are being written by another request.
+   */
+  | { ok: false; reason: "file" | "stale" | "busy" };
+
+/** Lines written between two renewals of the payout lock while a file is written down (review of #3906, LEVE 5). */
+const LINES_PER_HOLD = 20;
+
+/**
+ * Keeps a payout file about to be handed out (keepPayFile) under the store's payout lock, so two downloads at the
+ * same moment never both read the kept files before either writes, and the store never keeps more than
+ * MAX_PAY_FILES (review of #3906, LEVE 2). readAt is taken before reading the book, not after taking this lock.
+ * LockBusyError when the lock stays taken.
+ */
+export async function keepPayFileLocked(store: Store, lines: BatchLine[], readAt: number): Promise<string> {
+  if (!store.statsId || !isRedisConfigured()) throw new Error("Payout records are unavailable");
+  return withLock(`nl:pp:${store.statsId}:lock`, 120, 5_000, () => keepPayFile(store, lines, Date.now(), readAt));
+}
+
+/**
+ * Writes down a payout file the creator says they paid in their own provider (app/api/store/affiliates/payout-batch,
+ * POST): exactly the lines that file paid, as it was handed out (lib/affiliate-payouts.ts keepPayFile), never what
+ * the book says is owed now (C1-20261112-1000-C7-141, item 2c). Whatever was earned since stays owed.
+ *
+ * Under the store's payout lock, the one payWithPayPal and settlePayPal hold, so a confirmation never runs beside an
+ * automatic PayPal payout reading the same book. Each line is written once under an id named by the file and the
+ * affiliate (addPayoutOnce), and the files are let go only after every line is in the book: a double click, a retry
+ * after an unknown reply or a second confirmation writes nothing twice, and one that finds the file gone writes
+ * nothing at all. A line whose affiliate has no record any more cannot be written: every other line is, the files
+ * are kept, and the answer is "unrecorded" with how many lines and how much, so the creator compares the file with
+ * the book instead of seeing a success (Codex N1 on #3906, MEDIUM). A retry writes nothing twice and answers the same.
+ *
+ * A file is refused as "stale", with nothing written, when any of its affiliates has a PayPal payment on its way
+ * or a payout written at or after the book read began, other than this file's own lines (a retry): every
+ * file is a snapshot of the whole balance, so it overlaps whatever was paid since (review of #3906, MEDIUM 2 and
+ * LEVE 4; the same millisecond, Codex L).
+ * Once it is written down, every kept file of the store goes, for the same reason. The lock is renewed every
+ * LINES_PER_HOLD lines; lost, the writing stops as "busy" and a retry writes the rest once.
+ */
+export async function confirmPayFile(store: Store, file: string, input: { date: string; reference: string }): Promise<FileConfirmed> {
+  if (!store.statsId || !isRedisConfigured()) throw new Error("Payout records are unavailable");
+  const statsId = store.statsId;
+  try {
+    return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (held): Promise<FileConfirmed> => {
+      const kept = await readPayFile(statsId, file);
+      if (!kept) return { ok: false, reason: "file" };
+      const inFile = new Set(kept.lines.map((line) => line.a));
+      const away = await onTheirWay(store);
+      if ([...inFile].some((id) => away.has(id))) return { ok: false, reason: "stale" };
+      // Read-start proof, not the later keep time: any payout during that reading overlaps its balance (Codex X5).
+      // The same millisecond is ambiguous too. Only this file's own deterministic line is exempt.
+      const since = (await readPayoutsExact(store)).some(
+        (payout) => inFile.has(payout.aff) && payout.at >= kept.readAt && payout.id !== payoutIdForFileLine(file, payout.aff),
+      );
+      if (since) return { ok: false, reason: "stale" };
+      const reference = payoutReference(input.reference);
+      let written = 0;
+      let cents = 0;
+      let already = 0;
+      let unrecorded = 0;
+      let unrecordedCents = 0;
+      for (const [index, line] of kept.lines.entries()) {
+        if (index > 0 && index % LINES_PER_HOLD === 0 && !(await holdLock(held))) return { ok: false, reason: "busy" };
+        const result = await addPayoutOnce(store, { id: payoutIdForFileLine(file, line.a), aff: line.a, cents: line.c, currency: kept.currency, date: input.date, reference });
+        if (result === "gone") {
+          unrecorded += 1;
+          unrecordedCents += line.c;
+        } else if (result === "held") {
+          // Already in the book under this file's own id (a retry): counted apart, never as written now (Codex N1, LOW 2).
+          already += 1;
+        } else {
+          written += 1;
+          cents += line.c;
+        }
+      }
+      // Kept while a line the file paid is not in the book: dropping it would erase the only record of that payment.
+      if (unrecorded > 0) return { ok: false, reason: "unrecorded", written, cents, held: already, unrecorded, unrecordedCents };
+      await dropPayFiles(statsId);
+      return { ok: true, written, cents, held: already };
+    });
+  } catch (error) {
+    if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
+    throw error;
   }
 }
 

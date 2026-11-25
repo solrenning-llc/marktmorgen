@@ -5,7 +5,8 @@ import { AffiliateCommissionHistory, INVOICES_CEILING_TEXT, INVOICES_UNLINKED_TE
 import { AffiliateUnconfirmed, type WaitingLine } from "@/components/affiliate-unconfirmed";
 import type { AffiliateCommissionLine as LineView } from "@/lib/affiliate-commission-view";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { browserZone } from "@/lib/local-clock";
 import { EmailInput } from "@/components/email-input";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
@@ -38,6 +39,7 @@ import {
   creatorKeeps,
 } from "@/lib/partner-share";
 import type { Affiliate, AffiliateStatus, HoldFlag, Payout } from "@/lib/affiliates";
+import type { HeldPayFile } from "@/lib/affiliate-payouts";
 import { MAX_TERM_DAYS, changeOpen, lastDaySeconds, lastDayWords, shareRunning, stepWords, termWords } from "@/lib/partner-terms-rules";
 import { StoreField } from "@/components/studio-store-pin";
 import { LeadReview, type LeadRow, LeadTerms, type LeadTermsState } from "@/components/affiliate-leads-studio";
@@ -82,6 +84,10 @@ const MESSAGES: Record<string, string> = {
   amount: "Type the amount you paid, like 25 or 25.50.",
   date: "Pick the day you paid it.",
   nothing: "Nobody is owed anything right now, so there was nothing to write down.",
+  file: "This payout file can no longer be checked, so no new payout was recorded. If you already paid it, check each affiliate’s recorded payments and use their payout form to record only any missing amounts from that file. Do not pay it again or confirm a new file for that payment. If you have not paid it, download a new file.",
+  busy: "Payments to your affiliates are being written down right now, so nothing was saved. Try again in a minute.",
+  unrecorded: "Not every line of that file could be written down, because an affiliate in it is no longer on your list. The file was kept. Compare it with each affiliate’s recorded payments, and do not pay it again.",
+  stale: "That file is out of date, so no new payout was recorded: another payment overlaps the balance in the file. If you paid this file too, check each affiliate’s recorded payments and record only any missing amounts from that file by hand. Otherwise, download a new file.",
   refunds:
     "Stripe could not be asked about refunds just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
   invoices:
@@ -181,19 +187,57 @@ async function postUndo(payload: Record<string, unknown>): Promise<{ ok: true; u
 }
 
 /**
+ * A file written down only in part (Codex N1 on #3906, MEDIUM): what is in the book, what could not go in and why, and
+ * what to do. Counts and an amount only; the downloaded file names the line, so the screen never names a person gone.
+ */
+function unrecordedMessage(inBook: number, unrecorded: number, cents: number, currency: string): string {
+  const lines = (n: number) => `${n} ${n === 1 ? "line" : "lines"}`;
+  return `${lines(unrecorded)} of that file (${money(cents, currency)}) could not be written down, because the affiliate is no longer on your list. ${inBook ? `The other ${lines(inBook)} ${inBook === 1 ? "is" : "are"} in your records. ` : ""}The file was kept. Compare it with each affiliate’s recorded payments, and do not pay it again.`;
+}
+
+/**
  * Writing down a whole batch the creator has just paid in their own provider.
  * Separate from `post` because it answers with how many payouts it wrote, and
  * because it is the one call that touches several affiliates at once.
+ * It takes the chosen file itself, so the part that could not be written down is
+ * shown in the file's own currency, never the store's current one (Codex X6 on
+ * #3906, MEDIUM: a USD file after a switch to JPY read as ¥3,000, not $30.00).
  */
-async function postBatch(payload: Record<string, unknown>): Promise<{ written: number } | { error: string }> {
+/**
+ * When a payout file was downloaded, as the creator's own clock says it, with the zone named (FZ): in UTC on the
+ * server's first drawing (no zone known there), then redrawn in the browser's zone once the page is open. Pure.
+ */
+export function downloadedWords(at: number, zone?: string): string {
+  const parts = { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" } as const;
+  if (zone && zone !== "UTC" && zone !== "Etc/UTC") {
+    try {
+      return new Date(at).toLocaleString("en-US", { ...parts, timeZone: zone, timeZoneName: "short" });
+    } catch {
+      // A zone the browser names but cannot use: UTC, said as UTC, as on the server.
+    }
+  }
+  return `${new Date(at).toLocaleString("en-US", { ...parts, timeZone: "UTC" })} UTC`;
+}
+
+export async function postBatch(batch: { date: string; reference: string }, file: { id: string; currency: string }): Promise<{ written: number; held: number; left: number | null } | { error: string }> {
   try {
     const response = await fetch("/api/store/affiliates/payout-batch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ date: batch.date, reference: batch.reference, file: file.id }),
     });
-    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; written?: number };
-    if (data.ok) return { written: Number(data.written) || 0 };
+    const data = (await response.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      written?: number;
+      held?: number;
+      unrecorded?: number;
+      unrecordedCents?: number;
+      left?: number | null;
+    };
+    const count = (n: unknown) => (Number.isSafeInteger(n) && (n as number) >= 0 ? (n as number) : 0);
+    if (data.ok) return { written: count(data.written), held: count(data.held), left: typeof data.left === "number" ? data.left : null };
+    if (data.error === "unrecorded" && count(data.unrecorded) > 0) return { error: unrecordedMessage(count(data.written) + count(data.held), count(data.unrecorded), count(data.unrecordedCents), file.currency) };
     return { error: MESSAGES[data.error ?? ""] ?? MESSAGES.server_error };
   } catch {
     return { error: MESSAGES.server_error };
@@ -223,6 +267,7 @@ export function AffiliateStudio({
   payPanel = null,
   leads = [],
   leadsTotal = 0,
+  payFiles = [],
   unconfirmed = [],
   unconfirmedTotal = 0,
   unconfirmedDays = 14,
@@ -260,6 +305,8 @@ export function AffiliateStudio({
   /** Confirmed leads, newest first (lib/affiliate-leads.ts), and how many there are in all. */
   leads?: LeadRow[];
   leadsTotal?: number;
+  /** Payout files downloaded and not yet written down, newest first (lib/affiliate-payouts.ts heldPayFiles); null when they could not be read. */
+  payFiles?: HeldPayFile[] | null;
   /** Second-level lines waiting as "buyer not confirmed" (newest first, some), how many in all, and the days the job keeps looking. */
   unconfirmed?: WaitingLine[];
   unconfirmedTotal?: number;
@@ -329,6 +376,14 @@ export function AffiliateStudio({
   }
   const [batchDate, setBatchDate] = useState(today);
   const [batchReference, setBatchReference] = useState("");
+  const [batchFileId, setBatchFileId] = useState("");
+  // The reader's zone, known only in the browser: the file times are drawn in UTC first and redrawn in it after mount.
+  const [zone, setZone] = useState<string | undefined>(undefined);
+  useEffect(() => setZone(browserZone()), []);
+  // The file being written down: the one picked; a lone file needs no pick, but of several none is taken by default,
+  // so a hurried click never writes down the newest instead of the one paid (Codex N1 on #3906, LOW 1).
+  const files = payFiles ?? [];
+  const chosenFile = files.find((file) => file.id === batchFileId) ?? (files.length === 1 ? files[0] : null);
 
   async function act(where: string, payload: Record<string, unknown>, confirmation: string | ((state: string) => string)): Promise<boolean> {
     setBusy(where);
@@ -440,9 +495,13 @@ export function AffiliateStudio({
                   className="mt-4 rounded-xl border-2 border-violet-brand/30 bg-white p-3"
                   onSubmit={async (e) => {
                     e.preventDefault();
+                    if (!chosenFile) {
+                      setError({ where: "batch", text: "Pick the file you paid." });
+                      return;
+                    }
                     setBusy("batch");
                     setError(null);
-                    const done = await postBatch({ date: batchDate, reference: batchReference });
+                    const done = await postBatch({ date: batchDate, reference: batchReference }, chosenFile);
                     setBusy(null);
                     if ("error" in done) {
                       setError({ where: "batch", text: done.error });
@@ -450,7 +509,9 @@ export function AffiliateStudio({
                     }
                     setBatchOpen(false);
                     setBatchReference("");
-                    toast(`${done.written} ${done.written === 1 ? "payout" : "payouts"} written down.`);
+                    toast(
+                      `${done.written} ${done.written === 1 ? "payout" : "payouts"} written down.${done.held ? ` ${done.held} ${done.held === 1 ? "was" : "were"} already in your records.` : ""}${done.left ? ` ${money(done.left, currency)} is still owed and goes in the next file.` : ""}`,
+                    );
                     router.refresh();
                   }}
                 >
@@ -480,12 +541,35 @@ export function AffiliateStudio({
                       />
                     </label>
                   </div>
+                  {files.length > 0 ? (
+                    <label className="mt-3 block" htmlFor="batch-f">
+                      <span className="field-label">File you paid</span>
+                      <select id="batch-f" value={chosenFile?.id ?? ""} onChange={(e) => setBatchFileId(e.target.value)} className="field" required>
+                        {files.length > 1 ? (
+                          <option value="" disabled>
+                            Pick the file you paid
+                          </option>
+                        ) : null}
+                        {files.map((file) => (
+                          <option key={file.id} value={file.id}>
+                            {`Downloaded ${downloadedWords(file.at, zone)}: ${file.people} ${file.people === 1 ? "affiliate" : "affiliates"}, ${money(file.cents, file.currency)}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p className="mt-3 text-sm text-ink-soft" role="status">
+                      {payFiles === null
+                        ? "Your downloaded payout files could not be read just now, so nothing can be written down. Reload the page in a minute."
+                        : "No payout file is waiting. Download the PayPal file or the worksheet first, pay it, then come back here."}
+                    </p>
+                  )}
                   <p className="mt-2 text-xs text-ink-soft">
-                    This writes one payout for each of the {owedNow.length} owed right now, against what the book says at this
-                    moment. It records a payment you already made; no money moves from here.
+                    This writes down exactly what that file paid each affiliate. Anything they earned after you downloaded it is
+                    still owed and goes in the next file. It records a payment you already made; no money moves from here.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="submit" className="btn btn-primary btn-sm" disabled={busy !== null} aria-busy={busy === "batch"}>
+                    <button type="submit" className="btn btn-primary btn-sm" disabled={busy !== null || files.length === 0} aria-busy={busy === "batch"}>
                       Write the batch down
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => setBatchOpen(false)}>
@@ -500,7 +584,10 @@ export function AffiliateStudio({
                   onClick={() => {
                     setBatchDate(today);
                     setBatchReference("");
+                    setBatchFileId("");
                     setBatchOpen(true);
+                    // A file downloaded since this page loaded is listed once the page reads them again.
+                    router.refresh();
                   }}
                 >
                   I have paid this batch

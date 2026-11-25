@@ -31,7 +31,7 @@ import { creditPayPalSale, readBook } from "@/lib/affiliates";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { readFileSync } from "node:fs";
 import { AFFILIATE_ENTRY_BYTES, BOOK_KEPT_REFUND_BYTES } from "@/lib/api-read-rules";
-import { PAYPAL_REFUNDS_READ, type Paid, readPayPalRefundsWithCoverage, watchPayPal } from "@/lib/paypal-sales";
+import { PAYPAL_REFUNDS_READ, type Paid, WATCH_LATE_SECONDS, readPayPalRefundsWithCoverage, watchPayPal } from "@/lib/paypal-sales";
 import { payableLines } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -330,7 +330,11 @@ async function main(): Promise<void> {
         redis.pipeline = original;
       }
       const kept = sent.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:order-write:v1") && c.some((a) => String(a).startsWith(`nl:ppsell:back:${SID}`)));
-      return { kept, sent };
+      // The order put late before PayPal is asked (Codex U on #3443): one fenced put-back of the watch (PAYPAL_WATCH_IF_LIVE,
+      // its score the EVAL's eighth argument) at a score already past WATCH_LATE_SECONDS, part of the watch line's own
+      // commands (PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook).
+      const late = sent.filter((c) => fencedPutBack(c) && Number(c[7]) <= Math.floor(Date.now() / 1000) - WATCH_LATE_SECONDS);
+      return { kept, sent: sent.filter((c) => !late.includes(c)), late };
     };
     await setup();
     captures.set(CAPTURE, "REFUNDED");
@@ -357,7 +361,8 @@ async function main(): Promise<void> {
     // taken-back path again before the lasting write: the refund mark's ZADD and EXPIRE, and for a capture reversed,
     // failed or declined also its own mark's. The WHOLE command list of a failed look is held to the lines' sum, so
     // no step in that path can go uncounted: the run's two list reads (the pending sweep's and the watch's), the watch
-    // line's own two (the paid record's GET and the list write), the one script, and the marks (PAYPAL_REFUND_KEPT).
+    // line's own three (the paid record's GET, its one write when PayPal's word changes it, and the list write), the one
+    // script, and the marks (PAYPAL_REFUND_KEPT).
     // The sibling retry (rule 30): a buyer's record read whose reply is not exact also puts the order back an hour on,
     // after the marks and the script; its one HGET is the buyer's record of PAYPAL_REFUND_WATCH's open gap (main's).
     const failures = [
@@ -369,12 +374,15 @@ async function main(): Promise<void> {
       captures.set(CAPTURE, status);
       const look = await scripts(() => answering(failure.command, failure.prefix, failure.reply, () => watch()));
       const label = `${status}, ${failure.name} unknown`;
+      is(`${label}: put late once before PayPal was asked`, look.late.length, 1);
       is(`${label}: looked at again an hour on, one script`, [look.kept.length, look.sent.filter((c) => fencedPutBack(c)).length], [1, 1]);
       const counted = [
         (c: (string | number)[]) => failure.command === "HGET" && c[0] === "HGET" && String(c[1]).startsWith(failure.prefix),
         (c: (string | number)[]) => c[0] === "ZRANGEBYSCORE" && c[1] === `nl:ppsell:pending:${SID}`,
         (c: (string | number)[]) => c[0] === "ZRANGEBYSCORE" && c[1] === `nl:ppsell:watch:${SID}`,
         (c: (string | number)[]) => c[0] === "GET" && c[1] === `nl:ppsell:paid:${ORDER}`,
+        // A reversal's takenOff written once on the paid record (#3443, the Path's money), in the watch line's own.
+        (c: (string | number)[]) => c[0] === "SET" && c[1] === `nl:ppsell:paid:${ORDER}`,
         (c: (string | number)[]) => fencedPutBack(c),
         (c: (string | number)[]) => look.kept.includes(c),
       ];
@@ -387,8 +395,8 @@ async function main(): Promise<void> {
       is(`${label}: every other command of a failed look is a take-back mark (ZADD or EXPIRE of its set)`, rest.every((c) => (c[0] === "ZADD" || c[0] === "EXPIRE") && marks.has(String(c[1]))), true);
       is(`${label}: the marks of a failed look are within the line`, rest.length <= PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost, true);
       is(
-        `${label}: the whole failed look is within the lines' sum`,
-        look.sent.length - (failure.command === "HGET" ? 1 : 0) <=
+        `${label}: the whole failed look, its late mark included, is within the lines' sum`,
+        look.sent.length + look.late.length - (failure.command === "HGET" ? 1 : 0) <=
           PAYPAL_PENDING_SWEEP.listReadsPerStoreRun +
             PAYPAL_REFUND_WATCH.listReadsPerStoreRun +
             PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook +
@@ -397,6 +405,35 @@ async function main(): Promise<void> {
         true,
       );
     }
+  }
+
+  part("A reversal whose refund mark is not known written: the paid record's two writes are the watch line's own");
+  {
+    // Codex U (U-20261116-2208) on #3443: PayPal's word (takenOff) and then the blind mark are each one SET XX of the
+    // paid record in the same look; with the list reads, the GET, the list write and the marks, the whole look stays
+    // within the lines (PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook counts both writes).
+    await setup();
+    captures.set(CAPTURE, "REVERSED");
+    const sent: (string | number)[][] = [];
+    const original = redis.pipeline;
+    redis.pipeline = async (commands) => { sent.push(...commands); return original.call(redis, commands); };
+    try {
+      await answering("ZADD", `nl:ppsell:refunded:${SID}`, "garbled", () => watch());
+    } finally {
+      redis.pipeline = original;
+    }
+    const writes = sent.filter((c) => c[0] === "SET" && c[1] === `nl:ppsell:paid:${ORDER}` && c.includes("XX"));
+    const record = JSON.parse(String(redis.run(["GET", `nl:ppsell:paid:${ORDER}`]))) as Record<string, unknown>;
+    is("two writes of the paid record: PayPal's word, then the blind mark", writes.length, 2);
+    is("the blind mark keeps PayPal's word written before it", [record.takenOff, typeof record.blind], ["REVERSED", "number"]);
+    const marks = new Set([`nl:ppsell:refunded:${SID}`, `nl:ppsell:reversed:${SID}`]);
+    const own = sent.filter((c) => !((c[0] === "ZADD" || c[0] === "EXPIRE") && marks.has(String(c[1]))));
+    is(
+      "the whole look is within the lines' sum",
+      own.length <= PAYPAL_PENDING_SWEEP.listReadsPerStoreRun + PAYPAL_REFUND_WATCH.listReadsPerStoreRun + PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook
+        && sent.length - own.length <= PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost,
+      true,
+    );
   }
 
   part("The refund seen twice, in the lasting record and in the set, counts once");

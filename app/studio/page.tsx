@@ -1118,7 +1118,8 @@ export default async function StudioPage({
               (error: unknown) => ({ state: "error" as const, value: null, at: null, used: error instanceof ReadingsUsed, failed: error instanceof ReadingFailed, unnamed: false }),
             )
           : Promise.resolve({ state: "none" as const, value: null, at: null, used: false, failed: false, unnamed: false }),
-        readNotes(current.statsId).catch(() => []),
+        // A failed reading is null, said as notes that could not be read, never as an empty history (#5285 row #2689).
+        readNotes(current.statsId).catch((): null => null),
         // Which part of the spend is unread is said, never that part as $0 (Claude 5 on #2924); it never throws.
         spendsForStudio(current.statsId),
         heardOff(current.handle).catch(() => false),

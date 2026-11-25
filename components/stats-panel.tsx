@@ -487,7 +487,8 @@ export function StatsPanel({
   /** When the numbers shown were read, and whether they may be read again today (lib/store-readings.ts; inbox C4-33). */
   reading?: NumbersReading | null;
   canExport?: boolean;
-  notes?: StatsNote[];
+  /** Null when the notes could not be read: said so, never shown as none (components/numbers-notes.tsx). */
+  notes?: StatsNote[] | null;
   spends?: AdSpend[];
   /** Which part of the spend could not be read (lib/ad-spend-rules.ts): every figure that uses ad spend is left out then. */
   spendsUnread?: SpendUnread;
@@ -528,7 +529,8 @@ export function StatsPanel({
 }) {
   const [range, setRange] = useState<RangeKey>("d7");
   const [pickDates, setPickDates] = useState(false);
-  const [notes, setNotes] = useState(notesGiven);
+  const [notesRead, setNotes] = useState<StatsNote[] | null>(notesGiven);
+  const notes = notesRead ?? [];
   const [spends, setSpends] = useState(spendsGiven);
   const [spendsUnread, setSpendsUnread] = useState<SpendUnread>(spendsUnreadGiven);
   // The spend the figures use: none while a part is unread, and those figures are left out (Claude 5 on #2924).
@@ -914,7 +916,7 @@ export function StatsPanel({
               </details>
             );
           })()}
-          <NumbersNotes notes={notes} onChange={setNotes} from={days[0].date} to={days[days.length - 1].date} today={data.days[data.days.length - 1]?.date ?? days[days.length - 1].date} />
+          <NumbersNotes notes={notes} unread={notesRead === null} onChange={setNotes} from={days[0].date} to={days[days.length - 1].date} today={data.days[data.days.length - 1]?.date ?? days[days.length - 1].date} />
         </div>
       ) : null}
 

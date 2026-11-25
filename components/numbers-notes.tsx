@@ -16,14 +16,24 @@ function shortDay(day: string): string {
  * rise or a fall on the chart has its reason beside it. The list shows the
  * notes inside the days the chart shows; all of them are kept.
  */
+/** One id for the note being added, kept across its tries until the server confirms it (lib/stats-notes.ts, addNote). */
+function newOp(): string {
+  const bytes = new Uint8Array(4);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export function NumbersNotes({
   notes,
+  unread = false,
   onChange,
   from,
   to,
   today,
 }: {
   notes: StatsNote[];
+  /** The notes could not be read: the list says so, never that there are none (board #5285, row #2689). */
+  unread?: boolean;
   onChange: (notes: StatsNote[]) => void;
   /** The days the chart shows, so the list says what is on it. */
   from: string;
@@ -33,6 +43,9 @@ export function NumbersNotes({
   const [day, setDay] = useState(today);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  // The same id on each try of one note, so a try sent again after a save that landed adds no second note; a new one
+  // once that note is confirmed, or once its day or words change (it is then another note).
+  const [op, setOp] = useState(newOp);
   const shown = notes.filter((note) => note.day >= from && note.day <= to);
 
   async function send(body: Record<string, unknown>, done: string) {
@@ -60,6 +73,9 @@ export function NumbersNotes({
       <p className="mt-0.5 text-xs text-ink-soft">
         Mark what happened on a day, like a post, a launch or a new price, so you can see what it did. Days with a note are marked under the chart.
       </p>
+      {unread ? (
+        <p role="status" className="notice mt-2 text-sm">Your notes could not be read just now, so they are not shown here. Nothing was deleted. Reload the page to try again.</p>
+      ) : null}
       {shown.length ? (
         <ul className="mt-2 divide-y divide-line text-sm">
           {[...shown].reverse().map((note) => (
@@ -85,12 +101,15 @@ export function NumbersNotes({
         className="mt-2 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-end"
         onSubmit={async (event) => {
           event.preventDefault();
-          if (await send({ action: "add", day, text }, "Note added.")) setText("");
+          if (await send({ action: "add", day, text, op }, "Note added.")) {
+            setText("");
+            setOp(newOp());
+          }
         }}
       >
         <label className="min-w-0 text-sm">
           <span className="field-label">Day</span>
-          <input type="date" required className="field mt-1 min-w-0 max-w-full py-2 sm:w-auto" value={day} max={today} onChange={(e) => setDay(e.target.value)} />
+          <input type="date" required className="field mt-1 min-w-0 max-w-full py-2 sm:w-auto" value={day} max={today} onChange={(e) => { setDay(e.target.value); setOp(newOp()); }} />
         </label>
         <label className="min-w-0 text-sm">
           <span className="field-label">What happened</span>
@@ -100,7 +119,7 @@ export function NumbersNotes({
             maxLength={MAX_NOTE_LENGTH}
             placeholder="Posted the October reel"
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => { setText(e.target.value); setOp(newOp()); }}
           />
         </label>
         <button type="submit" className="btn btn-secondary btn-sm justify-self-start" disabled={busy}>

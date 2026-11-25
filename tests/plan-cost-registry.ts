@@ -1813,7 +1813,8 @@ export const PAYPAL_CAPTURE_WATCH = { countCommandsPerTry: 2, watchCommandsPerCa
  *   subscription's paid invoices from its end on (one list, its charges expanded), the account's balance, and for at
  *   most lateRefundsPerTry payments the refunds already made on it and the refund itself; no Redis command of its own
  *   (each refund's mark and idempotency key live at Stripe), and a plan with more to give back is kept for the next
- *   day (ZADD, SREM, ZREM, inside ownCommandsPerPlanTried);
+ *   day (the fenced write, GET then the EVAL with its GET, HGET and ZADD, then SREM and ZREM, inside
+ *   ownCommandsPerPlanTried);
  * - runMs: the share of the run the route gives the plans (PLANS_MS), every request given up by then;
  * - tellCommandsPerPlan: per try of the telling (sent once a plan; while it stays unsent, tried again at each of the
  *   plan's tries, weekly for a stuck plan and daily for an owed one, each try these commands again and, on the Amazon
@@ -1823,7 +1824,8 @@ export const PAYPAL_CAPTURE_WATCH = { countCommandsPerTry: 2, watchCommandsPerCa
  *   (lib/plan-stuck-notice.ts): the store read by its id (two GETs and the free-account check storeForEmail makes,
  *   five, as measured in tests/payment-plan-stuck.test.ts), the product's listing (at most one read), the email's
  *   meter and send on the Resend path measured there (four; on Amazon SES that path's own commands, priced with
- *   every store email in lib/email.ts), and, when it could not be sent, the mark given back (ZADD, SREM, ZREM).
+ *   every store email in lib/email.ts), and, when it could not be sent, the mark given back (for a plan naming its
+ *   store the fenced write, GET then the EVAL with its GET, HGET and ZADD, then SREM and ZREM; lib/plans.ts, moveTo).
  *   The email itself is the store's own, taken from its email figure before it is sent (EMAIL_SITES). The same
  *   figure bounds the once-a-plan email to the creator about a payment after the plan's end still owed back for
  *   PLAN_OWED_TELL_DAYS (lib/plan-stuck-notice.ts, tellPlanOwed: the same reads, meter and send, and the mark given

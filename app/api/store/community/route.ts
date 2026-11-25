@@ -12,6 +12,7 @@ import {
   type CommunityImage,
   addComment,
   createPost,
+  PostNotWritten,
   deleteComment,
   deletePost,
   editComment,
@@ -290,6 +291,10 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         // No room in the store's data room: nothing was written, and the picture goes back.
         if (error instanceof DataRoomError && img) await dropCommunityImage(img.path);
+        // Certainly not written (it failed before the post's own write): the picture is the member's again, listed for
+        // the sweep, which deletes it and gives its place back a day later unless they post it again (issue #3974).
+        // A failure of the write itself still keeps it: the post may exist.
+        else if (error instanceof PostNotWritten && img) await untakeCommunityUpload(img.path, key).catch(() => {});
         throw error;
       }
       if (!made.ok) {

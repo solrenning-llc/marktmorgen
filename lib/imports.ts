@@ -1985,6 +1985,7 @@ export async function importTracesOf(store: Store, email: string, now = Date.now
     const mail = stringList(replies?.[2]);
     if (errors === null || batches === null || mail === null) throw new UnknownReplyError("an import's records about a person");
     const notBroughtIn: ImportTrace["notBroughtIn"] = [];
+    let withheld = false;
     for (const raw of errors) {
       let line: unknown;
       try {
@@ -1997,8 +1998,17 @@ export async function importTracesOf(store: Store, email: string, now = Date.now
         continue;
       }
       const [row, column, problem, value] = line as [number, string, string, string];
-      if (names([value])) notBroughtIn.push({ row, column, problem, value });
+      // The cell's text only when it is their address and nothing else (#5285 row #5070): a cell that names them among
+      // other text ("nina@example.com, otto@example.com", a product or a note) may hold another person's address or
+      // data, which their copy never carries (GDPR art. 15(4)); the line still says the row named them.
+      // The copy says so, once per import, as rows waiting do (Claude 5 iaqyQ's LEVE on #5378): an empty value alone
+      // would read as an empty cell in their file.
+      if (!names([value])) continue;
+      const own = value.trim().normalize("NFC").toLowerCase() === subject.toLowerCase();
+      if (!own) withheld = true;
+      notBroughtIn.push({ row, column, problem, value: own ? value : "" });
     }
+    if (withheld) unread.push(`A line of the report of the import "${job.file}" names this address among other text; that text was not copied.`);
     const rowsWaiting: string[][] = [];
     let mentionsWithoutOwnership = false;
     for (let i = 0; i < batches; i += 1) {

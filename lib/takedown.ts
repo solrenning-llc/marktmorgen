@@ -36,6 +36,7 @@ import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
 import { type ReportInput, handleIn } from "@/lib/takedown-rules";
+import { TAKEN_DOWN_SECONDS, hasDraftPreview, isTakenDown, markTakenDown, readDraftPreview } from "@/lib/draft-preview";
 import { type PictureNames, withdrawProductPicture } from "@/lib/picture-withdraw";
 
 const REPORT_SECONDS = 400 * 86_400;
@@ -96,17 +97,50 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
   return sent ? "sent" : "error";
 }
 
-/** The product a notice's address points at (/@handle/p/<product>), when it points at one of this store's. */
+/**
+ * The product a notice's address points at (/@handle/p/<product>, or a draft's preview link /@handle/preview/<code>,
+ * lib/draft-preview.ts), when it points at one of this store's. A preview link that no longer opens points at nothing.
+ */
 export async function reportedProduct(report: Report, store: Store): Promise<Listing | null> {
+  // Only an address that is not one points at nothing. A read that cannot be read is unknown, never "no product": it
+  // throws, and the operator's page says the product could not be checked (Claude 4 cloud AE on #3597, LEVE 1).
+  const decoded = (text: string): string | null => {
+    try {
+      return decodeURIComponent(text);
+    } catch {
+      return null;
+    }
+  };
+  let parts: string[];
   try {
-    const parts = new URL(report.url).pathname.split("/").filter(Boolean);
-    const at = parts.indexOf("p");
-    const segment = at >= 0 ? decodeURIComponent(parts[at + 1] ?? "") : "";
-    const id = segment ? productIdFromAddress(store, segment) : null;
-    return id ? await readListing(store, id) : null;
+    parts = new URL(report.url).pathname.split("/").filter(Boolean);
   } catch {
     return null;
   }
+  const preview = parts.indexOf("preview");
+  if (preview >= 0) {
+    // Claude 6 on #3439, MEDIUM 1: a notice about a preview address maps to the draft it opens, in this store only.
+    const code = decoded(parts[preview + 1] ?? "");
+    if (code === null) return null;
+    const opened = await readDraftPreview(code);
+    return opened && store.statsId && opened.statsId === store.statsId ? await readListing(store, opened.productId) : null;
+  }
+  const at = parts.indexOf("p");
+  const segment = at >= 0 ? decoded(parts[at + 1] ?? "") : "";
+  const id = segment ? productIdFromAddress(store, segment) : null;
+  return id ? await readListing(store, id) : null;
+}
+
+/**
+ * The products the operator's page lists for a notice, each with its button (app/takedown/[token]/page.tsx): the one
+ * the notice points at first, even when it is a draft (a notice about a draft's preview address, whose button closes
+ * the link: takeDown, stillUp), then the first page of the store's published products. No other draft is listed.
+ * The page is the operator's only, so a draft listed here is shown to nobody else (Claude 4 cloud AE on #3597, MEDIUM).
+ */
+export function operatorProducts(store: Store, pointed: Listing | null): { product: Listing; draft: boolean; named: boolean }[] {
+  const named = pointed ? [{ product: pointed, draft: Boolean(pointed.hidden), named: true }] : [];
+  const rest = store.catalog.head.filter((p) => !p.hidden && p.id !== pointed?.id).map((p) => ({ product: p, draft: false, named: false }));
+  return [...named, ...rest];
 }
 
 /** The notice a token opens, and its store when the address names one. */
@@ -283,7 +317,18 @@ async function stillUp(store: Store, action: Exclude<TakedownAction, { type: "st
     // Read by id, however far down the store's list it is (lib/catalog.ts). A failed read throws to the caller.
     const product = await readListing(store, action.id);
     if (!product) throw new Error("the store lists this product, but its record could not be read");
-    if (product.hidden) return null;
+    if (product.hidden) {
+      // A draft is not public, but its preview link is (lib/draft-preview.ts): a notice about that address takes the
+      // link down, and none opens or is made for the draft until it is published (Claude 6's focal on #3597). Once
+      // marked, there is nothing more to take down. A store without a stats id never had a preview link. A mark that
+      // cannot be read throws to the caller, never "nothing to do".
+      if (!store.statsId || (await isTakenDown(store, action.id))) return null;
+      if (!(await hasDraftPreview(store, action.id))) return null;
+      return {
+        what: `The preview link of the draft product "${product.title}", now closed`,
+        howLong: `How long: until you publish the product, and at most ${Math.round(TAKEN_DOWN_SECONDS / 86_400)} days while it stays a draft. No preview link opens or can be made for it meanwhile. Publishing it while the notice stands may lead us to suspend your store (Terms, section 3, ${origin}/terms#selling-through-a-marktmorgen-store).`,
+      };
+    }
     return {
       what: `The product "${product.title}", now unpublished`,
       howLong: `How long: until you publish it again. Publishing it again while the notice stands may lead us to suspend your store (Terms, section 3, ${origin}/terms#selling-through-a-marktmorgen-store).`,
@@ -298,6 +343,16 @@ async function stillUp(store: Store, action: Exclude<TakedownAction, { type: "st
   }
   if (store.suspended) return null;
   return { what: "Your store's pages and sales, now switched off", howLong: "How long: until we switch your store back on, for example after your answer below." };
+}
+
+/**
+ * A product taken down after a notice also has its draft preview closed (Claude 6 on #3439, MEDIUM 1): its link ends at
+ * once and none opens or is made for it until it is published again (lib/draft-preview.ts). Run before a takedown's
+ * steps say it landed, on every path that says so, so a press after this failed marks it then; a write that is not
+ * confirmed throws. A store without a stats id never had a preview link to close.
+ */
+async function closePreview(store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>): Promise<void> {
+  if (action.type === "product" && store.statsId) await markTakenDown(store, action.id);
 }
 
 /** Takes it down. False when it went in the meantime (nothing was done); throws when the write's outcome is unknown. */
@@ -394,6 +449,7 @@ export async function sendOwedNotice(report: Report, store: Store, action: Exclu
         if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("a notice's owed takedowns write");
         return "unconfirmed" as const;
       }
+      await closePreview(now, action);
       kept = { ...kept, applied: true };
       await writeSteps(key, kept);
     }
@@ -437,6 +493,11 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
     await writeSteps(key, steps);
     // Owed from here until its notice goes out, so a page opened again can still send it (unsentNotices).
     await markOwed(report.id, part);
+    // The preview closed before the product is hidden (Claude 1 cloud rev-odd on #3597): a published product can
+    // still have a live link from its draft days, and hidden without its mark it would read as a draft with a live
+    // preview, "up", so the takedown would never be told. A mark that fails here throws with nothing taken down, and
+    // a press again does it all; a mark left on a product still published only stops preview links it does not need.
+    await closePreview(store, action);
     if (!(await apply(ref, store, action, holding ? { report, steps, token } : null))) {
       await redisPipeline([["DEL", key], ["SREM", owedKey(report.id), part]]).catch(() => {});
       return null;
@@ -451,6 +512,7 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
     if (!kept || kept.sent) return null;
     steps = kept;
     if (!steps.applied) {
+      await closePreview(store, action);
       steps = { ...steps, applied: true };
       await writeSteps(key, steps);
     }

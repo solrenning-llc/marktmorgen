@@ -424,10 +424,11 @@ async function checks(): Promise<void> {
 
     part("Unconfirmed portion writes grant no dispatch and are never refunded");
     const computedAck = new Array(1);
-    Object.defineProperty(computedAck, "0", { get: () => { rampGetterCalls += 1; return "OK"; } });
+    Object.defineProperty(computedAck, "0", { get: () => { rampGetterCalls += 1; return 1; } });
+    // The portion is written by RAMP_SWAP since issue #4134: its own reply is [1] (written) or [0] (changed first).
     const badAcks: [string, unknown][] = [
-      ["empty", []], ["null", [null]], ["boolean", [true]], ["lowercase", ["ok"]],
-      ["extra entry", ["OK", "OK"]], ["computed", computedAck],
+      ["empty", []], ["null", [null]], ["boolean", [true]], ["string", ["1"]], ["old OK", ["OK"]],
+      ["extra entry", [1, 1]], ["computed", computedAck],
       ["lost acknowledgement", new Error("synthetic applied ramp write lost")],
     ];
     for (const [name, reply] of badAcks) {
@@ -435,7 +436,7 @@ async function checks(): Promise<void> {
       const commandsSeen: (string | number)[][] = [];
       redis.pipeline = async commands => {
         commandsSeen.push(...commands);
-        if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === checkedRampKey) {
+        if (commands.length === 1 && commands[0][0] === "EVAL" && commands[0][3] === checkedRampKey) {
           await rampPipeline.call(redis, commands);
           if (reply instanceof Error) throw reply;
           return reply as unknown[];
@@ -446,7 +447,7 @@ async function checks(): Promise<void> {
       is(`${name}: sender waits with the whole recipient list`,
         [held.done, held.rest, held.stopped], [[], ["member0@example.com"], "portion"]);
       is(`${name}: no allowance increment or rollback command`,
-        commandsSeen.map(c => c[0]), ["GET", "GET", "SET"]);
+        commandsSeen.map(c => c[0]), ["GET", "GET", "EVAL"]);
       const applied = JSON.parse(String((await rampPipeline.call(redis, [["GET", checkedRampKey]]))[0]));
       is(`${name}: applied uncertain portion remains taken`, applied.left, RAMP_FIRST - 1);
     }

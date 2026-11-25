@@ -78,12 +78,18 @@ const isAssistantPrice = (price: Record<string, unknown> | undefined): price is 
     recurring?.interval === "month" && recurring.interval_count === 1;
 };
 
+/** The active price under the add-on's lookup key, when it is the add-on's own (isAssistantPrice); otherwise undefined. */
+async function listedAssistantPrice(): Promise<(Record<string, unknown> & { id: string }) | undefined> {
+  const listed = await onPlatform("GET", `/prices?${new URLSearchParams({ "lookup_keys[]": ASSISTANT_LOOKUP_KEY, active: "true", limit: "1" })}`);
+  const found = (listed.data as Record<string, unknown>[] | undefined)?.[0];
+  return isAssistantPrice(found) ? found : undefined;
+}
+
 /** The add-on's price at Stripe, made the first time it is needed, and replaced when it no longer matches ASSISTANT_PRICE_CENTS. */
 export async function ensureAssistantPrice(): Promise<string> {
   if (priceId) return priceId;
-  const listed = await onPlatform("GET", `/prices?${new URLSearchParams({ "lookup_keys[]": ASSISTANT_LOOKUP_KEY, active: "true", limit: "1" })}`);
-  const found = (listed.data as Record<string, unknown>[] | undefined)?.[0];
-  if (isAssistantPrice(found)) {
+  const found = await listedAssistantPrice();
+  if (found) {
     priceId = found.id;
     return found.id;
   }
@@ -111,8 +117,16 @@ export async function ensureAssistantPrice(): Promise<string> {
       nickname: `${ASSISTANT_NAME}, monthly`,
     }),
   );
-  // Nothing is kept on any other reply: the checkout that asked fails, and the next one asks Stripe again.
-  if (!isAssistantPrice(made)) throw new Error("Stripe did not return the price just written");
+  if (!isAssistantPrice(made)) {
+    // The price may be made although its reply does not read (Board #5285 row #3107): the lookup key, which the POST
+    // moved to it, is read once more, and the price there is used only when it is the add-on's own, as one found
+    // before the POST is. Nothing is kept on any other answer: the checkout that asked fails, and the next one asks
+    // Stripe again.
+    const after = await listedAssistantPrice();
+    if (!after) throw new Error("Stripe did not return the price just written");
+    priceId = after.id;
+    return after.id;
+  }
   priceId = made.id;
   return made.id;
 }

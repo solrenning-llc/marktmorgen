@@ -194,17 +194,28 @@ async function exactly(commands: (string | number)[][]): Promise<unknown[] | nul
 /** A PTTL reply: a whole number from -2 (no key) and -1 (no lifetime) up, or null. */
 const ttlOf = (reply: unknown): number | null => (typeof reply === "number" && Number.isSafeInteger(reply) && reply >= -2 ? reply : null);
 
-/** Whether the field holds exactly this paid value, read with an exact HGET (unknown is not). */
-async function holds(key: string, claim: string, value: string): Promise<boolean> {
-  const replies = await exactly([["HGET", key, claim]]);
-  return replies !== null && replies[0] === value;
+/**
+ * The hosts whose field holds exactly this paid value, read with one exact HGET each in one pipeline for all of them
+ * (unknown is not): a group booking's recovery takes the same trips to Redis whatever its number of hosts (#5285 row
+ * #3246).
+ */
+async function holding(ids: string[], claim: string, value: string): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const replies = await exactly(ids.map((id) => ["HGET", claimsKey(id), claim]));
+  return new Set(ids.filter((_, i) => replies !== null && replies[i] === value));
 }
 
-/** Whether the list lives at least `keep` (less a minute for the time the reads took), read with an exact PTTL. */
-async function lasts(key: string, keep: number): Promise<boolean> {
-  const replies = await exactly([["PTTL", key]]);
-  const ttl = replies ? ttlOf(replies[0]) : null;
-  return ttl !== null && ttl >= keep - 60_000;
+/**
+ * The hosts whose list lives at least `keep` (less a minute for the time the reads took), read with one exact PTTL
+ * each in one pipeline for all of them.
+ */
+async function lasting(ids: string[], keep: number): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const replies = await exactly(ids.map((id) => ["PTTL", claimsKey(id)]));
+  return new Set(ids.filter((_, i) => {
+    const ttl = replies ? ttlOf(replies[i]) : null;
+    return ttl !== null && ttl >= keep - 60_000;
+  }));
 }
 
 /**
@@ -227,43 +238,54 @@ export async function confirmClaim(ids: string[], claim: string, start: number, 
   const value = `${start}|${end}|0|${ref}`;
   const commands = ids.flatMap((id) => [["HSET", claimsKey(id), claim, value], ["PTTL", claimsKey(id)]]);
   const replies = await exactly(commands);
-  const short: string[] = [];
-  // What is still not confirmed, host by host; thrown only once every host has been tried.
+  // What is still not confirmed; thrown only once every host has been tried. Each recovery step below is one pipeline
+  // for every host that needs it, never one host after another (#5285 row #3246).
   const failed: string[] = [];
-  for (const [i, id] of ids.entries()) {
-    const key = claimsKey(id);
-    const written = replies !== null && countOf(replies[i * 2]) !== null;
-    if (!written) {
-      console.error("a paid booking's host claim was not answered as asked; reading it back");
-      if (!(await holds(key, claim, value))) {
-        await exactly([["HSET", key, claim, value]]);
-        if (!(await holds(key, claim, value))) {
-          failed.push("a paid booking's host claim");
-          continue;
-        }
-      }
+  const written = ids.map((_, i) => replies !== null && countOf(replies[i * 2]) !== null);
+  // A write not answered as asked: read back; if it does not hold the paid value, the same write once more, read back.
+  const unanswered = ids.filter((_, i) => !written[i]);
+  const lost = new Set<string>();
+  if (unanswered.length) {
+    console.error("a paid booking's host claim was not answered as asked; reading it back");
+    const held = await holding(unanswered, claim, value);
+    const again = unanswered.filter((id) => !held.has(id));
+    if (again.length) {
+      await exactly(again.map((id) => ["HSET", claimsKey(id), claim, value]));
+      const now = await holding(again, claim, value);
+      for (const id of again) if (!now.has(id)) lost.add(id);
     }
-    // The PTTL read with the write counts only when the write was answered; otherwise it is read again.
-    let ttl = written ? ttlOf(replies[i * 2 + 1]) : null;
-    if (ttl === null) {
-      const again = await exactly([["PTTL", key]]);
-      ttl = again ? ttlOf(again[0]) : null;
-      if (ttl === null) {
-        failed.push("a paid booking's host claims' lifetime");
-        continue;
-      }
-    }
-    // Never shortened: a later booking on the same list may need it longer.
-    if (ttl < keep) short.push(id);
   }
+  if (lost.size) failed.push(...Array.from(lost, () => "a paid booking's host claim"));
+  // The PTTL read with the write counts only when the write was answered; otherwise it is read again, all at once.
+  const ttls = new Map<string, number>();
+  const reread: string[] = [];
+  for (const [i, id] of ids.entries()) {
+    if (lost.has(id)) continue;
+    const ttl = written[i] ? ttlOf(replies![i * 2 + 1]) : null;
+    if (ttl === null) reread.push(id);
+    else ttls.set(id, ttl);
+  }
+  if (reread.length) {
+    const again = await exactly(reread.map((id) => ["PTTL", claimsKey(id)]));
+    for (const [j, id] of reread.entries()) {
+      const ttl = again ? ttlOf(again[j]) : null;
+      if (ttl === null) failed.push("a paid booking's host claims' lifetime");
+      else ttls.set(id, ttl);
+    }
+  }
+  // Never shortened: a later booking on the same list may need it longer.
+  const short = ids.filter((id) => (ttls.get(id) ?? Infinity) < keep);
   const set = short.length ? await exactly(short.map((id) => ["PEXPIRE", claimsKey(id), keep])) : [];
-  for (const [i, id] of short.entries()) {
-    if (set !== null && set[i] === 1) continue;
-    const key = claimsKey(id);
+  const unset = short.filter((_, i) => !(set !== null && set[i] === 1));
+  if (unset.length) {
     console.error("a paid booking's host claim's lifetime was not answered as set; reading it back");
-    if (await lasts(key, keep)) continue;
-    await exactly([["PEXPIRE", key, keep]]);
-    if (!(await lasts(key, keep))) failed.push("a paid booking's host claims' lifetime");
+    const lasted = await lasting(unset, keep);
+    const again = unset.filter((id) => !lasted.has(id));
+    if (again.length) {
+      await exactly(again.map((id) => ["PEXPIRE", claimsKey(id), keep]));
+      const now = await lasting(again, keep);
+      for (const id of again) if (!now.has(id)) failed.push("a paid booking's host claims' lifetime");
+    }
   }
   if (failed.length) throw new UnknownReplyError(failed[0]);
 }

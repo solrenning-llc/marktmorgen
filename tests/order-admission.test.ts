@@ -153,6 +153,7 @@ async function main() {
     /return settleAdmitted\(store, hour, 1, items\);/.test(read("lib/order-admission.ts")),
     /if \(taken === holdMark\(Number\(hour\), store\)\) await settleAdmitted\(store, hour, 1, items\);/.test(read("lib/order-admission.ts")),
   ], [true, true, true]);
+  is("a normal legacy checkout gives its captured hour and item count to atomic accounting", /\{ hour, items, createdAtMs \}/.test(read("lib/purchase-email.ts")) && read("lib/orders.ts").includes('"EVAL", COMMIT_ORDER_CONFIRMATION, 6, seenKey(reference)'), true);
   is("the field it travels in", ADMITTED_FIELD, "mm_admit");
   is("a refused buyer is told plainly, with nothing charged", [/OrdersPausedError/.test(read("app/api/store/checkout/route.ts")), read("app/api/store/checkout/route.ts").includes('status=${error.reason === "paused" ? "paused"'), /paused: \{ title:/.test(read("lib/buyer-words/en.ts"))], [true, true, true]);
   done();

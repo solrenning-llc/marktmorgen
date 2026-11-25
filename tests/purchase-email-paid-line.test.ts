@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { confirmPurchase, confirmationFor, confirmationKey } from "@/lib/purchase-email";
+import { storeOrdersThisMonth } from "@/lib/orders";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -132,7 +133,10 @@ async function main(): Promise<void> {
   is("no order counted", redis.run(["GET", seenKey(`checkout:${sessionId}`)]), null);
   is("read again with its amount: sent", await confirmPurchase(store, sessionId, { ...oneTime, id: sessionId } as never), "sent");
   is("one email, with what was paid", emails.map((e) => e.text.split("\n").find((l) => l.startsWith("Paid:"))), ["Paid: $49"]);
-  is("the order counted once", redis.run(["GET", seenKey(`checkout:${sessionId}`)]), "1");
+  is("the accounting receipt is complete", /^oc1:[0-9a-f]{64}$/.test(String(redis.run(["GET", seenKey(`checkout:${sessionId}`)]))), true);
+  is("the order counted once", await storeOrdersThisMonth(store), 1);
+  is("a later read is already confirmed", await confirmPurchase(store, sessionId, { ...oneTime, id: sessionId } as never), "already");
+  is("no extra email or order on the later read", [emails.length, await storeOrdersThisMonth(store)], [1, 1]);
 
   done();
 }

@@ -78,7 +78,7 @@ async function takeMeteredAllowance(meter: EmailMeter, n: number, now = Date.now
   return taken.ok;
 }
 
-type MeterAuthorization = { preflight: () => Promise<boolean>; beforePost: () => Promise<boolean> };
+type MeterAuthorization = { preflight: () => Promise<boolean>; beforePost: () => Promise<boolean>; takenAt?: () => number };
 /** Memoize only the debit of this invocation's original store/window. A
  * later variant must still prove current funding and the SAME window.
  * Refusal/throw/unknown stays sticky; this is not a durable retry receipt. */
@@ -87,7 +87,7 @@ function lazyMeter(meter: EmailMeter, n: number): MeterAuthorization {
     ...(meter.store.period ? { period: { ...meter.store.period } } : {}),
   } } : { ...meter };
   const original = selected.by === "store" ? allowanceWindow(selected.store) : null;
-  let debit: Promise<boolean> | undefined, refused = false;
+  let debit: Promise<boolean> | undefined, refused = false, takenAt = 0;
   const sameWindow = () => {
     if (selected.by !== "store") return true;
     const current = allowanceWindow(selected.store);
@@ -105,12 +105,16 @@ function lazyMeter(meter: EmailMeter, n: number): MeterAuthorization {
   return { preflight, beforePost: async () => {
     if (!(await preflight())) return false;
     try {
-      debit ??= takeMeteredAllowance(selected, n);
+      // The moment of the debit, so a give-back lands in the window it was taken from (Codex N1's LOW 2 on #3926).
+      if (!debit) {
+        takenAt = Date.now();
+        debit = takeMeteredAllowance(selected, n, takenAt);
+      }
       if (await debit === true && sameWindow()) return true;
     } catch { /* Keep the rejected debit promise and any committed effect. */ }
     refused = true;
     return false;
-  } };
+  }, takenAt: () => takenAt };
 }
 
 // Local tests may point this at a mock server on 127.0.0.1; nothing else is
@@ -351,7 +355,7 @@ const onceKey = (key: string) => `nl:ses:once:${createHash("sha256").update(key)
  * acceptance is unknown, including a pre-existing legacy claim. A claim is
  * not proof of delivery, nor a source-funded lifetime reservation.
  */
-async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey: string | undefined): Promise<boolean | null> {
+async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey: string | undefined, authorization?: MeterAuthorization): Promise<boolean | null> {
   const config = sesConfig();
   if (!config || !(await sesReady())) return false;
   // Amazon keeps no record of a key, so the once-only promise is kept here.
@@ -388,7 +392,7 @@ async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey
       headers,
       attachments: message.attachments,
       ...(tags.length ? { tags } : {}),
-    });
+    }, authorization?.beforePost);
     // A timeout or server error may follow acceptance. Keep any existing
     // claim, report unknown, and make no second SES attempt or Resend send.
     // This does not prove delivery or provide lifetime idempotency.
@@ -450,14 +454,15 @@ export async function sendEmailOutcome(message: OneMessage, runtime: ResendTrans
   // Keep one identity across awaits and both routes. Preserve the original
   // string and the existing structural contract, including inherited keys.
   const originalIdempotencyKey = message.idempotencyKey;
+  const authorization = lazyMeter(message.meter, 1);
+  if (!(await authorization.preflight())) return "refused";
   if (isSesConfigured()) {
-    if (!(await metered(message.meter, 1))) return "refused";
-    const amazon = await viaAmazon(message, to, originalIdempotencyKey);
+    const amazon = await viaAmazon(message, to, originalIdempotencyKey, authorization);
     if (amazon === true) return "sent";
     if (amazon === null) return "uncertain";
-    return resendOutcome(message, originalIdempotencyKey, runtime); // The existing SES path already took its allowance.
+    return resendOutcome(message, originalIdempotencyKey, runtime, authorization);
   }
-  return resendOutcome(message, originalIdempotencyKey, runtime, lazyMeter(message.meter, 1));
+  return resendOutcome(message, originalIdempotencyKey, runtime, authorization);
 }
 
 /** Durable shipment work owns its lifetime claim in the outbox, not the
@@ -745,11 +750,7 @@ async function dispatchBatch(
   if (going.length && (only === "resend"
     ? currentResendFallbackProofIsMissing(runtime)
     : serviceMailKnownUnavailable(runtime))) return "retry";
-  const resendSelected = only === "resend" || !(config && isSesConfigured());
   let authorization: MeterAuthorization | undefined;
-  // What this call took from a store's own figure up front (metered, the Amazon path), given back when the batch then
-  // answers "retry" or "waiting" with nothing handed to Amazon: a list sender tries such a batch again each run, and an
-  // outage must never spend the store's emails on mail that never went (outage drill, 14 November 2026).
   let debited = 0;
   // The moment it was taken: given back into that same window, never the one running when the answer came (a call
   // that crossed the window's end debited the old month and would have credited the new one; Codex N1's LOW 2 on #3926).
@@ -760,23 +761,24 @@ async function dispatchBatch(
     return answer;
   };
   if (going.length) {
-    if (resendSelected) {
-      // Keep the same recipients/content through tags/domain variants and
-      // bind the lazy debit to their filtered, bounded occurrence count.
-      going = going.map(message => ({ ...message,
-        ...(message.headers ? { headers: { ...message.headers } } : {}),
-        ...(message.tags ? { tags: { ...message.tags } } : {}),
-      }));
-      authorization = lazyMeter(meter, going.length);
-      if (!(await authorization.preflight())) return "refused";
-    } else {
-      const at = Date.now();
-      if (!(await metered(meter, going.length, at))) return "refused";
-      if (meter.by === "store") {
-        debited = going.length;
-        debitedAt = at;
+    // One lazy debit for either route, taken only right before a post (lib/ses.ts and the Resend send call
+    // beforePost): a batch refused before any post never takes the store's figure, and a fallback from Amazon to
+    // Resend is never counted twice. What was taken, and when, is given back into that same window when nothing went.
+    going = going.map(message => ({ ...message,
+      ...(message.headers ? { headers: { ...message.headers } } : {}),
+      ...(message.tags ? { tags: { ...message.tags } } : {}),
+    }));
+    const selected = lazyMeter(meter, going.length);
+    const count = going.length;
+    authorization = { preflight: selected.preflight, beforePost: async () => {
+      const allowed = await selected.beforePost();
+      if (allowed && meter.by === "store" && debited === 0) {
+        debited = count;
+        debitedAt = selected.takenAt?.() || Date.now();
       }
-    }
+      return allowed;
+    } };
+    if (!(await authorization.preflight())) return "refused";
   }
   let idempotencyKey = batchKey;
   // Whether Amazon took anyone in this call. Until it has, a "retry" further down (Amazon only, the Resend handoff
@@ -844,7 +846,7 @@ async function dispatchBatch(
           original: m,
         })),
         batchKey,
-        { maybeMarks: !listOnly },
+        { maybeMarks: !listOnly, beforePost: authorization?.beforePost },
       );
       await countSesSent(result.taken.length);
       if (result.taken.length > 0) amazonTook = true;
@@ -856,6 +858,7 @@ async function dispatchBatch(
       // its caller without another SES wave or a switch to Resend. A durable
       // caller checkpoint is still needed before a later invocation.
       if (result.uncertain === true) return "retry";
+      if (result.notPosted === true) return result.taken.length > 0 ? "retry" : nothingSent("refused");
       // Nor one whose marks could not be written: nothing more was asked of Amazon, and it is not Amazon's doing,
       // so the rest waits for it, never handed to Resend for good (lib/ses.ts, markMaybe).
       if (result.stalled === true) return result.taken.length === 0 ? nothingSent("retry") : "retry";

@@ -315,7 +315,7 @@ test("free copies stop at the month's orders: the plan's when paid, a trial's in
 test("every place an order is handed over counts it", () => {
   // An order nothing counts is an order nobody pays for on a plan with no share.
   for (const [file, mark] of [
-    ["lib/purchase-email.ts", "countOrder(store, `checkout:"],
+    ["lib/purchase-email.ts", "countLegacyCheckoutForConfirmation(store, `checkout:"],
     // A paid offer is counted by lib/upsell.ts (afterPaid), whether or not its confirmation email went.
     ["lib/upsell.ts", "countOrder(store, `offer:"],
     ["lib/group-buy.ts", "countOrder(store, `place:"],

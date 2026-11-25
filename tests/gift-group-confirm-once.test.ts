@@ -6,8 +6,8 @@
  * Once the giving/settling mark has run out (300 s) and within the day, a later run takes the re-tell path made for
  * #2872 review M1 and answers "sent" again. The room the checkout was admitted with (lib/order-admission.ts) is given
  * back once per checkout, never a second time: a second give-back would free another checkout's room in that hour, and
- * the store could admit one order past its plan's figure. Beside each, the M1 case itself: the first run threw before
- * giving anything back, so the run after it gives the room back, once.
+ * the store could admit one order past its plan's figure. Beside each, the M1 case itself: accounting now commits
+ * before the later record write can throw. Its count covers the order, and retries never release another hold.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
@@ -15,6 +15,7 @@ import { startGift } from "@/lib/gifts";
 import { startGroup } from "@/lib/group-buy";
 import { confirmPurchase } from "@/lib/purchase-email";
 import { ADMITTED_FIELD, admitOrders } from "@/lib/order-admission";
+import { storeOrdersThisMonth } from "@/lib/orders";
 import { paidPeriod } from "./billing-period-fixture";
 import { paidIntentReply } from "./paid-intent-standin";
 import { advance, store as redis } from "./redis-stub";
@@ -58,6 +59,11 @@ async function main(): Promise<void> {
   const store = (await storeForEmail(OWNER))!;
   const product = (await readListing(store, made.product.id))!;
   const folder = await storeFolder(OWNER);
+  const counted = async () => {
+    const count = await storeOrdersThisMonth(store);
+    if (count === null) throw new Error("the order count must be confirmed for this control");
+    return count;
+  };
   const held = async (hour: number) => Number((await real([["HGET", `nl:orders:open:${folder}`, String(hour)]]))[0] ?? 0);
   let n = 0;
   const session = (meta: Record<string, string>, hour: number, people = 1) => {
@@ -110,14 +116,17 @@ async function main(): Promise<void> {
 
     part(`${kind}: M1, the record's last write lands with its reply in another shape, so the first run throws`);
     const m1 = await twoAdmitted(kind);
+    const m1Count = await counted();
     unknownFor((c) => c[0] === "SET" && c[1] === m1.record, true);
     const m1First = await outcome(confirmPurchase(store, m1.s.id, m1.s as never));
     restore();
     const m1AfterFirst = await held(m1.hour);
+    const m1CountAfterFirst = await counted();
     const m1Second = await outcome(confirmPurchase(store, m1.s.id, m1.s as never));
     const m1Third = await outcome(confirmPurchase(store, m1.s.id, m1.s as never));
     is("threw, then sent, then already", [m1First, m1Second, m1Third], ["threw", "sent", "already"]);
-    is("the room is held through the throw, then given back once", [m1AfterFirst, await held(m1.hour)], [m1.before, m1.before - 1]);
+    is("committed accounting releases only its own room before the later throw", [m1AfterFirst, m1CountAfterFirst - m1Count], [m1.before - 1, 1]);
+    is("retries neither release another hold nor count again", [await held(m1.hour), (await counted()) - m1Count], [m1.before - 1, 1]);
 
     part(`${kind}: the run holding the mark dies after its record write, before its email; a run without the mark never certifies "sent"`);
     const dead = await twoAdmitted(kind);

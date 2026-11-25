@@ -232,7 +232,9 @@ export function isSesConfigured(): boolean {
 
 const base = (config: SesConfig) => `https://email.${config.region}.amazonaws.com`;
 
-async function call(config: SesConfig, method: "GET" | "POST", path: string, body?: string): Promise<Response> {
+class SesPostNotAuthorized extends Error {}
+
+async function call(config: SesConfig, method: "GET" | "POST", path: string, body?: string, beforePost?: () => Promise<boolean>): Promise<Response> {
   const url = `${base(config)}${path}`;
   const key = await sesCredentials(config);
   // No key to sign with is answered as Amazon answers a key it does not
@@ -250,6 +252,7 @@ async function call(config: SesConfig, method: "GET" | "POST", path: string, bod
   // `host` is set by fetch itself, from the address; it was needed for the signature only.
   const { host: _host, ...sent } = headers;
   void _host;
+  if (beforePost && !(await beforePost())) throw new SesPostNotAuthorized("email dispatch was not authorized");
   return timed(SES_TIMEOUT_MS, (signal) => fetch(url, { method, headers: sent, body, cache: "no-store", signal }));
 }
 
@@ -492,7 +495,7 @@ export type SesOutcome = "sent" | "busy" | "account" | "refused";
 
 const ACCOUNT_ERRORS = /AccountSuspended|SendingPaused|MailFromDomainNotVerified|LimitExceeded|AccessDenied|InvalidClientTokenId|SignatureDoesNotMatch|UnrecognizedClient|ExpiredToken|NotFound/i;
 
-export async function sesSend(config: SesConfig, message: SesMessage): Promise<{ outcome: SesOutcome; why: string; uncertain?: true }> {
+export async function sesSend(config: SesConfig, message: SesMessage, beforePost?: () => Promise<boolean>): Promise<{ outcome: SesOutcome; why: string; uncertain?: true; notPosted?: true }> {
   const payload = JSON.stringify({
     FromEmailAddress: message.from,
     Destination: { ToAddresses: [message.to] },
@@ -517,7 +520,7 @@ export async function sesSend(config: SesConfig, message: SesMessage): Promise<{
     ConfigurationSetName: config.configurationSet,
   });
   try {
-    const response = await call(config, "POST", "/v2/email/outbound-emails", payload);
+    const response = await call(config, "POST", "/v2/email/outbound-emails", payload, beforePost);
     if (response.ok) return { outcome: "sent", why: "" };
     // SES can accept a message before returning a server error. This is not
     // a confirmed refusal; sends must not retry or change sender.
@@ -539,6 +542,7 @@ export async function sesSend(config: SesConfig, message: SesMessage): Promise<{
     if (ACCOUNT_ERRORS.test(why) || /not verified|sandbox|quota/i.test(why)) return { outcome: "account", why };
     return { outcome: "refused", why };
   } catch (error) {
+    if (error instanceof SesPostNotAuthorized) return { outcome: "refused", why: error.message, notPosted: true };
     // A lost response is not proof that SES did not accept the message.
     return { outcome: "busy", why: error instanceof Error ? error.message.slice(0, 200) : "no answer", uncertain: true };
   }
@@ -670,8 +674,10 @@ export async function sesBatch<T extends SesMessage>(
   messages: T[],
   batchKey: string,
   /** Whether whoever may have been taken is marked for notMaybeTaken: a plain batch's, never a list batch's (lib/email.ts). */
-  options: { maybeMarks?: boolean } = {},
-): Promise<{ taken: T[]; left: T[]; refused: { message: T; why: string }[]; down: string; uncertain?: true; stalled?: true }> {
+  options: { maybeMarks?: boolean; beforePost?: () => Promise<boolean> } | (() => Promise<boolean>) = {},
+): Promise<{ taken: T[]; left: T[]; refused: { message: T; why: string }[]; down: string; uncertain?: true; stalled?: true; notPosted?: true }> {
+  const controls: { maybeMarks?: boolean; beforePost?: () => Promise<boolean> } =
+    typeof options === "function" ? { beforePost: options } : options;
   const taken: T[] = [];
   const refused = new Map<T, string>();
   const perSecond = Math.max(1, Math.floor(state.rate || 1));
@@ -679,14 +685,15 @@ export async function sesBatch<T extends SesMessage>(
   let down = "";
   let uncertain = false;
   let stalled = false;
+  let notPosted = false;
   // The possibly-taken marks this call wrote and holds, and those that must stay because an email of this call to
   // that address was taken or may have been (markMaybe, unmarkMaybe).
   const held = new Set<string>();
   const kept = new Set<string>();
   let queue = [...messages];
-  for (let round = 0; round < 2 && queue.length && !down && !uncertain && !stalled; round += 1) {
+  for (let round = 0; round < 2 && queue.length && !down && !uncertain && !stalled && !notPosted; round += 1) {
     const again: T[] = [];
-    for (let i = 0; i < queue.length && !down && !uncertain && !stalled; i += perSecond) {
+    for (let i = 0; i < queue.length && !down && !uncertain && !stalled && !notPosted; i += perSecond) {
       if (Date.now() - started > BATCH_MS) {
         again.push(...queue.slice(i));
         break;
@@ -696,18 +703,21 @@ export async function sesBatch<T extends SesMessage>(
       // Written down before Amazon is asked (notMaybeTaken): if its answer is then lost, a retry of this batch leaves
       // these people out even when Redis cannot be written afterwards. A mark that is not confirmed sends nothing of
       // the wave: the rest waits, and nothing is left marked that was not asked (outage drill, 13 November 2026).
-      if (options.maybeMarks === true && !(await markMaybe(batchKey, wave, held))) {
+      if (controls.maybeMarks === true && !(await markMaybe(batchKey, wave, held))) {
         again.push(...queue.slice(i));
         stalled = true;
         break;
       }
-      const results = await Promise.all(wave.map((m) => sesSend(config, m)));
+      const results = await Promise.all(wave.map((m) => sesSend(config, m, controls.beforePost)));
       const done: T[] = [];
       const notTaken: T[] = [];
       results.forEach((result, j) => {
         if (result.outcome !== "sent" && result.uncertain !== true) notTaken.push(wave[j]);
-        else if (options.maybeMarks === true) kept.add(maybeKey(batchKey, wave[j].to));
-        if (result.uncertain === true) {
+        else if (controls.maybeMarks === true) kept.add(maybeKey(batchKey, wave[j].to));
+        if (result.notPosted === true) {
+          notPosted = true;
+          again.push(wave[j]);
+        } else if (result.uncertain === true) {
           // A provider may have accepted this email before losing its reply.
           // Keep it unresolved, with no second attempt in this call.
           uncertain = true;
@@ -729,12 +739,12 @@ export async function sesBatch<T extends SesMessage>(
       }
       // Amazon said for certain it did not take these: their marks go, so a retry may send them. One that cannot be
       // taken off leaves that person out of a retry, as an answer that was lost does.
-      if (notTaken.length && options.maybeMarks === true) await unmarkMaybe(batchKey, notTaken, held, kept);
-      if (down || uncertain) again.push(...queue.slice(i + perSecond));
+      if (notTaken.length && controls.maybeMarks === true) await unmarkMaybe(batchKey, notTaken, held, kept);
+      if (down || uncertain || notPosted) again.push(...queue.slice(i + perSecond));
       else if (i + perSecond < queue.length) await pause(Math.max(0, 1_000 - (Date.now() - waveStarted)));
     }
     queue = again;
-    if (queue.length && !down && !uncertain && !stalled && round === 0) {
+    if (queue.length && !down && !uncertain && !stalled && !notPosted && round === 0) {
       if (Date.now() - started > BATCH_MS) break;
       await pause(1_000);
     }
@@ -748,5 +758,6 @@ export async function sesBatch<T extends SesMessage>(
     // Our own Redis could not write down who may be taken: Amazon was not asked for the rest, and it is not
     // Amazon's doing, so the rest waits for Amazon rather than going to the other sender.
     ...(stalled ? { stalled: true as const } : {}),
+    ...(notPosted ? { notPosted: true as const } : {}),
   };
 }

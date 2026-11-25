@@ -38,7 +38,7 @@ import { CLOSING_ACCESS_SENTENCE, CLOSING_TERMS_PATH, CLOSING_TERMS_WORDS } from
 import { deliversDigitally } from "@/lib/digital-consent";
 import { consentEmailLines } from "@/lib/digital-consent-email";
 import { ADMITTED_FIELD, OPEN_HOURS, settlePaidCheckout } from "@/lib/order-admission";
-import { countOrder } from "@/lib/orders";
+import { countLegacyCheckoutForConfirmation, countStuckLegacyCheckout } from "@/lib/orders";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { recordPackage } from "@/lib/call-packages";
@@ -72,7 +72,7 @@ import { firstChargeCents } from "@/lib/yearly-price";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
 import { purchaseRefunded } from "@/lib/refunds";
 import { scheduleReviewAsk } from "@/lib/review-ask";
-import { type BundleSlot, bumpsFromMeta, bundleFromMeta, deliveredIds, isBundle } from "@/lib/bundle-rules";
+import { type BundleSlot, bumpsFromMeta, bundleFromMeta, deliveredIds } from "@/lib/bundle-rules";
 import { type NextOffer, nextOfferForEmail } from "@/lib/next-offer";
 import { nextOfferWords } from "@/lib/buyer-words/next-offer";
 import { pricePill } from "@/lib/product-pill";
@@ -610,19 +610,12 @@ export async function confirmPurchase(
 ): Promise<ConfirmOutcome> {
   const read: { session?: SessionRecord; items?: number } = {};
   const outcome = await confirmOnce(store, sessionId, known, read);
-  // Confirmed now, so it is one of the month's orders (lib/orders.ts): once,
-  // by the checkout, and not at all when its sale paid a share.
-  if (outcome === "sent") {
-    const paid = typeof read.session?.amount_total === "number" ? read.session.amount_total : 0;
-    // A count not confirmed keeps the place its checkout was admitted with until its hours end, never given back as
-    // if counted (lib/orders.ts, countOrder).
-    if ((await countOrder(store, `checkout:${sessionId}`, paid, Date.now())) === "unknown") return outcome;
-    // The hour its checkout was held in gives it back, now that it is counted (lib/order-admission.ts): once per
-    // checkout, however many runs answer "sent" for it; a Stripe recovery copy only by taking its original's record,
-    // so a place given back at expiry is never given back twice.
-    if (read.session?.metadata?.[ADMITTED_FIELD] !== undefined && (await firstToGiveRoomBack(sessionId))) {
-      await settlePaidCheckout(store, read.session, read.items ?? 1);
-    }
+  // Normal legacy checkouts settle their original admission atomically with their
+  // count before delivery. A recovery copy owns no new place: only the main's
+  // original hold record may return that place, once, after confirmation.
+  if (outcome === "sent" && read.session?.recovered_from !== undefined && read.session.recovered_from !== null &&
+      read.session.metadata?.[ADMITTED_FIELD] !== undefined && (await firstToGiveRoomBack(sessionId))) {
+    await settlePaidCheckout(store, read.session, read.items ?? 1);
   }
   return outcome;
 }
@@ -659,10 +652,22 @@ async function confirmOnce(
   // A gift through "Support my work" has nothing to hand over or confirm (lib/store-tips.ts).
   if (session.metadata?.kind === "tip") return "skip";
   // A payment request (lib/payment-requests.ts): written down as paid, and its receipt emailed.
-  if (session.metadata?.kind === "request") return confirmRequest(store, session, key);
+  if (session.metadata?.kind === "request") {
+    if (isSettled(session) && saleHandles(store).has(session.metadata.store ?? "") && typeof session.metadata.request === "string") {
+      if ((await accountPaidCheckout(store, session, 1)) === "unknown") return "failed";
+    }
+    return confirmRequest(store, session, key);
+  }
   const listings = await listingsNamed(store, session.metadata);
-  // The products it hands over, a bundle's each, for what it keeps (lib/store-data-rules.ts).
-  read.items = listings.reduce((n, product) => n + (isBundle(product) ? (product.bundle?.length ?? 1) : 1), 0) || 1;
+  // Use the roots and bundle slots captured by admission, never a later catalog edit.
+  const items = bumpsFromMeta(session.metadata).reduce((n, bump) =>
+    n + (bundleFromMeta(session.metadata, `${bump.key}_bundle`).length || 1),
+  bundleFromMeta(session.metadata, "bundle").length || 1);
+  read.items = items;
+  if (isSettled(session) && saleHandles(store).has(session.metadata?.store ?? "") && session.metadata?.kind !== "call" &&
+      (listings.length || session.metadata?.gift || session.metadata?.group || session.metadata?.preorder)) {
+    if ((await accountPaidCheckout(store, session, items)) === "unknown") return "failed";
+  }
   // Bought for somebody else: handed to them, and the buyer gets a receipt
   // that says so (lib/gifts.ts), instead of the usual confirmation.
   if (session.metadata?.gift) return confirmGift(store, session, key);
@@ -736,6 +741,27 @@ async function confirmOnce(
     await scheduleReviewAsk(store, sessionId, paidAt).catch((error) => console.error("putting an order on the review list failed", error));
   }
   return sent ? "sent" : "failed";
+}
+
+/** Exact paid evidence before committing a legacy receipt. A later healthy read
+ * must not conflict with a receipt that guessed an unreadable amount. */
+async function accountPaidCheckout(store: Store, session: SessionRecord, items: number): Promise<"committed" | "already" | "unknown"> {
+  const now = Date.now();
+  const createdAtMs = typeof session.created === "number" && Number.isSafeInteger(session.created) ? session.created * 1000 : NaN;
+  const readable = typeof session.amount_total === "number" && Number.isSafeInteger(session.amount_total) && session.amount_total >= 0 &&
+    typeof session.currency === "string" && /^[a-zA-Z]{3}$/.test(session.currency);
+  // A Stripe recovery copy must not release an aggregate-hour place itself.
+  // settlePaidCheckout claims the original hold record, just as on main.
+  const hour = session.recovered_from === undefined || session.recovered_from === null ? session.metadata?.[ADMITTED_FIELD] : undefined;
+  const ordinary = readable
+    ? await countLegacyCheckoutForConfirmation(store, `checkout:${session.id}`, session.amount_total as number, now, { hour, items, createdAtMs })
+    : "unknown";
+  if (ordinary !== "unknown") return ordinary;
+  // Still unknown: counted once at its worst case after LEGACY_STUCK_AFTER_MS, only while Stripe's read shows it paid
+  // (Codex's MEDIUM on #3667; coordinator's decision 4c5c, option (a)). Rule 24 still holds an unreadable charge's
+  // email (renderConfirmation's UNREAD_CHARGE) until a read shows the amount; the accounting no longer holds it.
+  if (!isSettled(session)) return "unknown";
+  return countStuckLegacyCheckout(store, `checkout:${session.id}`, now, createdAtMs);
 }
 
 /**

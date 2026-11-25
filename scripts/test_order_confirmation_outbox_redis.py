@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import uuid
 from test_form_opportunity_redis import Redis
+from test_order_confirmation_checkpoint_redis import measure_commands
 
 
 class LocalRedis(Redis):
@@ -64,15 +65,8 @@ def main():
     def candidate(row, session, token):
         return dict(row, session=session, bindingFingerprint=hashlib.sha256(token.encode()).hexdigest(),
                     phase="awaiting_payment", sourceValue="bound:" + session, sealed="s1." + token)
-    def stats():
-        out = {}
-        for line in db.command("INFO", "COMMANDSTATS").splitlines():
-            match = re.match(r"cmdstat_([^:]+):calls=(\d+),", line)
-            if match and match[1] != "info": out[match[1]] = int(match[2])
-        return out
     def measured(run):
-        before = stats(); result = run(); after = stats()
-        return result, sum(after.get(k, 0) - before.get(k, 0) for k in set(before) | set(after))
+        return measure_commands(db, run)
     profiles = {}
     try:
         row, keys = fixture("atomic")

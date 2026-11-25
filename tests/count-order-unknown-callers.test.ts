@@ -13,7 +13,8 @@
  *
  *   - control: a healthy order is counted once and its place given back;
  *   - a count that keeps failing, or a count key that is not a whole number:
- *     the place stays held, so count + held still covers the order;
+ *     the place stays held, so count + held still covers the order. A legacy
+ *     checkout now waits before confirmation; its healthy retry counts first;
  *   - a paid offer whose confirmation email the sender refused is still one
  *     of the month's orders: counted, then its place given back;
  *   - a paid offer settled later (the bank asked the buyer to confirm) is
@@ -119,7 +120,8 @@ async function main(): Promise<void> {
   const windowId = window!.id;
 
   const plain = redis.pipeline.bind(redis);
-  const isCount = (commands: Commands) => commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:orders-count:"));
+  const isCount = (commands: Commands) => commands.some((c) => c[0] === "EVAL" &&
+    /marktmorgen:(orders-count:|order-confirmation-settlement:)/.test(String(c[1])));
   /** Every round trip of an order's count fails, whatever else goes through. */
   const countFails = () => {
     redis.pipeline = async (commands: Commands) => {
@@ -172,27 +174,33 @@ async function main(): Promise<void> {
 
   part("A paid checkout whose count keeps failing keeps its place held");
   {
-    const before = [await counted(), await held()];
+    const before = [await counted(), await held(), emailsAccepted];
     const { id, session } = await paidCheckout();
     countFails();
     const outcome = await confirmPurchase(store, id, session).catch(() => "threw");
     healthy();
-    is("the buyer still has their email", outcome, "sent");
+    is("an unconfirmed count blocks the confirmation", outcome, "failed");
+    is("no email was sent before accounting", emailsAccepted, before[2]);
     is("not counted", (await counted()) - before[0], 0);
     is("its place stays held, so the paid order is still in count + held", (await held()) - before[1], 1);
+    is("a healthy retry sends after accounting", await confirmPurchase(store, id, session), "sent");
+    is("retry counts once and releases only its hold", [(await counted()) - before[0], (await held()) - before[1], emailsAccepted - before[2]], [1, 0, 1]);
   }
 
   part("A paid checkout whose count is not a whole number keeps its place held");
   {
     const kept = (await plain([["GET", countKey]]))[0];
-    const before = await held();
+    const before = await held(), beforeEmails = emailsAccepted;
     const { id, session } = await paidCheckout();
     await plain([["SET", countKey, "not-a-count"]]);
     const outcome = await confirmPurchase(store, id, session).catch(() => "threw");
-    is("the buyer still has their email", outcome, "sent");
+    is("an unreadable count blocks the confirmation", outcome, "failed");
+    is("no email was sent on an unreadable count", emailsAccepted, beforeEmails);
     is("the count is left as it was", (await plain([["GET", countKey]]))[0], "not-a-count");
     is("its place stays held", (await held()) - before, 1);
     await plain([["SET", countKey, String(kept)], ["EXPIRE", countKey, 400 * 86_400]]);
+    is("repairing the count permits confirmation", await confirmPurchase(store, id, session), "sent");
+    is("the repaired retry counts once and releases its own hold", [(await counted()) - Number(kept), (await held()) - before, emailsAccepted - beforeEmails], [1, 0, 1]);
   }
 
   const browser = newUpsellKey();

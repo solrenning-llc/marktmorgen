@@ -17,6 +17,8 @@
  */
 import dns from "node:dns/promises";
 import { connectDomain, disconnectDomain, domainKey, domainStatus, proofRecord } from "@/lib/domains";
+/** These checks are about the claim: the store's pending-domain write (Codex L-20261120-0152) always confirms here. */
+const PENDING_OK = { keep: async () => true, clear: async () => true };
 import { proveDomain } from "@/lib/domain-proof";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -116,19 +118,20 @@ async function main(): Promise<void> {
 
   part("2. connectDomain — healthy controls");
   reset();
-  is("a free domain: claimed, added at Vercel", [await connectDomain(me, NAME), vercelCalls.filter((c) => c.startsWith("POST")).length, held()], [{ ok: true, name: NAME }, 1, "?mystore"]);
+  is("a free domain: claimed, added at Vercel", [await connectDomain(me, NAME, PENDING_OK), vercelCalls.filter((c) => c.startsWith("POST")).length, held()], [{ ok: true, name: NAME }, 1, "?mystore"]);
   reset("otherstore");
-  is("held by another store: taken, Vercel not asked, its key kept", [await connectDomain(me, NAME), vercelCalls.length, held()], [{ ok: false, reason: "taken" }, 0, "otherstore"]);
+  is("held by another store: taken, Vercel not asked, its key kept", [await connectDomain(me, NAME, PENDING_OK), vercelCalls.length, held()], [{ ok: false, reason: "taken" }, 0, "otherstore"]);
   reset();
-  postStatus = 500;
-  is("a free domain Vercel refuses: unavailable, this store's claim let go", [await connectDomain(me, NAME), held()], [{ ok: false, reason: "unavailable" }, null]);
+  // A refusal is a 4xx; a 5xx is not known and keeps the claim (Claude 1 on #5108, tests/domain-pending-before-provider.test.ts).
+  postStatus = 400;
+  is("a free domain Vercel refuses: refused, this store's claim let go", [await connectDomain(me, NAME, PENDING_OK), held()], [{ ok: false, reason: "shape" }, null]);
 
   part("2. connectDomain — the SET NX answered neither OK nor nil while another store holds the domain");
   for (const [shape, reply] of ODD) {
     reset("otherstore");
     postStatus = 500;
     answer(setNx(KEY), reply);
-    const made = await outcome(connectDomain(me, NAME));
+    const made = await outcome(connectDomain(me, NAME, PENDING_OK));
     is(`answered ${shape}: taken, Vercel not asked, the other store's key kept`, [made, vercelCalls.length, held()], [{ ok: false, reason: "taken" }, 0, "otherstore"]);
   }
 
@@ -136,7 +139,7 @@ async function main(): Promise<void> {
   for (const [shape, reply] of ODD) {
     reset();
     answer(setNx(KEY), reply);
-    is(`answered ${shape}, the claim ours: connected`, [await outcome(connectDomain(me, NAME)), held()], [{ ok: true, name: NAME }, "?mystore"]);
+    is(`answered ${shape}, the claim ours: connected`, [await outcome(connectDomain(me, NAME, PENDING_OK)), held()], [{ ok: true, name: NAME }, "?mystore"]);
   }
 
   part("2. connectDomain — the claim not known: Vercel not asked");
@@ -144,14 +147,14 @@ async function main(): Promise<void> {
     reset();
     answer(setNx(KEY), () => ["QUEUED"], { run: false });
     answer(getOf(KEY), reply);
-    is(`the claim odd and its read-back ${shape}: try again, Vercel not asked`, [await outcome(connectDomain(me, NAME)), vercelCalls.length], ["try again", 0]);
+    is(`the claim odd and its read-back ${shape}: try again, Vercel not asked`, [await outcome(connectDomain(me, NAME, PENDING_OK)), vercelCalls.length], ["try again", 0]);
   }
 
   part("2. connectDomain — a claim Vercel refuses is let go only while it is still this store's");
   reset();
-  postStatus = 500;
+  postStatus = 400;
   answer(letGo, (real) => real, { before: () => void redis.run(["SET", KEY, "otherstore"]) });
-  is("another store's claim in the key by then: kept", [await outcome(connectDomain(me, NAME)), held()], [{ ok: false, reason: "unavailable" }, "otherstore"]);
+  is("another store's claim in the key by then: kept", [await outcome(connectDomain(me, NAME, PENDING_OK)), held()], [{ ok: false, reason: "shape" }, "otherstore"]);
 
   part("3. proveDomain — healthy controls");
   reset("mystore");

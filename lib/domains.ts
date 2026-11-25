@@ -318,12 +318,24 @@ export type ConnectResult =
   | { ok: false; reason: "shape" | "taken" | "elsewhere" | "has_one" | "unavailable" | "plan" };
 
 /**
- * Adds a domain to a store: claims it here first, so two stores cannot both
- * have it, then asks Vercel to serve it. A claim Vercel refuses is let go.
- * Another store's claim not proved yet does not keep this store out: the
- * store that adds its TXT record proves it (#4108).
+ * How connectDomain writes the domain into the store before the provider is asked, and takes it off again if the
+ * provider refuses (app/api/store/domain/route.ts passes lib/store.ts replaceDomainIf): each answers true only once
+ * the store's write is confirmed (Codex L-20261120-0152).
  */
-export async function connectDomain(store: Store, raw: string): Promise<ConnectResult> {
+export type PendingDomain = {
+  /** True once written; "has_one" when not written because the store already holds a domain (another press's). */
+  keep(name: string): Promise<boolean | "has_one">;
+  clear(name: string): Promise<boolean>;
+};
+
+/**
+ * Adds a domain to a store: claims it here first, so two stores cannot both
+ * have it, writes it into the store as pending (`pending.keep`), then asks
+ * Vercel to serve it. A claim Vercel refuses is let go once the store no
+ * longer holds it. Another store's claim not proved yet does not keep this
+ * store out: the store that adds its TXT record proves it (#4108).
+ */
+export async function connectDomain(store: Store, raw: string, pending: PendingDomain): Promise<ConnectResult> {
   if (!canUseDomain(store)) return { ok: false, reason: "plan" };
   if (!isDomainsConfigured()) return { ok: false, reason: "unavailable" };
   if (store.domain) return { ok: false, reason: "has_one" };
@@ -352,15 +364,34 @@ export async function connectDomain(store: Store, raw: string): Promise<ConnectR
     if (!ownValue && !othersUnproved) return { ok: false, reason: "taken" };
   }
 
+  // Written into the store before the provider is asked (Codex L-20261120-0152): a delete of the store is refused while
+  // it holds a domain (lib/store.ts deleteStore), so it can no longer win while this request waits and leave the domain
+  // on the provider with no record to take it off. Not confirmed written: the provider is asked nothing.
+  const kept = await pending.keep(name).catch(() => false as const);
+  if (kept !== true) {
+    // Only a claim this very call took is let go: a claim that was already this store's (claimed "taken" above) may
+    // be a first press's, whose pending domain is what refused this one, and it stays with it (Claude 1 on #5108).
+    if (claimed === "ours") await releaseMark(domainKey(name), claim);
+    cache.delete(name);
+    // A store that already holds a domain by now (a first press's, written while this one ran) is told so, as one
+    // that held it before this press is, never "unavailable" (Claude 1 f9afa7's NIT on #5108).
+    return { ok: false, reason: kept === "has_one" ? "has_one" : "unavailable" };
+  }
+
   const added = await vercel("POST", `/v10/projects/${vercelProject()}/domains`, { name });
   // Already on this project (a second press, or added by hand) is fine;
   // on somebody else's is not.
   const alreadyHere =
     added.status === 409 && (await vercel("GET", `/v9/projects/${vercelProject()}/domains/${name}`)).status === 200;
   if (added.status !== 200 && !alreadyHere) {
-    // Only this store's own claim is let go of, never a key another store holds by now (an unproved claim this
-    // store connected beside included); one that cannot be let go lapses on its own.
-    await releaseMark(domainKey(name), claim);
+    // Only a refusal Vercel gave (a 4xx: the request was not taken) proves the domain was not added. An answer that is
+    // not known (a 5xx, or the wrapper's own 502 when Vercel did not answer in time) may have added it (rule 24): the
+    // pending domain and the claim stay on the store, and the studio's Remove takes it off at Vercel and here (Claude 1
+    // on #5108). On a refusal, only this store's own claim is let go of, never a key another store holds by now (an
+    // unproved claim this store connected beside included), and only once the pending domain is confirmed off the
+    // store; otherwise both stay, and Remove finishes it.
+    const refused = added.status >= 400 && added.status < 500;
+    if (refused && (await pending.clear(name).catch(() => false))) await releaseMark(domainKey(name), claim);
     cache.delete(name);
     if (added.status === 409) return { ok: false, reason: "elsewhere" };
     if (added.status === 400) return { ok: false, reason: "shape" };

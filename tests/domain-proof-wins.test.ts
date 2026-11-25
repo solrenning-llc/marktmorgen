@@ -8,6 +8,8 @@
  */
 import dns from "node:dns/promises";
 import { connectDomain, domainKey, proofRecord } from "@/lib/domains";
+/** These checks are about the claim: the store's pending-domain write (Codex L-20261120-0152) always confirms here. */
+const PENDING_OK = { keep: async () => true, clear: async () => true };
 import { proveDomain } from "@/lib/domain-proof";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -58,9 +60,9 @@ async function main(): Promise<void> {
 
   part("The owner connects a domain another store only claimed, unproven");
   const a = domain();
-  is("the squatter's claim is taken first", await connectDomain(pro(squatter), a), { ok: true, name: a });
+  is("the squatter's claim is taken first", await connectDomain(pro(squatter), a, PENDING_OK), { ok: true, name: a });
   is("the squatter's claim is unproven", held(a), "?squatter");
-  is("the owner may connect it too: an unproven claim keeps nobody out", await connectDomain(pro(owner), a), { ok: true, name: a });
+  is("the owner may connect it too: an unproven claim keeps nobody out", await connectDomain(pro(owner), a, PENDING_OK), { ok: true, name: a });
   is("connecting does not move the squatter's claim", held(a), "?squatter");
 
   part("The owner's TXT record wins over the unproven claim");
@@ -71,7 +73,7 @@ async function main(): Promise<void> {
 
   part("A claim expired: the squatter's check claims it again, the owner's proof still wins");
   const b = domain();
-  await connectDomain(pro(squatter), b);
+  await connectDomain(pro(squatter), b, PENDING_OK);
   redis.run(["DEL", domainKey(b)]);
   is("the squatter's check without the record: waiting", await proveDomain(squatter, b), "waiting");
   is("the owner proves it all the same", [await proveDomain(owner, b), held(b)], ["proved", "realowner"]);
@@ -86,14 +88,14 @@ async function main(): Promise<void> {
   const d = domain();
   redis.run(["SET", domainKey(d), "someoneelse"]);
   asked = 0;
-  is("connect: taken", await connectDomain(pro(owner), d), { ok: false, reason: "taken" });
+  is("connect: taken", await connectDomain(pro(owner), d, PENDING_OK), { ok: false, reason: "taken" });
   is("prove: taken, DNS not asked", [await proveDomain(owner, d), asked, held(d)], ["taken", 0, "someoneelse"]);
 
   part("Vercel refusing the owner's connect never drops the other store's claim");
   const e = domain();
   redis.run(["SET", domainKey(e), "?squatter", "EX", 600]);
   addStatus = 400;
-  is("refused as a bad name", await connectDomain(pro(owner), e), { ok: false, reason: "shape" });
+  is("refused as a bad name", await connectDomain(pro(owner), e, PENDING_OK), { ok: false, reason: "shape" });
   is("the claim it did not take stays", held(e), "?squatter");
   addStatus = 409;
 

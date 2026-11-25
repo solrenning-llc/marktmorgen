@@ -1082,6 +1082,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/appeals/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/appeals",
+      "parameters": []
+    },
+    {
       "source": "app/studio/blog/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/blog",
@@ -1844,6 +1850,7 @@
     "components/submission-review.tsx",
     "components/submission-settings.tsx",
     "components/takedown-actions.tsx",
+    "components/takedown-appeal-form.tsx",
     "components/task-editor.tsx",
     "components/tasks-agenda.tsx",
     "components/tax-collected.tsx",
@@ -1990,6 +1997,7 @@
     "app/api/store/announcement/route.ts",
     "app/api/store/answers/route.ts",
     "app/api/store/api-keys/route.ts",
+    "app/api/store/appeal/route.ts",
     "app/api/store/ask/route.ts",
     "app/api/store/assistant-memory/route.ts",
     "app/api/store/assistant-next/route.ts",

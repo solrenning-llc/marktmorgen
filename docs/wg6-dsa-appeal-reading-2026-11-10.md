@@ -80,8 +80,11 @@ no plan line. The ceilings for the next units are fixed now, before any spend:
 
 ## Next units (not built)
 
-1. Storage: one request per decision under the store (`lib/store-data.ts` family), number taken only when missing,
-   files under the ceilings above, kept like the notice (400 days), deleted with the store's data.
+1. Storage: one request per decision, number taken only when missing, files under the ceilings above, kept like the
+   notice (400 days). Built in #3533 (unit 2) as part of the company's record of the takedown, not the store's: under
+   the notices' company family (`nl:report:`, `lib/data-families.ts`; `tests/store-data-registry.ts`), so it outlives
+   the store's closing for those 400 days, as the notice does (DSA Art. 20 record). This was the choice; a later unit
+   should not move it into the store's data without deciding that again.
 2. Studio: the notice's lines next to each decision, the "Ask us to look again" form and the request's state, with
    the AX274 checks of a form (labels, errors, review before sending).
 3. Operator: the states on `app/takedown/[token]`, the reason field, the reversal through the existing switches,

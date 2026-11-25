@@ -4474,6 +4474,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   // of #3326): at most 2 x 10 x 2 = 40 end emails an account in any calendar month. The asks are paced by move-ask.
   "app/api/auth/move/route.ts": COMPANY,
   "lib/recovery-address.ts": COMPANY, "lib/stats-report.ts": COMPANY, "lib/traffic-spike.ts": COMPANY, "lib/store-alerts.ts": COMPANY, "lib/low-stock-alert.ts": STORE, "lib/takedown.ts": COMPANY,
+  "lib/takedown-appeals.ts": COMPANY,
   "lib/trial-nudges.ts": COMPANY, "lib/two-step.ts": COMPANY, "lib/verify-mail.ts": COMPANY, "lib/yearly-offer.ts": COMPANY,
   "lib/inbound-mail.ts": ["store", "company"],
   "app/api/store/mail/route.ts": MONTHLY, "lib/api-write.ts": MONTHLY, "lib/community-mail.ts": MONTHLY, "lib/flows.ts": MONTHLY,

@@ -61,6 +61,8 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type BatchMessage, isSenderConfigured, sendListBatch } from "@/lib/email";
 import { BATCH_SIZE, CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, bodyHtml, render } from "@/lib/mail";
 import { storeSender } from "@/lib/calls";
+import { replaceListAndSetIfStoreLive } from "@/lib/live-fence";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { SITE_URL } from "@/lib/site-url";
 import { type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
 import { type CommunityConfig, type Member, readConfigExact, readMembersExact } from "@/lib/community";
@@ -255,23 +257,20 @@ function stillUseful(kind: EventMailKind, start: number, now: number): boolean {
 }
 
 /**
- * Writes a waiting notice's readers down, in order, then the send with them, every reply exact (Claude 2's focal on
- * #3134), as startJob writes a send's. True only when the whole list was written and then the send; false when any
- * reply is not known or the write failed, so the caller keeps the notice waiting and the next run reads and writes
- * the list again (DEL first, so a list written in part is never sent from).
+ * Writes a waiting notice's readers down, in order, and the send with them, in one step behind the store's fence
+ * (lib/live-fence.ts replaceListAndSetIfStoreLive): a run that read the list just before the store's erasure passed
+ * must not write the erased readers and the send back, and then send to them (Codex G, #5010 7152085522). "kept" only
+ * when the whole list and then the send were written; "gone" when the store's erasure has begun or the store is gone,
+ * and nothing was written; "unknown" when the reply is not known or the write failed, so the caller keeps the notice
+ * waiting as it was and the next run reads and writes the list again (the script deletes the list first, so a list
+ * written in part is never sent from). Every reply exact (Claude 2's focal on #3134), as startJob writes a send's.
  */
-async function listReaders(job: EventMailJob, readers: string[]): Promise<boolean> {
-  const commands: (string | number)[][] = [["DEL", toKey(job.id)]];
-  for (let i = 0; i < readers.length; i += 500) commands.push(["RPUSH", toKey(job.id), ...readers.slice(i, i + 500)]);
-  commands.push(["EXPIRE", toKey(job.id), KEEP_SECONDS]);
+async function listReaders(store: Store, job: EventMailJob, readers: string[]): Promise<"kept" | "gone" | "unknown"> {
   try {
-    const listed = repliesFor(await redisPipeline(commands), commands.length);
-    if (!listed || !listed.every((reply) => countOf(reply) !== null)) return false;
-    const saved = repliesFor(await redisPipeline([["SET", jobKey(job.id), JSON.stringify(job), "EX", KEEP_SECONDS]]), 1)?.[0];
-    return saved === "OK";
+    return await replaceListAndSetIfStoreLive(await storeLiveFence(store), toKey(job.id), readers, jobKey(job.id), JSON.stringify(job), KEEP_SECONDS);
   } catch (error) {
     console.error("writing down who a waiting event email goes to failed", error);
-    return false;
+    return "unknown";
   }
 }
 
@@ -652,10 +651,18 @@ export async function advanceEventJob(
       }
       if (!readers.length) return await finish("sent", "");
       const listed: EventMailJob = { ...job, waiting: false, total: readers.length, note: "" };
-      if (!(await listReaders(listed, readers))) {
-        // Not written down whole: it waits, and the next run writes the whole list again. Nothing was sent from it.
-        job = { ...job, note: WAITING_NOTE };
-        await save(job);
+      const kept = await listReaders(store, listed, readers);
+      if (kept === "gone") {
+        // The store's erasure has begun: nothing of the send is written back, and nobody is emailed. What an erasure
+        // that passed before this run took (the send, its list, its place in line) stays gone.
+        await redisPipeline([["DEL", jobKey(id), toKey(id)], ["SREM", JOBS, id]]).catch((error: unknown) => {
+          console.error("an erased store's waiting event email could not be cleared", error);
+        });
+        return null;
+      }
+      if (kept === "unknown") {
+        // Not known to be written down whole: it waits as it was (nothing saved behind no fence), and the next run
+        // writes the whole list again. Nothing was sent from it.
         return job;
       }
       job = listed;

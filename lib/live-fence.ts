@@ -114,3 +114,50 @@ export async function pushIfStoreLive(fence: StoreLiveFence, key: string, value:
   const answer = replies?.[0];
   return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
 }
+
+// The same fence for a list replaced as a whole and the record that goes with it, in one step (Codex G, #5010
+// 7152085522: a waiting event notice whose readers were written down after its store's erasure had passed came back,
+// and was sent). KEYS the live key, the erasing hash, the list and the record; ARGV the store's field, the record, its
+// seconds, the statsId ("" for a store with an id), the store's ref and the list's values as a JSON array of strings.
+// The list is deleted and pushed again in parts of 500, kept `seconds` like the record. 0: gone or erasing, nothing
+// written; -1: the owner's record or the values could not be read, nothing written; 1: both written. Billed as the
+// EVAL, its HGET and GET, the DEL, one RPUSH a part, the EXPIRE and the SET: 6 + ceil(values / 500) commands, three
+// more than the plain DEL, RPUSHes, EXPIRE and SET it replaces, once for each waiting notice whose list reads.
+export const REPLACE_LIST_AND_SET_IF_STORE_LIVE = `-- marktmorgen:store-list-record-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[4] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[5] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[4] then return 0 end
+end
+local ok, values = pcall(cjson.decode, ARGV[6])
+if not ok or type(values) ~= "table" then return -1 end
+for i = 1, #values do if type(values[i]) ~= "string" then return -1 end end
+redis.call("DEL", KEYS[3])
+local part = {}
+for i = 1, #values do
+  part[#part + 1] = values[i]
+  if #part == 500 then redis.call("RPUSH", KEYS[3], unpack(part)); part = {} end
+end
+if #part > 0 then redis.call("RPUSH", KEYS[3], unpack(part)) end
+if #values > 0 then redis.call("EXPIRE", KEYS[3], ARGV[3]) end
+redis.call("SET", KEYS[4], ARGV[2], "EX", ARGV[3])
+return 1`;
+
+/**
+ * Replaces the list under `listKey` with `values` and keeps `record` under `recordKey`, both for `seconds`, in one step
+ * while the fenced store is live: "kept"; "gone" when its erasure has begun, its record is gone or another store holds
+ * its key, and then nothing is written; "unknown" for a store from before ids with no statsId or any other answer
+ * (nothing known to be written).
+ */
+export async function replaceListAndSetIfStoreLive(fence: StoreLiveFence, listKey: string, values: readonly string[], recordKey: string, record: string, seconds: number): Promise<"kept" | "gone" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  if (fence.statsId === null) return "unknown";
+  const replies = repliesFor(await redisPipeline([["EVAL", REPLACE_LIST_AND_SET_IF_STORE_LIVE, 4, fence.live, fence.erasing, listKey, recordKey, fence.field, record, seconds, fence.statsId, fence.ref, JSON.stringify(values)]]), 1);
+  const answer = replies?.[0];
+  return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
+}

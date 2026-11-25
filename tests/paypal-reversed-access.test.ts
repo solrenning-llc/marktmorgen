@@ -187,7 +187,8 @@ async function main(): Promise<void> {
     const real = redis.pipeline.bind(redis);
     // The mark's writes answer out of their shape, as a reply that cannot be read does: never "written".
     redis.pipeline = (async (commands: (string | number)[][]) =>
-      commands.some((c) => c[1] === reversedKey && c[0] !== "ZSCORE") ? commands.map(() => "OK") : real(commands)) as typeof redis.pipeline;
+      // The mark's write, a plain ZADD before Codex G-20261120-1631 and now the fenced EVAL whose third key is the set.
+      commands.some((c) => (c[1] === reversedKey && c[0] !== "ZSCORE") || (c[0] === "EVAL" && c[5] === reversedKey)) ? commands.map(() => "OK") : real(commands)) as typeof redis.pipeline;
     const logged = console.error;
     console.error = () => undefined;
     let run: Awaited<ReturnType<typeof watchPayPal>>;

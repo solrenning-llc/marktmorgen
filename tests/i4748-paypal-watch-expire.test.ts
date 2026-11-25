@@ -1,6 +1,7 @@
 /**
  * #4748 (Codex X8, transcribed by Claude 2): the PayPal refund watch (lib/paypal-sales.ts, watchPayPal) took an
- * EXPIRE reply of 0 as a written mark. The marks are a ZADD then an EXPIRE in one pipeline, which is not atomic: when
+ * EXPIRE reply of 0 as a written mark. Since #5152 the mark is one fenced step (PAYPAL_MARK_IF_LIVE) whose reply carries
+ * the same two answers; this test now gives that step's reply an EXPIRE of 0. The marks are a ZADD then an EXPIRE in one pipeline, which is not atomic: when
  * the key goes between the two (a TTL running out, a store erased), the EXPIRE answers 0, nothing is kept, and yet the
  * refund was told, the purchase taken back and the order taken off the watch, with no mark for the affiliate book, the
  * store's numbers or the hand-over retry (lib/paypal-delivery.ts) to read. The same holds for the taken-back mark of a
@@ -136,17 +137,22 @@ async function main(): Promise<void> {
   const held = async (email: string) => (await importedFor((await storeForEmail("owner@example.com"))!, email)).length;
   const watched = async (order: string) => (await redis.pipeline([["ZSCORE", watchKey, order]]))[0] !== null;
 
-  /** The mark's key goes between its ZADD and its EXPIRE, as when its TTL runs out right then: the EXPIRE answers 0. */
+  /**
+   * The mark's one step (PAYPAL_MARK_IF_LIVE, since #5152) answers that its expiry was not set: { ZADD's answer, 0 },
+   * with nothing of it kept, as when the key went right then. A reply other than -1 or { 0|1, 1 } is not known written
+   * (CX-123 rule 24), so nothing is told or taken back. Before #5152 the marks were a plain ZADD then EXPIRE, and this
+   * dropped the key between the two.
+   */
   const dropBetween = async (key: string, run: () => Promise<Awaited<ReturnType<typeof watchPayPal>>>) => {
     const real = redis.pipeline.bind(redis);
     let dropped = 0;
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      const [add, expire] = commands;
-      if (commands.length === 2 && add[0] === "ZADD" && add[1] === key && expire[0] === "EXPIRE" && expire[1] === key) {
-        const [added] = await real([add]);
+      const [step] = commands;
+      if (commands.length === 1 && step[0] === "EVAL" && String(step[1]).startsWith("-- marktmorgen:paypal-mark-if-live:v1\n") && step[5] === key) {
+        const [reply] = await real(commands);
         await real([["DEL", key]]);
         dropped++;
-        return [added, ...(await real([expire]))];
+        return [Array.isArray(reply) ? [reply[0], 0] : reply];
       }
       return real(commands);
     }) as typeof redis.pipeline;
@@ -161,14 +167,14 @@ async function main(): Promise<void> {
   };
 
   for (const [status, key] of [["REFUNDED", refundedKey], ["REVERSED", reversedKey]] as const) {
-    part(`Capture ${status}: its mark's key gone before its EXPIRE (EXPIRE answers 0)`);
+    part(`Capture ${status}: its mark's step answers that its expiry was not set ({ ZADD, 0 })`);
     const email = `expire-${status.toLowerCase()}@example.com`;
     const bought = await buy(email);
     captures.set(bought.capture, status);
     await dueNow(bought.order);
     const told = refunds.length;
     const { result, dropped } = await dropBetween(key, () => watchPayPal(store, Date.now() + 10_000, on));
-    is("control: the key went between the ZADD and the EXPIRE", dropped, 1);
+    is("control: the mark's step answered { ZADD, 0 } and kept nothing", dropped, 1);
     is("the order stays watched", await watched(bought.order), true);
     is("nothing is taken back", [result.revoked, await held(email)], [0, 1]);
     is("no refund is told", refunds.length, told);

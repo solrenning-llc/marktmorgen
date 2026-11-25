@@ -173,7 +173,9 @@ async function main(): Promise<void> {
     is("the next look tells the refund to the endpoint, once", told.length, 1);
     is("named, never having been deleted", (told[0]?.data as Record<string, unknown> | undefined)?.buyer, { email: UNREAD, name: null });
     is("told, the order leaves the watch", (await realPipeline([["ZSCORE", watch, openedU.order]]))[0], null);
-    const marks = seen.filter((c) => c[1] === refundedKey(statsId) && (c[0] === "ZADD" || c[0] === "EXPIRE")).length;
+    // The refund mark is one EVAL behind the store's fence since Codex G-20261120-1631 (PAYPAL_MARK_IF_LIVE), billed as
+    // the EVAL and its four calls (EXISTS, HEXISTS, one ZADD, EXPIRE); its set is the script's third key.
+    const marks = seen.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:paypal-mark-if-live:v1") && c[5] === refundedKey(statsId)).length * 5;
     is("the owed look writes the refund mark again as the cost line says", marks, PAYPAL_REFUND_TOLD.markCommandsPerOwedLook);
     is("and reads the purchase again as the cost line says", seen.filter((c) => c[0] === "HGET" && c[1] === importedKey(statsId, UNREAD)).length, PAYPAL_REFUND_TOLD.recordReadsPerOwedLook);
     const rewrites = seen.filter((c) => (c[0] === "SREM" || c[0] === "HSET") && (c[1] === importedKey(statsId, UNREAD) || c[1] === ownKey(statsId, UNREAD, product.id))).length;

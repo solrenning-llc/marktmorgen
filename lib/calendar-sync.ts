@@ -1128,10 +1128,14 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     if (typeof raw !== "string" || !/^\d{1,15}$/.test(raw)) return null;
     return Number(raw);
   };
-  const changed = countOf(changedRaw) ?? 0;
-  const changedSince = copy !== null && changed > copy.at;
-  const fresh = copy !== null && !changedSince && now - copy.at < CALENDAR_REFRESH_SECONDS * 1000;
+  // An unreadable changed mark is not "no booking changed" (issue #3958): the copy is never fresh then, the file is
+  // made again from the day's own makings (never a booking's credit, which only a readable change gives), and when it
+  // cannot be made, nothing is answered (the app asks again) rather than a copy that may miss a booking.
+  const changed = countOf(changedRaw);
+  const changedSince = copy !== null && changed !== null && changed > copy.at;
+  const fresh = copy !== null && changed !== null && !changedSince && now - copy.at < CALENDAR_REFRESH_SECONDS * 1000;
   if (fresh) return { state: "copy", ics: copy.ics };
+  const stale = (): FeedAnswer => (copy && changed !== null ? { state: "copy", ics: copy.ics } : { state: "none" });
   // A booking made, moved or let go since the copy: one of the day's credits, which bookings give, up to
   // CALENDAR_CREDITS_PER_DAY. Otherwise (or with none left) one of the day's own CALENDAR_BUILDS_PER_DAY.
   const credits = Math.min(countOf(creditsRaw) ?? 0, CALENDAR_CREDITS_PER_DAY);
@@ -1148,19 +1152,19 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     return count !== null && count < ceiling;
   };
   if (!roomFor(attemptsRaw, tries) || !((changedSince && roomFor(creditsUsedRaw, credits)) || roomFor(ownRaw, CALENDAR_BUILDS_PER_DAY))) {
-    return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+    return stale();
   }
   // Every try of the day, made or failed, or refused by a making that ran at the same moment, is one of the priced
   // makings (inbox C4-53): a failure given back below tries again inside this figure, never past it.
   if (!(await takeCounted(attemptsKey, tries, 2 * 86_400))) {
-    return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+    return stale();
   }
   const taken =
     changedSince && credits > 0 && (await takeCounted(creditKey, credits, 2 * 86_400)) ? creditKey
     : (await takeCounted(ownKey, CALENDAR_BUILDS_PER_DAY, 2 * 86_400)) ? ownKey
     : null;
   // Refused by a making that ran at the same moment: the try stays counted, so its commands are priced.
-  if (!taken) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  if (!taken) return stale();
   let made: MadeFeed;
   try {
     made = await make();
@@ -1172,16 +1176,17 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     }
     // Stripe did not answer: the making is given back once a day, so the app's next check tries again; past that
     // one it stays counted. The try itself stays counted either way (calendarAttemptsKey), so what it read is priced
-    // (inbox C4-53). The copy stands.
+    // (inbox C4-53). The copy stands while the changed mark was read; on an unreadable mark it is not answered as current
+    // (issue #3958), so the error goes up and the app asks again.
     if (await takeCounted(retriesKey(owner.statsId, day), CALENDAR_RETRIES_PER_DAY, 2 * 86_400)) await giveCounted(taken, 2 * 86_400);
-    if (copy) return { state: "copy", ics: copy.ics };
+    if (copy && changed !== null) return { state: "copy", ics: copy.ics };
     throw error;
   }
   const { ics } = made;
   const file = JSON.stringify({ at: now, ics, ref, sid: owner.statsId });
   if (Buffer.byteLength(file, "utf8") > CALENDAR_FILE_MAX_BYTES) {
     console.error("a booking calendar file is larger than its ceiling, so it is neither kept nor sent", owner.statsId);
-    return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+    return stale();
   }
   // Kept only while the store's settings are still there: a deletion that ran while this was being made
   // (forgetStoreCalendar) is not undone by a copy written after it, with its buyers' names; and what was made is
@@ -1204,7 +1209,7 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     const erased = listId ? suppressedKey(listId) : "nl:none";
     [written] = await redisPipeline([["EVAL", KEEP_COPY, 3, cfgKey(owner.statsId), outKey(owner.statsId), erased, file, CALENDAR_COPY_SECONDS, ...prints]]).catch(() => [null]);
   }
-  if (written !== 0 && written !== 1 && written !== 2) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  if (written !== 0 && written !== 1 && written !== 2) return stale();
   if (written === 0) return { state: "gone" };
   if (written === 2) {
     // Its copy gone with nothing kept in its place, the erasure's own DEL may find none and give no making back

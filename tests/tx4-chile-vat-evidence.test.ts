@@ -26,3 +26,26 @@ test("Chile evidence says no registration threshold was found and the statute wa
   const doc = readFileSync(path, "utf8");
   for (const text of ["No monetary registration threshold was identified in the sources read", "must not be gated on a sales counter", "Statute not read"]) assert.ok(doc.includes(text), text);
 });
+// Board #5285, row #2633 (Claude 5's LOWs #3 and #4 on #2633): phrases being present never proved the note free of
+// an added conclusion or a zero cost, and the note had no owner-dependent list, unlike the other TX4 notes.
+test("Chile evidence adds no zero cost and no conclusion about the LLC, and lists what depends on the owner", () => {
+  const doc = readFileSync(path, "utf8");
+  assert.doesNotMatch(doc, /(?:USD|EUR|CLP|US\$|€|\$)\s*0(?:[.,]0+)?\b/i);
+  assert.doesNotMatch(doc, /(?:LLC|Marktmorgen)\s+(?:is|are)\s+(?:not\s+(?:a|the)\s+(?:digital\s+intermediation\s+)?platform|exempt|below)/i);
+  assert.doesNotMatch(doc, /(?:LLC|Marktmorgen)\s+(?:must|will|need(?:s)? to)\s+(?:file|register|appoint|pay)/i);
+  for (const text of ["Owner-dependent", "reviewed legal facts", "complete funded cost evidence", "not compliance, profitability, deployment or customer-availability certification"]) assert.ok(doc.includes(text), text);
+});
+// Claude 3 yaQt's LEVE on #5414 @6e2c549c2d: the rest of Claude 5's LOW #3 on #2633. An added threshold with an amount
+// ("A registration threshold of USD 100,000 applies before any obligation.") contradicts the note, which found none, and
+// the sources were pinned only by fragments of their file names.
+test("Chile evidence states no threshold amount and cites each source by its full address", () => {
+  const doc = readFileSync(path, "utf8");
+  assert.doesNotMatch(doc, /threshold[^.\n]{0,60}?(?:USD|EUR|CLP|US\$|€|\$|UF|UTM)\s*[\d.,]*\d/i);
+  assert.doesNotMatch(doc, /(?:USD|EUR|CLP|US\$|€|\$|UF|UTM)\s*[\d.,]*\d[^.\n]{0,60}?threshold/i);
+  for (const url of [
+    "https://www.sii.cl/normativa_legislacion/resoluciones/2024/reso107.pdf",
+    "https://www.sii.cl/normativa_legislacion/resoluciones/2025/reso84.pdf",
+    "https://www.sii.cl/normativa_legislacion/resoluciones/2025/reso93.pdf",
+    "https://www.sii.cl/vat/index.html",
+  ]) assert.ok(doc.includes(`](${url})`), url);
+});

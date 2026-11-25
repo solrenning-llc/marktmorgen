@@ -167,8 +167,9 @@ export async function POST(request: NextRequest) {
     session: request.cookies.get(affiliateCookieName(store.handle))?.value,
   });
   const via = credit.known ? credit.via : null;
-  // From a package: checked, and the session's coupon made, before the time is held.
-  const prepared = pkg ? await prepareSession(store, pkg, linkOrigin(request, store)) : null;
+  // From a package: checked, and the session's coupon made, before the time is held. A package pays only for sessions
+  // of the call it was bought for (MM-SA-32): prepareSession answers "gone" for another call's id, on its one read.
+  const prepared = pkg ? await prepareSession(store, pkg, linkOrigin(request, store), product.id) : null;
   if (prepared && !prepared.ok) return back(`pkg-${prepared.reason}`);
   const result = await holdAndCheckout({
     store,

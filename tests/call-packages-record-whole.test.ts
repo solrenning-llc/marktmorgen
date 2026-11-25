@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   const outcome = await confirmPurchase(store, PAID, session as Parameters<typeof confirmPurchase>[2]);
   is("the sweep then counts it as confirmed", outcome, "sent");
   is("the token the page links to finds the package", (await boughtByToken(again!.token))?.checkout ?? null, PAID);
-  const prepared = await prepareSession(store, again!.token, "https://marktmorgen.com");
+  const prepared = await prepareSession(store, again!.token, "https://marktmorgen.com", product.id);
   is("the buyer can book one of the five sessions they paid for", prepared.ok ? "ok" : prepared.reason, "ok");
   is("the buyer got the email with the booking link", emails.filter((m) => m.text.includes("?pkg=")).length, 1);
 

@@ -101,7 +101,7 @@ async function main(): Promise<void> {
     redis.advance(431 * 86_400_000);
     is("the package is still there", (await readBought(PAID)) !== null, true);
     is("sessions used stay used", (await packageState((await readBought(PAID))!)).left, 0);
-    const again = await prepareSession(store, bought.token, "https://marktmorgen.com");
+    const again = await prepareSession(store, bought.token, "https://marktmorgen.com", product.id);
     is("a new free session is refused", again.ok ? "prepared" : again.reason, "used");
   }
 
@@ -117,7 +117,7 @@ async function main(): Promise<void> {
     moveBothClocks(431 * DAY);
     is("the confirmation marks are gone", redis.run(["EXISTS", `nl:call:confirmed:${sessionId("b", 0)}`]), 0);
     is("sessions used stay used, on both clocks", (await packageState((await readBought(PAID))!)).left, 0);
-    const again = await prepareSession(store, bought.token, "https://marktmorgen.com");
+    const again = await prepareSession(store, bought.token, "https://marktmorgen.com", product.id);
     is("no free session after 431 days", again.ok ? "prepared" : again.reason, "used");
   }
 
@@ -180,7 +180,7 @@ async function main(): Promise<void> {
     }) as typeof redis.pipeline;
     try {
       is("a garbled answer leaves nothing free", (await packageState((await readBought(PAID))!)).left, 0);
-      const again = await prepareSession(store, bought.token, "https://marktmorgen.com");
+      const again = await prepareSession(store, bought.token, "https://marktmorgen.com", product.id);
       is("and books nothing free", again.ok ? "prepared" : again.reason, "used");
     } finally {
       redis.pipeline = pipeline;
@@ -202,7 +202,7 @@ async function main(): Promise<void> {
     redis.run(["DEL", used[0]]);
     redis.run(["SADD", used[0], ...members]);
     is(`[CORRETO] ${label}: nothing comes back free`, (await packageState((await readBought(PAID))!)).left, 0);
-    const again = await prepareSession(store, bought.token, "https://marktmorgen.com");
+    const again = await prepareSession(store, bought.token, "https://marktmorgen.com", product.id);
     is(`[CORRETO] ${label}: and nothing free is booked`, again.ok ? "prepared" : again.reason, "used");
   }
 

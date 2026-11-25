@@ -5,7 +5,8 @@
  * the store's data room before it is written; a list that does not read is
  * an error, never an empty list, and is never written over.
  */
-import { MAX_PATHS, PathsUnreadable, readPaths, savePaths } from "@/lib/learning-paths";
+import { MAX_PATHS, PATHS_SLOT, PATHS_SLOT_IF_HELD, PathsUnreadable, readPaths, savePaths } from "@/lib/learning-paths";
+import { TAKE_DATA } from "@/lib/store-data";
 import { parseStoredPaths, readPathsInput } from "@/lib/learning-path-rules";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
@@ -179,6 +180,40 @@ async function main(): Promise<void> {
   is("A is not said as saved", (await savePaths(STORE, [two("A2")], COURSES, NOW + 17)).state, "unknown");
   redis.pipeline = before4;
   is("the slot still counts B's stored list, never A's smaller one", (await slotNow()) >= (await storedSize()), true);
+
+  part("Claude 1's note on #3722 (#5285 row): a stall between the write and the slot's set never sets back another save's count");
+  // A writes its smaller list while it holds the lock; then, before its slot is set to that size, it stalls longer
+  // than the lock's life; B takes the lock, saves a larger list and sets the slot to it. A's set must not then bring
+  // the slot down to A's smaller size: the lock's check and the slot's set are one step.
+  let beforeSet = true;
+  const before5 = redis.pipeline;
+  redis.pipeline = (async (batch: Command[]) => {
+    const setsSlot = batch.some((c) =>
+      c[0] === "EVAL" && (String(c[1]).startsWith("-- marktmorgen:paths-slot-if-held:") || (String(c[1]).startsWith("-- marktmorgen:store-data:v1") && c.includes("s"))),
+    );
+    if (beforeSet && setsSlot) {
+      beforeSet = false;
+      await real([["DEL", `nl:paths:lock:${statsId}`]]);
+      const b = await savePaths(STORE, Array.from({ length: MAX_PATHS }, (_, i) => two(`B's path ${i}, saved while A stalled`)), COURSES, NOW + 20);
+      if (b.state !== "saved") throw new Error(`fixture: B ${b.state}`);
+    }
+    return before5(batch);
+  }) as typeof redis.pipeline;
+  await savePaths(STORE, [two("A3")], COURSES, NOW + 19);
+  redis.pipeline = before5;
+  is("(setup) A stalled after its write, before its slot was set", beforeSet, false);
+  is("the slot still counts B's stored list, never A's smaller one", (await slotNow()) >= (await storedSize()), true);
+
+  part("Claude 3 yUZf's LEVE on #5309: the script itself checks the lock before it takes any room");
+  // The tests reach PATHS_SLOT_IF_HELD only through its mirror in lib/redis-memory.ts, so its own text is held here: the
+  // lock's GET compared with this save's token, answered {2, 0}, comes first, before TAKE_DATA runs, and the rebound
+  // arguments are the slot's set (mode '2', 's', PATHS_SLOT), never a plain take.
+  const script = PATHS_SLOT_IF_HELD.split("\n");
+  const guard = "if redis.call('GET', KEYS[2]) ~= ARGV[4] then return {2, 0} end";
+  is("the script's first line after its name is the lock's check", script[1], guard);
+  is("the check comes before the room is taken", PATHS_SLOT_IF_HELD.indexOf(guard) < PATHS_SLOT_IF_HELD.indexOf(TAKE_DATA), true);
+  is("the room's script is the shared TAKE_DATA, whole", PATHS_SLOT_IF_HELD.includes(TAKE_DATA), true);
+  is("its arguments set the paths slot", PATHS_SLOT_IF_HELD.includes(`local ARGV = {limit, '2', month, 's', '${PATHS_SLOT}', size}`), true);
 
   part("Review (LEVE 2): an id that would not read back is never given");
   const odd = readPathsInput([two("X")], [], COURSES, () => Number.NaN);

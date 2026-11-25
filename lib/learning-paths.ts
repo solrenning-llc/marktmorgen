@@ -15,9 +15,9 @@
  * overwritten (rule 24).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type Held, LockBusyError, holdLock, releaseLock, setIfHeldOnly, takeLock } from "@/lib/redis-lock";
-import { type DataStore, giveData, takeData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { type Held, LockBusyError, releaseLock, setIfHeldOnly, takeLock } from "@/lib/redis-lock";
+import { type DataStore, TAKE_DATA, dataKey, monthOf, takeData } from "@/lib/store-data";
+import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 import { MAX_PATHS, type PathsProblem, type StoredPath, parseStoredPaths, readPathsInput } from "@/lib/learning-path-rules";
 
 export { MAX_PATHS };
@@ -26,6 +26,31 @@ const STATS_ID = /^[0-9a-f]{32}$/;
 const LOCK_SECONDS = 60;
 /** The list's slot in the store's data room: set to its size at each save. */
 export const PATHS_SLOT = "paths";
+
+/**
+ * Sets the paths' slot in the store's data room (KEYS[1]) to ARGV[3] bytes only while the save's lock (KEYS[2]) still
+ * holds its token (ARGV[4]), in one step: the data room's own give-back (TAKE_DATA, mode "2", which never recreates a
+ * room taken away with the store). {2, 0} when the lock is no longer this save's, and nothing set. Modelled by
+ * lib/redis-memory.ts. Its inner calls are the lock's GET and the room's own, one EVAL fewer than the EXTEND and the
+ * give-back it replaces.
+ */
+export const PATHS_SLOT_IF_HELD = `-- marktmorgen:paths-slot-if-held:v1
+if redis.call('GET', KEYS[2]) ~= ARGV[4] then return {2, 0} end
+local function pathsRoom(limit, month, size)
+  local KEYS = {KEYS[1]}
+  local ARGV = {limit, '2', month, 's', '${PATHS_SLOT}', size}
+${TAKE_DATA}
+end
+return pathsRoom(ARGV[1], ARGV[2], ARGV[3])`;
+
+/** The slot set to `size` while `held` is still this save's (PATHS_SLOT_IF_HELD); any failure leaves it as it was. */
+async function setSlotIfHeld(store: DataStore, held: Held, size: number, now: number): Promise<void> {
+  const room = dataKey(store);
+  if (!room || !isRedisConfigured()) return;
+  await redisPipeline([["EVAL", PATHS_SLOT_IF_HELD, 2, room, held.key, contentRoomFor(store, now / 1000), monthOf(now), size, held.token]]).catch(
+    (error: unknown) => console.error("could not set a store's learning paths slot", error),
+  );
+}
 
 const pathsKey = (statsId: string) => `nl:paths:${statsId}`;
 const lockKey = (statsId: string) => `nl:paths:lock:${statsId}`;
@@ -106,10 +131,11 @@ export async function savePaths(store: DataStore & { statsId: string }, raw: unk
     // never writes over another's list. Anything but the exact 1 (the lock lost, or an answer not read) is not said as
     // saved, and the slot keeps what it was given (more than is stored, never less, until a save that holds its lock).
     if (!(await setIfHeldOnly(held, pathsKey(store.statsId), json))) return { state: "unknown" };
-    // Written: the slot is set to exactly this list only while the lock is still ours, so no other save has taken its
-    // own count since; this also brings back to what is stored anything a stale save added. Should the lock run out
-    // in between, the slot stays at least at what is stored, and the next save that holds its lock sets it again.
-    if (await holdLock(held)) await giveData(store, [{ slot: PATHS_SLOT, bytes: size, set: true }], now);
+    // Written: the slot is set to exactly this list only while the lock is still ours, the check and the set in one
+    // script (PATHS_SLOT_IF_HELD), so no other save can have taken the lock and its own count in between (Claude 1's
+    // note on #3722, #5285); this also brings back to what is stored anything a stale save added. A lock that ran out,
+    // or an answer not read, leaves the slot at least at what is stored, until the next save that holds its lock.
+    await setSlotIfHeld(store, held, size, now);
     return { state: "saved", paths: read.paths };
   } finally {
     await releaseLock(held).catch(() => undefined);

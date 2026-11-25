@@ -32,6 +32,10 @@
  * docs.stripe.com/api/invoices/void ("Mark a finalized invoice as void").
  *
  *   nl:closing:paid:<folder>   hash  subscription -> its last payment (PaidPeriod), from the hold to the closing
+ *   nl:closing:paidby:<folder> hash  a member's address, hashed (heldAddressField) -> their subscriptions in
+ *                                    nl:closing:paid, comma-joined: written in one script with each row
+ *                                    (PAID_HOLD), deleted with it (forgetHeld), so a person's copy reads only
+ *                                    their own rows (#5125, coordinator 6a9d, 22 November 2026)
  *   nl:closing:work:<folder>   hash  where the hold and the release stopped, the members not held yet
  *                                    ("f:<sub>"), those past the call budget ("o:<sub>"), what is
  *                                    left of the budget ("calls") and the ending it was set for ("of")
@@ -51,6 +55,7 @@ import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { normaliseEmail } from "@/lib/auth";
+import { createHash } from "node:crypto";
 import { forgetCredit } from "@/lib/closing-credit";
 import {
   HOLD_PAGES_PER_RUN,
@@ -67,6 +72,13 @@ import {
 
 export const paidKey = (folder: string) => `nl:closing:paid:${folder}`;
 export const workKey = (folder: string) => `nl:closing:work:${folder}`;
+export const paidByKey = (folder: string) => `nl:closing:paidby:${folder}`;
+/**
+ * A member's address as the index of their rows names it: trimmed and lower-cased exactly as heldPaymentsOf compares a
+ * row's address with a person's, then hashed, so the index finds every row that comparison would, and never names the
+ * address itself.
+ */
+export const heldAddressField = (email: string) => createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
 export const HELD_INDEX = "nl:closing:held";
 /** Stores whose closing day has begun (their memberships ended at Stripe): seen through to the end, whatever the plan does since. */
 export const FINAL_INDEX = "nl:closing:final";
@@ -184,6 +196,29 @@ if redis.call("HGET", KEYS[1], "of") == ARGV[2] then return 0 end
 redis.call("DEL", KEYS[1])
 redis.call("HSET", KEYS[1], "calls", ARGV[1], "of", ARGV[2])
 return 1`;
+
+/**
+ * KEYS[1] the closing's members' payments, KEYS[2] their index by address; ARGV[1] the subscription, ARGV[2] its last
+ * payment, ARGV[3] the member's address field (heldAddressField), "" when Stripe gave no address. The row is written
+ * only when there is none yet (HSETNX: the first reading is the one before any hold), and the subscription is added to
+ * the address's list in the same script, once, so no row is ever kept that the person's copy cannot find (#5125).
+ * Answers HSETNX's 1 or 0; a key of another type fails the script, which is unknown to the caller.
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const PAID_HOLD = `-- marktmorgen:closing-paid-hold:v1
+local set = redis.call("HSETNX", KEYS[1], ARGV[1], ARGV[2])
+if ARGV[3] ~= "" then
+  local held = redis.call("HGET", KEYS[2], ARGV[3])
+  local list = ARGV[1]
+  if held then
+    for one in string.gmatch(held, "[^,]+") do
+      if one == ARGV[1] then return set end
+    end
+    list = held .. "," .. ARGV[1]
+  end
+  redis.call("HSET", KEYS[2], ARGV[3], list)
+end
+return set`;
 
 /**
  * Sets the closing's budget of calls to the creator's Stripe account, once an
@@ -340,8 +375,13 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
   const email = memberEmail(sub);
   if (!plan) {
     const period = paid.map((invoice) => paidPeriodOf(invoice, email)).find((p): p is PaidPeriod => p !== null) ?? null;
-    // The first reading is the one before any hold (HSETNX).
-    if (period) await redisPipeline([["HSETNX", paidKey(folder), id, JSON.stringify(period)]]);
+    // The first reading is the one before any hold (HSETNX), written with its place in the member's index in one script
+    // (PAID_HOLD). An answer other than 1 or 0 is unknown (rule 24): the member is not held now and is tried again, so
+    // no row is kept that the index may not name.
+    if (period) {
+      const written = repliesFor(await redisPipeline([["EVAL", PAID_HOLD, 2, paidKey(folder), paidByKey(folder), id, JSON.stringify(period), period.e ? heldAddressField(period.e) : ""]]), 1)?.[0];
+      if (written !== 1 && written !== 0) throw new UnknownReplyError("a member's last payment written down at the hold");
+    }
   }
   await onAccount("POST", account, `/subscriptions/${encodeURIComponent(id)}`, holdBody(sub, endedAt), undefined, `closing-hold:${id}:${endedAt}`);
   // Set aside only now that it is held: a hold that failed leaves its refund's calls spent, never a second reserve.
@@ -366,27 +406,21 @@ async function stringsOf(command: (string | number)[], what: string, pairs = fal
 }
 
 /**
- * The members' payments a store wrote down (HSETNX on hold, savePaidPeriod since), field by field, every row read
- * exactly: a row that does not parse into a payment is unknown and throws (rule 24), never "left out", so a member's
- * refund is never settled, nor their payment deleted, on a row unread. With `subsOnly` (what the refunds act on), a
- * field that is not a subscription is unknown too: the closing writes only subscriptions there.
+ * One kept row read exactly (rule 24): text that parses into an object with a finite amount and an invoice, or
+ * UnknownReplyError, never "left out", so a person's copy is never made without a payment kept for them. (The whole
+ * hash's reader, paidRows, went with #5125: the closing's own reads are paidPeriods, and the copy reads one person's
+ * rows through their index.)
  */
-async function paidRows(folder: string, subsOnly: boolean): Promise<[string, PaidPeriod][]> {
-  const what = "a closing's members' payments (HGETALL)";
-  const flat = await stringsOf(["HGETALL", paidKey(folder)], what, true);
-  const out: [string, PaidPeriod][] = [];
-  for (let i = 0; i < flat.length; i += 2) {
-    let row: unknown;
-    try {
-      row = JSON.parse(flat[i + 1]);
-    } catch {
-      throw new UnknownReplyError(what);
-    }
-    const paid = row as PaidPeriod;
-    if ((subsOnly && !SUB_ID.test(flat[i])) || !row || typeof row !== "object" || Array.isArray(row) || typeof paid.amt !== "number" || !Number.isFinite(paid.amt) || typeof paid.inv !== "string") throw new UnknownReplyError(what);
-    out.push([flat[i], paid]);
+function keptRow(text: string, what: string): PaidPeriod {
+  let row: unknown;
+  try {
+    row = JSON.parse(text);
+  } catch {
+    throw new UnknownReplyError(what);
   }
-  return out;
+  const paid = row as PaidPeriod;
+  if (!row || typeof row !== "object" || Array.isArray(row) || typeof paid.amt !== "number" || !Number.isFinite(paid.amt) || typeof paid.inv !== "string") throw new UnknownReplyError(what);
+  return paid;
 }
 
 /** The addresses of every member of this ending (held, past the budget or not held yet), payment plans included. */
@@ -622,7 +656,7 @@ export async function savePaidPeriod(store: Store, sub: string, row: PaidPeriod)
 
 /** Once the store is closed or runs again: its written-down payments are deleted, and it leaves the line. */
 export async function forgetHeld(store: Store, folder: string): Promise<void> {
-  await redisPipeline([["DEL", paidKey(folder), workKey(folder)], ["ZREM", HELD_INDEX, storeRef(store)]]);
+  await redisPipeline([["DEL", paidKey(folder), paidByKey(folder), workKey(folder)], ["ZREM", HELD_INDEX, storeRef(store)]]);
   await forgetCredit(folder);
 }
 
@@ -702,7 +736,32 @@ export async function releaseRestarted(deadline: number, staysOpen: (store: Stor
 export async function heldPaymentsOf(store: Store, email: string): Promise<(PaidPeriod & { subscription: string })[]> {
   if (!isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
-  // Throws when it cannot be read (rule 24): the person's copy is then not made, never made without their payment.
-  const rows = await paidRows(await storeFolder(storeRef(store)), false);
-  return rows.filter(([, row]) => typeof row.e === "string" && row.e.trim().toLowerCase() === address).map(([subscription, row]) => ({ ...row, subscription }));
+  const folder = await storeFolder(storeRef(store));
+  const what = "a closing's payments kept for one person (HGET, HMGET)";
+  // Only the person's own rows, through their index (#5125, PAID_HOLD): never the store's whole hash, which holds a row
+  // for every member the closing held. Every read is exact (rule 24): one that cannot be read throws, and the person's
+  // copy is then not made, never made without their payment. A list that is not subscriptions, each once, is unknown.
+  const listed = repliesFor(await redisPipeline([["HGET", paidByKey(folder), heldAddressField(address)]]), 1);
+  if (!listed) throw new UnknownReplyError(what);
+  if (listed[0] === null) return [];
+  if (typeof listed[0] !== "string") throw new UnknownReplyError(what);
+  const subs = listed[0].split(",");
+  if (!subs.every((sub) => SUB_ID.test(sub)) || new Set(subs).size !== subs.length) throw new UnknownReplyError(what);
+  const out: (PaidPeriod & { subscription: string })[] = [];
+  for (let at = 0; at < subs.length; at += HELD_ROWS_PER_READ) {
+    const some = subs.slice(at, at + HELD_ROWS_PER_READ);
+    const rows = repliesFor(await redisPipeline([["HMGET", paidKey(folder), ...some]]), 1)?.[0];
+    if (!Array.isArray(rows) || rows.length !== some.length) throw new UnknownReplyError(what);
+    some.forEach((subscription, i) => {
+      // A row Redis says is not there is none; anything else that is not text is unknown.
+      if (rows[i] === null) return;
+      if (typeof rows[i] !== "string") throw new UnknownReplyError(what);
+      const row = keptRow(rows[i] as string, what);
+      if (typeof row.e === "string" && row.e.trim().toLowerCase() === address) out.push({ ...row, subscription });
+    });
+  }
+  return out;
 }
+
+/** The most of a person's kept rows read in one HMGET by heldPaymentsOf. */
+export const HELD_ROWS_PER_READ = 100;

@@ -4034,6 +4034,21 @@ export class MemoryRedis {
           this.run(["HSET", work, "calls", calls, "of", ending]);
           return 1;
         }
+        // lib/closing-holds.ts PAID_HOLD: a member's last payment written once, with its subscription added once to its address's list (#5125).
+        if (key.startsWith("-- marktmorgen:closing-paid-hold:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, paid, by, sub, row, field] = args;
+          for (const one of [paid, by]) {
+            const type = this.run(["TYPE", one]);
+            if (type !== "hash" && type !== "none") throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          }
+          const set = this.run(["HSETNX", paid, sub, row]);
+          if (field !== "") {
+            const held = this.run(["HGET", by, field]);
+            if (held === null) this.run(["HSET", by, field, sub]);
+            else if (!String(held).split(",").filter(Boolean).includes(sub)) this.run(["HSET", by, field, `${String(held)},${sub}`]);
+          }
+          return set;
+        }
         // lib/plan-closing.ts CLOSING_START: a closing's told marks, email credit and call budget, started once per ending, the endings compared as numbers, step for step (Codex G on #3299, G112).
         if (key.startsWith("-- marktmorgen:closing-start:v2\n") && args[0] === "3" && args.length === 7) {
           const [, told, credit, work, emails, calls, ending] = args;

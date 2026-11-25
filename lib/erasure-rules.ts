@@ -130,7 +130,10 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
 // ERASE_SUBMISSIONS: 575 before them.
 // And (review of #3929) the read of the note of the carts the person was reminded of (lib/checkout-recovery.ts,
 // forgetRecoveryPerson), one SMEMBERS, the note deleted inside the marks' one DEL: 576 before ERASE_SUBMISSIONS.
-export const ERASE_FIXED_COMMANDS = 576 + ERASE_SUBMISSIONS[0];
+// And (Codex X4 on #4880) a person's benefit marks erased by one EVAL whose three calls replace three commands, one
+// more: 577 before ERASE_SUBMISSIONS, written apart so the cost registry's source line for 576 still holds. No public
+// allowance changes.
+export const ERASE_FIXED_COMMANDS = 576 + 1 + ERASE_SUBMISSIONS[0];
 /**
  * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
  * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted

@@ -2504,14 +2504,43 @@ export class MemoryRedis {
         }
         // lib/tier-benefits.ts BENEFIT_MARK: one person's benefit marks written only while they are not on the store's
         // list of the deleted; -1 when they are, otherwise each HSETNX's reply and the SADD's.
-        if (key.startsWith("-- marktmorgen:benefit-mark:v1\n") && args[0] === "3" && args.length >= 8 && (args.length - 6) % 2 === 0) {
-          const [, marks, who, erased, print, person, ...pairs] = args;
+        if (key.startsWith("-- marktmorgen:benefit-mark:v4\n") && args[0] === "5" && args.length >= 12 && (args.length - 10) % 2 === 0) {
+          const [, marks, who, erased, identity, erasing, print, person, erasingField, statsId, ...pairs] = args;
+          this.scriptCalls += 1;
+          if (statsId === "") {
+            if (this.run(["EXISTS", identity]) === 0) return -2;
+          } else {
+            const raw = this.run(["GET", identity]);
+            if (raw === null) return -2;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -3;
+            }
+            if (!record || typeof record !== "object" || Array.isArray(record)) return -3;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return -2;
+          }
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, erasingField]) === 1) return -2;
           this.scriptCalls += 1;
           if (this.run(["HEXISTS", erased, print]) === 1) return -1;
           const out: unknown[] = [];
-          for (let i = 0; i < pairs.length; i += 2) out.push(this.run(["HSETNX", marks, pairs[i], pairs[i + 1]]));
+          for (let i = 0; i < pairs.length; i += 2) {
+            this.scriptCalls += 1;
+            out.push(this.run(["HSETNX", marks, pairs[i], pairs[i + 1]]));
+          }
+          this.scriptCalls += 1;
           out.push(this.run(["SADD", who, person]));
           return out;
+        }
+        // lib/tier-benefits.ts FORGET_BENEFIT_PERSON: the exact snapshot removed in one operation.
+        if (key.startsWith("-- marktmorgen:forget-benefit-person:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, marks, who, person] = args;
+          this.scriptCalls += 1;
+          const flat = this.run(["HGETALL", marks]);
+          const listed = this.run(["SREM", who, person]);
+          return [this.run(["DEL", marks]), listed, flat];
         }
         // lib/calendar-sync.ts CALENDAR_CONFIG_SWAP: a store's calendar settings written only over the exact text they
         // were read as ("1"), or only while still absent ("0"); 0 when changed since (issue #3984).

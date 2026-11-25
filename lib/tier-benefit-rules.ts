@@ -55,6 +55,15 @@ export const BENEFIT_STRIPE_PAGES = 10;
  */
 export const BENEFIT_PAGE_UNITS = 6;
 
+/** Studio work admitted before a mark press's room and writes. This consumes the existing allowance; it does not
+ * change any plan's allowance. Each row costs at most EVAL + three reads + HSETNX + SADD; eight more for take/give
+ * room. Four KB per row covers script, keys/prints and mark; another four KB covers room replies. Count rows,
+ * not unique people: one person can have several subscriptions. Grouping those rows only reduces this bound.
+ */
+export function benefitMarkUnits(rows: number): number {
+  return Math.ceil((8 + 6 * rows) / 20 + (4_096 + 4_096 * rows) / 50_000);
+}
+
 /** Characters in the address written on a mark: the sign-in address's own cap (lib/auth.ts, MAX_EMAIL_LENGTH). */
 export const MARK_BY_MAX = 254;
 /**

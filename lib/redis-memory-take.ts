@@ -1,7 +1,7 @@
 /**
  * A mirror, for lib/redis-memory.ts, of the scripts the tests' stand-in Redis runs (tests/redis-take-scripts.ts): the
  * scripts of lib/redis-take.ts and their kin (lib/card-update.ts, lib/sales-goal.ts, lib/live-fence.ts,
- * lib/store-live-cache.ts, lib/community.ts's CAS_MEMBER, lib/payment-recovery-report.ts, lib/recent-sales.ts), each
+ * lib/store-live-cache.ts, lib/community.ts's CAS_MEMBER, lib/recent-sales.ts), each
  * as the same plain commands in one step. Before 22/11/2026 they lived only in the stand-in, so `next dev`, the demo
  * store and the Mobile render job, which use MemoryRedis with no test stub, refused them (#4969). Keyed by the name on
  * the script's first line (`-- marktmorgen:<name>`), in alphabetical order (AGENTS.md AC (q)).
@@ -55,11 +55,6 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
     run(["LTRIM", list, 0, last]);
     run(["EXPIRE", list, seconds]);
     run(["DEL", feed]);
-    return 1;
-  },
-  "recovery-report-live:v1": (run, [storeId, erasing, report], [field, value, seconds]) => {
-    if (Number(run(["EXISTS", storeId])) !== 1 || run(["HGET", erasing, field]) !== null) return 0;
-    run(["SET", report, value, "EX", seconds]);
     return 1;
   },
   "sales-goal-live:v1": (run, [live, erasing, key], [field, value]) => {

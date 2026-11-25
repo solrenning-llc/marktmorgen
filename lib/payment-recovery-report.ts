@@ -16,16 +16,13 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
-import { ERASING_KEY, erasingField, saleHandles, storeIdCommand, storeRef, type Store } from "@/lib/store";
+import { saleHandles, type Store } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { countKey, monthOf, sentKey } from "@/lib/dunning-keys";
 
 const DAY = 86_400;
 const MAX_PAGES = 10;
 const CACHE_SECONDS = 10 * 60;
-const KEEP_REPORT_IF_LIVE = `-- marktmorgen:recovery-report-live:v1
-if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
-redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
-return 1`;
 const BILLING_REASONS = new Set([
   "automatic_pending_invoice_item_invoice", "manual", "quote_accept", "subscription",
   "subscription_create", "subscription_cycle", "subscription_threshold", "subscription_update", "upcoming",
@@ -206,20 +203,10 @@ export async function recoveryReport(store: Store, fresh = false, now = Date.now
     month,
     complete,
   };
-  if (isRedisConfigured()) {
-    await redisPipeline([
-      [
-        "EVAL",
-        KEEP_REPORT_IF_LIVE,
-        3,
-        storeIdCommand(store.sid)[1],
-        ERASING_KEY,
-        cacheKey(store),
-        await erasingField(storeRef(store)),
-        JSON.stringify(report),
-        CACHE_SECONDS,
-      ],
-    ]).catch(() => {});
-  }
+  // Kept through the shared fence (lib/live-fence.ts): a store with an id while its id key holds its own ref, one from
+  // before ids while its owner's record is still its own, never while it is being erased. The report's own script
+  // checked only the id key, so a store from before ids never kept it and read Stripe again on every view (board
+  // #5285, row #4887).
+  if (isRedisConfigured()) await setWhileStoreLive(store, cacheKey(store), JSON.stringify(report), CACHE_SECONDS).catch(() => {});
   return report;
 }

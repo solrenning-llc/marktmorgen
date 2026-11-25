@@ -61,11 +61,6 @@ const CASES: Record<string, Case[]> = {
     { what: "no store", setup: [], keys: ["k:id", "k:erasing", "k:list", "k:feed"], argv: ["f1", "{}", 4, 600, "ref1"] },
     { what: "an erasing store", setup: [["SET", "k:id", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:id", "k:erasing", "k:list", "k:feed"], argv: ["f1", "{}", 4, 600, "ref1"] },
   ],
-  "recovery-report-live:v1": [
-    { what: "a live store", setup: [["SET", "k:id", "s1"]], keys: ["k:id", "k:erasing", "k:report"], argv: ["f1", "{}", 300] },
-    { what: "an erasing store", setup: [["SET", "k:id", "s1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:id", "k:erasing", "k:report"], argv: ["f1", "{}", 300] },
-    { what: "no store", setup: [], keys: ["k:id", "k:erasing", "k:report"], argv: ["f1", "{}", 300] },
-  ],
   "sales-goal-live:v1": [
     { what: "a live store, a goal", setup: [["SET", "k:live", "x"]], keys: ["k:live", "k:erasing", "k:goal"], argv: ["f1", "500"] },
     { what: "a live store, the goal cleared", setup: [["SET", "k:live", "x"], ["SET", "k:goal", "500"]], keys: ["k:live", "k:erasing", "k:goal"], argv: ["f1", ""] },

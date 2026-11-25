@@ -25,6 +25,8 @@ export const retry = {
   delivered: [] as string[],
   spends: "none" as "none" | "throws" | "metaUnread",
   team: "members" as "members" | "throws",
+  /** More team members who see the numbers, beside member@example.test (tests/numbers-summary-retry-cost.test.ts). */
+  moreMembers: [] as string[],
 };
 
 export function resetRetry(): void {
@@ -40,6 +42,7 @@ export function resetRetry(): void {
   firstUnder.clear();
   retry.spends = "none";
   retry.team = "members";
+  retry.moreMembers = [];
 }
 
 const DAY_MS = 86_400_000;
@@ -97,7 +100,7 @@ export async function readSpendLines(): Promise<{ spends: never[]; metaUnread: b
 // lib/team.ts
 const members = () => {
   if (retry.team === "throws") throw new Error("synthetic team read failure");
-  return [{ email: "member@example.test", role: "editor" as const, joinedAt: "2026-10-01T00:00:00.000Z" }];
+  return ["member@example.test", ...retry.moreMembers].map((email) => ({ email, role: "editor" as const, joinedAt: "2026-10-01T00:00:00.000Z" }));
 };
 export async function readTeamMembers() {
   return members();

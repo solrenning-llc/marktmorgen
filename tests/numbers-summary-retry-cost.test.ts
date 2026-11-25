@@ -20,7 +20,7 @@ import { seedNumbersStore } from "./numbers-email-claim-world";
 import { NextRequest } from "next/server";
 import { GET as weekly } from "@/app/api/cron/weekly/route";
 import { GET as monthly } from "@/app/api/cron/monthly/route";
-import { SUMMARY_TRIES, SUMMARY_TRY_COMMANDS_MOST, SUMMARY_TRY_EXTRA_BYTES } from "@/lib/stats-report";
+import { MAX_WEEKLY_TEAM, SUMMARY_TRIES, SUMMARY_TRY_COMMANDS_MOST, SUMMARY_TRY_EMAILS_MOST, SUMMARY_TRY_EXTRA_BYTES } from "@/lib/stats-report";
 import { control, ai, resetRetry, retry } from "./numbers-summary-retry-cost-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -50,8 +50,9 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
 
   const largestFence = ["EVAL", SUMMARY_LIVE, 4, "x".repeat(80), "nl:closed:erasing", "x".repeat(80), "x".repeat(80), "x".repeat(40), "\u0001".repeat(320), "b".repeat(32), 40 * 86400, "x".repeat(32), "retry", Date.now(), 23 * 3600000, 3];
-  const largestWire = 5 * Buffer.byteLength(JSON.stringify(largestFence)) + 1024;
-  is("five maximally escaped fences plus four bounded readbacks fit the extra wire room", largestWire <= SUMMARY_TRY_EXTRA_BYTES, true);
+  // Five fences, and one more for each team copy since Board #5285 row #3297.
+  const largestWire = (5 + MAX_WEEKLY_TEAM) * Buffer.byteLength(JSON.stringify(largestFence)) + 1024;
+  is(`${5 + MAX_WEEKLY_TEAM} maximally escaped fences plus four bounded readbacks fit the extra wire room`, largestWire <= SUMMARY_TRY_EXTRA_BYTES, true);
   console.log(`summary extra wire bound: ${largestWire} <= ${SUMMARY_TRY_EXTRA_BYTES}`);
   part("Control: the weekly AI lead is written once, on the week's one run");
   reset();
@@ -93,6 +94,30 @@ async function main(): Promise<void> {
     is(`${label}: ${TRIES} owner's emails tried, never more`, retry.mails.length, TRIES);
     is(`${label}: the longest try's commands (${longest}) at most SUMMARY_TRY_COMMANDS_MOST`, longest > 0 && longest <= SUMMARY_TRY_COMMANDS_MOST, true);
   }
+
+  // Each team copy is a part of its own since Board #5285 row #3297 (Codex X6's MEDIUM): with the owner's email gone,
+  // the post refused and all MAX_WEEKLY_TEAM copies refused, every try takes each copy's mark, keeps its first time
+  // and lets it go. That is the weekly route's longest try now; the monthly route sends no team copies.
+  part(`Weekly with ${MAX_WEEKLY_TEAM} team copies, each refused every time: the longest try at most SUMMARY_TRY_COMMANDS_MOST`);
+  reset();
+  retry.chat = "channel";
+  retry.postOk = false;
+  retry.moreMembers = Array.from({ length: MAX_WEEKLY_TEAM - 1 }, (_, i) => `member${i + 1}@example.test`);
+  const chosen = ["member@example.test", ...retry.moreMembers];
+  redis.run(["SADD", "nl:weekly:to:fixture-store", ...chosen]);
+  retry.sendOk = (to) => to === "owner@example.test";
+  const copyTries: number[] = [];
+  for (let i = 1; i <= TRIES + 1; i += 1) {
+    sent = 0; fenceBytes = 0;
+    await weekly(request("/api/cron/weekly"));
+    copyTries.push(sent);
+    is("weekly with copies: fenced wire bytes fit their recorded room", fenceBytes <= SUMMARY_TRY_EXTRA_BYTES, true);
+  }
+  const longestCopies = Math.max(...copyTries.slice(0, TRIES));
+  console.log(`weekly with copies: commands a run ${JSON.stringify(copyTries)}`);
+  is("the owner's email once, each copy tried by every try", [retry.mails.filter((to) => to === "owner@example.test").length, chosen.map((to) => retry.mails.filter((m) => m === to).length)], [1, chosen.map(() => TRIES)]);
+  is(`weekly with copies: the longest try's commands (${longestCopies}) at most SUMMARY_TRY_COMMANDS_MOST`, longestCopies > 0 && longestCopies <= SUMMARY_TRY_COMMANDS_MOST, true);
+  is(`the emails a try sends at most one owner's and ${MAX_WEEKLY_TEAM} copies (SUMMARY_TRY_EMAILS_MOST)`, SUMMARY_TRY_EMAILS_MOST, 1 + MAX_WEEKLY_TEAM);
 }
 
 main().then(done, (error) => { console.error(error); process.exit(1); });

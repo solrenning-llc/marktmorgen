@@ -2,13 +2,13 @@ import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail, sendEmailPinned } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailPinned } from "@/lib/email";
 import { visitedFolders } from "@/lib/traffic";
 import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { EMAIL_KEY_HOLDS_MS, firstTryOf, noteSeen, readNumbers, readSeen, releaseWeek, sendPart, tryPeriodAgain, weekClaim, weekOf, weekPeriod, weeklyMessage, weeklyOffState, weeklyToken } from "@/lib/stats-report";
+import { EMAIL_KEY_HOLDS_MS, copyPart, firstTryOf, noteSeen, readNumbers, readSeen, releaseWeek, sendPart, tryPeriodAgain, weekClaim, weekOf, weekPeriod, weeklyMessage, weeklyOffState, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
 import { spendsForReport } from "@/lib/ad-spend";
@@ -182,17 +182,39 @@ async function runJob(request: NextRequest) {
         if (owner === "gone") { decided.push(folder); continue; }
         if (owner === "missed") missed = true;
         if (owner === "unconfirmed") unconfirmed = true;
-        if (owner === "sent") {
-          out.sent += 1;
-          // The owner and these copies are one batch admitted by the emailed part before its first send.
-          // The same email to the team members the owner chose, while they are on
-          // the team in a role that sees the numbers, each with their own stop link:
-          // only with the owner's own, so a week tried again never sends them twice.
+        if (owner === "sent") out.sent += 1;
+        if (owner === "sent" || owner === "earlier") {
+          // The same email to the team members the owner chose, while they are on the team in a role that sees the
+          // numbers, each with their own stop link, only once the owner's own went (now, or on an earlier try). Each
+          // copy is a part of its own (Codex X6's MEDIUM on #3297, Board #5285 row #3297): marked once for the week,
+          // sent under a key of its own kept with its sender, and its outcome read as the owner's is, so a copy the
+          // provider refused lets the week go and a later try sends it, while a copy that went, or may have gone, is
+          // never sent again. Before, its answer was dropped and a week tried again never reached the copies.
+          // The owner and these copies are one batch, admitted by the emailed part before its first send: work already
+          // admitted is not cancelled by the store's erasure (lib/summary-live.ts). A copy's mark is still fenced by the
+          // store, so nothing of an erased store is written again; once the store is found erased ("gone"), each copy
+          // left goes once, with no mark (no later try reaches an erased store), as the batch was admitted
+          // (tests/summary-store-erasure.test.ts).
+          let gone = false;
           for (const email of copies) {
             const own = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&e=${encodeURIComponent(email)}&t=${encodeURIComponent(weeklyMemberToken(store.handle, email))}`;
             const text = message.text.replace(stopUrl, own).replace("You get this every Monday while your store has visitors.", `You get this because the owner of @${store.handle} added you.`);
-            await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: email, subject: message.subject, text, headers: { "List-Unsubscribe": `<${own}>` } }).catch(() => false);
+            const part = copyPart(email);
+            const send = () => sendEmailPinned({ meter: { by: "company" },
+              from: NIMBUS_FROM,
+              to: email,
+              subject: message.subject,
+              text,
+              headers: { "List-Unsubscribe": `<${own}>` },
+              idempotencyKey: `numbers-summary:${period.key}:${part}`,
+            });
+            if (gone) { await send().catch(() => false); continue; }
+            const copy = await sendPart(period, part, send, { keyHoldsMs: EMAIL_KEY_HOLDS_MS });
+            if (copy === "gone") { gone = true; await send().catch(() => false); continue; }
+            if (copy === "missed") missed = true;
+            if (copy === "unconfirmed") unconfirmed = true;
           }
+          if (gone) { decided.push(folder); continue; }
         }
       }
       if (missed) {

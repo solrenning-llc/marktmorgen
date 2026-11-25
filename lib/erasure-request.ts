@@ -139,7 +139,9 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
       // C4-15 (3)(a)): their time, and a send that fails or finds the room just taken, would only ever come to
       // an address the store knows. They go to the server's log; the page always gives the privacy contact.
       afterAnswer(async () => {
-        const known = new Set(await storesKnownFor(email));
+        // Every store that knows the address, not the library's first MAX_LIBRARY_STORES: a store past that cut is asked
+        // here for itself, and its own link must not be lost (Claude 5 ia5d on #5226). The union is read whole either way.
+        const known = new Set(await storesKnownFor(email, Number.MAX_SAFE_INTEGER));
         if (!(await knows(store, email, known))) return;
         const answer = await emailLink([store], email, input.origin);
         if (answer.status !== "sent") console.warn(`a deletion link asked from one store was not emailed: ${answer.status} (store ${store.sid})`);
@@ -150,7 +152,12 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
   // Every store: which stores know the address, and the email, only after the answer, for the same reason.
   afterAnswer(async () => {
     const stores: Store[] = [];
-    for (const sid of (await storesKnownFor(email)).slice(0, MAX_ERASE_STORES)) {
+    // One store more than a link can hold is read, only to tell (#5010 row 108, Codex T-20261119-1120): an address known
+    // to more stores gets no link at all, never one to part of them, which the person would finish and be told was done
+    // while the stores left out kept everything. The failure goes to the log; the page gives the privacy contact.
+    const known = await storesKnownFor(email, MAX_ERASE_STORES + 1);
+    if (known.length > MAX_ERASE_STORES) throw new Error(`an every-store deletion cannot fit every store that knows the address in one link (more than ${MAX_ERASE_STORES})`);
+    for (const sid of known) {
       // Read exactly (rule 24): a store that is gone (no record) is left out, but one whose record does not read
       // stops the link (logged by afterAnswer). Left out, the person would be sent a link to part of the stores,
       // told it was done, and that store would keep everything about them (readErasureLink refuses the same).

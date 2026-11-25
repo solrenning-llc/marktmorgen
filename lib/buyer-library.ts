@@ -76,11 +76,14 @@ const ids = (reply: unknown, what = "a library's stores") => {
  * the quarters. A reply out of shape throws UnknownReplyError: the deletion ask for every store (lib/erasure-request.ts)
  * and the person's copy (lib/person-copy.ts) then fail, never go on as if no store knew the address.
  */
-export async function storesKnownFor(email: string): Promise<string[]> {
+export async function storesKnownFor(email: string, most = MAX_LIBRARY_STORES): Promise<string[]> {
   if (!isRedisConfigured()) return [];
+  // The buyer's library shows at most MAX_LIBRARY_STORES; a deletion asks for one more, only to tell that its link
+  // could not hold every store (#5010 row 108). The union is read whole either way.
+  if (!Number.isSafeInteger(most) || most < 1) throw new RangeError("the most stores to answer is not a whole count");
   const replies = repliesFor(await redisPipeline([["SUNION", ...libraryKeys(email), ...joinedKeys(email)]]), 1);
   if (!replies) throw new UnknownReplyError("the stores that know an address");
-  return [...new Set(ids(replies[0], "the stores that know an address"))].slice(0, MAX_LIBRARY_STORES);
+  return [...new Set(ids(replies[0], "the stores that know an address"))].slice(0, most);
 }
 
 /**

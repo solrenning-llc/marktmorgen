@@ -210,6 +210,21 @@ async function main(): Promise<void> {
   is("a reply to a post they left behind files nothing under their key", await rows(anaKey), 0);
   is("and pushes nothing", looked.length, 0);
 
+  part("A store switched off after notices about its content (Claude 6's LOW 2 on #3406, #5285 row): no phone is pushed");
+  {
+    const cy = "cy@pushreach.example";
+    const cyKey = memberKey(cy);
+    await touchMember(ID, cy, null, club);
+    is("control: a device is turned on for the member", await rememberDevice(ID, cyKey, subscription(), club), "added");
+    const off: Store = { ...club, suspended: "notice" } as Store;
+    looked.length = 0;
+    await tell(ID, [cyKey], { kind: "reply", post: "p00000000001", comment: "c99999999998", by: "b".repeat(32), words: "While off" }, off, phone);
+    is("switched off: no push goes out", looked.length, 0);
+    looked.length = 0;
+    await tell(ID, [cyKey], { kind: "reply", post: "p00000000001", comment: "c99999999999", by: "b".repeat(32), words: "Back on" }, club, phone);
+    is("control: back on, the member is pushed again", looked.length, 1);
+  }
+
   done();
 }
 

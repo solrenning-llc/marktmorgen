@@ -96,8 +96,8 @@ export async function tell(
   id: string,
   to: string[],
   notice: Omit<Notice, "at" | "words"> & { words: string },
-  /** The store whose data room the notices take from. */
-  room: DataStore,
+  /** The store whose data room the notices take from; a store switched off (`suspended`) pushes no phone. */
+  room: DataStore & { suspended?: unknown },
   /** Where a phone should be sent, and by what name. Left out, none is sent. */
   phone?: { handle: string; who: string; language?: unknown },
 ): Promise<void> {
@@ -136,7 +136,9 @@ export async function tell(
   } catch (error) {
     console.error("filing a community notification failed", error);
   }
-  if (!phone) return;
+  // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule 24):
+  // the notice is filed in the community as before, but no phone is pushed (Claude 6's LOW 2 on #3406).
+  if (!phone || room.suspended) return;
   // The words are deliberately absent: a notification is read on a lock
   // screen, and this one says who did what and where, nothing more.
   // In the store's language, like the pages it opens.

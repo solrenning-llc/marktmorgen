@@ -1443,6 +1443,10 @@ export async function sendDripEmails(
     }
     const dripping = course.modules.filter((m) => m.dripDays > 0 && m.lessons.length > 0);
     if (dripping.length === 0) continue;
+    // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule 24):
+    // none of its students is read and nothing is sent; it stays in line, and a module that opened in the last three
+    // days goes out once the store is back on, as broadcasts and sequences wait (Claude 6's LOW 2 on #3406).
+    if (store.suspended) continue;
     const read = await studentsOf(course, 5000);
     if (!read) {
       // Unknown, not none: this course waits for the next run, which reads it again.

@@ -232,7 +232,12 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
     checks += 1;
     try {
       const found = await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}`, undefined, undefined, undefined, CHECK_MS);
-      if (isSettled(found)) {
+      if (found.id !== session) {
+        // An answer about another checkout proves nothing about this one (board #5285, row #4455; Claude 5's LEVE on
+        // #5363): neither paid nor expired, so the unit stays held and the count is unknown.
+        used += 1;
+        unknown += 1;
+      } else if (isSettled(found)) {
         paid.push(session);
         used += 1;
       } else if (found.status === "expired") {
@@ -342,7 +347,9 @@ export async function releaseStockHold(store: Store, product: Listing, session: 
       `/checkout/sessions/${encodeURIComponent(session)}/expire`,
       new URLSearchParams(),
     );
-    if (closed.status !== "expired") return false;
+    // Let go only on Stripe's receipt for this very checkout (board #5285, row #4455, as payment requests already do):
+    // an "expired" naming another session says nothing about this one, which may still be paid.
+    if (closed.id !== session || closed.status !== "expired") return false;
   } catch {
     return false;
   }
@@ -622,7 +629,9 @@ export async function withCartStockHolds<T extends { id: string }>(
   if (store.stripeAccountId) {
     const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(value.id)}/expire`, new URLSearchParams()).catch(() => null);
     // One command a product, both fields at once, so the failure path stays inside CART_STOCK_COMMANDS_MOST (tests/cart-stock.test.ts).
-    if (closed?.status === "expired") await redisPipeline(keys.map((key) => ["HDEL", key, value.id, pending])).catch(() => {});
+    // Only Stripe's receipt for this very checkout (board #5285, row #4455): an "expired" naming another session says
+    // nothing about this one, which may still be open and be paid.
+    if (closed?.id === value.id && closed.status === "expired") await redisPipeline(keys.map((key) => ["HDEL", key, value.id, pending])).catch(() => {});
   }
   return { ok: false, reason: "busy" };
 }
@@ -677,7 +686,9 @@ export async function releaseCartStockHolds(store: Store, products: Listing[], s
   if (holding.length === 0) return false;
   try {
     const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}/expire`, new URLSearchParams());
-    if (closed.status !== "expired") return false;
+    // Let go only on Stripe's receipt for this very checkout (board #5285, row #4455, as payment requests already do):
+    // an "expired" naming another session says nothing about this one, which may still be paid.
+    if (closed.id !== session || closed.status !== "expired") return false;
   } catch {
     return false;
   }

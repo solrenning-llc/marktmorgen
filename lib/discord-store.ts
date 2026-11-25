@@ -144,6 +144,25 @@ end
 return {gone, links, redis.call("HLEN", KEYS[1])}`;
 
 /**
+ * What each person kept adds to a Disconnect (forgetServer), in billed commands: the calls FORGET_PEOPLE makes for them
+ * inside its script (GET and DEL of their address link, HGET and HDEL of their row, ZREM of their due entry). Measured
+ * through the whole route by tests/discord-disconnect-route-envelope.test.ts; priced in NOT_A_COST (tests/plan-cost-registry.ts).
+ */
+export const DISCONNECT_COMMANDS_PER_PERSON = 5;
+
+/**
+ * The server, its products' roles and its people's list, deleted in one step only while nobody is on the list (Board
+ * #5285, row #3017: the LOW Claude 4 disclosed on #3017 at 5b7a26d4). Before, the people left were counted in one
+ * command (FORGET_PEOPLE's HLEN, or a plain HLEN) and the three keys deleted in another: a join already under way
+ * (keepMember) could write its person between the two, and the DEL then dropped their row and the server and left their
+ * address link with nobody to forget it. KEYS[1] the server, KEYS[2] the products' roles, KEYS[3] the people. Answers -1,
+ * deleting nothing, when anybody is on the list; otherwise the keys deleted. lib/redis-memory.ts runs it the same way.
+ */
+export const DROP_SERVER_IF_EMPTY = `-- marktmorgen:discord-drop-server-if-empty:v1
+if redis.call("HLEN", KEYS[3]) ~= 0 then return -1 end
+return redis.call("DEL", KEYS[1], KEYS[2], KEYS[3])`;
+
+/**
  * Forgets the server, the roles each product gave and everyone given them.
  * Returns who was given roles, so the caller can say how many; nothing is
  * taken back in Discord, where the bot is no longer.
@@ -152,7 +171,8 @@ return {gone, links, redis.call("HLEN", KEYS[1])}`;
  * in another shape, throws UnknownReplyError before anything is deleted. Deleting the people while their addresses
  * are unknown would leave each buyer's address linked to their Discord id for good (Claude 6's proof,
  * tests/discord-forget-server.test.ts); kept whole, the next try forgets everything. The two lists must match, and
- * only the people read are deleted, with their address links: the server goes only once nobody is left (Codex G).
+ * only the people read are deleted, with their address links: the server goes only once nobody is left (Codex G), in
+ * the same step that sees nobody left (DROP_SERVER_IF_EMPTY).
  */
 export async function forgetServer(room: string, sid: string): Promise<number> {
   const people = stringList(oneReply(await redisPipeline([["HKEYS", membersKey(room)]]), "the people given Discord roles"));
@@ -169,7 +189,9 @@ export async function forgetServer(room: string, sid: string): Promise<number> {
   });
   // Only the people read, with their address links and due entries, are deleted; then the list must be empty. Anybody
   // left (a reading that missed somebody, a person who joined meanwhile) keeps the server for the next try, which
-  // forgets them with their address: no buyer's address is ever left linked to a Discord id with nobody to forget it.
+  // forgets them with their address: no buyer's address is left linked to a Discord id with nobody to forget it by a
+  // person read or written before the server goes. A join whose write lands after the whole Disconnect is not fenced
+  // here: keepMember does not yet check the server (Claude 3 yUZf's LEVE on #5380; its own row of the #5010 board).
   // Each person goes only while their row is still the one read, in one step (FORGET_PEOPLE; Codex G on #3017): a join
   // that rewrote them with another address meanwhile keeps its row, its new link and its due entry for the next try.
   if (people.length) {
@@ -191,13 +213,13 @@ export async function forgetServer(room: string, sid: string): Promise<number> {
       throw new UnknownReplyError("the deletion of a Discord server's people");
     }
     if (counts[2] !== 0) throw new UnknownReplyError("the people given Discord roles, not all forgotten");
-  } else {
-    const left = repliesFor(await redisPipeline([["HLEN", membersKey(room)]]), 1)?.map(countOf);
-    if (!left || left[0] === null) throw new UnknownReplyError("the deletion of a Discord server's people");
-    if (left[0] !== 0) throw new UnknownReplyError("the people given Discord roles, not all forgotten");
   }
-  const gone = repliesFor(await redisPipeline([["DEL", serverKey(room), productsKey(room), membersKey(room)]]), 1)?.map(countOf);
-  if (!gone || gone[0] === null || (gone[0] as number) > 3) throw new UnknownReplyError("the deletion of a Discord server");
+  // The server goes only while nobody is on the list, in the same step (DROP_SERVER_IF_EMPTY): a person a join wrote
+  // since the people were read keeps the server, and the next press forgets them with their address link.
+  const gone = repliesFor(await redisPipeline([["EVAL", DROP_SERVER_IF_EMPTY, 3, serverKey(room), productsKey(room), membersKey(room)]]), 1)?.[0];
+  if (gone === -1) throw new UnknownReplyError("the people given Discord roles, not all forgotten");
+  const deleted = countOf(gone);
+  if (deleted === null || deleted > 3) throw new UnknownReplyError("the deletion of a Discord server");
   return people.length;
 }
 

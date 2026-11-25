@@ -544,9 +544,13 @@ export async function dueReminders(now = Date.now(), limit = 50): Promise<{ sid:
   });
 }
 
-/** Puts a reminder that could not go at a later time, so the job never tries it twice in a run. */
+/**
+ * Puts a reminder that could not go at a later time, so the job never tries it twice in a run. Only a reminder still
+ * on the list is moved (XX): one the person's erasure, or the request's end, took off since the job read it is never
+ * put back (#4767). New reminders are added only by the request's own save.
+ */
 export async function delayReminder(sid: string, id: string, at: number): Promise<void> {
-  await redisPipeline([["ZADD", DUE, String(at), `${sid}|${id}`]]).catch(() => undefined);
+  await redisPipeline([["ZADD", DUE, "XX", String(at), `${sid}|${id}`]]).catch(() => undefined);
 }
 
 /** Takes a reminder off the list (its request is gone, or its store is). */

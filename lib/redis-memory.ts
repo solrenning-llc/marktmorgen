@@ -619,16 +619,27 @@ export class MemoryRedis {
           this.run(["EXPIRE", listK, keep]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:flow-wait:v3\n") && args[0] === "1" && args.length === 7) {
+        if (key.startsWith("-- marktmorgen:flow-wait:v4\n") && args[0] === "1" && args.length === 7) {
           const [, runK, step, now, gen, counted, other] = args;
           if (this.run(["EXISTS", runK]) !== 1 || !genOk(runK, gen)) return [-1];
           const n = this.run(["HINCRBY", runK, counted, 1]);
           const kept = (this.run(["HGET", runK, other]) as string | null) ?? "";
+          let off = 0;
+          if (counted !== "offLooks") this.run(["HDEL", runK, "offAt"]);
+          if (counted === "offLooks") {
+            const oat = this.run(["HGET", runK, "offAt"]);
+            const ofound = typeof oat === "string" ? /^(-?\d+):(\d+)$/.exec(oat) : null;
+            if (ofound && ofound[1] === step && Number(ofound[2]) > 0) off = Number(ofound[2]);
+            else {
+              this.run(["HSET", runK, "offAt", `${step}:${now}`]);
+              off = Number(now);
+            }
+          }
           const at = this.run(["HGET", runK, "waitAt"]);
           const found = typeof at === "string" ? /^(-?\d+):(\d+)$/.exec(at) : null;
-          if (found && found[1] === step && Number(found[2]) > 0) return [n, kept, Number(found[2])];
+          if (found && found[1] === step && Number(found[2]) > 0) return [n, kept, Number(found[2]), off];
           this.run(["HSET", runK, "waitAt", `${step}:${now}`]);
-          return [n, kept, Number(now)];
+          return [n, kept, Number(now), off];
         }
         // lib/flow-runs.ts PARK_IF_RUN: one SES park counted only while the run is there and is this run.
         if (key.startsWith("-- marktmorgen:flow-ses-park:v1\n") && args[0] === "1" && args.length === 5) {

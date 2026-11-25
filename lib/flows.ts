@@ -1565,7 +1565,7 @@ async function waitOrStop(
       outcomes.push({ email: p.email, state: "failed", note: stop ?? "Stopped here.", to: -1, status: "ended" });
       continue;
     }
-    queue.push(["ZADD", QUEUE, nextTry(p.reason, p.reason === "switched_off" ? looksUsed(count) : count.waits, nowSeconds, { ...known, since: count.since }), `${group}|${p.email}`]);
+    queue.push(["ZADD", QUEUE, nextTry(p.reason, p.reason === "switched_off" ? looksUsed(count) : count.waits, nowSeconds, { ...known, since: count.since, offSince: count.offSince }), `${group}|${p.email}`]);
     outcomes.push({ email: p.email, state: "deferred", note: p.note, to: index });
   }
   return { queue, outcomes };

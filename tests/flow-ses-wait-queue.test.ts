@@ -30,6 +30,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { installSesMailFixture } from "./ses-mail-fixture";
+import { commandsOf } from "./flow-wait-inside";
 
 const RealDate = Date;
 const baseNow = Date.UTC(2026, 9, 20, 9, 0, 0);
@@ -52,7 +53,7 @@ const listSent = () => mail.sesAttempts.flatMap((m) => m.to).filter((to) => to.e
 let commands = 0;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = ((list: (string | number)[][]) => {
-  commands += list.length;
+  commands += commandsOf(list);
   return pipeline(list);
 }) as typeof redis.pipeline;
 

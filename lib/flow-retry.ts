@@ -70,10 +70,11 @@ export function looksUsed(count: { waits: number; offLooks?: number }): number {
 /**
  * When to try a waiting step again, in seconds. `n` is this wait's number in
  * the run (1 for the first); for "switched_off", it is the run's room used,
- * this look included (looksUsed). `windowEnd`, `pauseUntil` and `since` (when this
- * step began to wait, lib/flow-runs.ts countWaits) are in seconds, when known.
+ * this look included (looksUsed). `windowEnd`, `pauseUntil`, `since` (when this
+ * step began to wait, lib/flow-runs.ts countWaits) and `offSince` (when it was
+ * first looked at while its store was switched off) are in seconds, when known.
  */
-export function nextTry(reason: WaitReason, n: number, nowSeconds: number, known: { windowEnd?: number | null; pauseUntil?: number | null; since?: number | null } = {}): number {
+export function nextTry(reason: WaitReason, n: number, nowSeconds: number, known: { windowEnd?: number | null; pauseUntil?: number | null; since?: number | null; offSince?: number | null } = {}): number {
   const soonest = nowSeconds + FIRST_DELAY_SECONDS;
   if (reason === "allowance" && known.windowEnd && known.windowEnd > nowSeconds) return Math.max(soonest, known.windowEnd + AFTER_END_SECONDS);
   if (reason === "paused" && known.pauseUntil && known.pauseUntil > nowSeconds) return Math.max(soonest, known.pauseUntil + AFTER_END_SECONDS);
@@ -82,8 +83,12 @@ export function nextTry(reason: WaitReason, n: number, nowSeconds: number, known
     // began to wait, so a short switch-off holds it a day at most; after that (or with one look left), what is left of
     // the step's days is shared by the looks the run has left (this one's included): the last is on its last day.
     const since = known.since && known.since > 0 && known.since <= nowSeconds ? known.since : nowSeconds;
+    // The early look counts from the step's first look while its store was switched off, when known, not from when it
+    // began to wait for another reason (Claude 3's LOW on #3428): a step that waited two days for the month's room is
+    // still looked at a day after its store was found switched off. Its days (since) still bound the whole wait.
+    const offSince = known.offSince && known.offSince > 0 && known.offSince <= nowSeconds ? known.offSince : since;
     const looksLeft = Math.max(1, MAX_LOOKS_PER_RUN - Math.max(1, Math.floor(n)) + 1);
-    if (looksLeft > 1 && since + SWITCHED_OFF_FIRST_LOOK_SECONDS > nowSeconds) return Math.max(soonest, since + SWITCHED_OFF_FIRST_LOOK_SECONDS);
+    if (looksLeft > 1 && offSince + SWITCHED_OFF_FIRST_LOOK_SECONDS > nowSeconds) return Math.max(soonest, Math.min(offSince + SWITCHED_OFF_FIRST_LOOK_SECONDS, since + MAX_WAIT_DAYS_PER_STEP * 86_400));
     return Math.max(soonest, nowSeconds + Math.floor((since + MAX_WAIT_DAYS_PER_STEP * 86_400 - nowSeconds) / looksLeft));
   }
   if (reason === "day") return Math.max(soonest, (Math.floor(nowSeconds / 86_400) + 1) * 86_400 + 5 * AFTER_END_SECONDS);

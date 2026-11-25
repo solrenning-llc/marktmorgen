@@ -11,4 +11,5 @@
  */
 export const PUBLISHED_COMMERCIAL_TERMS: Readonly<Record<number, string>> = Object.freeze({
   29: 'v29:sha256:41cc7b04fd0f8d1741eb5eacafefb1c2b316cf490540b65761fa71ec76afcfde',
+  30: 'v30:sha256:d78ba2ff70cf8b001c4b51440161cec3d98feb05d88d99c70a014be478eff409',
 });

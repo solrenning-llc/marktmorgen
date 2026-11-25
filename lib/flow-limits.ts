@@ -121,8 +121,22 @@ export const QUEUE_COMMANDS_PER_STEP = 8;
  * 4 November 2026, with the lease read); 32 with room to spare. One more since
  * 14 November 2026: the run's last move, read with the row and the lease entry
  * for a workflow whose steps changed places (lib/flows.ts, Flow.layoutAt): 33.
+ * Since 23 November 2026 the wait counted is priced as WAIT_COUNTED_COMMANDS, its
+ * script's EVAL and every command inside it, not 3 (Claude 5 ibuF's LEVE on
+ * #5347): measured so at 27 for a wait on the day's room and 34 for the
+ * month's emails, and at 22 for a look while the store is switched off. A
+ * look counts as half a wait (SWITCHED_OFF_LOOKS_PER_WAIT), so a wait is
+ * priced at twice the look: 44. WORST_COMMANDS_PER_RUN prices each counted
+ * wait at the dearer SES_COUNTED_WAIT_COMMANDS_PER_TRY (75 since the same
+ * review counts the park's inside too).
  */
-export const WAIT_COMMANDS_PER_TRY = 33;
+export const WAIT_COMMANDS_PER_TRY = 44;
+/**
+ * The wait counted on a run (countWaits, WAIT_IF_RUN in lib/flow-runs.ts): one EVAL and the nine commands its script
+ * can send inside it (EXISTS, the generation's HGET, HINCRBY, the other field's HGET, offAt's HDEL or HGET and HSET,
+ * waitAt's HGET and HSET). tests/flow-wait-inside.test.ts counts them in the script itself.
+ */
+export const WAIT_COUNTED_COMMANDS = 10;
 /**
  * Waiting only for room at Amazon SES (ALL-160, 12 November 2026; the owner's
  * rule LC: email waits in the Amazon queue and is never discarded). Until this
@@ -187,14 +201,17 @@ export const SES_WAKE_JOBS_PER_DAY = 288;
  * waitOrStop): the try reads Amazon's state and its 24 hours as any SES try does, and the wait is counted as any other.
  * Measured at 65 in tests/flow-ses-over-cap.test.ts (15 November 2026, review of #4246 by Claude 4 cloud AA); 68 with
  * room; 71 since the park is one guarded script priced with its six inside (PARK_IF_RUN, #4234), three more than the
- * four commands it replaced. WORST_COMMANDS_PER_RUN prices each of the MAX_WAITS_PER_RUN counted waits at the dearer of this and
+ * four commands it replaced. Since 23 November 2026 the tests count every command inside the wait's and the park's
+ * scripts (tests/flow-wait-inside.ts): measured so at 72 (Claude 5 icFoe's LEVE on #5347), 75 with the same room of
+ * three. WORST_COMMANDS_PER_RUN prices each of the MAX_WAITS_PER_RUN counted waits at the dearer of this and
  * WAIT_COMMANDS_PER_TRY, since any of them may be such a try.
  */
-export const SES_COUNTED_WAIT_COMMANDS_PER_TRY = 71;
+export const SES_COUNTED_WAIT_COMMANDS_PER_TRY = 75;
 /**
  * A look at a step waiting while its store is switched off (lib/flow-retry.ts) reads only the queue, the store, its
  * workflows and the run's count, and puts the step back: measured at 13 commands for a batch of one person, the step's
- * first wait included (tests/suspended-store-mail.test.ts, 9 November 2026), at most half of WAIT_COMMANDS_PER_TRY. So
+ * first wait included (tests/suspended-store-mail.test.ts, 9 November 2026); 22 since 23 November 2026, with the
+ * commands inside the wait's script counted (WAIT_COUNTED_COMMANDS), at most half of WAIT_COMMANDS_PER_TRY. So
  * it counts as half a wait against MAX_WAITS_PER_RUN: a run may look SWITCHED_OFF_LOOKS_PER_WAIT times for each wait
  * it has left, and its commands stay within MAX_WAITS_PER_RUN × WAIT_COMMANDS_PER_TRY below.
  */

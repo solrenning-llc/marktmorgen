@@ -37,6 +37,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { installSesMailFixture } from "./ses-mail-fixture";
+import { commandsOf } from "./flow-wait-inside";
 
 const mail = installSesMailFixture({
   fallback: () => new Response(JSON.stringify({ object: "list", data: [], has_more: false })),
@@ -44,7 +45,7 @@ const mail = installSesMailFixture({
 let commands = 0;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = ((list: (string | number)[][]) => {
-  commands += list.length;
+  commands += commandsOf(list);
   return pipeline(list);
 }) as typeof redis.pipeline;
 

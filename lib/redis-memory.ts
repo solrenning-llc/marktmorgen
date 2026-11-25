@@ -4283,7 +4283,8 @@ export class MemoryRedis {
         const endsAt = exat >= 0 ? Number(flags[exat + 1]) : NaN;
         if (Number.isFinite(seconds)) this.until.set(key, this.now() + seconds * 1000);
         else if (Number.isFinite(endsAt)) this.until.set(key, endsAt * 1000);
-        else this.until.delete(key);
+        // KEEPTTL keeps the key's expiry, as Redis does (lib/certificate.ts keepWalk, #4304); any other plain SET drops it.
+        else if (!flags.includes("KEEPTTL")) this.until.delete(key);
         return "OK";
       }
       // Redis 7's options: NX only when the key has no expiry, XX only when it has one, GT/LT only a later/earlier

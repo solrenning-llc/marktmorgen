@@ -99,6 +99,58 @@ async function main(): Promise<void> {
     is("the note is refused and nothing is kept", [await refused(() => addNote(store, DAY, "After the walk", NOW)), Number(redis.run(["EXISTS", key]))], [true, 0]);
   }
 
+  // #5285 row #5251 (Claude 4 AC's NIT on the merged head 68c1875166, comment 7090663224): a store gone or being erased
+  // while its note was in flight threw a plain Error, so the studio route logged a server failure and answered 500
+  // server_error. It is an expected refusal: the route answers 410 "gone", as the other erasure fences do (#5237), logs
+  // no error, and still writes nothing.
+  part("A note refused because the store went away mid-request answers 410 gone, not a logged 500");
+  {
+    const store = await liveStore();
+    const session = await openSession(OWNER);
+    const key = `nl:stats:${store.statsId}:notes`;
+    const field = await erasingField(storeRef(store));
+    const real = redis.pipeline.bind(redis);
+    // The erasure begins between the route's guard and the note's fenced write (the race the fence exists for).
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:stats-note-add-live:"))) {
+        redis.run(["HSET", ERASING_KEY, field, String(Date.now())]);
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const logged: unknown[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => { logged.push(args); };
+    let status = 0;
+    let answer: { ok?: boolean; error?: string; message?: string } = {};
+    let cache: string | null = null;
+    try {
+      const response = await notesRoute(new NextRequest("https://marktmorgen.com/api/store/notes", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` },
+        body: JSON.stringify({ action: "add", day: new Date().toISOString().slice(0, 10), text: "Late note" }),
+      }));
+      status = response.status;
+      cache = response.headers.get("cache-control");
+      answer = await response.json();
+    } finally {
+      redis.pipeline = real;
+      console.error = realError;
+    }
+    is("RED: answers 410 gone, not 500 server_error", [status, answer.ok, answer.error], [410, false, "gone"]);
+    is("RED: says in plain words that the note was not saved", typeof answer.message === "string" && /not saved/.test(answer.message), true);
+    is("RED: not cached", cache, "no-store");
+    is("RED: an expected refusal logs no server error", logged.length, 0);
+    is("still nothing written, nor any expiry set", [Number(redis.run(["EXISTS", key])), Number(redis.run(["TTL", key]))], [0, -2]);
+    let thrown: unknown = null;
+    try {
+      await addNote(store, DAY, "Late note", NOW);
+    } catch (error) {
+      thrown = error;
+    }
+    is("RED: addNote's refusal has its own error (NoteStoreGoneError)", (thrown as Error | null)?.name, "NoteStoreGoneError");
+    redis.run(["HDEL", ERASING_KEY, field]);
+  }
+
   part("The studio's whole request that adds a note stays inside the studio unit's envelope (coord 35ee)");
   {
     const store = await liveStore();

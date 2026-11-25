@@ -177,7 +177,8 @@ async function main() {
     await setup();
     pages = [{ data: [dispute("du_Plan1", "needs_response", SUB), dispute("du_Addon1", "needs_response", ADDON), dispute("du_NoInvoice", "needs_response", null), dispute("du_Other1", "needs_response", OTHER), dispute("du_Broken1", "needs_response", BROKEN)], has_more: false }];
     const first = await syncPlanDisputes(Date.now() + 10_000, NOW);
-    is("counts", first, { seen: 5, recorded: 1, unmatched: 3, reread: 0, failed: 1, complete: true });
+    // du_Broken1 failed, so the run is not complete: it is read again next run (Claude 5's LOW on #2884).
+    is("counts", first, { seen: 5, recorded: 1, unmatched: 3, reread: 0, failed: 1, complete: false });
     const after = (await storeForEmail(owner))!;
     is("the plan's dispute is written down", after.planDisputes?.map((kept) => [kept.id, kept.status, kept.coversUntil]), [["du_Plan1", "open", NOW + 20 * DAY]]);
     is("and pauses the store's costs", costPauseCode(after, NOW), "plan_disputed");
@@ -242,7 +243,8 @@ async function main() {
     misread[asked[2]] = 7;
     pages = [{ data: [dispute("du_NullBody1", "needs_response", asked[0]), dispute("du_TextBody1", "needs_response", asked[1]), dispute("du_NumberBody1", "needs_response", asked[2])], has_more: false }];
     const read = await syncPlanDisputes(Date.now() + 10_000, NOW);
-    is("each is counted as failed, none recorded or unmatched", [read.recorded, read.unmatched, read.failed, read.complete], [0, 0, 3, true]);
+    // Three failed, so the run is not complete: they are read again next run (Claude 5's LOW on #2884).
+    is("each is counted as failed, none recorded or unmatched", [read.recorded, read.unmatched, read.failed, read.complete], [0, 0, 3, false]);
     is("no dispute is written on the store", (await storeForEmail(owner))!.planDisputes ?? [], []);
     const seenNow = await redis.run(["HGETALL", "nl:plan-disputes:seen"]);
     const seenIds = Array.isArray(seenNow) ? (seenNow as unknown[]).filter((_, i) => i % 2 === 0).map(String) : Object.keys((seenNow ?? {}) as object);

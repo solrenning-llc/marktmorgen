@@ -26,6 +26,7 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { type Store, storeForId } from "@/lib/store";
 import { type Listing, readListing, readProduct } from "@/lib/catalog";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { type PressEvidence, pressGate } from "@/lib/eu-vat-gate";
 import { withStockHold } from "@/lib/stock";
 import { fromLine, render } from "@/lib/mail";
 import { tokensFor } from "@/lib/contacts";
@@ -255,7 +256,7 @@ export async function welcomesOffered(store: Store): Promise<number> {
   return Number(n) || 0;
 }
 
-export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "refused" | "consent" };
+export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "refused" | "consent" | "abroad" | "country" };
 
 /**
  * The checkout the offer's button opens: the offered product, the address
@@ -269,6 +270,8 @@ export async function openWelcome(
   nowSeconds = Math.floor(Date.now() / 1000),
   /** The box to start access at once, checked on the button's page (lib/digital-consent.ts). */
   consent: DigitalConsent | null = null,
+  /** The press's headers and form, for the EU VAT gate (lib/eu-vat-gate.ts pressGate); none opens nothing that needs it. */
+  evidence?: PressEvidence,
 ): Promise<OpenResult> {
   const claim = await readClaimFull(token);
   if (!claim || claim.h !== store.handle) return { ok: false, reason: "expired" };
@@ -284,6 +287,10 @@ export async function openWelcome(
   if (offer.ended) return { ok: false, reason: "expired" };
   const product = await readProduct(store, offer.product.id);
   if (!product || !canOfferWelcome(store, offer.product)) return { ok: false, reason: "unavailable" };
+  // EU VAT art. 9a, as every other checkout asks it (Claude 1 coord's MEDIUM, 6809): before a unit is held or Stripe is
+  // asked, a buyer in the EU or the UK goes back to the page with "abroad", one with no billing country with "country".
+  const refused = pressGate(product, evidence);
+  if (refused) return { ok: false, reason: refused };
   try {
     const held = await withStockHold(store, product, (holding) =>
       createCheckout(store, product, origin, undefined, { coupon: store.welcomeOffer.coupon, email: claim.e, welcome: true, held: holding, digitalConsent: consent }),

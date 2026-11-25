@@ -1,5 +1,6 @@
 import { POST } from "@/app/api/store/move/open/route";
 import { NextRequest } from "next/server";
+import { fromOutsideEu } from "./eu-vat-press-fixture";
 import { AFFILIATE_STRIPE_PAGES_PER_UNIT } from "@/lib/public-read-rules";
 /**
  * The Stripe reads an invitation's button makes are counted before the first one (Codex C2 on #2685, from
@@ -62,7 +63,7 @@ async function main(){
   }
   return originalFetch(input,init);
  }) as typeof fetch;
- const form=withConsent(new URLSearchParams({handle:store.handle,product:club.product.id,k:fresh.t}));
+ const form=fromOutsideEu(withConsent(new URLSearchParams({handle:store.handle,product:club.product.id,k:fresh.t})));
  const before=checkouts;
  const response=await POST(new NextRequest("https://marktmorgen.com/api/store/move/open",{method:"POST",headers:{host:"marktmorgen.com",origin:"https://marktmorgen.com","content-type":"application/x-www-form-urlencoded"},body:form.toString()}));
  is("five customer records, each with a full page of ended memberships: it opens",[response.status,response.headers.get("location")?.startsWith("https://checkout.stripe.com/")],[303,true]);
@@ -80,7 +81,7 @@ async function main(){
  const other=(await readInvite(store.statsId!,field))!;
  customersThere=100;gets=0;paidBefore=-1;
  const beforeMany=checkouts;
- const many=await POST(new NextRequest("https://marktmorgen.com/api/store/move/open",{method:"POST",headers:{host:"marktmorgen.com",origin:"https://marktmorgen.com","content-type":"application/x-www-form-urlencoded"},body:withConsent(new URLSearchParams({handle:store.handle,product:club.product.id,k:other.t})).toString()}));
+ const many=await POST(new NextRequest("https://marktmorgen.com/api/store/move/open",{method:"POST",headers:{host:"marktmorgen.com",origin:"https://marktmorgen.com","content-type":"application/x-www-form-urlencoded"},body:fromOutsideEu(withConsent(new URLSearchParams({handle:store.handle,product:club.product.id,k:other.t}))).toString()}));
  is("too many customer records: one page read, no checkout made",[gets,checkouts-beforeMany,many.headers.get("location")?.startsWith("https://checkout.stripe.com/")],[1,0,false]);
  done();
 }

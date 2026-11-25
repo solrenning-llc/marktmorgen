@@ -8,6 +8,7 @@
  * email or reminder names another price instead. Stripe is played by a
  * stand-in for `fetch`.
  */
+import { OUTSIDE_EU } from "./eu-vat-press-fixture";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addOption, addProduct, claimHandle, ensureStatsId, removeOption, setLanguage, setProductHidden, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -109,16 +110,16 @@ async function main(): Promise<void> {
   const basicOffer = await comeBackOffer(statsId, id, basic);
 
   part("While the price is offered, both open at it");
-  const movedPlus = await openMove(store, id, plusInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  const movedPlus = await openMove(store, id, plusInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
   is("the moving-in link opens Plus", [movedPlus.ok, checkouts.at(-1)?.get("metadata[option]")], [true, plus]);
-  const backPlus = await openWinBack(store, id, plusOffer, "https://marktmorgen.com", TEST_CONSENT);
+  const backPlus = await openWinBack(store, id, plusOffer, "https://marktmorgen.com", TEST_CONSENT, OUTSIDE_EU);
   is("the come-back offer opens Plus", [backPlus.ok, checkouts.at(-1)?.get("metadata[option]")], [true, plus]);
 
   part("An option kept with nothing to hand over");
   let product = (await readProduct(store, id))!;
   const atStart = checkouts.length;
-  const moveBare = await openMove(store, id, bareInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
-  const backBare = await openWinBack(store, id, bareOffer, "https://marktmorgen.com", TEST_CONSENT);
+  const moveBare = await openMove(store, id, bareInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
+  const backBare = await openWinBack(store, id, bareOffer, "https://marktmorgen.com", TEST_CONSENT, OUTSIDE_EU);
   is("not on sale: the general answer, never \"refused\" for ever nor \"price\", and no checkout", [namedPriceOffered(product, bare), moveBare.ok ? "opened" : moveBare.reason, backBare.ok ? "opened" : backBare.reason, checkouts.length], [false, "unavailable", "unavailable", atStart]);
   is("no email or reminder names it", [priceWords(store, product, bare), await inviteEmail(store, bareField)], [null, null]);
   const bareBack = await page(RenewPage, "pricegone", id, { back: bareOffer });
@@ -131,11 +132,11 @@ async function main(): Promise<void> {
   store = (await storeForEmail(OWNER))!;
   product = (await readProduct(store, id))!;
   const before = checkouts.length;
-  const move1 = await openMove(store, id, plusInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
-  const back1 = await openWinBack(store, id, plusOffer, "https://marktmorgen.com", TEST_CONSENT);
+  const move1 = await openMove(store, id, plusInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
+  const back1 = await openWinBack(store, id, plusOffer, "https://marktmorgen.com", TEST_CONSENT, OUTSIDE_EU);
   is("both say the price is gone, and no checkout opens", [move1.ok ? "opened" : move1.reason, back1.ok ? "opened" : back1.reason, checkouts.length], ["price", "price", before]);
   is("no email or reminder names another price", [priceWords(store, product, plus), await inviteEmail(store, plusField)], [null, null]);
-  is("Basic's link still opens at Basic", (await openMove(store, id, basicInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT)).ok, true);
+  is("Basic's link still opens at Basic", (await openMove(store, id, basicInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU)).ok, true);
   checkouts.length = before;
   const links = (html: string) => html.split(`href="/@pricegone/p/`).length - 1;
   const plusBack = await page(RenewPage, "pricegone", id, { back: plusOffer });
@@ -150,8 +151,8 @@ async function main(): Promise<void> {
   store = (await storeForEmail(OWNER))!;
   product = (await readProduct(store, id))!;
   is("the product still sells at its own price", [product.options.length, product.priceCents], [0, 2900]);
-  const move2 = await openMove(store, id, basicInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
-  const back2 = await openWinBack(store, id, basicOffer, "https://marktmorgen.com", TEST_CONSENT);
+  const move2 = await openMove(store, id, basicInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
+  const back2 = await openWinBack(store, id, basicOffer, "https://marktmorgen.com", TEST_CONSENT, OUTSIDE_EU);
   is("neither opens at the product's own price: both say the price is gone", [move2.ok ? "opened" : move2.reason, back2.ok ? "opened" : back2.reason, checkouts.length], ["price", "price", before]);
   is("and no email or reminder names the product's own price instead", [priceWords(store, product, basic), await inviteEmail(store, basicField)], [null, null]);
   const lastBack = await page(RenewPage, "pricegone", id, { back: basicOffer });

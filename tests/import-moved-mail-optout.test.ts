@@ -13,6 +13,7 @@
  * invitation in an unknown shape opens nothing; an order status left empty in a file that has a status column is
  * never read as paid, while a file with no status column is read as before.
  */
+import { OUTSIDE_EU } from "./eu-vat-press-fixture";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { addRows, finishUpload, previewImport, runImport, sendMoveReminders, startImport } from "@/lib/imports";
 import { importedFor } from "@/lib/imported-purchases";
@@ -258,10 +259,10 @@ async function main(): Promise<void> {
     store = await fresh();
     const link = lastTo("quiet@example.com")?.text.match(/\/move\/([A-Za-z0-9_-]+)\?k=([0-9a-f]{40})/);
     if (!link) throw new Error("no link");
-    const first = await openMove(store, link[1], link[2], "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+    const first = await openMove(store, link[1], link[2], "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
     is("control: before it is kept, the checkout opens", [first.ok, checkouts.length], [true, 1]);
     await noteKept(store, "quiet@example.com", club.id);
-    const again = await openMove(store, link[1], link[2], "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+    const again = await openMove(store, link[1], link[2], "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
     is("once kept, it answers kept and opens nothing", [again.ok ? "opened" : again.reason, checkouts.length], ["kept", 1]);
     const other = lastTo(`held${UNKNOWN[0][0].length}@example.com`);
     const otherLink = other?.text.match(/\/move\/([A-Za-z0-9_-]+)\?k=([0-9a-f]{40})/);
@@ -274,13 +275,13 @@ async function main(): Promise<void> {
       };
       let unknown;
       try {
-        unknown = await openMove(store, otherLink[1], otherLink[2], "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+        unknown = await openMove(store, otherLink[1], otherLink[2], "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
       } finally {
         restore();
       }
       is(`${what}: nothing opens, and the member is asked to try again`, [unknown.ok ? "opened" : unknown.reason, checkouts.length], ["refused", 1]);
     }
-    const control = await openMove(store, otherLink[1], otherLink[2], "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+    const control = await openMove(store, otherLink[1], otherLink[2], "https://marktmorgen.com", Date.now(), TEST_CONSENT, OUTSIDE_EU);
     is("control: read whole, that member's checkout opens", [control.ok, checkouts.length], [true, 2]);
   }
 

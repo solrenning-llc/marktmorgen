@@ -1,5 +1,6 @@
 import { withinStore } from "@/lib/metered-limits";
 import { type DigitalConsent, consentFromForm } from "@/lib/digital-consent";
+import { pressCountryKept } from "@/lib/eu-vat-gate";
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
@@ -22,8 +23,11 @@ export async function POST(request: NextRequest) {
   let token = "";
   // The box to start access at once (lib/digital-consent.ts), checked again where the charge is built.
   let consent: DigitalConsent | null = null;
+  // The form as sent, for the billing country the EU VAT gate reads (lib/eu-vat-gate.ts pressGate).
+  let sent = new FormData();
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
+    sent = form;
     consent = consentFromForm(form);
     handle = normaliseHandle(String(form.get("handle") ?? ""));
     token = String(form.get("token") ?? "").slice(0, 80);
@@ -33,12 +37,17 @@ export async function POST(request: NextRequest) {
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("Not found.", { status: 404 });
 
+  // The country a press named, put back beside the button after a refusal that was not about it (WCAG 3.3.7).
+  const kept = (status: string) => {
+    const country = pressCountryKept(sent, status);
+    return country ? `&from=${country}` : "";
+  };
   const back = (status: string) =>
-    new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/free?token=${encodeURIComponent(token)}&welcome=${status}`, "Cache-Control": "no-store" } });
+    new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/free?token=${encodeURIComponent(token)}&welcome=${status}${kept(status)}`, "Cache-Control": "no-store" } });
   const room = await withinStore("welcome-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store).catch(unknownLimit);
   if (room === "unknown") return back("refused");
   if (!room) return back("limited");
-  const opened = await openWelcome(store, token, linkOrigin(request, store), Math.floor(Date.now() / 1000), consent);
+  const opened = await openWelcome(store, token, linkOrigin(request, store), Math.floor(Date.now() / 1000), consent, { headers: request.headers, form: sent });
   if (!opened.ok) return back(opened.reason);
   return new Response(null, { status: 303, headers: { Location: opened.url, "Cache-Control": "no-store" } });
 }

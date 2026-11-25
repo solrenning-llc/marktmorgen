@@ -1,5 +1,6 @@
 import { withinStore } from "@/lib/metered-limits";
 import { type DigitalConsent, consentFromForm } from "@/lib/digital-consent";
+import { pressCountryKept } from "@/lib/eu-vat-gate";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
@@ -31,8 +32,11 @@ export async function POST(request: NextRequest) {
   let token = "";
   // The box to start access at once (lib/digital-consent.ts), checked again where the charge is built.
   let consent: DigitalConsent | null = null;
+  // The form as sent, for the billing country the EU VAT gate reads (lib/eu-vat-gate.ts pressGate).
+  let sent = new FormData();
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
+    sent = form;
     consent = consentFromForm(form);
     handle = normaliseHandle(String(form.get("handle") ?? ""));
     product = String(form.get("product") ?? "").slice(0, 40);
@@ -44,12 +48,17 @@ export async function POST(request: NextRequest) {
   if (!store || !/^[a-z0-9]{6,40}$/.test(product)) return new Response("Not found.", { status: 404 });
 
   const page = `${origin}/@${store.handle}/renew/${product}`;
+  // The country a press named, put back beside the button after a refusal that was not about it (WCAG 3.3.7).
+  const kept = (status: string) => {
+    const country = pressCountryKept(sent, status);
+    return country ? `&from=${country}` : "";
+  };
   const back = (status: string) =>
-    new Response(null, { status: 303, headers: { Location: `${page}?back=${encodeURIComponent(token)}&status=${status}`, "Cache-Control": "no-store" } });
+    new Response(null, { status: 303, headers: { Location: `${page}?back=${encodeURIComponent(token)}&status=${status}${kept(status)}`, "Cache-Control": "no-store" } });
   const room = await withinStore("come-back", `${clientAddress(request)}|${store.handle}`, 20, 600, store).catch(unknownLimit);
   if (room === "unknown") return back("refused");
   if (!room) return back("limited");
-  const opened = await openWinBack(store, product, token, linkOrigin(request, store), consent);
+  const opened = await openWinBack(store, product, token, linkOrigin(request, store), consent, { headers: request.headers, form: sent });
   // The link could not be read just now (CX-123 rule 24): 503 with the store's words, never sent back as "expired".
   if (!opened.ok && opened.reason === "unknown") {
     return new Response(membershipWords(store.language).offerNotices.unknown, {

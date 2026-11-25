@@ -9,7 +9,7 @@
  * so, and sales stay closed by lib/opening.ts regardless (PLANS_ON_SALE false, DEEMED_SUPPLIER_RECORDS empty).
  */
 import { type EuSupplyFields, REFUSED_PLACES, euSupplyOf } from "@/lib/eu-vat-supply";
-import { checkoutEvidence } from "@/lib/eu-vat-evidence";
+import { BILLING_COUNTRY_FIELD, checkoutEvidence } from "@/lib/eu-vat-evidence";
 import { type EuVatRate, type VatOnTop } from "@/lib/eu-vat-amount";
 import { type EuCheckoutRefusal, euCheckout } from "@/lib/eu-vat-checkout";
 import { SHIP_COUNTRIES } from "@/lib/shipping";
@@ -122,4 +122,37 @@ export function consumerGate(input: {
   }
   if (billing === null || !OFFERED.has(billing)) return { ok: false, reason: "billing", message: BILLING_COUNTRY_NEEDED };
   return { ok: true };
+}
+
+/** What a buyer's press sent, as consumerGate reads it (lib/eu-vat-evidence.ts): the request's headers and its form. */
+export type PressEvidence = { headers: Headers; form: URLSearchParams | FormData };
+
+/**
+ * consumerGate for a button that opens one product's checkout from an email's page (the welcome offer, the come-back
+ * offer, a moved member's invitation; Claude 1 coord's MEDIUM, 6809): null when the press may go on, otherwise the
+ * status the other routes send back to the page, "abroad" for the EU or the UK and "country" when the billing country
+ * is missing. Asked before anything is counted, marked or sent to Stripe. A press with no evidence at all is read as
+ * one that names no country: a free product or a live service goes on as consumerGate lets it, and anything else is
+ * "country", never let through, so a caller that forgets the evidence opens nothing.
+ *
+ * At the opening (789 [IV1]) these three buttons keep refusing the EU and the UK even where the card checkout collects
+ * the VAT on top (lib/eu-vat-collect.ts euSaleGate): they pass no `euVat` to createCheckout, so a buyer there is sent
+ * back rather than charged without it, the safe side (Claude 1 coord, 20th audit batch on #5121). Collecting on them
+ * is its own later change.
+ */
+export function pressGate(product: EuSupplyFields, evidence: PressEvidence | undefined, members?: ReadonlyMap<string, EuSupplyFields>): "abroad" | "country" | null {
+  const { headers, form } = evidence ?? { headers: new Headers(), form: new URLSearchParams() };
+  const gate = consumerGate({ product, members, headers, form });
+  return gate.ok ? null : gate.reason === "refused" ? "abroad" : "country";
+}
+
+/**
+ * The billing country a refused press named, put back in its form so it is not chosen twice (WCAG 3.3.7), as the tip's
+ * page does: only when the refusal was not about where the buyer is ("abroad" or "country" ask for another country),
+ * and only a code the field lists; null otherwise.
+ */
+export function pressCountryKept(form: URLSearchParams | FormData, status: string): string | null {
+  if (status === "abroad" || status === "country") return null;
+  const raw = form.get(BILLING_COUNTRY_FIELD);
+  return typeof raw === "string" && /^[A-Z]{2}$/.test(raw) && (SHIP_COUNTRIES as readonly string[]).includes(raw) ? raw : null;
 }

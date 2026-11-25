@@ -20,11 +20,12 @@ const IMPLEMENTED_IN = [
   "app/api/store/tip/route.ts",
   "components/billing-country-field.tsx",
   "lib/upsell.ts (offerGate)",
+  "lib/eu-vat-gate.ts (pressGate: the welcome offer, the come-back offer and a moved member's invitation)",
   "lib/eu-vat-goods.ts (vatShipCloses)",
   "lib/physical-legal-ship.ts (shippingNow)",
 ].join("; ");
 
-const EVIDENCE = ["tests/eu-vat-consumer-gate.test.ts", "tests/eu-vat-checkout-routes.test.ts", "tests/eu-vat-pay-request-gate.test.ts", "tests/eu-vat-tip-gate.test.ts", "tests/eu-vat-open-paths.test.ts", "tests/eu-vat-upsell-gate.test.ts", "tests/eu-vat-goods.test.ts"].join("; ");
+const EVIDENCE = ["tests/eu-vat-consumer-gate.test.ts", "tests/eu-vat-checkout-routes.test.ts", "tests/eu-vat-pay-request-gate.test.ts", "tests/eu-vat-tip-gate.test.ts", "tests/eu-vat-open-paths.test.ts", "tests/eu-vat-upsell-gate.test.ts", "tests/eu-vat-goods.test.ts", "tests/eu-vat-offer-paths-gate.test.ts"].join("; ");
 
 export const REFUSE_CONSUMERS_DRAFTS: readonly DeemedSupplierRecord[] = [
   { jurisdiction: "EU", treatment: "refuse-consumers", implementedIn: IMPLEMENTED_IN, recordedOn: "2026-11-13", registration: "", evidence: EVIDENCE },
@@ -35,6 +36,12 @@ export const REFUSE_CONSUMERS_DRAFTS: readonly DeemedSupplierRecord[] = [
  * The paid paths a buyer can still reach without consumerGate: each must be gated, or shown not to need it. Empty since
  * 789 [IV1] unit 1 closed its last one, physical goods shipped to an EU or UK address (lib/eu-vat-goods.ts,
  * vatShipCloses, read by lib/physical-legal-ship.ts shippingNow for both checkouts; PayPal sells nothing shipped,
- * lib/paypal-sales.ts sellsWithPayPal). A path found later is added here at once.
+ * lib/paypal-sales.ts sellsWithPayPal). A path found later is added here at once. Three were found later and closed in
+ * the change that found them (Claude 1 coord's MEDIUM, 6809): the welcome offer's, the come-back offer's and a moved
+ * member's buttons, which called createCheckout with no gate, now ask lib/eu-vat-gate.ts pressGate first. The walk in
+ * tests/checkout-gate-walk.ts, run by tests/eu-vat-offer-paths-gate.test.ts over app/ and lib/, fails when a call of
+ * createCheckout (or of a function that only hands its arguments on to it) has no gate asked before it, with its answer
+ * used, in the same outermost function, or when createCheckout is renamed on import or passed as a value. It does not
+ * prove the answer is acted on: each path's journey test does.
  */
 export const REFUSE_CONSUMERS_OPEN: readonly string[] = [];

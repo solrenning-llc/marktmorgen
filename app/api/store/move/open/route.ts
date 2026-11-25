@@ -1,5 +1,6 @@
 import { withinStore } from "@/lib/metered-limits";
 import { type DigitalConsent, consentFromForm } from "@/lib/digital-consent";
+import { pressCountryKept } from "@/lib/eu-vat-gate";
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
@@ -23,8 +24,11 @@ export async function POST(request: NextRequest) {
   let token = "";
   // The box to start access at once (lib/digital-consent.ts), checked again where the charge is built.
   let consent: DigitalConsent | null = null;
+  // The form as sent, for the billing country the EU VAT gate reads (lib/eu-vat-gate.ts pressGate).
+  let sent = new FormData();
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
+    sent = form;
     consent = consentFromForm(form);
     handle = normaliseHandle(String(form.get("handle") ?? ""));
     product = String(form.get("product") ?? "").slice(0, 64);
@@ -36,12 +40,17 @@ export async function POST(request: NextRequest) {
   if (!store || !/^[A-Za-z0-9_-]{1,64}$/.test(product)) return new Response("Not found.", { status: 404 });
 
   const page = `${origin}/@${store.handle}/move/${product}`;
+  // The country a press named, put back beside the button after a refusal that was not about it (WCAG 3.3.7).
+  const kept = (status: string) => {
+    const country = pressCountryKept(sent, status);
+    return country ? `&from=${country}` : "";
+  };
   const back = (status: string) =>
-    new Response(null, { status: 303, headers: { Location: `${page}?k=${encodeURIComponent(token)}&status=${status}`, "Cache-Control": "no-store" } });
+    new Response(null, { status: 303, headers: { Location: `${page}?k=${encodeURIComponent(token)}&status=${status}${kept(status)}`, "Cache-Control": "no-store" } });
   const room = await withinStore("move-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store, "buyer").catch(unknownLimit);
   if (room === "unknown") return back("refused");
   if (!room) return back("limited");
-  const opened = await openMove(store, product, token, linkOrigin(request, store), Date.now(), consent);
+  const opened = await openMove(store, product, token, linkOrigin(request, store), Date.now(), consent, { headers: request.headers, form: sent });
   if (!opened.ok) return back(opened.reason);
   return new Response(null, { status: 303, headers: { Location: opened.url, "Cache-Control": "no-store" } });
 }

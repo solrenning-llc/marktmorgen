@@ -13,6 +13,7 @@
  *     with the link back to their page;
  *   - the numbers count those sales as "Welcome offer".
  */
+import { OUTSIDE_EU } from "./eu-vat-press-fixture";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { NO_WELCOME_OFFER, endsAt, leftWords, parseWelcomeOffer, remindAt } from "@/lib/welcome-offer";
 import { forgetWelcomePerson, openWelcome, scheduleReminder, sendWelcomeReminders, welcomeFor } from "@/lib/welcome-offer-send";
@@ -122,15 +123,15 @@ async function main(): Promise<void> {
 
   part("The button, while it lasts and after");
   checkouts.length = 0;
-  const unasked = await openWelcome(store, token, "https://marktmorgen.com", asked + HOUR);
+  const unasked = await openWelcome(store, token, "https://marktmorgen.com", asked + HOUR, null, OUTSIDE_EU);
   is("without the box to start before the 14 days end (lib/digital-consent.ts), no checkout opens", unasked.ok ? "opened" : unasked.reason, "consent");
-  const opened = await openWelcome(store, token, "https://marktmorgen.com", asked + HOUR, TEST_CONSENT);
+  const opened = await openWelcome(store, token, "https://marktmorgen.com", asked + HOUR, TEST_CONSENT, OUTSIDE_EU);
   const body = checkouts[0];
   is("a checkout with the coupon, for that address, marked as a welcome offer", [opened.ok, body?.get("discounts[0][coupon]"), body?.get("customer_email"), body?.get("metadata[welcome]"), body?.has("metadata[winback]")], [true, "c_welcome25", "lead@example.com", "yes", false]);
   checkouts.length = 0;
-  const ended = await openWelcome(store, token, "https://marktmorgen.com", asked + 48 * HOUR, TEST_CONSENT);
+  const ended = await openWelcome(store, token, "https://marktmorgen.com", asked + 48 * HOUR, TEST_CONSENT, OUTSIDE_EU);
   is("at the end, no checkout opens", [ended.ok ? "" : ended.reason, checkouts.length], ["expired", 0]);
-  is("a link for another store opens nothing", (await openWelcome({ ...store, handle: "other" }, token, "https://marktmorgen.com", asked + HOUR)).ok, false);
+  is("a link for another store opens nothing", (await openWelcome({ ...store, handle: "other" }, token, "https://marktmorgen.com", asked + HOUR, null, OUTSIDE_EU)).ok, false);
 
   part("One reminder, to someone who agreed and confirmed");
   await recordLead(store, claim, "Pantry Guide");

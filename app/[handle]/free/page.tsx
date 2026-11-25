@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
+import { BillingCountryField } from "@/components/billing-country-field";
 import { WithdrawalWhere } from "@/components/withdrawal-where";
 import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import Link from "next/link";
@@ -126,7 +127,9 @@ export default async function FreePage({ params, searchParams }: Params) {
   // The welcome offer, with a deadline of the person's own, begun when they asked (lib/welcome-offer.ts).
   const welcome = full && stillFree && full.h === store.handle ? await welcomeFor(store, full).catch(() => null) : null;
   const ww = welcomeWords(store.language);
-  const welcomeNotice = typeof query.welcome === "string" ? ww.notices[query.welcome as keyof typeof ww.notices] : undefined;
+  // "abroad" and "country" are the EU VAT gate's (lib/eu-vat-gate.ts pressGate), said as on the product's page.
+  const welcomeAbroad = query.welcome === "abroad" || query.welcome === "country" ? query.welcome : null;
+  const welcomeNotice = welcomeAbroad ? said.w.notices[welcomeAbroad] : typeof query.welcome === "string" ? ww.notices[query.welcome as keyof typeof ww.notices] : undefined;
   const endedOn = welcome ? new Date(welcome.until * 1000).toLocaleString(said.lang.locale, { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }) : "";
   const notice = g.freeNotices[status] ?? g.freeNotices.error;
 
@@ -230,7 +233,7 @@ export default async function FreePage({ params, searchParams }: Params) {
               {ww.offer(welcome.percent, welcome.product.title)}
             </h2>
             {welcomeNotice ? (
-              <p className="notice notice-error mt-3" role="alert">
+              <p id={welcomeAbroad ? "welcome-country-problem" : undefined} className="notice notice-error mt-3" role="alert">
                 <strong>{welcomeNotice.title}</strong> {welcomeNotice.body}
               </p>
             ) : null}
@@ -248,6 +251,12 @@ export default async function FreePage({ params, searchParams }: Params) {
                 <form action="/api/store/welcome/open" method="post" className="mt-4">
                   <input type="hidden" name="handle" value={store.handle} />
                   <input type="hidden" name="token" value={token} />
+                  {/* Where the buyer is buying from (EU VAT art. 9a, lib/eu-vat-gate.ts pressGate), as beside every paid checkout. */}
+                  {welcome.product.priceCents > 0 || welcome.product.pwyw ? (
+                    <div className="mb-4">
+                      <BillingCountryField id="bc-welcome" locale={said.lang.locale} label={said.w.billingCountry} choose={said.w.chooseCountry} problem={welcomeAbroad ? "welcome-country-problem" : undefined} chosen={typeof query.from === "string" ? query.from : undefined} />
+                    </div>
+                  ) : null}
                   {/* The box to start access at once (lib/digital-consent.ts), before the offer's checkout opens. */}
                   {deliversDigitally(welcome.product) ? <DigitalConsentBox id="dc-welcome" kind={consentKind(welcome.product)} lang={store.language} refused={query.welcome === "consent"} className="mb-4" /> : <WithdrawalWhere lang={store.language} className="mb-4" />}
                   <button type="submit" className="btn st-btn btn-lg">

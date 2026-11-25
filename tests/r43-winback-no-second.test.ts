@@ -7,6 +7,7 @@
  * second membership is ever charged to the same person. Synthetic Stripe only; the search stand-in matches addresses
  * in any letters, which real Stripe was not checked for.
  */
+import { OUTSIDE_EU } from "./eu-vat-press-fixture";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setRecovery, setStripeAccount, setSubscription, setWinBack, storeForEmail } from "@/lib/store";
@@ -95,12 +96,12 @@ async function main(): Promise<void> {
   const statsId = store.statsId as string;
   const open = async (email: string) => {
     const before = checkouts.length;
-    const opened = await openWinBack(store, product, await comeBackLink(statsId, email), "https://marktmorgen.com", TEST_CONSENT);
+    const opened = await openWinBack(store, product, await comeBackLink(statsId, email), "https://marktmorgen.com", TEST_CONSENT, OUTSIDE_EU);
     return [opened.ok ? "opened" : opened.reason, checkouts.length - before];
   };
   /** One press of the button on a link's page: what it answered, and the checkout's address when it opened one. */
   const press = async (token: string) => {
-    const opened = await openWinBack(store, product, token, "https://marktmorgen.com", TEST_CONSENT);
+    const opened = await openWinBack(store, product, token, "https://marktmorgen.com", TEST_CONSENT, OUTSIDE_EU);
     return opened.ok ? opened.url : opened.reason;
   };
 
@@ -254,7 +255,7 @@ async function main(): Promise<void> {
   customerEmail.set("cus_VicOld000001", "vic@example.com");
   subsBody.set("cus_VicOld000001", sub("sub_VicEnded0001", "canceled"));
   const vicLink = await comeBackLink(statsId, "vic@example.com");
-  const vic = await openWinBack(reminding, product, vicLink, "https://marktmorgen.com", TEST_CONSENT);
+  const vic = await openWinBack(reminding, product, vicLink, "https://marktmorgen.com", TEST_CONSENT, OUTSIDE_EU);
   is("Vic: the checkout opens", vic.ok, true);
   const closes = Number(checkouts.at(-1)?.get("expires_at") ?? NaN);
   const [vicTtl] = await redisPipeline([["TTL", `nl:wb:open:${vicLink}`]]);

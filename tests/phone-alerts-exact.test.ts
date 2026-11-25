@@ -131,7 +131,9 @@ async function main(): Promise<void> {
   // Claude 5 on #2882 (LIGHT): two devices added at once by two people: neither write lands over the other.
   part("Two devices added at once");
   await real([["SET", cfg, String(saved)]]);
-  const isWrite = (c: Commands) => c.length === 1 && ((c[0][0] === "SET" && c[0][1] === cfg) || (c[0][0] === "EVAL" && c[0][3] === cfg));
+  // The list's write: the plain compare-and-set (its key at index 3) or a registration's fenced one (ADD_DEVICE_IF_LIVE,
+  // its key at index 5; Codex L-20261119-2022).
+  const isWrite = (c: Commands) => c.length === 1 && ((c[0][0] === "SET" && c[0][1] === cfg) || (c[0][0] === "EVAL" && (c[0][3] === cfg || (String(c[0][1]).startsWith("-- marktmorgen:phone-add-live:") && c[0][5] === cfg))));
   let raced = false;
   redis.pipeline = (async (c: Commands) => {
     if (!raced && isWrite(c)) {

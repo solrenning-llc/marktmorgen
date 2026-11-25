@@ -70,6 +70,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
 import { repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { type Store, accountStores, setPhoneSales, storeRef } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
+import type { StoreLiveFence } from "@/lib/live-fence";
 import { normaliseEmail } from "@/lib/auth";
 import { type Permission, type Role, can } from "@/lib/team-roles";
 import { memberStores, readTeam } from "@/lib/team";
@@ -243,22 +245,88 @@ async function readConfig(statsId: string): Promise<Config | null> {
 }
 
 /**
+ * A registration's write of the device list (addDevice; Codex L-20261119-2022, #5010 row 124): the compare-and-set of
+ * COMPARE_AND_SET, held to the store's fence in the same step. A registration is the only change that builds a list
+ * from nil, so a store erased while one was in flight got its list back from nil, with the endpoint, its keys and the
+ * teammate's address, kept with no expiry. The fence is the identity rule of lib/live-fence.ts store-keep-live:v1
+ * (built by lib/store-live-cache.ts storeLiveFence): the store's erasing field absent and, for a store with an id, its
+ * id key still holding this store's ref; for one from before ids, its record still carrying this statsId.
+ *
+ * KEYS: the fence's live key, ERASING_KEY, the device list. ARGV: the store's erasing field, its statsId ("" for a
+ * store with an id), its ref, the text read ("" for none) and the text to write. Answers 1 written; 0 the store is
+ * gone, moved or erasing (nothing written); -2 the record from before ids does not read (nothing written); {-1, text
+ * now} or {-1} when the list no longer holds the text read (nothing written), the text now handed back so the next
+ * try needs no read of its own. Billed: the EVAL and its HGET, the live key's GET, the list's GET and SET, 5 a try
+ * where COMPARE_AND_SET's EVAL, GET and SET were 3; the read a lost try made before is gone (PHONE_ADD_TRY_COMMANDS).
+ */
+export const ADD_DEVICE_IF_LIVE = `-- marktmorgen:phone-add-live:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[2] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[3] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -2 end
+  if record["statsId"] ~= ARGV[2] then return 0 end
+end
+local current = redis.call("GET", KEYS[3])
+if (current or "") ~= ARGV[4] then
+  if current then return {-1, current} end
+  return {-1}
+end
+redis.call("SET", KEYS[3], ARGV[5])
+return 1`;
+
+/** Billed for one fenced try of a registration (ADD_DEVICE_IF_LIVE): the EVAL, HGET, GET of the live key, GET and SET. */
+export const PHONE_ADD_TRY_COMMANDS = 5;
+
+/**
+ * A registration's tries (the other changes of the list keep four): two keep the studio's whole request that adds a
+ * device inside one studio unit's commands with the fence's two more a try (tests/phone-registration-store-erasure.test.ts
+ * measures it). A registration that loses to two other changes of the same list in a row throws, as one that lost four
+ * did before: nothing of it is written, and the studio says it did not work.
+ */
+export const PHONE_ADD_TRIES = 2;
+
+/** A registration refused because its store is gone, moved or being erased: nothing was written. */
+const STORE_GONE = Symbol("the store is gone or being erased");
+
+/**
  * Changes the device list on a fresh read, written only while it still holds the very text read (COMPARE_AND_SET,
  * as lib/webhooks.ts does; Claude 5 on #2882): two changes at once never write one over the other, and the one
  * that finds the list changed reads it again and makes its change on that, a few times, then throws. `change`
  * returns null to write nothing. A write whose answer is not known is read back: our own text is written, the text
- * read is not (and it goes again), anything else throws.
+ * read is not (and it goes again), anything else throws. With `fence` (a registration, addDevice), the write is
+ * ADD_DEVICE_IF_LIVE: a store gone, moved or being erased answers STORE_GONE and nothing is written, a lost try
+ * takes the list's text from the script's answer instead of reading it again, and it tries PHONE_ADD_TRIES times.
  */
-async function changeConfig(store: Store, change: (config: Config | null) => Config | null): Promise<Config | null> {
+async function changeConfig(store: Store, change: (config: Config | null) => Config | null): Promise<Config | null>;
+async function changeConfig(store: Store, change: (config: Config | null) => Config | null, fence: StoreLiveFence): Promise<Config | null | typeof STORE_GONE>;
+async function changeConfig(store: Store, change: (config: Config | null) => Config | null, fence?: StoreLiveFence): Promise<Config | null | typeof STORE_GONE> {
   const statsId = store.statsId as string;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const { config, raw } = await readConfigText(statsId);
+  let handed: { config: Config | null; raw: string | null } | null = null;
+  for (let attempt = 0; attempt < (fence ? PHONE_ADD_TRIES : 4); attempt += 1) {
+    const { config, raw } = handed ?? (await readConfigText(statsId));
+    handed = null;
     const next = change(config);
     if (!next) return null;
     const text = JSON.stringify({ ...next, handle: store.handle });
-    const saved = repliesFor(await redisPipeline([["EVAL", COMPARE_AND_SET, 1, cfgKey(statsId), raw ?? "", text]]), 1)?.[0];
+    const command: (string | number)[] = fence
+      ? ["EVAL", ADD_DEVICE_IF_LIVE, 3, fence.live, fence.erasing, cfgKey(statsId), fence.field, fence.statsId ?? "", fence.ref, raw ?? "", text]
+      : ["EVAL", COMPARE_AND_SET, 1, cfgKey(statsId), raw ?? "", text];
+    const saved = repliesFor(await redisPipeline([command]), 1)?.[0];
     if (saved === 1) return wrote(store, next);
-    if (Array.isArray(saved) && saved[0] === -1) continue;
+    if (fence && saved === 0) return STORE_GONE;
+    if (fence && saved === -2) throw new UnknownReplyError("the store's record");
+    if (Array.isArray(saved) && saved[0] === -1) {
+      // The fenced script hands back the list as it now is: read exactly, as readConfigText reads it (configOf).
+      if (fence && (saved.length === 1 || (saved.length === 2 && typeof saved[1] === "string"))) {
+        const now = saved.length === 2 ? (saved[1] as string) : null;
+        handed = { config: configOf(now), raw: now };
+      }
+      continue;
+    }
     const back = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1)?.[0];
     if (back === text) return wrote(store, next);
     if (back !== raw) throw new UnknownReplyError("the phone devices saved");
@@ -638,8 +706,12 @@ export async function addDevice(
     who: whoFor(store, person),
   };
   // Decided again on each fresh read (changeConfig): the same subscription updates its device, a new one is added.
+  // Written only while the store is live, in the same step (ADD_DEVICE_IF_LIVE; Codex L-20261119-2022): a store from
+  // before ids with no statsId cannot be told from another, and addDevice already needs a statsId above.
+  const fence = await storeLiveFence(store);
+  if (fence.statsId === null) return { ok: false, reason: "unavailable" };
   let outcome: { id: string; created: boolean; label: string } | "full" = "full";
-  await changeConfig(store, (read) => {
+  const changed = await changeConfig(store, (read) => {
     const config = read ?? { handle: store.handle, devices: [] };
     const same = config.devices.find((d) => d.endpoint === subscription.endpoint);
     if (same) {
@@ -662,7 +734,9 @@ export async function addDevice(
     }
     outcome = { id: fresh.id, created: true, label: fresh.label };
     return { ...config, devices: [...config.devices, fresh] };
-  });
+  }, fence);
+  // The store is gone or being erased: nothing was written, whatever the last try decided.
+  if (changed === STORE_GONE) return { ok: false, reason: "unavailable" };
   const done = outcome as { id: string; created: boolean; label: string } | "full";
   if (done === "full") return { ok: false, reason: "full" };
   // Written down: it is added, and the owner is told of it (the route), even when the view cannot be read just now

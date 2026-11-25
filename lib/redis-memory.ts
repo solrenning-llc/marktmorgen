@@ -744,6 +744,34 @@ export class MemoryRedis {
           this.run(["SET", seen, "pending", "EX", seenSeconds]);
           return 1;
         }
+        // lib/phone-alerts.ts ADD_DEVICE_IF_LIVE: a registration's compare-and-set of the device list, held to the store's
+        // fence (the rule of lib/live-fence.ts store-keep-live:v1) in the same step; each inner call counted as Upstash bills it.
+        if (key.startsWith("-- marktmorgen:phone-add-live:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, live, erasing, list, field, statsId, ref, expected, text] = args;
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["HGET", erasing, field]) !== null) return 0;
+          if (statsId === "") {
+            if (call(["GET", live]) !== ref) return 0;
+          } else {
+            const raw = call(["GET", live]);
+            if (raw === null) return 0;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -2;
+            }
+            if (!record || typeof record !== "object") return -2;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+          }
+          const current = call(["GET", list]);
+          if ((current ?? "") !== expected) return current === null ? [-1] : [-1, current];
+          call(["SET", list, text]);
+          return 1;
+        }
         // lib/phone-alerts.ts PHONE_STATE_IF_LISTED: devices' last sends, each kept only while it is still on its store's list.
         if (key.startsWith("-- marktmorgen:phone-state-if-listed:v1\n") && args[0] === "2" && args.length >= 5 && (args.length - 3) % 2 === 0) {
           const [, list, states, ...pairs] = args;

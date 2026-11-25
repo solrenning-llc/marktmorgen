@@ -47,7 +47,7 @@ is("a blog page past the last post: heading, sentence and the link to all posts"
 // The exact reader distinguishes an unavailable listing before destructuring it.
 // Keep the confirmed-empty 404 contract, without requiring the old await spelling.
 is("a store with no posts still has no blog page",
-  /const listing = await publishedPosts\(store\.statsId, page\)\.catch\(\(\) => null\);\s*if \(listing === null\) return <BlogUnavailable[^;]+;\s*const \{ posts, total \} = listing;\s*if \(total === 0\) notFound\(\);/.test(blog), true);
+  /const listing = await publishedPosts\(store\.statsId, page\)\.catch\(\(error: unknown\) => \{[\s\S]*?return null;\s*\}\);\s*if \(listing === null\) return <BlogUnavailable[^;]+;\s*const \{ posts, total \} = listing;\s*if \(total === 0\) notFound\(\);/.test(blog), true);
 is("no bare sentence left where the blog is empty", blog.includes("{w.blogEmpty}</p>"), false);
 
 done();

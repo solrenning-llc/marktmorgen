@@ -108,7 +108,8 @@ async function main(): Promise<void> {
 
   part("The route");
   const route = readFileSync("app/api/store/blog/route.ts", "utf8");
-  is("needs the page permission, and keeps the count on the store", [route.includes('guardStoreWrite(request, "page"'), (route.match(/setPostCount\(/g) ?? []).length], [true, 2]);
+  // The count is kept on the store through one helper (keepCount), for a save and for a deletion (row #2695 of #5285).
+  is("needs the page permission, and keeps the count on the store", [route.includes('guardStoreWrite(request, "page"'), (route.match(/setPostCount\(/g) ?? []).length, (route.match(/await keepCount\(/g) ?? []).length], [true, 1, 3]);
   done();
 }
 

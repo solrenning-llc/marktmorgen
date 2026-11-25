@@ -49,8 +49,12 @@ export default async function BlogPage({ params, searchParams }: Params) {
   if (await isResting(store)) return <StoreResting store={store} />;
   const query = searchParams ? await searchParams : {};
   const page = typeof query.page === "string" && /^\d{1,3}$/.test(query.page) ? Math.max(1, Number(query.page)) : 1;
-  const listing = await publishedPosts(store.statsId, page).catch(() => null);
-  if (listing === null) return <BlogUnavailable language={store.language} handle={store.handle} name={store.name} />;
+  const listing = await publishedPosts(store.statsId, page).catch((error: unknown) => {
+    // Said as unavailable, never as an empty blog; the cause is kept in the logs (Claude 7's LEVE on #2695, board #5285).
+    console.error("reading a store's blog page failed", error);
+    return null;
+  });
+  if (listing === null) return <BlogUnavailable language={store.language} handle={store.handle} name={store.name} page={page} />;
   const { posts, total } = listing;
   if (total === 0) notFound();
   const say = speech(store);

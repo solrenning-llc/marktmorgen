@@ -58,8 +58,17 @@ export async function POST(request: Request) {
         ? apiError(409, "taken", "Your Stripe account already has a code with these letters. Choose another.")
         : apiError(502, "unavailable", "The code could not be made on Stripe just now. Try again in a moment.");
     }
-    await setHasDiscounts(storeRef(store), true);
-    return apiOk({ data: codeOut(made.code) });
+    // Stripe made the code: from here it is answered as made, whatever happens to the second write (issue #4076). A
+    // checkout code box that could not be switched on is said so, never "could not be made" (a retry would only meet
+    // 409 taken); making or switching off any code later switches it again.
+    const boxOn = await setHasDiscounts(storeRef(store), true).then(
+      () => true,
+      (error: unknown) => {
+        console.error("api: a code was made but the checkout's code box was not switched on", error);
+        return false;
+      },
+    );
+    return apiOk({ data: codeOut(made.code), ...(boxOn ? {} : { checkout_box: "not_switched_on" }) });
   } catch (error) {
     console.error("api: making a code failed", error);
     return apiError(502, "unavailable", "The code could not be made on Stripe just now. Try again in a moment.");
@@ -97,8 +106,18 @@ export async function DELETE(request: Request) {
     if (after.state !== "ok") return apiOk({ stopped: id, listed: false, data: null, message: "The code was switched off. Your discount codes could not be read back from Stripe just now; read them again with GET /api/v1/codes." });
     // "No live code" only from a list read to its end; a page with more behind it leaves the box as it was.
     const live = after.codes.some((c) => c.active);
-    if (live || after.complete) await setHasDiscounts(storeRef(store), live);
-    return apiOk({ data: after.codes.map(codeOut), has_more: !after.complete });
+    // Switched off on Stripe already (issue #4294): a code box that could not be written is said beside the codes,
+    // never as 502 "could not be switched off"; the next code made or switched off writes it again.
+    const boxSet = live || after.complete
+      ? await setHasDiscounts(storeRef(store), live).then(
+          () => true,
+          (error: unknown) => {
+            console.error("api: a code was switched off but the checkout's code box was not updated", error);
+            return false;
+          },
+        )
+      : true;
+    return apiOk({ data: after.codes.map(codeOut), has_more: !after.complete, ...(boxSet ? {} : { checkout_box: "not_updated" }) });
   } catch (error) {
     console.error("api: switching a code off failed", error);
     return unreadable();

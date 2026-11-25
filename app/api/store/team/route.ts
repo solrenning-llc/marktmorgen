@@ -10,9 +10,19 @@ import { ROLE_NAMES, parseTeamRole } from "@/lib/team-roles";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { forgetPerson } from "@/lib/phone-alerts";
 
-/** A person off the team keeps no device here (lib/phone-alerts.ts). Never fails the change itself. */
-async function forgetDevices(store: Parameters<typeof forgetPerson>[0], who: string): Promise<void> {
-  await forgetPerson(store, who).catch((error: unknown) => console.error("forgetting a team member's devices failed", error));
+/**
+ * A person off the team keeps no device here (lib/phone-alerts.ts). False when that could not be confirmed (#4811,
+ * Claude 2's fix on claude2/defect-phone-alerts-4751-4811): the change itself stands, the answer says the devices are
+ * still to remove, and pressing Remove again forgets them (their ids stay in the device list until their states are gone).
+ */
+async function forgetDevices(store: Parameters<typeof forgetPerson>[0], who: string): Promise<boolean> {
+  return forgetPerson(store, who).then(
+    () => true,
+    (error: unknown) => {
+      console.error("forgetting a team member's devices failed", error);
+      return false;
+    },
+  );
 }
 
 const ANSWERS: Record<string, number> = {
@@ -29,6 +39,8 @@ const ANSWERS: Record<string, number> = {
   owner_no_step: 409,
   owner_step_session: 403,
   changed: 409,
+  devices: 503,
+  devices_self: 503,
   unsaved: 503,
   unsure: 503,
   unread: 503,
@@ -57,9 +69,17 @@ export async function POST(request: NextRequest) {
   const action = text(body.action, 20);
   const fail = (error: string) => Response.json({ ok: false, error }, { status: ANSWERS[error] ?? 400 });
   // Taken off, but their API keys could not all be paused after: said, so the removal is repeated (owner C3-100).
-  const repeat = () =>
+  // When their phone devices could not be confirmed forgotten either, the answer says both (#4811; Claude 1's LOW 1
+  // on #5105): pressing Remove again finishes the two.
+  const repeat = (devicesForgotten: boolean) =>
     Response.json(
-      { ok: false, error: "repeat", message: "They are off the team, but some of the API keys they made may still work. Press Remove again to finish." },
+      devicesForgotten
+        ? { ok: false, error: "repeat", message: "They are off the team, but some of the API keys they made may still work. Press Remove again to finish." }
+        : {
+            ok: false,
+            error: "repeat_devices",
+            message: "They are off the team, but some of the API keys they made may still work and their phone alerts could not all be removed yet. Press Remove again to finish.",
+          },
       { status: 503 },
     );
   if (!store.sid) return fail("unknown");
@@ -102,14 +122,20 @@ export async function POST(request: NextRequest) {
       const gone = log !== null && log.lines.some((line) => line.what === `Took ${who} off the team` || (line.who === who && line.what === "Left the team"));
       const removed = await removeMember(store, who, { repeat: gone }).catch((error: unknown) => (error instanceof KeysNotSwept ? "repeat" : Promise.reject(error)));
       if (removed === "repeat") {
-        // Off the team already: written in the log now, so pressing again is known for a repeat.
+        // Off the team already: written in the log now, so pressing again is known for a repeat, which forgets their
+        // devices again too (#4811).
+        const forgot = await forgetDevices(store, who);
         await logTeam(store.sid, { who: email, role, what: `Took ${who} off the team` });
-        return repeat();
+        return repeat(forgot);
       }
-      if (!removed) return gone ? Response.json({ ok: true, already: true }) : log === null || log.skipped > 0 ? fail("unsure") : fail("not_found");
-      await forgetDevices(store, who);
+      if (!removed) {
+        if (!gone) return log === null || log.skipped > 0 ? fail("unsure") : fail("not_found");
+        // A repeat: their devices are forgotten again, and the removal is said done only once that is confirmed (#4811).
+        return (await forgetDevices(store, who)) ? Response.json({ ok: true, already: true }) : fail("devices");
+      }
+      const forgot = await forgetDevices(store, who);
       await logTeam(store.sid, { who: email, role, what: `Took ${who.toLowerCase()} off the team` });
-      return Response.json({ ok: true });
+      return forgot ? Response.json({ ok: true }) : fail("devices");
     }
 
     // 612 [WP11], owner C3-100: the owner requires two-step sign-in of the
@@ -177,9 +203,10 @@ export async function POST(request: NextRequest) {
       // as its maker is on the team no more (lib/api-keys.ts pauseWhy), and the owner's next removal of anybody sweeps again.
       const left = await removeMember(store, email).catch((error: unknown) => (error instanceof KeysNotSwept ? true : Promise.reject(error)));
       if (!left) return fail("unknown");
-      await forgetDevices(store, email);
+      const forgot = await forgetDevices(store, email);
       await logTeam(store.sid, { who: email, role, what: "Left the team" });
-      return Response.json({ ok: true });
+      // The log says they left, so the owner's Remove for their address is a repeat that forgets their devices (#4811).
+      return forgot ? Response.json({ ok: true }) : fail("devices_self");
     }
 
     return fail("invalid");

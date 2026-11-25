@@ -398,6 +398,24 @@ for i = 1, #ARGV - 1, 2 do
 end
 return written`;
 
+/**
+ * Takes one person's devices off a store's list and deletes their states in one step (forgetPerson; Claude 7 xAF's
+ * LEVE on #5105): written only while the list still holds the very text read (KEYS[1] = ARGV[1], else -1), and only
+ * when the states key is a hash or absent (else -2, before anything is written, so the HDEL cannot fail after the SET).
+ * Being one script, no alert's PHONE_STATE_IF_LISTED can land between the unlisting and the HDEL, and a reply lost
+ * after it ran leaves the list at the text written, which the caller reads back. Returns the HDEL's count.
+ * Billed as the EVAL and its GET, TYPE, SET and HDEL (PHONE_UNLIST_FORGET_COMMANDS). Modelled by lib/redis-memory.ts.
+ */
+export const PHONE_UNLIST_AND_FORGET = `-- marktmorgen:phone-unlist-forget:v1
+local current = redis.call("GET", KEYS[1])
+if (current or "") ~= ARGV[1] then return -1 end
+local kind = redis.call("TYPE", KEYS[2])["ok"]
+if kind ~= "hash" and kind ~= "none" then return -2 end
+redis.call("SET", KEYS[1], ARGV[2])
+if #ARGV < 3 then return 0 end
+return redis.call("HDEL", KEYS[2], unpack(ARGV, 3))`;
+export const PHONE_UNLIST_FORGET_COMMANDS = 5;
+
 /** Writes the states of the devices just told, in one script, each only while it is still listed (PHONE_STATE_IF_LISTED). */
 async function keepStates(statsId: string, states: { id: string; state: DeviceState }[]): Promise<void> {
   if (states.length === 0) return;
@@ -728,17 +746,40 @@ export async function removeDevice(store: Store, who: string, role: Role, id: st
  */
 export async function forgetPerson(store: Store, who: string): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
+  const statsId = store.statsId;
   const person = normaliseEmail(who);
   if (person === normaliseEmail(store.email)) return 0;
-  let theirs: Device[] = [];
-  await changeConfig(store, (config) => {
-    theirs = (config?.devices ?? []).filter((d) => ownerOf(store, d) === person);
-    return config && theirs.length ? { ...config, devices: config.devices.filter((d) => ownerOf(store, d) !== person) } : null;
-  });
-  if (theirs.length === 0) return 0;
-  await redisPipeline([["HDEL", stateKey(store.statsId), ...theirs.map((d) => d.id)]]);
-  return theirs.length;
+  // Their devices leave the list and their states are deleted in one script, over the very list read
+  // (PHONE_UNLIST_AND_FORGET; Claude 7 xAF's LEVE on #5105). Before it, the states went first and the devices left the
+  // list after (#4811, Codex G; Claude 2's fix; Claude 1's LOW 2 and bUAk's LOW on #5105), and an alert's state written
+  // between them, with the last HDEL's reply lost, stayed under an id no repeat could find. Now nothing can land
+  // between the two, a reply that proves nothing is settled by reading the list back (our text: done; the text read:
+  // nothing ran, try again; anything else: unknown, thrown with the devices still listed), and a device added while the
+  // list was being read makes the write refuse and read again. A person who keeps adding devices during their own
+  // removal makes this throw with the newest still listed, and pressing Remove again finishes.
+  let removed = 0;
+  for (let round = 0; round < FORGET_ROUNDS; round += 1) {
+    const { config, raw } = await readConfigText(statsId);
+    const going = (config?.devices ?? []).filter((d) => ownerOf(store, d) === person).map((d) => d.id);
+    if (!config || raw === null || going.length === 0) return removed;
+    const next: Config = { ...config, devices: config.devices.filter((d) => ownerOf(store, d) !== person) };
+    const text = JSON.stringify({ ...next, handle: store.handle });
+    const reply = repliesFor(await redisPipeline([["EVAL", PHONE_UNLIST_AND_FORGET, 2, cfgKey(statsId), stateKey(statsId), raw, text, ...going]]), 1)?.[0];
+    if (reply === -1) continue;
+    if (reply === -2) throw new UnknownReplyError("the phone device states");
+    if (!(typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 0 && reply <= going.length)) {
+      const back = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1)?.[0];
+      if (back === raw) continue;
+      if (back !== text) throw new UnknownReplyError("the phone devices forgotten");
+    }
+    await wrote(store, next);
+    removed += going.length;
+  }
+  throw new Error("Their phone devices kept changing while being forgotten.");
 }
+
+/** How many read and unlist-and-forget tries forgetPerson takes before it says the devices are still to remove. */
+const FORGET_ROUNDS = 3;
 
 /** Forgets every device of a deleted store, whoever's they were. */
 export async function forgetStorePhones(statsId: string | null, apply: (commands: (string | number)[][]) => Promise<unknown> = redisPipeline): Promise<void> {

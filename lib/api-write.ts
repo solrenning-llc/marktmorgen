@@ -110,6 +110,9 @@ export async function addLead(store: Store, body: Record<string, unknown>): Prom
   const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId;
   if (!listId) return fail("list_full");
   const [before] = await redisPipeline([["HGET", leadsKey(listId), email]]);
+  // A row kept but not readable as a contact is unknown, never an address not on the list (#4205): nothing is
+  // counted, taken or written over, and the caller is told to try again.
+  if (before !== null && (typeof before !== "string" || !parseContact(before))) return fail("unavailable");
   const had = parseContact(before);
   if (!had && !(await withinLimit("api-add", store.sid ?? store.handle, ADDS_PER_DAY, 86_400))) return fail("daily_limit");
   // A contact written is API_WRITE_UNITS of the window's API requests, the request itself one of them.

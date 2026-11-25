@@ -3620,8 +3620,10 @@ export class MemoryRedis {
           return out;
         }
         // lib/receipt-number.ts RECEIPT_NUMBER: a sale's number read, or its room taken and the next number given, in one step.
-        if (key.startsWith("-- marktmorgen:receipt-number:v1\n") && args[0] === "3" && args.length === 9) {
-          const [, room, numbers, counter, limit, month, reference, entry, keys] = args;
+        // v2: the live id must still hold this store's ref (store-cache-live:v3's rule; Claude 5 icEJ on #5224).
+        if (key.startsWith("-- marktmorgen:receipt-number:v2\n") && args[0] === "5" && args.length === 13) {
+          const [, room, numbers, counter, storeId, erasing, limit, month, reference, entry, keys, field, ref] = args;
+          if (this.run(["GET", storeId]) !== ref || this.run(["HEXISTS", erasing, field]) === 1) return [-2, 0];
           const held = this.run(["HGET", numbers, reference]);
           if (typeof held === "string") {
             const n = Number(held);

@@ -66,6 +66,35 @@ async function main(): Promise<void> {
   is("a required field missing: Invalid params", missing.answer.error?.code, -32602);
   is("a required field missing: no command sent", missing.commands, 0);
 
+  part("Issue #3931 (Codex C2): a product-scoped tool says its product (and get_lesson its lesson) is required");
+  // Before, the seven advertised no `required`, so `{}` matched their schema, passed this check, took a request from
+  // the store's API allowance and was answered only with a tool error. Now it is Invalid params before the key.
+  for (const name of ["get_product_description", "get_sales_page", "get_course_outline", "get_lesson", "get_page_test", "get_page_reading", "get_page_versions"]) {
+    const { answer, commands: sent } = await call(reader.key, name, {});
+    is(`${name} with no product: Invalid params`, answer.error?.code, -32602);
+    is(`${name} with no product: no command sent`, sent, 0);
+  }
+  // An empty id is no id (Claude 3 yLYhi's LEVE on #5413, confirmed by Claude 3 wtXk): "" is a string, present, so
+  // `required` alone let it through to the store's allowance and the route's own tool error.
+  for (const name of ["get_product_description", "get_sales_page", "get_course_outline", "get_lesson", "get_page_test", "get_page_reading", "get_page_versions"]) {
+    const { answer, commands: sent } = await call(reader.key, name, name === "get_lesson" ? { product: "", lesson: "lessonid01" } : { product: "" });
+    is(`${name} with an empty product: Invalid params`, answer.error?.code, -32602);
+    is(`${name} with an empty product: no command sent`, sent, 0);
+  }
+  // The three that prepare a change take the same never-empty product (Claude 3 wtXk's NIT on the patch for #5413).
+  for (const [name, field] of [["propose_product_description", "description"], ["propose_product_title", "title"], ["propose_product_summary", "summary"]] as const) {
+    const { answer, commands: sent } = await call(drafter.key, name, { product: "", [field]: "Words for the product." });
+    is(`${name} with an empty product: Invalid params`, answer.error?.code, -32602);
+    is(`${name} with an empty product: no command sent`, sent, 0);
+  }
+  const emptyLesson = await call(reader.key, "get_lesson", { product: product.product.id, lesson: "" });
+  is("get_lesson with an empty lesson: Invalid params, no command sent", [emptyLesson.answer.error?.code, emptyLesson.commands], [-32602, 0]);
+  const noLesson = await call(reader.key, "get_lesson", { product: product.product.id });
+  is("get_lesson with no lesson: Invalid params", noLesson.answer.error?.code, -32602);
+  is("get_lesson with no lesson: no command sent", noLesson.commands, 0);
+  const described = await call(reader.key, "get_product_description", { product: product.product.id });
+  is("control: get_product_description with its product answers", [described.answer.error ?? null, described.answer.result?.isError ?? null], [null, false]);
+
   part("Controls: what matches its schema runs; an unknown tool keeps its own answer");
   const seven = await call(reader.key, "get_revenue_by_channel", { days: 7 });
   is("{ days: 7 } answers", [seven.answer.error ?? null, seven.answer.result?.isError ?? null], [null, false]);

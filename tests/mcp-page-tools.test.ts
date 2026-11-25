@@ -61,7 +61,13 @@ async function main(): Promise<void> {
     is("another store's product is not read", await tool("get_sales_page", { product: theirs.product.id }), unknown);
     is("nor its description", await tool("get_product_description", { product: theirs.product.id }), unknown);
     is("an unknown id is said so", await tool("get_product_description", { product: "nope" }), unknown);
-    is("no id is said so", await tool("get_sales_page", {}), unknown);
+    // No id at all is refused by the tool's own schema (issue #3931): Invalid params, before the key and any read.
+    const noId = (await (await POST(new Request("https://marktmorgen.com/api/mcp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${made.key}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "tools/call", params: { name: "get_sales_page", arguments: {} } }),
+    }))).json()) as { error?: { code: number } };
+    is("no id is Invalid params", noId.error?.code, -32602);
 
     part("Testimonials are counted, never quoted");
     const saved: SalesPage = {

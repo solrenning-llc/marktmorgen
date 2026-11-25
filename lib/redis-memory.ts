@@ -4376,7 +4376,12 @@ export class MemoryRedis {
         return gone;
       }
       case "EXISTS":
-        return this.data.has(key) && !MemoryRedis.empty(this.data.get(key)) ? 1 : 0;
+        // Redis counts every key it is given that exists (a key given twice counts twice), as lib/community-mail.ts
+        // reads a send's record and its held mark in one EXISTS (Claude 4 AC on #5072).
+        return rest.map(String).reduce<number>((n, name) => {
+          this.live(name);
+          return n + (this.data.has(name) && !MemoryRedis.empty(this.data.get(name)) ? 1 : 0);
+        }, 0);
       case "DUMP": {
         // A stand-in for Redis's own serialized value (lib/backup-export.ts): the value and its type, never the key
         // name or its time to live, as DUMP's is; RESTORE below is the only reader of it. Null for a missing key.

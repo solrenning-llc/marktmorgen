@@ -37,7 +37,7 @@ import { tell } from "@/lib/community-notify";
 import { communityWords } from "@/lib/buyer-words/community";
 import { checkCommunityImage, ownsCommunityImage } from "@/lib/community-image";
 import { blobImages, dropCommunityImage, takeCommunityUpload, untakeCommunityUpload } from "@/lib/community-files";
-import { RecipientsUnreadError, advanceAnnouncement, queueAnnouncement } from "@/lib/community-mail";
+import { ANNOUNCE_PLACE_STUDIO_UNITS, RecipientsUnreadError, advanceAnnouncement, queueAnnouncement } from "@/lib/community-mail";
 import {
   ITEM_ID,
   MAX_COMMENT_TEXT,
@@ -132,8 +132,11 @@ export async function POST(request: NextRequest) {
   if (lock) return back(fromPage, "locked");
   // Each act is one of the store's buyer actions, or the creator's studio
   // requests, taken before anything is written (lib/buyer-actions.ts).
-  // Deleting what one wrote is not: it can only follow an act that was.
-  if (!UNCOUNTED.has(action) && !(await takeBuyerAction(store, owner ? "owner" : "buyer"))) return restingAway(origin, store);
+  // Deleting what one wrote is not: it can only follow an act that was. An emailed announcement also holds its place
+  // among the community's sends, at most ANNOUNCE_PLACE_COMMANDS_MOST commands more (lib/community-mail.ts), so it takes
+  // ANNOUNCE_PLACE_STUDIO_UNITS studio requests more, with the post's own (Claude 6 NQoup on #5072, LEVE).
+  const units = owner && lockedAct === "email" ? 1 + ANNOUNCE_PLACE_STUDIO_UNITS : 1;
+  if (!UNCOUNTED.has(action) && !(await takeBuyerAction(store, owner ? "owner" : "buyer", units))) return restingAway(origin, store);
 
   try {
     // ------------------------------------------------------------ your choices
@@ -323,6 +326,8 @@ export async function POST(request: NextRequest) {
           after(() => advanceAnnouncement(jobId, storeForHandle, Date.now() + 25_000).then(() => undefined, (error) => console.error("sending an announcement failed", error)));
           return back(`${home}/post/${made.post.id}`, "announced");
         }
+        // Too many sends still going out (MAX_SENDS_UNDER_WAY): the post is up, without its email, and says so.
+        if (queued.reason === "busy") return back(`${home}/post/${made.post.id}`, "notemailedbusy");
         return back(`${home}/post/${made.post.id}`, queued.reason === "plan" ? "noemail" : "noreaders");
       }
       return back(`${home}/post/${made.post.id}`, "posted");

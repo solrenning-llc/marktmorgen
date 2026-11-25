@@ -49,7 +49,7 @@ export const HELP_DATES: Readonly<Record<string, HelpDates>> = {
   "how-many-visits-does-my-plan-cover": { created: "2026-10-07", updated: "2026-11-16", digest: "1fa59d67e21e" },
   "what-if-i-sell-a-very-large-number-of-things": { created: "2026-10-13", updated: "2026-11-02", digest: "ea768336b3cf" },
   "when-do-my-plans-monthly-figures-start-again": { created: "2026-10-17", updated: "2026-11-09", digest: "c112d97ccdf2" },
-  "what-else-does-my-plan-cover-each-month": { created: "2026-10-17", updated: "2026-11-02", digest: "c8d5e3ebd6b4" },
+  "what-else-does-my-plan-cover-each-month": { created: "2026-10-17", updated: "2026-11-23", digest: "566900ed58f7" },
   "how-much-can-my-store-hold": { created: "2026-10-07", updated: "2026-11-09", digest: "4a9c139efd68" },
   "what-happens-when-my-plan-ends": { created: "2026-10-17", updated: "2026-11-05", digest: "a2b62e19232b" },
   "how-do-i-refund-members-for-unused-time-when-my-store-closes": { created: "2026-11-12", updated: "2026-11-12", digest: "14702c6eae30" },
@@ -132,6 +132,6 @@ export const HELP_DATES: Readonly<Record<string, HelpDates>> = {
   "what-do-you-store-about-me": { created: "2026-09-18", updated: "2026-10-10", digest: "5143228bda99" },
   "how-are-my-store-and-my-buyers-protected": { created: "2026-09-27", updated: "2026-11-04", digest: "6f7d3e90ba31" },
   "can-i-have-it-deleted": { created: "2026-09-18", updated: "2026-10-17", digest: "f05eb722f19e" },
-  "someone-asked-me-to-delete-their-data-what-do-i-do": { created: "2026-10-17", updated: "2026-11-16", digest: "acf3391c286f" },
+  "someone-asked-me-to-delete-their-data-what-do-i-do": { created: "2026-10-17", updated: "2026-11-23", digest: "4c83de405895" },
   "do-you-sell-or-share-it": { created: "2026-09-18", updated: "2026-09-28", digest: "94d418e55fb5" },
 };

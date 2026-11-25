@@ -15,6 +15,7 @@
  * Nothing in this file touches the network, so a page may import it.
  */
 import type { Store } from "@/lib/store";
+import { MAX_SENDS_UNDER_WAY } from "@/lib/community-text";
 
 /** Everything an eraser needs to find one person in one store, worked out once. */
 export type ErasureScope = {
@@ -105,6 +106,25 @@ export type ErasureSize = {
 export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
 
 /**
+ * A person's key in the community's announcements still going out (Codex L-20261121-0758, lib/community-mail.ts
+ * forgetAnnouncementRecipient): the community's sends read (one SMEMBERS, at most ERASE_SENDS_READ_MOST ids of
+ * 24 characters, twice MAX_SENDS_UNDER_WAY), then one script (BLANK_IN_LISTS, lib/erasure-lists.ts) that reads each send's list on the Redis side and
+ * writes the mark over the person's place: its EVAL, an LRANGE a send and an LSET a send at the most (a member is
+ * in a send's list once), as Upstash bills them, and one SREM of any member that is not a send's id (Claude 7 xAF on
+ * #5072); and, past the cap, one EXISTS for each id read (of its record and its held mark, Claude 4 AC on #5072), at
+ * most twice the cap (ERASE_SENDS_READ_MOST, Claude 2 lpgvy on #5072, LOW 2), so the places whose send is gone are let
+ * go in the same SREM; and, first, the community's count of
+ * erasures moved on (an INCR and its EXPIRE, Claude 2 lpgvy on #5072, LOW 1), so a send that read the members while
+ * this person was erased lets its list go; and one DEL for each stale place's recipient list, let go before its SREM
+ * (Claude 3 yaQt on #5072, LEVE), at most MAX_SENDS_UNDER_WAY where they count most: with s stale places and l live
+ * sends, s + l at most ERASE_SENDS_READ_MOST and l at most the cap, 5 + (s + l) + s + 2l is largest at s = l = the
+ * cap (Claude 3 on #5072, MEDIO: 105 sent against the 85 counted before). Bytes: the script's text, the keys and the
+ * replies, under 5,000 with the DELs' keys, counted at 8,000; the lists themselves stay inside Redis. Held, commands
+ * sent against this figure at that worst, by tests/community-mail-recipient-erasure.test.ts.
+ */
+export const ERASE_ANNOUNCEMENT_LISTS: readonly [number, number] = [2 + 3 + 2 * MAX_SENDS_UNDER_WAY + 2 * MAX_SENDS_UNDER_WAY + MAX_SENDS_UNDER_WAY, 8_000];
+
+/**
  * Commands every erasure sends whatever the store: each module's own, workflows at their cap, a sync log at its length,
  * and (since 18 October 2026) a person's payment requests at their cap, four commands each for twice MAX_PER_PERSON
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
@@ -130,7 +150,8 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
 // ERASE_SUBMISSIONS: 575 before them.
 // And (review of #3929) the read of the note of the carts the person was reminded of (lib/checkout-recovery.ts,
 // forgetRecoveryPerson), one SMEMBERS, the note deleted inside the marks' one DEL: 576 before ERASE_SUBMISSIONS.
-export const ERASE_FIXED_COMMANDS = 576 + ERASE_SUBMISSIONS[0];
+// And (Codex L-20261121-0758) a person's key in the community's announcements still going out, ERASE_ANNOUNCEMENT_LISTS.
+export const ERASE_FIXED_COMMANDS = 576 + ERASE_SUBMISSIONS[0] + ERASE_ANNOUNCEMENT_LISTS[0];
 /**
  * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
  * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted
@@ -139,7 +160,7 @@ export const ERASE_FIXED_COMMANDS = 576 + ERASE_SUBMISSIONS[0];
  * 325,000 before (#4290) the atomic ask eraser's script, two keys, arguments and its two counts, 5,000; and (750 [CD1])
  * a person's files sent for review, ERASE_SUBMISSIONS: 330,000 before them.
  */
-export const ERASE_FIXED_BYTES = 330_000 + ERASE_SUBMISSIONS[1];
+export const ERASE_FIXED_BYTES = 330_000 + ERASE_SUBMISSIONS[1] + ERASE_ANNOUNCEMENT_LISTS[1];
 /** Members removed per command in the atomic checkout-ask eraser; not a cap on a person's erasure. */
 export const ASK_ERASE_BATCH = 512;
 /** Per thing counted: [commands, bytes]. */

@@ -152,7 +152,7 @@ test("students' work is held to its plan's room", async () => {
 
 test("every route a buyer acts through takes from the store's month before it writes", () => {
   const routes: [string, RegExp][] = [
-    ["app/api/store/community/route.ts", /takeBuyerAction\(store, owner \? "owner" : "buyer"\)/],
+    ["app/api/store/community/route.ts", /takeBuyerAction\(store, owner \? "owner" : "buyer", units\)/],
     ["app/api/store/community/rsvp/route.ts", /takeBuyerAction\(store\)/],
     ["app/api/store/community/challenge/route.ts", /takeBuyerAction\(store\)/],
     ["app/api/store/community/chat/route.ts", /takeBuyerAction\(store, owner \? "owner" : "buyer"\)/],

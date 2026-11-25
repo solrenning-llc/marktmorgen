@@ -59,6 +59,40 @@ export const MAX_COMMENTS_PER_POST = 300;
 export const MAX_MEMBERS = 50_000;
 /** Reported posts and comments waiting for the creator. */
 export const MAX_REPORT_QUEUE = 500;
+/**
+ * Announcement emails a community may have going out at once (lib/community-mail.ts): a person's erasure walks each
+ * of them to take that person out (Codex L-20261121-0758), so its work is bounded by this, not by the posts.
+ */
+export const MAX_SENDS_UNDER_WAY = 20;
+/**
+ * The most other places one send's hold looks up past the cap (lib/community-mail.ts holdSendPlace), so its commands
+ * are bounded (Claude 6 NQoup on #5072, LEVE): with its own place, as many ids as an erasure reads
+ * (ERASE_SENDS_READ_MOST, twice the cap). Places past it are looked up by the next sends and erasures; a send that
+ * finds the cap still passed is refused as busy, as before.
+ */
+export const PLACE_LOOKS_MOST = 2 * MAX_SENDS_UNDER_WAY - 1;
+/**
+ * The most commands one queueAnnouncement sends besides its recipient list's writes (a DEL, an RPUSH for each 500
+ * members and an EXPIRE, as before #5072) and the read of who asked for the emails (lib/community.ts mailableMembers):
+ * the hold's SET, SADD and EXPIRE, its SCARD and SMEMBERS, an EXISTS and at most a DEL for each place it looks up
+ * (PLACE_LOOKS_MOST), the stale places' SREM, the SCARD again and its own SREM when refused; the erasures' count read
+ * before and after the members; then the send's record and its place in line, or, when a person was erased meanwhile,
+ * its list's DEL and the two SREMs of letGo. Held by tests/community-mail-place-cost.test.ts.
+ */
+export const ANNOUNCE_PLACE_COMMANDS_MOST = 3 + 2 + 2 * PLACE_LOOKS_MOST + 3 + 2 + 2 + 3;
+/**
+ * The commands a studio request is priced for: lib/student-bulk-rules.ts STUDIO_REQUEST_COMMANDS, written here so
+ * this file imports nothing (the page reads it); tests/community-mail-place-cost.test.ts holds the two equal.
+ */
+export const ANNOUNCE_STUDIO_REQUEST_COMMANDS = 20;
+/**
+ * Studio requests an emailed announcement takes besides the one every post takes (app/api/store/community/route.ts),
+ * before anything is read: enough, at STUDIO_REQUEST_COMMANDS each, for ANNOUNCE_PLACE_COMMANDS_MOST. The composer's
+ * box and the help's answer on studio requests say the total (Claude 3 hujg on #5072, LEVE 2).
+ */
+export const ANNOUNCE_PLACE_STUDIO_UNITS = Math.ceil(ANNOUNCE_PLACE_COMMANDS_MOST / ANNOUNCE_STUDIO_REQUEST_COMMANDS);
+/** What an emailed announcement counts as, in studio requests: the post's own and its place's. */
+export const ANNOUNCE_EMAIL_STUDIO_REQUESTS = 1 + ANNOUNCE_PLACE_STUDIO_UNITS;
 
 /** Posts on one page of a feed, and members on one page of the directory. */
 export const FEED_PAGE = 20;

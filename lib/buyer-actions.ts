@@ -33,10 +33,13 @@ import { takePublicRequest, takePublicRequestExact } from "@/lib/traffic";
 /** Public requests a community picture counts as: its bytes pass through us (tests/plan-cost-registry.ts holds the price). */
 export const PICTURE_REQUEST_UNITS = 4;
 
-/** One action, taken from the store's month: the buyer's figure, or the creator's studio requests. */
-export async function takeBuyerAction(store: Store, by: "buyer" | "owner" = "buyer"): Promise<boolean> {
+/**
+ * One action, taken from the store's month: the buyer's figure, or the creator's studio requests; `units` of them for
+ * an act that costs more than one (an emailed announcement, lib/community-mail.ts ANNOUNCE_PLACE_STUDIO_UNITS).
+ */
+export async function takeBuyerAction(store: Store, by: "buyer" | "owner" = "buyer", units = 1): Promise<boolean> {
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
-  const taken = by === "owner" ? await takeAllowance(store, "studio") : await takeAllowance(store, "buyer");
+  const taken = by === "owner" ? await takeAllowance(store, "studio", units) : await takeAllowance(store, "buyer", units);
   return taken.ok;
 }
 

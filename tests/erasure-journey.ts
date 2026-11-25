@@ -40,6 +40,7 @@ const ALLOWED: { pattern: RegExp; why: string }[] = [
   { pattern: /^nl:(allow|rl|rlm|traffic|free:pool|fp|pool|usage|studio|spend|ses|mail:day|mail:used):/, why: "counts that pay for the work and limit it" },
   { pattern: /^nl:mail:flowstats:/, why: "a workflow's counts of how many started, never who" },
   { pattern: /^nl:cm:[0-9a-f]+:pts:b:/, why: "a board worked out again when next read" },
+  { pattern: /^nl:cm:[0-9a-f]+:erasures$/, why: "a community's count of erasures, a number only, so a send that read its members during one lets its list go (Claude 2 lpgvy on #5072, LOW 1)" },
   { pattern: /^nl:rev:(sum|stores):/, why: "a review summary worked out again" },
   { pattern: /^nl:lc:[^:]+:(seen|r)$/, why: "comment counts" },
   { pattern: /^nl:wl:[^:]+:[^:]+:send$/, why: "a launch's list, with the deleted address written over (lib/erasure-lists.ts)" },

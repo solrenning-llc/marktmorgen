@@ -532,7 +532,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       memberTraces(id, who),
       challengesOf(id, who),
       // What they sent that waits for approval, and the notes about what was not published (543 [CM2]).
-      heldOf(id, who),
+      heldOf(id, who, undefined, { prune: false }),
     ]);
     const votes = await votesOf(id, who, traces.pollPosts);
     const { pollPosts: _polls, ...wrote } = traces;
@@ -678,7 +678,7 @@ export const ALSO_COPIERS: Readonly<Record<string, PartCopier>> = {
     const names = [...(s.listId ? ["On the store's do-not-email list"] : []), ...(statsId ? ["Stopped product update emails", "Stopped review requests", "Stopped checkout reminders"] : [])];
     return { records: marks.flatMap((mark, i) => (mark === null ? [] : [{ yourNo: names[i], since: markTime(mark) }])), unread: [] };
   },
-  "lib/imports.ts": async (s, now) => importTracesOf(s.store, s.email, now),
+  "lib/imports.ts": async (s, now) => importTracesOf(s.store, s.email, now, { prune: false }),
   "lib/webhooks.ts": async (s, now) => deliveriesAbout(s.store, s.email, now),
 };
 

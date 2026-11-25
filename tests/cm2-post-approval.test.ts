@@ -188,7 +188,8 @@ async function main(): Promise<void> {
   await forgetCommunityPerson(id, ada, "ada@example.com", []);
   is("through the community erasure too", await heldOf(id, ada, t0 + 5), []);
   is("lib/person-data.ts says so", PERSON_DATA.some((d) => d.file === "lib/community-approval.ts" && d.how === "erased" && d.via === "lib/community-erasure.ts"), true);
-  is("the copy of their data includes it", /heldOf\(id, who\)/.test(read("lib/person-copy.ts")), true);
+  // The copy reads it without pruning (#5125): heldOf(id, who, undefined, { prune: false }).
+  is("the copy of their data includes it", /heldOf\(id, who[,)]/.test(read("lib/person-copy.ts")), true);
 
   part("An unknown reply never publishes a held post");
   redis.clear();

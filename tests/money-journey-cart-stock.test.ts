@@ -17,23 +17,29 @@
  *   4. Stripe says the first checkout is paid: readOrder hands over the
  *      three products (the first as the order's own, the other two as its
  *      added lines), for the $54 charged;
- *   5. the thanks page's own steps turn the held units into sales, and the
- *      units stay sold after the hold's time has run out;
+ *   5. the buyer lands on the real thanks page, drawn for the paid checkout:
+ *      it turns the held units into sales, and the units stay sold after the
+ *      hold's time has run out;
  *   6. a third buyer who pays but never comes back to the thanks page: the
  *      units are still never handed back once the hold has run out, because
  *      Stripe says the checkout was paid;
  *   7. the buyer's confirmation is sent once, for the $54 paid, and the order
- *      is counted once; a second try sends nothing more.
+ *      is counted once; a second try sends nothing more;
+ *   8. a cart that starts with a limited product: the thanks page turns the
+ *      order's own held unit into a sale too.
  *
  * Each step reads what the previous one wrote, so a break anywhere fails the
- * journey. Synthetic data only: no real Stripe, email or Redis.
+ * journey. Synthetic data only: no real Stripe, email or Redis. The thanks
+ * page's work left for after its answer (the confirmation, the sale's notes)
+ * is held, never run (next-server-after-world.ts), so part 7 sends it itself.
  */
-import { readFileSync } from "node:fs";
+import { renderToReadableStream } from "react-dom/server";
 import { NextRequest } from "next/server";
+import ThanksPage from "@/app/[handle]/thanks/page";
 import { POST as payCart } from "@/app/api/store/cart/route";
 import { readListing } from "@/lib/catalog";
 import { readOrder } from "@/lib/store-checkout";
-import { confirmCartStock, confirmStock, stockLeft } from "@/lib/stock";
+import { stockLeft } from "@/lib/stock";
 import { confirmPurchase } from "@/lib/purchase-email";
 import {
   addProduct,
@@ -46,6 +52,7 @@ import {
   setSubscription,
   storeForEmail,
 } from "@/lib/store";
+import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -150,6 +157,16 @@ function stripePays(id: string, email: string): number {
   return total;
 }
 
+/** The buyer back from Stripe on the real thanks page (app/[handle]/thanks/page.tsx), drawn as a request would draw it. */
+async function openThanks(sessionId: string): Promise<string> {
+  const query = { session_id: sessionId };
+  answering(new Request(`https://marktmorgen.com/@${HANDLE}/thanks?${new URLSearchParams(query)}`, { headers: { "x-forwarded-for": "203.0.113.54" } }));
+  const tree = await ThanksPage({ params: Promise.resolve({ handle: `@${HANDLE}` }), searchParams: Promise.resolve(query) });
+  const stream = await renderToReadableStream(tree as React.ReactElement, { onError: () => {} });
+  await stream.allReady;
+  return await new Response(stream).text();
+}
+
 async function main(): Promise<void> {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_journey_cart_only";
@@ -228,12 +245,10 @@ async function main(): Promise<void> {
   is("a checkout of another store's handle opens nothing here", await readOrder({ ...(await store()), handle: "elsewhere", previousHandles: [] } as Awaited<ReturnType<typeof store>>, checkout.id).then((o) => o.state), "invalid");
 
   part("5. The thanks page turns the held units into sales");
-  // The thanks page's own two calls (app/[handle]/thanks/page.tsx), checked in its source below.
-  const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
-  is("the thanks page confirms the order's own limited product", /order\.state === "paid" && sessionId && order\.product\.stock !== null\)\s*\{\s*await confirmStock\(store, order\.product, sessionId\)/.test(thanks), true);
-  is("and each limited product among the cart's added lines", /await confirmCartStock\(store, order\.bumps\.map\(\(added\) => added\.product\), sessionId\)/.test(thanks), true);
-  if (order.product.stock !== null) await confirmStock(await store(), order.product, checkout.id);
-  if (order.bumps.some((added) => added.product.stock !== null)) await confirmCartStock(await store(), order.bumps.map((added) => added.product), checkout.id);
+  // The buyer comes back from Stripe to the real thanks page (app/[handle]/thanks/page.tsx), drawn as a request
+  // would draw it: its own steps confirm the held units, nothing here calls them for it.
+  const thanksHtml = await openThanks(checkout.id);
+  is("the thanks page is drawn for the paid cart, naming every product bought", ["Glaze Guide", "Mug Print", "Bowl Print"].every((title) => thanksHtml.includes(title)), true);
   const statsId = (await store()).statsId as string;
   // Since #4472 a unit sold is counted in the record's "#sold" field (STOCK_SELL), and the checkout's own hold field is
   // let go in the same step, so the record no longer grows with every sale.
@@ -271,6 +286,21 @@ async function main(): Promise<void> {
   is("it names every product bought", ["Glaze Guide", "Mug Print", "Bowl Print"].every((title) => text.includes(title)), true);
   is("and says what was paid: $54", text.split("\n").find((line) => line.startsWith("Paid:")) ?? "", "Paid: $54");
   is("a second try sends nothing more", [await confirmPurchase(await store(), checkout.id), emails.filter((email) => email.to.includes("potter@example.com")).length], ["already", 1]);
+
+  part("8. A cart that starts with a limited product");
+  const fifth = await pay([ids["Bowl Print"], ids["Glaze Guide"]]);
+  is("the limited product is the order's own, and one more unit is held", [fifth.stripe, metadataOf(fifth.made[0].body).product, await stockLeft(await store(), await listing("Bowl Print"))], [true, ids["Bowl Print"], 2]);
+  stripePays(fifth.made[0].id, "thrower@example.com");
+  const bowl = async () => (await redis.pipeline([["HGET", `nl:stock:${statsId}:${ids["Bowl Print"]}`, fifth.made[0].id], ["HGET", `nl:stock:${statsId}:${ids["Bowl Print"]}`, "#sold"]])) as (string | null)[];
+  const [holdBefore, soldBefore] = await bowl();
+  is("before the buyer is back, the unit is only held for the checkout", holdBefore !== null, true);
+  const fifthHtml = await openThanks(fifth.made[0].id);
+  is("the thanks page is drawn for it", ["Bowl Print", "Glaze Guide"].every((title) => fifthHtml.includes(title)), true);
+  is(
+    "the thanks page turns the order's own limited unit into a sale: its hold is let go and one more unit is counted sold",
+    await bowl(),
+    [null, String(Number(soldBefore ?? 0) + 1)],
+  );
 
   done();
 }

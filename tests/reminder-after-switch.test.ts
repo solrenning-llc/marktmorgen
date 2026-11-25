@@ -88,6 +88,23 @@ async function main() {
     await redis.pipeline([["SET", `nl:remind:trial:sub_LegacyMark0001:${trialEnd}`, "1", "EX", 60 * DAY]]);
     is("no second notice for a charge already warned of", (await sendReminders(NOW)).sent, 0);
   }
+  part("An old mark that cannot be read sends nothing on a guess, and the next run reads it again (rule 24)");
+  {
+    active = [];
+    const trialEnd = NOW + 5 * DAY;
+    trialing = [sub("sub_LegacyDown001", "trialing", "creator", "month", trialEnd)];
+    const legacy = `nl:remind:trial:sub_LegacyDown001:${trialEnd}`;
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "EXISTS" && c[1] === legacy)) throw new Error("store down (synthetic)");
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const down = await sendReminders(NOW);
+    redis.pipeline = real;
+    const [marked] = await real([["EXISTS", `${legacy}:creator:month:${PLAN_PRICES.creator.month}`]]);
+    is("no notice while the old mark is unreadable, and no new mark taken", [down.sent, marked], [0, 0]);
+    is("the next run reads it and sends the notice once", (await sendReminders(NOW + 3600)).sent, 1);
+  }
   done();
 }
 

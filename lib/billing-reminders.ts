@@ -9,7 +9,11 @@
  * a subscription should treat the person paying for it. Each is sent once per
  * charge, and says the date, the amount and the one click that stops it.
  */
+import { claimMark, claimValue } from "@/lib/claim-mark";
+import { RELEASE } from "@/lib/redis-lock";
+import { cursorRefused } from "@/lib/stripe-cursor";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { isAddOn, keepCardThatPays, listSubscriptions, ownLatestInvoice, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -26,6 +30,116 @@ const YEAR_NOTICE_SECONDS = 30 * DAY;
 /** Too close to the charge to be of use: left alone. */
 const TOO_LATE_SECONDS = DAY;
 const MAX_PAGES = 50;
+/**
+ * Where a list was left when a run stopped at MAX_PAGES, so the next run goes on from there rather than from the top
+ * again (rule 24, R24 crons item 6): a subscription past the first fifty pages used to be never reached, in silence.
+ */
+const afterKey = (status: string) => `nl:remind:after:${status}`;
+const AFTER_SECONDS = 30 * DAY;
+const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]{6,64}$/;
+
+/**
+ * Every subscription of one status, a page at a time from where the last run left the list, at most MAX_PAGES a run.
+ * `each` says whether a subscription was handled (sent, or nothing due). Where the next run reads from:
+ *   - the list ended this run: the top, so a subscription not handled is read again there, with every newer one;
+ *   - the cap stopped this run: from before the first not handled (its email did not go), or after the last page
+ *     read when every one was. Not before the first not handled when that is where this run started: nothing moved,
+ *     so a subscription whose email fails every time would hold the cursor for good, and every subscription after it
+ *     would never be read (Claude 2 and Codex S on #3215). The walk then steps past that one only: from before the
+ *     second not handled, or from the last page read when there is none, and that one is read again when the list
+ *     comes round.
+ * `more`: the cap stopped this run.
+ */
+async function walkList(
+  status: "trialing" | "active" | "past_due",
+  each: (subscription: Record<string, unknown>) => Promise<boolean>,
+): Promise<{ seen: number; more: boolean }> {
+  const [saved] = await redisPipeline([["GET", afterKey(status)]]);
+  // Unreadable or absent: from the top, as every run read before this cursor existed. Never a send twice: each
+  // reminder is held by its own mark.
+  let after = typeof saved === "string" && SUBSCRIPTION_ID.test(saved) ? saved : "";
+  let start = after;
+  // Every subscription not handled, in list order, by where a reading starts to list it again.
+  const notHandledFrom: string[] = [];
+  let seen = 0;
+  let more = true;
+  let restarted = false;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    let listed: Awaited<ReturnType<typeof listSubscriptions>>;
+    try {
+      listed = await listSubscriptions(status, after || undefined);
+    } catch (error) {
+      // A kept cursor Stripe refuses (the object is gone) is never read again: the list is read from the top at once,
+      // once a run, and the cursor written at the end replaces it (Claude 3 N, 6806672663 item 2 on #3215).
+      if (restarted || page !== 0 || !after || !cursorRefused(error)) throw error;
+      restarted = true;
+      after = "";
+      start = "";
+      page -= 1;
+      continue;
+    }
+    const { data, hasMore } = listed;
+    let previous = after;
+    for (const subscription of data) {
+      const from = previous;
+      previous = String(subscription.id);
+      seen += 1;
+      if (!(await each(subscription))) notHandledFrom.push(from);
+    }
+    const last = data[data.length - 1];
+    if (!hasMore || typeof last?.id !== "string") {
+      after = "";
+      more = false;
+      break;
+    }
+    after = last.id;
+  }
+  if (more) console.error(`billing reminders: more ${status} subscriptions than one run reads; the next run goes on from where this one stopped`);
+  const stopAt = notHandledFrom[0] ?? null;
+  if (more && stopAt === start) console.error(`billing reminders: a ${status} subscription at the start of this run was not handled again; the walk goes on and reads it when the list comes round`);
+  // Only that one is stepped past: the next one not handled, when there is one, is read again on the next run
+  // (Claude 1 on #3215: a sender outage would otherwise skip every one the run read).
+  const next = !more ? "" : stopAt === null ? after : stopAt === start ? (notHandledFrom[1] ?? after) : stopAt;
+  await redisPipeline([next ? ["SET", afterKey(status), next, "EX", AFTER_SECONDS] : ["DEL", afterKey(status)]]);
+  return { seen, more };
+}
+
+/**
+ * Whether a reminder's mark from before the plan, cycle and amount were in it is still held: "held" (that notice went
+ * for this date), "absent", or "unknown" when the store did not answer in a shape read exactly (rule 24).
+ */
+async function legacyHeld(legacy: string): Promise<"held" | "absent" | "unknown"> {
+  try {
+    const reply = repliesFor(await redisPipeline([["EXISTS", legacy]]), 1);
+    const count = reply ? countOf(reply[0]) : null;
+    if (count === 1) return "held";
+    if (count === 0) return "absent";
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Lets a reminder's mark go after its email did not go, so the next run tries again (rule 24, R24 crons item 6): tried
+ * twice, and a mark still held is said (false, logged with its key), never swallowed, because it keeps that reminder
+ * from being tried again until it runs out. Only this run's own claim (`value`) is let go, compared and deleted in one
+ * script (lib/redis-lock.ts, RELEASE), as lib/payment-recovery.ts does with releaseMark: a mark that ran out and was
+ * taken by another run is that run's, and stays (Claude 1, 6834038662 on #3215). Read exactly (rule 24): 1, deleted,
+ * or 0, not ours (any more): nothing of ours is held. Any other answer, or none: tried once more, then said.
+ */
+async function letGo(key: string, value: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const reply = repliesFor(await redisPipeline([["EVAL", RELEASE, 1, key, value]]), 1);
+      if (reply && (reply[0] === 0 || reply[0] === 1)) return true;
+    } catch {
+      // Tried once more, then said.
+    }
+  }
+  console.error("a billing reminder's mark could not be let go: that reminder is not tried again until the mark runs out", key);
+  return false;
+}
 
 export type Reminder = {
   kind: "trial" | "renewal";
@@ -230,42 +344,45 @@ export function failedPlanEmail(failed: FailedPlan): { subject: string; text: st
   };
 }
 
-/** Every plan whose payment failed and that has not been written to about it yet. */
-export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: number; seen: number }> {
-  const counts = { sent: 0, failed: 0, seen: 0 };
+/**
+ * Every plan whose payment failed and that has not been written to about it yet. `unreleased`: emails that did not go
+ * and whose mark could not be let go, so they are not tried again until it runs out; `more`: the page cap stopped
+ * this run, and the next goes on from there.
+ */
+export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: number; seen: number; unreleased: number; more: boolean }> {
+  const counts = { sent: 0, failed: 0, seen: 0, unreleased: 0, more: false };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
-  let after: string | undefined;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const { data, hasMore } = await listSubscriptions("past_due", after);
-    for (const subscription of data) {
-      counts.seen += 1;
-      const due = failedPlan(subscription);
-      if (!due) continue;
-      // Claimed before anything is done, so a second run never writes twice.
-      const key = `nl:remind:failed:${due.invoice}`;
-      const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 90 * DAY]]);
-      if (claimed === null) continue;
-      try {
-        // A renewal's email says what has stopped, so it is written down
-        // first (lib/billing-sync.ts); a failure waits for the next run.
-        if (!due.afterTrial) await recordUnpaidRenewal(subscription);
-        // First, so the card that pays is the one the next renewal uses.
-        await keepCardThatPays(due.subscription);
-        const { subject, text } = failedPlanEmail(due);
-        const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: due.email, subject, text, replyTo: SUPPORT_EMAIL });
-        if (!ok) throw new Error("the email was not sent");
-        counts.sent += 1;
-      } catch (error) {
-        counts.failed += 1;
-        console.error("telling a creator their payment failed did not work", error);
-        // Tried again on the next run rather than never.
-        await redisPipeline([["DEL", key]]).catch(() => {});
-      }
+  const walked = await walkList("past_due", async (subscription) => {
+    const due = failedPlan(subscription);
+    if (!due) return true;
+    // Claimed before anything is done, so a second run never writes twice.
+    const key = `nl:remind:failed:${due.invoice}`;
+    const value = claimValue();
+    // Ours, someone else's (told already), or unknown: no email on a guess, read again on the next run (rule 24).
+    const claimed = await claimMark(key, 90 * DAY, value);
+    if (claimed === "taken") return true;
+    if (claimed !== "ours") return false;
+    try {
+      // A renewal's email says what has stopped, so it is written down
+      // first (lib/billing-sync.ts); a failure waits for the next run.
+      if (!due.afterTrial) await recordUnpaidRenewal(subscription);
+      // First, so the card that pays is the one the next renewal uses.
+      await keepCardThatPays(due.subscription);
+      const { subject, text } = failedPlanEmail(due);
+      const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: due.email, subject, text, replyTo: SUPPORT_EMAIL });
+      if (!ok) throw new Error("the email was not sent");
+      counts.sent += 1;
+      return true;
+    } catch (error) {
+      counts.failed += 1;
+      console.error("telling a creator their payment failed did not work", error);
+      // Tried again on the next run rather than never.
+      if (!(await letGo(key, value))) counts.unreleased += 1;
+      return false;
     }
-    const last = data[data.length - 1];
-    if (!hasMore || typeof last?.id !== "string") break;
-    after = last.id;
-  }
+  });
+  counts.seen = walked.seen;
+  counts.more = walked.more;
   return counts;
 }
 
@@ -277,41 +394,48 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
   sent: number;
   failed: number;
   seen: number;
+  /** Reminders whose email did not go and whose mark could not be let go: not tried again until it runs out. */
+  unreleased: number;
+  /** A list longer than one run reads: the next run goes on from where this one stopped. */
+  more: boolean;
 }> {
-  const counts = { sent: 0, failed: 0, seen: 0 };
+  const counts = { sent: 0, failed: 0, seen: 0, unreleased: 0, more: false };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
 
   for (const status of ["trialing", "active"] as const) {
-    let after: string | undefined;
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const { data, hasMore } = await listSubscriptions(status, after);
-      for (const subscription of data) {
-        counts.seen += 1;
-        const reminder = dueReminder(subscription, nowSeconds);
-        if (!reminder) continue;
-        // Once per charge: its date, and the plan and amount it charges. A
-        // switch inside a trial keeps the trial's end, and one between plans
-        // of the same interval keeps the period's end, so the date alone would
-        // let the notice about the plan left stand for a charge of another
-        // amount. A mark from before the plan was in it (`legacy`) still
-        // counts for that date, so nobody is written to twice for it.
-        const legacy = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
-        const key = `${legacy}:${reminder.tier}:${reminder.cycle}:${reminder.amountCents}`;
-        const [before, claimed] = await redisPipeline([["EXISTS", legacy], ["SET", key, "1", "NX", "EX", 60 * DAY]]);
-        if (claimed === null || before === 1) continue;
-        const { subject, text } = reminderEmail(reminder);
-        const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL });
-        if (ok) counts.sent += 1;
-        else {
-          counts.failed += 1;
-          // Tried again on the next run rather than never.
-          await redisPipeline([["DEL", key]]).catch(() => {});
-        }
+    const walked = await walkList(status, async (subscription) => {
+      const reminder = dueReminder(subscription, nowSeconds);
+      if (!reminder) return true;
+      // Once per charge: its date, and the plan and amount it charges. A
+      // switch inside a trial keeps the trial's end, and one between plans
+      // of the same interval keeps the period's end, so the date alone would
+      // let the notice about the plan left stand for a charge of another
+      // amount. A mark from before the plan was in it (`legacy`) still
+      // counts for that date, so nobody is written to twice for it.
+      const legacy = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
+      const key = `${legacy}:${reminder.tier}:${reminder.cycle}:${reminder.amountCents}`;
+      // The old mark held: sent already. Unreadable: no email on a guess, read again on the next run (rule 24).
+      const before = await legacyHeld(legacy);
+      if (before === "held") return true;
+      if (before !== "absent") return false;
+      // Ours, someone else's (sent already), or unknown: no email on a guess, read again on the next run (rule 24).
+      const value = claimValue();
+      const claimed = await claimMark(key, 60 * DAY, value);
+      if (claimed === "taken") return true;
+      if (claimed !== "ours") return false;
+      const { subject, text } = reminderEmail(reminder);
+      const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL });
+      if (ok) {
+        counts.sent += 1;
+        return true;
       }
-      const last = data[data.length - 1];
-      if (!hasMore || typeof last?.id !== "string") break;
-      after = last.id;
-    }
+      counts.failed += 1;
+      // Tried again on the next run rather than never.
+      if (!(await letGo(key, value))) counts.unreleased += 1;
+      return false;
+    });
+    counts.seen += walked.seen;
+    counts.more ||= walked.more;
   }
   return counts;
 }

@@ -10,9 +10,19 @@ import { mailDay, monthlyAllowance, release } from "@/lib/mail";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { COST_LINES } from "./plan-cost-registry";
 import { paidPeriod } from "./billing-period-fixture";
 
 async function main(): Promise<void> {
+  // #5285 row #4074 (Claude 3's LEVE on the merged head dbe28f5a31): release runs two GIVE_BACK_FLOOR EVALs, but the
+  // list-email cost line did not name it or its floor. It is named now, with why the plan's figure covers it.
+  part("The list-email cost line names release and its floor");
+  {
+    const line = COST_LINES.find((one) => one.id === "list-email");
+    const named = (line?.sources ?? []).flatMap((source) => (source.file === "lib/mail.ts" ? source.names : []));
+    is("RED: release and GIVE_BACK_FLOOR_EXTRA_COMMANDS are among its sources", ["release", "GIVE_BACK_FLOOR_EXTRA_COMMANDS"].every((name) => named.includes(name)), true);
+    is("RED: its basis says why the plan's figure covers them", /release/.test(line?.basis ?? "") && /GIVE_BACK_FLOOR/.test(line?.basis ?? ""), true);
+  }
   redis.clear();
   const owner = "release-floor@example.com";
   await claimHandle(owner, "releasefloor", "Release Floor", "");

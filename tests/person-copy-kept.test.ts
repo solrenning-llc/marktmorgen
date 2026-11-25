@@ -10,6 +10,7 @@ import { DEFAULT_KEYS } from "@/lib/key-setup";
 import { keyForSale } from "@/lib/licence-keys";
 import { addressHash } from "@/lib/imported-purchases";
 import { toldKey } from "@/lib/closing-buyers";
+import { productsKey, whoField, whoKey } from "@/lib/preorders";
 import { erasureScope } from "@/lib/person-erasure";
 import { COPIERS, COPY_PLAN } from "@/lib/person-copy";
 import { setSubscription } from "@/lib/store";
@@ -39,6 +40,10 @@ async function main(): Promise<void> {
   redis.run(["SADD", `nl:ppsell:own:${statsId}:${addressHash(PERSON)}:${id}`, "ORDER12345AB"]);
   redis.run(["SET", "nl:ppsell:paid:ORDER12345AB", JSON.stringify({ store: statsId, order: "ORDER12345AB", capture: "CAP1", email: PERSON, product: id, cents: 4900, currency: "usd", at: 1_790_000_000 })]);
   redis.run(["HSET", `nl:pre:${statsId}:${id}`, "cs_test_" + "p".repeat(20), JSON.stringify({ to: PERSON, at: 1_790_000_000, pi: "pi_1" }), "cs_test_" + "q".repeat(20), JSON.stringify({ to: OTHER, at: 1_790_000_000, pi: "pi_2" })]);
+  // Each pre-order's line in its buyer's index and the product in the store's list, as recordPreorder writes them
+  // (#5125, coordinator b3f6): the copy reads a person's pre-orders through them.
+  redis.run(["HSET", whoKey(statsId, id), whoField(PERSON), "cs_test_" + "p".repeat(20), whoField(OTHER), "cs_test_" + "q".repeat(20)]);
+  redis.run(["SADD", productsKey(statsId), id]);
   redis.run(["HSET", toldKey(await storeFolder(storeRef(store))), PERSON, "x"]);
   const scope = { ...(await erasureScope(store, PERSON))!, productIds: [id] };
 

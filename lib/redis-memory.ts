@@ -795,6 +795,19 @@ export class MemoryRedis {
           if (Number(this.run(["HEXISTS", erasing, field])) === 1) return 0;
           return 1;
         }
+        // lib/preorders.ts PREORDER_RECORD: the entry and, only when it is new, its line in the buyer's index and its product
+        // in the store's list, then the three expiries, answering {made, the entry}.
+        if (key.startsWith("-- marktmorgen:preorder-record:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, entries, who, products, field, checkout, entry, product, keep] = args;
+          const made = this.run(["HSETNX", entries, checkout, entry]);
+          if (made === 1) {
+            const list = this.run(["HGET", who, field]);
+            this.run(["HSET", who, field, typeof list === "string" ? `${list}\n${checkout}` : checkout]);
+            this.run(["SADD", products, product]);
+          }
+          for (const k of [entries, who, products]) this.run(["EXPIRE", k, keep]);
+          return [made, this.run(["HGET", entries, checkout])];
+        }
         // lib/flows.ts WRITE_FLOWS_IF: the workflows written only over the text they were read from, sent as its SHA-1.
         // lib/checkout-sweep.ts KEEP_AFFILIATE_SETTLED: the sessions marked, the day trimmed and the expiry set, in one step.
         if (key.startsWith("-- marktmorgen:sweep-affiliate-settled:v1\n") && args[0] === "1" && args.length >= 4) {

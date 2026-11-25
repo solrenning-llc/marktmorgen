@@ -19,7 +19,7 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, storeForEmail } from "@/lib/store";
 import { setSoon } from "@/lib/waitlist";
-import { preorderViews, preordersOf, setExpectedDay } from "@/lib/preorders";
+import { preorderViews, preordersOf, productsKey, setExpectedDay, whoField, whoKey } from "@/lib/preorders";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { COPIERS } from "@/lib/person-copy";
 import type { ErasureScope } from "@/lib/erasure-rules";
@@ -143,7 +143,9 @@ async function main(): Promise<void> {
     await setProductLink(OWNER, pid, "https://example.com/the-thing");
     await setSoon(await store(), pid, true);
     const key = `nl:pre:${sid}:${pid}`;
-    if (withBuyer) await redis.pipeline([["HSET", key, CHECKOUT, WAITING]]);
+    // The buyer's pre-order with its line in the buyer's index and its product in the store's list, as recordPreorder
+    // writes them (#5125, coordinator b3f6): the copy reads a person's pre-orders through them.
+    if (withBuyer) await redis.pipeline([["HSET", key, CHECKOUT, WAITING], ["HSET", whoKey(sid, pid), whoField(BUYER), CHECKOUT], ["SADD", productsKey(sid), pid]]);
     return { pid, key };
   };
   const switchDay = (pid: string) =>
@@ -156,8 +158,10 @@ async function main(): Promise<void> {
   const { pid: e } = await setUp("Course E");
   is("the studio sees the buyer who waits, and nothing for a product nobody pre-ordered", await preorderViews(await store(), [a, b]), { [a]: { day: null, waiting: 1, given: 0, refunded: 0 } });
   is("the switch answers the view with its day and the buyer who waits", await switchDay(a).then((r) => r.json()), { ok: true, view: { day: DAY, waiting: 1, given: 0, refunded: 0 } });
-  is("the copy of the buyer's data has their pre-order", (await preordersOf(await store(), [a, b], BUYER)).map((p) => [p.product, p.checkout, p.to]), [[a, CHECKOUT, BUYER]]);
-  is("and the copier hands it over", (await COPIERS["lib/preorders.ts"](await scopeOf([a, b]))).length, 1);
+  // Since #5125 the copy reads every product the store took a pre-order for, not only those it is asked about: the
+  // buyer's pre-order of E, which the scope below does not list, is theirs too and is in it.
+  is("the copy of the buyer's data has their pre-orders", (await preordersOf(await store(), BUYER)).map((p) => [p.product, p.checkout, p.to]).sort(), [[a, CHECKOUT, BUYER], [e, CHECKOUT, BUYER]].sort());
+  is("and the copier hands them over", (await COPIERS["lib/preorders.ts"](await scopeOf([a, b]))).length, 2);
 
   for (const [label, reply] of SHAPES) {
     part(`Unknown (${label}): the HVALS of a product's pre-orders answers in another shape`);
@@ -179,11 +183,12 @@ async function main(): Promise<void> {
   }
 
   for (const [label, reply] of HASH_SHAPES) {
-    part(`Unknown (${label}): the HGETALL of a product's pre-orders for the copy answers in another shape`);
+    // Since #5125 the copy reads the buyer's entry by its checkout (HGET), never the product's whole hash.
+    part(`Unknown (${label}): the read of the buyer's pre-order for the copy answers in another shape`);
     const shop = await store();
-    is(`(${label}) preordersOf says it does not know, never "no pre-orders"`, await withBent("HGETALL", aKey, reply, () => rejection(() => preordersOf(shop, [a, b], BUYER))), "UnknownReplyError");
+    is(`(${label}) preordersOf says it does not know, never "no pre-orders"`, await withBent("HGET", aKey, reply, () => rejection(() => preordersOf(shop, BUYER))), "UnknownReplyError");
     const scope = await scopeOf([a, b]);
-    is(`(${label}) so the copy is not made without them`, await withBent("HGETALL", aKey, reply, () => rejection(() => COPIERS["lib/preorders.ts"](scope))), "UnknownReplyError");
+    is(`(${label}) so the copy is not made without them`, await withBent("HGET", aKey, reply, () => rejection(() => COPIERS["lib/preorders.ts"](scope))), "UnknownReplyError");
   }
 
   // The independent review of #3005 (LEVE): "Saved." rested on an HSET/HDEL whose reply was never checked.

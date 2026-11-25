@@ -82,6 +82,15 @@ export const pictureNoteKey = (path: string): string => uploadKey(path);
 const TAKEN = "\ttaken\t";
 const markOf = (author: string) => `${TAKEN}${createHash("sha256").update(`nimbus-cimg-taken:${author}`).digest("hex").slice(0, 16)}`;
 /**
+ * What a picture's note holds once a post dropped it and its delete was not confirmed (dropCommunityImage), until the
+ * daily sweep has deleted the file and given its place back (sweepCommunityUploads). The name stays held: no door can be
+ * noted for it (NOTE_PICTURE's SET NX), no post can take it (TAKE_PICTURE wants the member's own note), and the sweep,
+ * unlike for TAKEN, deletes it. Before (Codex X6's LOW on #3414), the mark was only deleted: a delete whose answer was
+ * lost after the file store had deleted the file left the name free, a new door noted for it replaced the dropped
+ * picture's listing, and that picture's place was never given back. Never a member's key (no tab in one) nor TAKEN.
+ */
+const DROPPED = "\tdropped\t";
+/**
  * What a picture's mark keeps in the database, taken from the store's data room with the post that shows the picture
  * (lib/community.ts, postBytes): its key and its value, as one entry.
  */
@@ -295,10 +304,12 @@ export async function dropCommunityImage(path: string | undefined | null): Promi
   // With nothing else naming it, false means only that the delete failed.
   if (await removeCommunityImage(path)) return;
   console.error("a community picture whose delete failed is listed for the daily sweep");
-  // Its mark goes first (merge of main's 25c1b63df with this PR's mark): a picture marked TAKEN is kept by the sweep,
-  // so a dropped picture listed with its mark would stay in storage for good, its place counted. No post keeps it any
-  // more, and its name is not reopened: a door asks the file store first and refuses a name it still has.
-  await redisPipeline([["DEL", uploadKey(path)], ["ZADD", DOORS_KEY, 0, path]]).catch((listError: unknown) =>
+  // Its mark becomes DROPPED (merge of main's 25c1b63df with this PR's mark: a picture marked TAKEN is kept by the
+  // sweep, so a dropped picture listed with its mark would stay in storage for good, its place counted). No post keeps
+  // it any more, and its name stays held until the sweep has given its place back: a delete whose answer was lost may
+  // have deleted the file already, so the file store's head no longer refuses the name (Codex X6's LOW on #3414). The
+  // same two commands as before, a SET in place of the DEL.
+  await redisPipeline([["SET", uploadKey(path), DROPPED], ["ZADD", DOORS_KEY, 0, path]]).catch((listError: unknown) =>
     console.error("could not list a community picture whose delete failed; it and its place are kept", listError),
   );
 }
@@ -400,6 +411,23 @@ export async function sweepCommunityUploads(now = Date.now(), limit = 300): Prom
     const note = read ? read[0] : undefined;
     if (typeof note === "string" && note.startsWith(TAKEN)) {
       console.error("a community picture a post took was listed for the sweep; kept");
+      continue;
+    }
+    if (note === DROPPED) {
+      // A picture a post dropped whose delete was not confirmed (dropCommunityImage): deleted, then its name freed, and
+      // only once that is confirmed its place given back, once. A failure at either step lists it again, its name still
+      // held, for a later sweep (a second delete of a file already gone is fine).
+      try {
+        await del(path);
+        const freed = repliesFor(await redisPipeline([["DEL", uploadKey(path)]]), 1);
+        if (!freed || countOf(freed[0]) !== 1) throw new UnknownReplyError("a dropped community picture's name freed");
+      } catch (error) {
+        console.error("could not finish a dropped community picture; listed again", error);
+        await redisPipeline([["ZADD", DOORS_KEY, before, path]]).catch(() => null);
+        continue;
+      }
+      await givePicturePlace(path);
+      swept += 1;
       continue;
     }
     if (note !== null) {

@@ -59,7 +59,7 @@ test("a new request is waiting for both addresses", () => {
     appliedAt: null,
   });
   assert.equal(moveState(request, T0), "waiting-both");
-  assert.equal(MOVE_EMAILS_PER_REQUEST, 2);
+  assert.equal(MOVE_EMAILS_PER_REQUEST, 3);
 });
 
 test("without both confirmations nothing moves", () => {

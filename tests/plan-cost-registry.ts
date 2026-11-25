@@ -2601,6 +2601,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/path-lead.ts", names: ["PATH_LEAD_COMMANDS", "countConfirmedLead"] },
       { file: "app/api/store/join/confirm/route.ts", names: ["countConfirmedLead"] },
       { file: "app/api/store/waitlist/confirm/route.ts", names: ["countConfirmedLead"] },
+      // A buyer's move of purchases to another email (611 [WP10]): three access emails a request (one with no link to the current address, the new address's link as `asked`, then the current address's link once the new one confirmed), at most three requests an address a day.
+      { file: "lib/purchase-move-rules.ts", names: ["MOVE_EMAILS_PER_REQUEST", "MAX_MOVES_PER_ADDRESS_DAY"] },
+      { file: "lib/purchase-move-flow.ts", names: ["kind: \"transactional\"", "asked: true"] },
     ],
     basis: "The plan's access emails, each at the most an email costs and its count; taken from the store's window before sending, refused past it. Since 9 November 2026 each also carries the Path lead its sign-up or waitlist link may count when it is used (lib/path-lead.ts, 13 [D10]): PATH_LEAD_COMMANDS (one script's EVAL and the eight it runs, as Upstash bills them: the deletion check, two TYPEs, the erasure note's three, the mark and the count, taken together so an address already deleted writes nothing and a mark never stands without its note or its count), held in tests/path-lead-confirmed.test.ts; the confirmation routes take no public request. The join link is deleted on use and the waitlist's later presses do not ask (`first`); two presses at the same instant can each send the script, eight commands that write nothing more.",
   },
@@ -2894,6 +2897,8 @@ export const COST_LINES: CostLine[] = [
       // row that exists the reading, the row's HSET and, for a new end, its room are paid first as one more public
       // request (takePublicRequest), a later page of its own, refused past the store's window (C2's L-1 on #3445).
       { file: "app/api/store/course/start/route.ts", names: ["purchaseStamp(store, email, product.id)", "noteStudentStamp(", "takePublicRequest(store, \"buyer\")"] },
+      // A buyer's move of purchases (611 [WP10]): the ask, a link's page and its Confirm each hold a public request before they read (tests/purchase-move-flow.test.ts holds the reads under it).
+      { file: "lib/purchase-move-flow.ts", names: ["MOVE_ASK_UNITS", "MOVE_LINK_UNITS", "MOVE_ASK_COMMANDS", "MOVE_LINK_COMMANDS", "MOVE_CONFIRM_COMMANDS", "MOVE_ISSUE_COMMANDS"] },
       // A license key's device activation or release (610 [WP9] unit 2): at most ACTIVATION_COMMANDS commands and the record's
       // bytes, counted as ACTIVATION_REQUEST_UNITS requests before anything is read (the price is held in tests/licence-activations.test.ts);
       // its record takes its room in the store's data room before it is written (tests/store-data-registry.ts).
@@ -4488,6 +4493,8 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/paypal-cancel.ts": ORDER,
   "lib/purchase-email.ts": ["order", "store"], "lib/calls.ts": ["order", "store"], "lib/licence-keys.ts": ["order", "store"],
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,
+  // A buyer's move of purchases to another email (611 [WP10]): one link to each address, from the store's access emails.
+  "lib/purchase-move-flow.ts": STORE,
   "lib/buyer-library.ts": STORE, "lib/erasure-request.ts": STORE, "lib/buyer-orders.ts": STORE, "lib/checkout-recovery.ts": STORE, "lib/checkout-trouble.ts": STORE, "lib/plan-stuck-notice.ts": STORE, "lib/plan-late-notice.ts": STORE,
   "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/community-held-notice.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE, "lib/letter-access.ts": STORE,
   "lib/lesson-comment-notify.ts": STORE, "lib/member-nudge.ts": STORE, "lib/membership-manage.ts": STORE, "lib/membership-pause.ts": STORE,

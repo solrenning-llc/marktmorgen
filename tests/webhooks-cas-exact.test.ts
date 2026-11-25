@@ -25,7 +25,7 @@ import { SAVE_CRM_PIPELINES } from "@/lib/crm";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { allowanceUsed } from "@/lib/store-allowance";
-import { addEndpoint, emitEvent, removeEndpoint, resendDelivery, rotateSecret, setSendHooksForTests, webhooksView } from "@/lib/webhooks";
+import { RESEND_IN_FLIGHT_MS, addEndpoint, emitEvent, removeEndpoint, resendDelivery, rotateSecret, setSendHooksForTests, webhooksView } from "@/lib/webhooks";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -56,6 +56,9 @@ let casCalls = 0;
 /** While set, the reply to each other command it matches is replaced by what it returns (the command still runs). */
 let bend: ((command: Command, reply: unknown) => unknown) | null = null;
 redis.pipeline = (async (commands: Command[]) => {
+  // Each case presses once, in a fresh minute: since issue #3994 a resend counts the tests' minute before its mark, and
+  // this file is about the mark's replies, not that limit (held in tests/webhook-resend.test.ts).
+  if (commands.some((c) => c[0] === "INCR" && String(c[1]).startsWith("nl:rl:hooks:test:"))) await real([["DEL", ...commands.filter((c) => c[0] === "INCR").map((c) => String(c[1]))]]);
   // The queue's lease is not taken here, so the event's first try waits (no network either way).
   if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes('redis.call("ZSCORE", KEYS[1], ARGV[1])')) return [0];
   if (commands.length === 1 && isCas(commands[0])) {
@@ -361,6 +364,10 @@ async function main(): Promise<void> {
   }
   const [gone] = await real([["DEL", `nl:hooks:d:${resentAs}`]]);
   is("setup: the last resend expired", gone, 1);
+  // A resend's record expires days after its mark (DELIVERY_SECONDS), so by then the mark is far older than
+  // RESEND_IN_FLIGHT_MS (issue #3994: a recent mark with no record is a resend under way, not gone).
+  const markedOriginal = JSON.parse(String((await real([["GET", `nl:hooks:d:${failedId}`]]))[0])) as Record<string, unknown>;
+  await real([["SET", `nl:hooks:d:${failedId}`, JSON.stringify({ ...markedOriginal, resentAt: Date.now() - RESEND_IN_FLIGHT_MS - 1 }), "KEEPTTL"]]);
   const afterGone = sends;
   const again = brief(await outcome(resendDelivery(store, failedId)));
   is("control: a last resend that is gone (null) lets the original be sent again", [again, sends - afterGone], ["sent", 1]);

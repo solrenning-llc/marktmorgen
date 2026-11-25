@@ -39,6 +39,9 @@ let writesFailAfterMark = false;
 let marked = false;
 const touchesOriginal = (c: Command) => (c[0] === "EVAL" ? String(c[3]) === original : String(c[1]) === original);
 redis.pipeline = (async (commands: Command[]) => {
+  // Each case presses once, in a fresh minute: since issue #3994 a resend counts the tests' minute before its mark, and
+  // this file is about the mark's replies, not that limit (held in tests/webhook-resend.test.ts).
+  if (commands.some((c) => c[0] === "INCR" && String(c[1]).startsWith("nl:rl:hooks:test:"))) await real([["DEL", ...commands.filter((c) => c[0] === "INCR").map((c) => String(c[1]))]]);
   // The queue's lease is not taken here, so the event's first try waits (no network either way).
   if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes('redis.call("ZSCORE", KEYS[1], ARGV[1])')) return [0];
   if (marked && writesFailAfterMark && commands.some((c) => touchesOriginal(c) && !READS.has(String(c[0])))) {

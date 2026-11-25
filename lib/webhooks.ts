@@ -78,7 +78,7 @@ import { isSettled } from "@/lib/instant-pay";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
 import { suppressedAmongCommand, wholeErasedReply } from "@/lib/suppression";
 import { ERASING_KEY, MAX_STORE_BYTES, STORE_ID_PATTERN, type Store, erasingField, ownerKey, storeIdCommand, storeRef, storeForHandle, saleHandles } from "@/lib/store";
-import { allowanceUsedWords, allowancesUsedStrict, takeAllowance } from "@/lib/store-allowance";
+import { allowanceUsedWords, allowancesUsedStrict, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { WEBHOOK_ADD_PAUSED_WORDS, WEBHOOK_PAUSED_COUNTED, WEBHOOK_PAUSED_NOT_SENT_WORDS, WEBHOOK_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
 import { namesAddress } from "@/lib/address-match";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
@@ -309,6 +309,11 @@ export type Delivery = {
   notSentPaused?: true;
   /** The failed delivery this one sends again, by the creator's hand (378 [TB4] unit 3). */
   resentFrom?: string;
+  /**
+   * When an original was marked as sent again by hand (resentAs), in milliseconds (issue #3994): a resend it names
+   * with no record yet is under way, not gone, until RESEND_IN_FLIGHT_MS after this. Absent on marks written before.
+   */
+  resentAt?: number;
   /** On a failed delivery: the last time it was sent again by hand, so it is sent again only while that one failed. */
   resentAs?: string;
   /**
@@ -1661,6 +1666,14 @@ export async function removeEndpoint(store: Store, id: string, withLog = true): 
 }
 
 /**
+ * How long a resend that a mark names, and that has no record yet, is taken as under way, not gone (issue #3994): from
+ * the mark to the record written after the endpoint's answer, a press runs one call of at most ATTEMPT_TIMEOUT_MS and a
+ * few Redis commands, far less than this. A press that stopped in between (a crash, the function's time limit) holds
+ * the original at most this long; then its resend reads as gone and the original may be sent again.
+ */
+export const RESEND_IN_FLIGHT_MS = 15 * 60_000;
+
+/**
  * A resend's mark on the original delivery (resendDelivery): written only while the original still holds the very
  * text read, as the settings' compare-and-set, with the same replies (1 written; [-1] or [-1, n] the text there was another), so
  * compareAndSetReply reads it. Unlike that script, its write keeps the original's expiry in the same step (KEEPTTL),
@@ -1723,6 +1736,12 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
     const last = lastRead[0] === null ? null : parseDelivery(lastRead[0]);
     if (lastRead[0] !== null && !last) return { ok: false, reason: "unavailable" };
     if (last && last.state !== "failed") return { ok: false, reason: "resent" };
+    // No record yet for a resend marked moments ago: that press is calling the endpoint now, and writes its record
+    // only after the answer. It is under way, never gone (issue #3994: a second press in that gap sent the event
+    // again). Only a mark older than RESEND_IN_FLIGHT_MS, or one from before resentAt was kept, reads as gone.
+    if (!last && typeof before.resentAt === "number" && Number.isFinite(before.resentAt) && Math.abs(now - before.resentAt) < RESEND_IN_FLIGHT_MS) {
+      return { ok: false, reason: "resent" };
+    }
   }
   // A message kept before the bound, larger than it, is not kept again by hand.
   if (tooLargeToKeep(JSON.stringify({ ...before, attempts: 0, state: "queued", next: 0, lastStatus: 0, lastError: "", lastAt: 0, resentFrom: before.id, resentAs: undefined }))) {
@@ -1744,27 +1763,34 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
     if (!(error instanceof UnknownReplyError)) throw error;
     return { ok: false, reason: "unavailable" };
   }
-  const againId = `dlv_${randomBytes(12).toString("hex")}`;
-  // Two presses at once: only the one that marks the original first goes on (a compare-and-set over the text read).
-  // A press refused below (the minute's limit, the month's deliveries) leaves a mark naming nothing, which allows the next.
-  // The mark read exactly (rules 24 and 30): [-1] / [-1, n] is another press first ("resent"); any other reply is
-  // unknown, never marked: nothing is taken or sent, and it could not be sent just now. A mark that did land names a
-  // resend that was never written, which reads as gone and allows the next press. The mark keeps the original's
-  // expiry in its own step (RESEND_MARK), so whatever fails after it, the original still goes when it would have.
-  let marked: "saved" | "changed";
-  try {
-    marked = compareAndSetReply(await redisPipeline([["EVAL", RESEND_MARK, 1, deliveryKey(deliveryId), raw, JSON.stringify({ ...before, resentAs: againId }), DELIVERY_SECONDS]]), "a webhook resend's mark");
-  } catch (error) {
-    if (!(error instanceof UnknownReplyError)) throw error;
-    return { ok: false, reason: "unavailable" };
-  }
-  if (marked !== "saved") return { ok: false, reason: "resent" };
-  // A count in any other shape is unknown (CX-123 rule 24): the endpoint is not called on it.
+  // The minute's limit, the paid window and the month's delivery are taken before the mark (issue #3994), so a mark
+  // is left only by a press that goes on to call the endpoint: a refused press never marks the original, and a mark
+  // with no record yet is a resend under way (RESEND_IN_FLIGHT_MS above). A count in any other shape is unknown
+  // (CX-123 rule 24): the endpoint is not called on it.
   const count = windowCountOf(await redisPipeline(windowCount(testsKey(statsId), 60)));
   if (count === null || count > TESTS_PER_MINUTE) return { ok: false, reason: "limited" };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "unavailable" };
   const taken = await takeAllowance(store, "webhook", 1, now);
   if (!taken.ok) return { ok: false, reason: "used", message: taken.message };
+  const againId = `dlv_${randomBytes(12).toString("hex")}`;
+  // Two presses at once: only the one that marks the original first goes on (a compare-and-set over the text read).
+  // The mark read exactly (rules 24 and 30): [-1] / [-1, n] is another press first ("resent"); any other reply is
+  // unknown: nothing is sent, and it could not be sent just now. A press that does not go on gives back the month's
+  // delivery it took (best effort: a give-back that fails leaves it taken, never one sent twice). The mark keeps the
+  // original's expiry in its own step (RESEND_MARK), so whatever fails after it, the original still goes when it
+  // would have; and it keeps when it was made (resentAt), so the next press knows this one is under way.
+  let marked: "saved" | "changed";
+  try {
+    marked = compareAndSetReply(await redisPipeline([["EVAL", RESEND_MARK, 1, deliveryKey(deliveryId), raw, JSON.stringify({ ...before, resentAs: againId, resentAt: now }), DELIVERY_SECONDS]]), "a webhook resend's mark");
+  } catch (error) {
+    await giveAllowance(store, "webhook", 1, now).catch(() => undefined);
+    if (!(error instanceof UnknownReplyError)) throw error;
+    return { ok: false, reason: "unavailable" };
+  }
+  if (marked !== "saved") {
+    await giveAllowance(store, "webhook", 1, now).catch(() => undefined);
+    return { ok: false, reason: "resent" };
+  }
   const again: Delivery = {
     id: againId,
     statsId,

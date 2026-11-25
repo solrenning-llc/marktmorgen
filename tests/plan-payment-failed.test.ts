@@ -11,6 +11,11 @@
  *     the store does not have;
  *   - never twice for the same invoice, and tried again on the next run when
  *     the email could not be sent;
+ *   - the once-per-invoice claim is won only on an exact answer (CX-123 rule
+ *     24, lib/claim-mark.ts): an answer that proves nothing sends nothing,
+ *     keeps no card, is counted as unknown, and the next run sends it once;
+ *     a proven nil (claimed elsewhere) sends nothing and is not unknown, and
+ *     an answer lost on a write that landed is read back as ours;
  *   - nothing is sent for an invoice that is not open, has nothing on it,
  *     has no page to pay on, or has no address to write to.
  */
@@ -159,6 +164,85 @@ async function main() {
     emailWorks = true;
     const up = await sendFailedPlanNotices();
     is("sent on the next run", up.sent, 1);
+  }
+
+  // The claim's SET NX answered in a shape that proves nothing; every other command is the stand-in's own.
+  // With `landed`, the write is made first and only its answer is lost.
+  const original = redis.pipeline;
+  async function withClaimReply<T>(reply: unknown[], run: () => Promise<T>, landed = false): Promise<T> {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const claim = commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:remind:failed:") && commands[0].includes("NX");
+      if (!claim) return original.call(redis, commands);
+      if (landed) await original.call(redis, commands);
+      return [...reply];
+    }) as typeof redis.pipeline;
+    try {
+      return await run();
+    } finally {
+      redis.pipeline = original;
+    }
+  }
+  const UNKNOWN_REPLIES: unknown[][] = [[], [undefined], ["unconfirmed"], [0]];
+  const shown = (reply: unknown[]) => `[${reply.map((value) => (value === undefined ? "undefined" : JSON.stringify(value))).join(", ")}]`;
+
+  part("An unknown answer to the claim sends nothing, and the next run sends it once");
+  for (const [i, reply] of UNKNOWN_REPLIES.entries()) {
+    const id = `sub_claimunk0${i}`;
+    subscriptions = [sub(id)];
+    const odd = await withClaimReply(reply, () => sendFailedPlanNotices());
+    is(`reply ${shown(reply)}: nothing sent, counted as unknown, not failed`, [odd.sent, odd.unknown, odd.failed], [0, 1, 0]);
+    is(`reply ${shown(reply)}: no email`, emails.filter((e) => e.to.startsWith(id)).length, 0);
+    is(`reply ${shown(reply)}: the card is not touched`, kept.includes(id), false);
+    const next = await sendFailedPlanNotices();
+    is(`reply ${shown(reply)}: the next run sends it`, [next.sent, next.unknown], [1, 0]);
+    is(`reply ${shown(reply)}: one email in all`, emails.filter((e) => e.to.startsWith(id)).length, 1);
+  }
+
+  part("Controls: a proven nil, and an answer lost on a write that landed");
+  const controls: unknown[] = [];
+  {
+    subscriptions = [sub("sub_claimnil001")];
+    await redis.pipeline([["SET", "nl:remind:failed:in_claimnil001inv", "someone-else", "EX", 60]]);
+    const taken = await sendFailedPlanNotices();
+    is("a proven nil (claimed elsewhere): nothing sent, nothing failed", [taken.sent, taken.failed], [0, 0]);
+    is("and no email", emails.some((e) => e.to.startsWith("sub_claimnil001")), false);
+    controls.push(taken.unknown);
+  }
+  {
+    subscriptions = [sub("sub_claimlost01")];
+    const lost = await withClaimReply([undefined], () => sendFailedPlanNotices(), true);
+    is("an answer lost on a write that landed is read back as ours: sent once", lost.sent, 1);
+    const again = await sendFailedPlanNotices();
+    is("and not again", again.sent, 0);
+    is("one email", emails.filter((e) => e.to.startsWith("sub_claimlost01")).length, 1);
+    controls.push(lost.unknown, again.unknown);
+  }
+  is("none of the controls is counted as unknown", controls, [0, 0, 0]);
+
+  // Codex X6 (@a8bd96a695, NOT FIXED): the claim's write landed, and both its answer and the read-back were lost. The
+  // run cannot tell, sends nothing and says unknown; it must let go of its own mark, or the next 90 days see it taken.
+  part("A write that landed with its answer and its read-back both lost: let go, so the next run sends it once");
+  {
+    subscriptions = [sub("sub_claimboth1")];
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const claim = commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:remind:failed:") && commands[0].includes("NX");
+      const readBack = commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:remind:failed:");
+      if (claim) {
+        await original.call(redis, commands);
+        throw new Error("synthetic: the answer was lost");
+      }
+      if (readBack) throw new Error("synthetic: the read-back was lost");
+      return original.call(redis, commands);
+    }) as typeof redis.pipeline;
+    let both: Awaited<ReturnType<typeof sendFailedPlanNotices>>;
+    try {
+      both = await sendFailedPlanNotices();
+    } finally {
+      redis.pipeline = original;
+    }
+    is("nothing sent, counted as unknown", [both.sent, both.unknown], [0, 1]);
+    const next = await sendFailedPlanNotices();
+    is("the next run sends it, once", [next.sent, emails.filter((e) => e.to.startsWith("sub_claimboth1")).length], [1, 1]);
   }
 
   done();

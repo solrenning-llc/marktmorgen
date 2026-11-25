@@ -64,6 +64,7 @@ const CREDENTIALS = [
   "re_test_lesson_comments_only",
   "re_test_library_only_a_stand_in",
   "re_test_move_only_a_stand_in",
+  "re_test_notice_run_only",
   "re_test_numbers_four_only",
   "re_test_numbers_six_only",
   "re_test_numbers_three_only",

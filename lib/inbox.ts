@@ -659,15 +659,18 @@ async function keptSlots(statsId: string, ids: string[]): Promise<(string | null
   return slots as (string | null)[];
 }
 
-/** The store's conversations, open first, then the newest; what has expired is dropped from the index. */
-export async function readInbox(statsId: string | null): Promise<Conversation[]> {
+/**
+ * The store's conversations, open first, then the newest; what has expired is dropped from the index, unless `prune`
+ * is false: a person's data copy only reads (lib/person-copy.ts; issue #5125).
+ */
+export async function readInbox(statsId: string | null, { prune = true }: { prune?: boolean } = {}): Promise<Conversation[]> {
   if (!statsId || !isRedisConfigured()) return [];
   const ids = await indexIds(statsId, MAX_CONVERSATIONS - 1);
   if (!ids.length) return [];
   const values = await keptSlots(statsId, ids);
   // Only a slot that answered exactly null has expired; nothing else leaves the index.
   const gone = ids.filter((_, i) => values[i] === null);
-  if (gone.length) await redisPipeline([["ZREM", indexKey(statsId), ...gone]]).catch(() => {});
+  if (prune && gone.length) await redisPipeline([["ZREM", indexKey(statsId), ...gone]]).catch(() => {});
   // A kept record that does not read is unknown, never a conversation that is not there (rule 24): the studio and the
   // person's data copy would otherwise go on without it in silence.
   const kept = values.map((value) => {

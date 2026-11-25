@@ -320,8 +320,11 @@ export async function changeRequest<T>(
   });
 }
 
-/** The store's requests, newest first, at most its plan's kept figure; null when they cannot be read. */
-export async function listRequests(store: Store, now = Date.now()): Promise<PaymentRequest[] | null> {
+/**
+ * The store's requests, newest first, at most its plan's kept figure; null when they cannot be read. Expired ids are
+ * dropped from the indexes, unless `prune` is false: a person's data copy only reads (lib/person-copy.ts; issue #5125).
+ */
+export async function listRequests(store: Store, now = Date.now(), { prune = true }: { prune?: boolean } = {}): Promise<PaymentRequest[] | null> {
   if (!isRedisConfigured() || !store.sid) return null;
   try {
     const limit = Math.max(1, requestLimitsFor(store, now / 1000).kept, 20);
@@ -348,7 +351,7 @@ export async function listRequests(store: Store, now = Date.now()): Promise<Paym
       else if (raw === null) gone.push(id);
       else throw new Error("Payment request record unreadable");
     });
-    if (gone.length) await redisPipeline([["ZREM", storeKey(store.sid), ...gone], ["ZREM", openKey(store.sid), ...gone]]);
+    if (prune && gone.length) await redisPipeline([["ZREM", storeKey(store.sid), ...gone], ["ZREM", openKey(store.sid), ...gone]]);
     return out;
   } catch (error) {
     console.error("reading payment requests failed", error);

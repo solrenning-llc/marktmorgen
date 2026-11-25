@@ -355,7 +355,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return out;
   },
   "lib/payment-request-store.ts": async (s) => {
-    const list = await listRequests(s.store);
+    // Read only: expired ids stay in the store's index for the studio to drop (issue #5125).
+    const list = await listRequests(s.store, Date.now(), { prune: false });
     if (list === null) throw new Error("the payment requests could not be read");
     // The request's id is the secret in its pay link, a key, left out: they have it in the email that sent it. So are
     // the store's own id, the last checkout opened for it and the internal reason an email failed (as for agreements);
@@ -366,7 +367,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     });
   },
   "lib/agreement-store.ts": async (s) => {
-    const list = await listAgreements(s.store);
+    const list = await listAgreements(s.store, { prune: false });
     if (list === null) throw new Error("the agreements could not be read");
     const out: unknown[] = [];
     for (const a of list.filter((a) => same(a.email, s.email))) {
@@ -481,7 +482,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   },
   "lib/inbox.ts": async (s) => {
     const out: unknown[] = [];
-    for (const conversation of (await readInbox(s.statsId)).filter((c) => same(c.email, s.email))) {
+    for (const conversation of (await readInbox(s.statsId, { prune: false })).filter((c) => same(c.email, s.email))) {
       // Without the store: read, never marked as read.
       const thread = await openConversation(s.statsId, conversation.id);
       if (!thread) continue;

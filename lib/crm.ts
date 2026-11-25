@@ -381,6 +381,22 @@ export async function readValues(statsId: string | null, person: string, fields:
 }
 
 /**
+ * A person's fields and answers for their page in the studio (app/studio/people/page.tsx), read together, or null
+ * when either read is unknown (Codex X6's LOW 2 on #2901, #5285): the page then says they could not be read just now,
+ * as it does for the person's company, instead of falling to the site's error page. An unknown read is never an empty
+ * list of fields nor a person with no answers. A person not given ("") reads the fields alone, with no answers.
+ */
+export async function personFieldsForPage(statsId: string | null, person: string): Promise<{ fields: CrmField[]; values: Record<string, string> } | null> {
+  try {
+    const fields = await readFields(statsId);
+    return { fields, values: await readValues(statsId, person, fields) };
+  } catch (error) {
+    if (error instanceof CrmSchemaReadUnavailable || error instanceof UnknownReplyError) return null;
+    throw error;
+  }
+}
+
+/**
  * The most a value takes, in UTF-8: the longest a field keeps (a text, an address
  * or a number at MAX_FIELD_VALUE; every choice of a field of several, one a
  * line), at three bytes a UTF-16 unit, the most any takes.

@@ -16,7 +16,7 @@ import type { Company } from "@/lib/crm-companies-rules";
 import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
-import { readFields, readGeneration, readPersonTasks, readValues, pageMark } from "@/lib/crm";
+import { pageMark, personFieldsForPage, readGeneration, readPersonTasks } from "@/lib/crm";
 import { personKey } from "@/lib/person-key";
 import { PERSON_KEY, addressForPerson } from "@/lib/person-agenda";
 import { agendaData, countLedger } from "@/lib/person-agenda-read";
@@ -125,9 +125,11 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   // Signed with when it was read (lib/crm.ts, pageMark): a save from this page after PAGE_MARK_SECONDS is refused.
   const mark = email && store.statsId ? pageMark(store.statsId, personKey(store.statsId, email), generation) : "";
   const profile = email ? await buyerProfile(store, email) : null;
-  // The store's own fields about each person (lib/crm-rules.ts), and this one's answers.
-  const fields = profile ? await readFields(store.statsId) : [];
-  const values = profile?.person ? await readValues(store.statsId, profile.person, fields) : {};
+  // The store's own fields about each person (lib/crm-rules.ts), and this one's answers; null when either could not be
+  // read, which the fields' section says, never an empty list (Codex X6's LOW 2 on #2901, #5285).
+  const fieldsRead = profile ? await personFieldsForPage(store.statsId, profile.person ?? "") : { fields: [], values: {} };
+  const fields = fieldsRead?.fields ?? null;
+  const values = fieldsRead?.values ?? {};
   // Tasks about this person (639 [GL7](6)), and who may be made responsible: the owner and teammates who can see orders.
   const [tasks, team, companyRead] = profile?.person
     ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null), personCompanies(store, profile.person).catch(() => ({ state: "failed" as const }))])
@@ -306,7 +308,7 @@ async function LatestBuyers({ store }: { store: Store }) {
   );
 }
 
-function Profile({ store, profile, fields, values, eraseToken, tasks, assignees, mark, companies, companiesRefusal }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] | null; mark: string; companies: Company[] | null; /** The studio's own sentence when its requests are used up (round 4, L1). */ companiesRefusal: string }) {
+function Profile({ store, profile, fields, values, eraseToken, tasks, assignees, mark, companies, companiesRefusal }: { store: Store; profile: BuyerProfile; fields: CrmField[] | null; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] | null; mark: string; companies: Company[] | null; /** The studio's own sentence when its requests are used up (round 4, L1). */ companiesRefusal: string }) {
   const money = (cents: number, currency = profile.currency) => formatMoney(cents, currency);
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
@@ -504,10 +506,14 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
         <p className="mt-1 text-sm text-ink-soft">
           What you keep about each person, in fields of your own. They go into your list&apos;s file as columns.{" "}
           <Link href={studioPath(store, "", "deals")} className="underline underline-offset-4">
-            {fields.length ? "Change the fields" : "Make your first field"}
+            {fields === null || fields.length ? "Change the fields" : "Make your first field"}
           </Link>
         </p>
-        {profile.person && fields.length ? <PersonFields key={profile.person} person={profile.person} fields={fields} initial={values} mark={mark} /> : null}
+        {fields === null ? (
+          <p className="mt-2 text-sm text-ink-soft" role="status">Your fields could not be read just now. Open this page again in a moment.</p>
+        ) : profile.person && fields.length ? (
+          <PersonFields key={profile.person} person={profile.person} fields={fields} initial={values} mark={mark} />
+        ) : null}
       </section>
 
       <section aria-labelledby="company-title" className="card mt-8 p-6 sm:p-8">

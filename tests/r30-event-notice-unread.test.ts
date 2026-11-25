@@ -25,6 +25,7 @@ import { claimHandle, ensureStatsId, setCommunity, setSubscription, storeForEmai
 import { POST as events } from "@/app/api/store/community/events/route";
 import { store as redis } from "./redis-stub";
 import { allowanceUsed } from "@/lib/store-allowance";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { installSesMailFixture } from "./ses-mail-fixture";
 import { done, is, part } from "./check";
 import { withinOneUtcDay } from "./one-utc-day";
@@ -181,10 +182,11 @@ async function main(): Promise<void> {
   is("canceled, and its notice waits", await answer(await post({ action: "cancel", event: loose.id })), [200, true, "waiting"]);
   await runAfter();
   unread(false);
-  // On the run where the list reads, the push of the people to the send's own list answers nothing and does not land.
+  // On the run where the list reads, writing the people down with the send (one fenced step since Codex G's ALTO,
+  // #5010 7152085522) answers nothing and does not land.
   let dropped = 0;
   redis.pipeline = (async (commands: Commands) => {
-    const at = commands.findIndex((c) => c[0] === "RPUSH" && /^nl:cm:evmail:[0-9a-f]{24}:to$/.test(String(c[1])));
+    const at = commands.findIndex((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:store-list-record-live") && /^nl:cm:evmail:[0-9a-f]{24}:to$/.test(String(c[5])));
     if (at < 0) return original(commands);
     dropped += 1;
     const rest = await original(commands.filter((_, i) => i !== at));
@@ -212,6 +214,35 @@ async function main(): Promise<void> {
   is("once its start has passed, it is not sent", to("New time: Late night"), []);
   const [left] = await original([["SMEMBERS", "nl:cm:evmailq"]]);
   is("and no send is left under way", left, []);
+
+  part("A waiting notice whose store is erased while its list is being written down: nobody is emailed, and nothing comes back (Codex G, #5010 7152085522)");
+  const erased = await event("Erased night", hour(realNow() + 3 * DAY));
+  unread(true);
+  is("canceled, and its notice waits", await answer(await post({ action: "cancel", event: erased.id })), [200, true, "waiting"]);
+  await runAfter();
+  unread(false);
+  const [waiting] = await original([["SMEMBERS", "nl:cm:evmailq"]]);
+  const sendId = (waiting as string[])[0];
+  is("one send waits", (waiting as string[]).length, 1);
+  const fence = await storeLiveFence((await storeForEmail(OWNER))!);
+  // The store's whole erasure runs just before the send's list is written down: the erasing mark, the store's own key,
+  // the send, its list and its place among the sends under way.
+  let erasedAt = 0;
+  redis.pipeline = (async (commands: Commands) => {
+    const writesList = commands.some((c) => String(c[1]) === `nl:cm:evmail:${sendId}:to` || (c[0] === "EVAL" && String(c[1]).includes("marktmorgen:store-list-record-live")));
+    if (writesList && !erasedAt) {
+      erasedAt = 1;
+      await original([["HSET", fence.erasing, fence.field, "1"], ["DEL", fence.live, `nl:cm:evmail:${sendId}`, `nl:cm:evmail:${sendId}:to`], ["SREM", "nl:cm:evmailq", sendId]]);
+    }
+    return original(commands);
+  }) as typeof redis.pipeline;
+  await job();
+  redis.pipeline = original;
+  is("the erasure ran while the list was being written down", erasedAt, 1);
+  is("nobody is contacted after the erasure", to("Canceled: Erased night"), []);
+  is("the erased send and its readers do not come back", await original([["GET", `nl:cm:evmail:${sendId}`], ["LRANGE", `nl:cm:evmail:${sendId}:to`, 0, -1]]), [null, []]);
+  const [stillQueued] = await original([["SMEMBERS", "nl:cm:evmailq"]]);
+  is("and it is not back among the sends under way", stillQueued, []);
 
   done();
 }

@@ -101,6 +101,40 @@ export const TAKE_SCRIPTS: Readonly<Record<string, TakeScript>> = {
     run(["SET", key, value, "EX", seconds]);
     return 1;
   },
+  // lib/live-fence.ts REPLACE_LIST_AND_SET_IF_STORE_LIVE: a list replaced as a whole and its record, in one step, only
+  // while the store is not erasing and its key is still its own, by the same identity rule (Codex G, #5010 7152085522).
+  "store-list-record-live:v1": (run, [live, erasing, list, key], [field, value, seconds, statsId, ref, values]) => {
+    if (run(["HGET", erasing, field]) !== null) return 0;
+    if (statsId === "") {
+      if (run(["GET", live]) !== ref) return 0;
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return 0;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -1;
+      }
+      if (!record || typeof record !== "object") return -1;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+    }
+    let read: unknown;
+    try {
+      read = JSON.parse(String(values));
+    } catch {
+      return -1;
+    }
+    // cjson decodes a JSON object as a table too, whose length (#) is 0 for its named keys: an object writes an empty
+    // list, as the script does. The caller always sends an array.
+    const all = Array.isArray(read) ? read : read !== null && typeof read === "object" ? [] : null;
+    if (!all || !all.every((v) => typeof v === "string")) return -1;
+    run(["DEL", list]);
+    for (let i = 0; i < all.length; i += 500) run(["RPUSH", list, ...all.slice(i, i + 500)]);
+    if (all.length) run(["EXPIRE", list, seconds]);
+    run(["SET", key, value, "EX", seconds]);
+    return 1;
+  },
   // lib/live-fence.ts PUSH_IF_STORE_LIVE: a line pushed onto a bounded, renewed list only while the store is not
   // erasing and its key is still its own, by the same identity rule (Codex L-20261120-2338).
   "store-push-live:v1": (run, [live, erasing, key], [field, value, seconds, statsId, ref, most]) => {

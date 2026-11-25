@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { BADGE_HOME } from "@/lib/badge-link";
 import { canRecover } from "@/lib/buyer-orders";
 import { photoUrl } from "@/lib/photo-limits";
+import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { speech } from "@/lib/buyer-words";
@@ -66,12 +68,15 @@ export function StoreResting({ store, suspended = false, buyer = false }: { stor
                 </Link>
               </p>
             ) : null}
+            {/* Absolute on Marktmorgen, as the store page's badge is: on a creator's own domain "/" and "/studio" are
+                that creator's pages, so the owner's link and "Made with Marktmorgen" would lead back to the store
+                (Claude 6's LEVE on #5304, #5285 row #3429). */}
             <p className="mb-4">
-              <Link href="/studio" className="st-footer-link text-sm font-semibold">
+              <Link href={`${SITE_URL}/studio`} prefetch={false} className="st-footer-link text-sm font-semibold">
                 {w.restingOwner}
               </Link>
             </p>
-            <Link href="/" className="st-footer-link text-sm font-semibold">
+            <Link href={BADGE_HOME} prefetch={false} className="st-footer-link text-sm font-semibold">
               {w.madeWith}
             </Link>
           </div>

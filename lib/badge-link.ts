@@ -5,8 +5,9 @@
  * It carries the creator's invite code only while both locks are open: the
  * invite programme (INVITE_PROGRAM_OPEN) and sales (PLANS_ON_SALE), so a
  * visitor is never sent to a sign-up that does not work today. With either
- * closed, or with no valid code, it is the plain link to the home page it has
- * always been, and no code is read for it.
+ * closed, or with no valid code, it is the plain link to Marktmorgen's home
+ * page, and no code is read for it. Both are absolute on SITE_URL, so they
+ * work from a store on the creator's own domain too.
  *
  * The link holds the code and nothing else: no email, name or internal id.
  * The page writes nothing in the visitor's browser for it; the invite cookie
@@ -17,16 +18,21 @@
 import { INVITE_CODE_PATTERN, INVITE_PROGRAM_OPEN, invitePath } from "@/lib/creator-invite-rules";
 import { existingInviteCode } from "@/lib/creator-invites";
 import { PLANS_ON_SALE } from "@/lib/opening";
+import { SITE_URL } from "@/lib/site-url";
 
-/** The badge's link with no code: the home page, as it has always been. */
-export const BADGE_HOME = "/";
+/**
+ * The badge's link with no code: Marktmorgen's home page. Absolute, because a store can be served on the creator's
+ * own domain, where "/" is the creator's page and the badge would link the store back to itself (Codex X6's LOW on
+ * #3429).
+ */
+export const BADGE_HOME = `${SITE_URL}/`;
 
 /** Whether the badge's link may carry a code: the invite programme and sales, both open. */
 export const INVITE_BADGE_LINK_ON: boolean = INVITE_PROGRAM_OPEN && PLANS_ON_SALE;
 
 /** The badge's link: the invite page with the creator's code while the link is on and the code is valid, else the plain one. */
 export function badgeHref(code: string | null, on: boolean = INVITE_BADGE_LINK_ON): string {
-  return on && typeof code === "string" && INVITE_CODE_PATTERN.test(code) ? invitePath(code) : BADGE_HOME;
+  return on && typeof code === "string" && INVITE_CODE_PATTERN.test(code) ? `${SITE_URL}${invitePath(code)}` : BADGE_HOME;
 }
 
 /**

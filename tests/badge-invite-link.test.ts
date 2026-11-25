@@ -17,7 +17,12 @@
  * The code is read without ever being made (existingInviteCode): a store page
  * must not write. Synthetic stores only, against the in-memory Redis.
  */
+import { SITE_URL } from "@/lib/site-url";
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { StoreResting } from "@/components/store-resting";
+import { claimHandle, storeForEmail } from "@/lib/store";
 import { BADGE_HOME, INVITE_BADGE_LINK_ON, badgeHref, badgeInviteCode } from "@/lib/badge-link";
 import { existingInviteCode, inviteCode, myCodeKey } from "@/lib/creator-invites";
 import { INVITE_PROGRAM_OPEN } from "@/lib/creator-invite-rules";
@@ -44,7 +49,9 @@ async function main(): Promise<void> {
   is("the switch is both locks together, and both are off today", INVITE_BADGE_LINK_ON, INVITE_PROGRAM_OPEN && PLANS_ON_SALE);
   is("off today", INVITE_BADGE_LINK_ON, false);
   is("off: the plain link even with a valid code", badgeHref("abcdefgh", false), BADGE_HOME);
-  is("the plain link is the home page", BADGE_HOME, "/");
+  // Absolute, so a store on its own domain still sends the visitor to Marktmorgen and not back to itself (Codex X6's
+  // LOW on #3429, #5285 row #3429): "/" on a creator's domain is that creator's own page.
+  is("the plain link is Marktmorgen's home page, absolute", BADGE_HOME, `${SITE_URL}/`);
   const code = await inviteCode(SID);
   is("a synthetic store has a code", typeof code === "string", true);
   const before = sent;
@@ -52,10 +59,13 @@ async function main(): Promise<void> {
   is("off: not one command sent", sent - before, 0);
 
   part("2. Both open and a valid code: the invite page with that code and nothing else");
-  is("on: the invite page with the code", badgeHref("abcdefgh", true), "/invite/abcdefgh");
+  is("on: the invite page with the code, absolute on Marktmorgen", badgeHref("abcdefgh", true), `${SITE_URL}/invite/abcdefgh`);
   is("on: the store's own code, read back", await badgeInviteCode(SID, true), code);
   const href = badgeHref(code, true);
-  is("only the code is in it: no query, no fragment", /^\/invite\/[a-hj-km-np-z2-9]{8}$/.test(href), true);
+  // Read through URL, never a pattern built from SITE_URL by hand (CodeQL alert 262, Claude 3 ynux's LEVE on #5304).
+  const url = new URL(href);
+  is("only the code is in it: no query, no fragment", [url.origin === SITE_URL, /^\/invite\/[a-hj-km-np-z2-9]{8}$/.test(url.pathname), url.search, url.hash], [true, true, "", ""]);
+  is("both links leave a creator's own domain for Marktmorgen's", [BADGE_HOME, href].every((link) => new URL(link).origin === SITE_URL), true);
 
   part("3. A code that is not a valid one is never put in it");
   for (const bad of ["", "ABCDEFGH", "abcdefg", "abcdefghi", "abcdefg1", "a@b.co12", "../admin", "abcdefgi", null]) {
@@ -87,6 +97,20 @@ async function main(): Promise<void> {
   part("6. A store that may take the badge off and did shows nothing");
   is("the badge is shown only when kept on or when the plan does not allow it off", /\{showBadge \? \(/.test(badge), true);
   is("and the code is read only when the badge is shown", /const showBadge = store\.look\.badge \|\| !canUse\(store, "branding"\);/.test(page) && /showBadge \? badgeInviteCode\(store\.sid\) : null/.test(page), true);
+
+  part("7. A resting or switched-off store's page leaves for Marktmorgen too (Claude 6's LEVE on #5304)");
+  // On a creator's own domain app/[handle]/page.tsx renders StoreResting for a resting or switched-off store: "/" and
+  // "/studio" there are that creator's pages, so both links must be absolute on Marktmorgen.
+  await claimHandle("resting-badge@example.com", "resting-badge-shop", "Resting Badge", "");
+  const resting = (await storeForEmail("resting-badge@example.com"))!;
+  for (const suspended of [false, true]) {
+    const html = renderToStaticMarkup(createElement(StoreResting, { store: resting, suspended }));
+    const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1].replace(/&amp;/g, "&"));
+    const label = suspended ? "switched off" : "resting";
+    is(`${label}: "Made with Marktmorgen" links to Marktmorgen's home page, absolute`, hrefs.includes(BADGE_HOME), true);
+    is(`${label}: the owner's link is Marktmorgen's studio, absolute`, hrefs.includes(`${SITE_URL}/studio`), true);
+    is(`${label}: no bare "/" or "/studio" left on the page`, hrefs.filter((h) => h === "/" || h === "/studio"), []);
+  }
 
   part("Cost: one command more on the front page only while the link is on");
   is("the front page's commands", COMMANDS.frontPage, 4 + (INVITE_BADGE_LINK_ON ? 1 : 0));

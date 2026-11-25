@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { pendingRemoval } from "@/lib/passkeys";
-import { DEVICE_COOKIE, SESSION_COOKIE, endSession, isMoving, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
+import { DEVICE_COOKIE, SESSION_COOKIE, endSession, isMoving, noteSignIn, sessionCookie } from "@/lib/auth";
+import { openSessionWhile } from "@/lib/session-while";
 import { repairMove } from "@/lib/move-repair";
 import { HOLD_SECONDS, TWO_STEP_COOKIE, endRecoveryAccess, holdSignIn, resetIfDue, twoStepOn } from "@/lib/two-step";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -41,14 +42,18 @@ export async function finishProvenSignIn(
     // ends here); without it, it is refused.
     const blocked = owner ? (await isMoving(owner)) && !((await repairMove(owner)) && !(await isMoving(owner))) : false;
     if (owner && blocked && !(await twoStepOn(owner))) return redirect("/signin?status=move-busy");
-    if (owner && (await twoStepOn(owner)) && (blocked || !(await resetIfDue(owner)))) {
-      const held = await holdSignIn(owner, false, way === "google");
+    const toCode = async (address: string) => {
+      const held = await holdSignIn(address, false, way === "google");
       const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
       const response = redirect("/signin/code");
       response.headers.append("Set-Cookie", `${TWO_STEP_COOKIE}=${held}; Path=/; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${secure}`);
       return response;
-    }
-    sessionId = owner ? await openSession(owner) : null;
+    };
+    if (owner && (await twoStepOn(owner)) && (blocked || !(await resetIfDue(owner)))) return await toCode(owner);
+    // Two-step login turned on in another browser while this login was being decided: the session just opened is
+    // taken back and the login waits for the app's code, as if the app had been on from the start (#4032).
+    sessionId = owner ? await openSessionWhile(owner, async () => !(await twoStepOn(owner))) : null;
+    if (owner && sessionId === null) return await toCode(owner);
     // A passkey removal whose days are over is applied at every login (lib/passkeys.ts).
     if (owner) await pendingRemoval(owner).catch(() => console.error("applying a passkey removal failed"));
     if (owner) await endRecoveryAccess(owner).catch(() => console.error("closing a recovery login failed"));

@@ -53,6 +53,7 @@ import { UK_VAT_RATE_VALID_UNTIL, toPence, ukCheckout, ukVatOnTop } from "@/lib/
 import { HMRC_PERIOD_RATES, type HmrcPeriodRate, hmrcPeriodRate } from "@/lib/hmrc-period-rates";
 import { decimalsOf, isCurrency } from "@/lib/money";
 import { type SwitchInput, euVatCollectOn, ukVatCollectOn } from "@/lib/vat-registrations";
+import { CHECKOUT_OPEN_SECONDS } from "@/lib/stripe-account";
 
 /** What the checkout route does with the buyer before anything is held: go on, collect EU VAT, or refuse. */
 export type EuSaleGate =
@@ -195,6 +196,11 @@ export function applyEuCollect(
     rates?: readonly EuVatRate[];
     /** Tests only: HMRC's period rates (lib/hmrc-period-rates.ts) instead of HMRC_PERIOD_RATES. */
     sterlingRates?: readonly HmrcPeriodRate[];
+    /**
+     * How long, at most, the checkout stays payable from now, in seconds (vatWindowSeconds): what a UK sale's sterling
+     * month is checked for. Given, it wins over an `expires_at` already in the body, which Stripe may drop (B1).
+     */
+    closesWithinSeconds?: unknown;
   },
 ): void {
   collectOn(body, input, false);
@@ -218,6 +224,11 @@ export function applyEuCollectCart(
     rates?: readonly EuVatRate[];
     /** Tests only: HMRC's period rates (lib/hmrc-period-rates.ts) instead of HMRC_PERIOD_RATES. */
     sterlingRates?: readonly HmrcPeriodRate[];
+    /**
+     * How long, at most, the checkout stays payable from now, in seconds (vatWindowSeconds): what a UK sale's sterling
+     * month is checked for. Given, it wins over an `expires_at` already in the body, which Stripe may drop (B1).
+     */
+    closesWithinSeconds?: unknown;
   },
 ): void {
   collectOn(body, { ...input, chooseYourPrice: false }, true);
@@ -235,6 +246,11 @@ function collectOn(
     rates?: readonly EuVatRate[];
     /** Tests only: HMRC's period rates (lib/hmrc-period-rates.ts) instead of HMRC_PERIOD_RATES. */
     sterlingRates?: readonly HmrcPeriodRate[];
+    /**
+     * How long, at most, the checkout stays payable from now, in seconds (vatWindowSeconds): what a UK sale's sterling
+     * month is checked for. Given, it wins over an `expires_at` already in the body, which Stripe may drop (B1).
+     */
+    closesWithinSeconds?: unknown;
   },
   cart: boolean,
 ): void {
@@ -274,7 +290,7 @@ function collectOn(
   }
   if (!Number.isSafeInteger(total)) refuse("the lines' total");
   const now = input.now ?? new Date();
-  const uk = input.country === "GB" ? ukVat(total, currency, now, input.sterlingRates ?? HMRC_PERIOD_RATES, body.get("expires_at")) : null;
+  const uk = input.country === "GB" ? ukVat(total, currency, now, input.sterlingRates ?? HMRC_PERIOD_RATES, closesAtMs(now, input.closesWithinSeconds, body.get("expires_at"))) : null;
   const vat = input.country === "GB" ? uk?.vat ?? null : vatOnTop(total, input.country, input.rates ?? EU_VAT_RATES, now);
   if (!vat || vat.country !== input.country) refuse("no sourced rate, or no sterling rate");
   // A UK sale is declared to HMRC in pounds whatever it was charged in, so its exchange-rate allowance is the pound's
@@ -296,7 +312,7 @@ function collectOn(
  * currency, and its VAT stated in sterling at HMRC's period rate for the supply's month (VAT Notice 700, 7.6;
  * lib/hmrc-period-rates.ts): no row for that month and currency, or a currency not in hundredths, is null (unit 7).
  */
-function ukVat(amountCents: number, currency: string, now: Date, table: readonly HmrcPeriodRate[], expiresAt: string | null): { vat: VatOnTop; sterling: { pence: number; perPound: string; month: string } | null } | null {
+function ukVat(amountCents: number, currency: string, now: Date, table: readonly HmrcPeriodRate[], closes: number): { vat: VatOnTop; sterling: { pence: number; perPound: string; month: string } | null } | null {
   if (!Number.isFinite(now.getTime())) return null;
   const today = now.toISOString().slice(0, 10);
   if (today > UK_VAT_RATE_VALID_UNTIL) return null;
@@ -306,9 +322,7 @@ function ukVat(amountCents: number, currency: string, now: Date, table: readonly
   if (code === "gbp") return { vat: { ...vat, country: "GB" }, sterling: null };
   if (!isCurrency(code) || decimalsOf(code) !== 2) return null;
   // The rate is the one of the month the buyer pays in (Notice 700, 7.6: "current at the time of the supply"), and
-  // the checkout is opened now: it is collected only while it cannot be paid in another month. Without its own
-  // `expires_at`, a Stripe Checkout Session stays open 24 hours (Claude 1's LOW on #5032).
-  const closes = expiresAt === null ? now.getTime() + 86_400_000 : /^[1-9]\d{0,11}$/.test(expiresAt) ? Number(expiresAt) * 1000 : Number.NaN;
+  // the checkout is opened now: it is collected only while it cannot be paid in another month (closesAtMs).
   if (!Number.isFinite(closes) || closes < now.getTime()) return null;
   // The month is the UK's (Claude 2's LOW on #5032): in summer time the last hour of a UTC month is already the next
   // month in London. Both ends must fall in one month in London and in UTC alike, so the rate never depends on which.
@@ -321,6 +335,51 @@ function ukVat(amountCents: number, currency: string, now: Date, table: readonly
   const pence = rate ? toPence(vat.vatCents, rate.perPound) : null;
   if (!rate || pence === null) return null;
   return { vat: { ...vat, country: "GB" }, sterling: { pence, perPound: rate.perPound, month } };
+}
+
+/** How long a Stripe Checkout Session stays open when it is given no `expires_at`: 24 hours. */
+export const STRIPE_CHECKOUT_DEFAULT_SECONDS = 86_400;
+
+/**
+ * The margin added to the time a checkout is checked for (B1): the time between the check and Stripe's answer,
+ * retries included. A checkout that would still close later is refused before Stripe is asked (closesInsideWindow).
+ */
+export const VAT_WINDOW_MARGIN_SECONDS = 300;
+
+/**
+ * The window a checkout's UK VAT is checked for, in seconds from the check (Claude 1 A's note 1 on #5032, #5285 row
+ * B1): a held unit's checkout closes in CHECKOUT_OPEN_SECONDS, set by the caller just before Stripe is asked; any
+ * other may be sent with no `expires_at` (a reminder's hour that Stripe refuses is dropped, lib/recovery-setting.ts
+ * withoutRecovery) and so stays open Stripe's 24 hours. Each with VAT_WINDOW_MARGIN_SECONDS.
+ */
+export function vatWindowSeconds(held: boolean): number {
+  return (held ? CHECKOUT_OPEN_SECONDS : STRIPE_CHECKOUT_DEFAULT_SECONDS) + VAT_WINDOW_MARGIN_SECONDS;
+}
+
+/**
+ * When the checkout stops being payable, in ms, as the check reads it: the caller's window when one is given (a whole
+ * number of seconds, more than 0 and no more than Stripe's day with its margin; anything else is NaN and refuses),
+ * else the body's own `expires_at`, else Stripe's 24 hours (Claude 1's LOW on #5032).
+ */
+function closesAtMs(now: Date, within: unknown, expiresAt: string | null): number {
+  if (within !== undefined) {
+    const ok = typeof within === "number" && Number.isSafeInteger(within) && within > 0 && within <= vatWindowSeconds(false);
+    return ok ? now.getTime() + within * 1000 : Number.NaN;
+  }
+  if (expiresAt === null) return now.getTime() + STRIPE_CHECKOUT_DEFAULT_SECONDS * 1000;
+  return /^[1-9]\d{0,11}$/.test(expiresAt) ? Number(expiresAt) * 1000 : Number.NaN;
+}
+
+/**
+ * Whether a body about to be sent to Stripe closes inside the window its UK VAT was checked for (B1): only a body
+ * whose sterling figure depends on the month (`uk_vat_gbp`) is held to it. Its `expires_at`, or, with none, Stripe's 24
+ * hours from now, must be no later than `checkedAt` (seconds) plus `windowSeconds`. Called just before each request.
+ */
+export function closesInsideWindow(body: URLSearchParams, checkedAt: number, windowSeconds: number, nowSeconds = Math.floor(Date.now() / 1000)): boolean {
+  if (!body.has("payment_intent_data[metadata][uk_vat_gbp]")) return true;
+  const told = body.get("expires_at");
+  const closes = told === null ? nowSeconds + STRIPE_CHECKOUT_DEFAULT_SECONDS : /^[1-9]\d{0,11}$/.test(told) ? Number(told) : Number.NaN;
+  return Number.isSafeInteger(closes) && closes <= checkedAt + windowSeconds;
 }
 
 /** The calendar day in the UK (Europe/London) at an instant, as YYYY-MM-DD; null when it cannot be read. */

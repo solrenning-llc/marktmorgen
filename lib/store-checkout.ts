@@ -57,7 +57,7 @@ import { LANGUAGES } from "@/lib/store-language";
 import { type CameFrom, hasSource } from "@/lib/came-from";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods, reusableMethod, saveCardForOffers } from "@/lib/instant-pay";
-import { applyEuCollect } from "@/lib/eu-vat-collect";
+import { EuVatCollectRefused, applyEuCollect, closesInsideWindow, vatWindowSeconds } from "@/lib/eu-vat-collect";
 import type { EuVatRate } from "@/lib/eu-vat-amount";
 import { BUYER_CURRENCY_LIVE, DEFAULT_BUYER_CURRENCY_MODE, accountSettlementCurrency, applyBuyerCurrency, buyerCurrencyPlan, hasApplicationFee, hasTaxRates, settlesIn } from "@/lib/buyer-currency";
 import { activePwyw, pwywPriceId } from "@/lib/pay-what-you-want";
@@ -826,7 +826,11 @@ export async function createCheckout(
   // EU VAT on top, when the route's EU gate said to collect it (lib/eu-vat-collect.ts): worked out on this line's real
   // amount, added as its own line and through the platform's fee, after the share so the share never carries it. A
   // sale that cannot carry it exactly is refused here, before Stripe is asked. Never set while nothing collects.
-  if (extras.euVat) applyEuCollect(body, { ...extras.euVat, chooseYourPrice: pwyw !== null, buyerCurrencyLive: BUYER_CURRENCY_LIVE });
+  // A UK sale's sterling month is checked for the window this checkout can be paid in (B1): a held unit's own 31
+  // minutes, set just before Stripe is asked, else Stripe's day; each request below is refused if it would close later.
+  const vatCheckedAt = Math.floor(Date.now() / 1000);
+  const vatWindow = vatWindowSeconds(extras.held === true);
+  if (extras.euVat) applyEuCollect(body, { ...extras.euVat, chooseYourPrice: pwyw !== null, buyerCurrencyLive: BUYER_CURRENCY_LIVE, closesWithinSeconds: vatWindow });
 
   // The buyer's own currency (22 [E5] unit 3a, lib/buyer-currency.ts): off
   // while BUYER_CURRENCY_LIVE is false, so Stripe's conversion stays off as
@@ -938,6 +942,7 @@ export async function createCheckout(
     // Set just before the request, because Stripe counts its minimum from then.
     if (extras.held) body.set("expires_at", String(checkoutClosesAt()));
     else if (extras.remind && !body.has("expires_at")) body.set("expires_at", String(Math.floor(Date.now() / 1000) + RECOVERY_OPEN_SECONDS));
+    if (!closesInsideWindow(body, vatCheckedAt, vatWindow)) throw new EuVatCollectRefused("the checkout would stay open past the window its UK VAT was checked for");
     return onAccount("POST", store.stripeAccountId as string, "/checkout/sessions", body, recurring ? SUBSCRIPTION_CHECKOUT_VERSION : undefined);
   };
 

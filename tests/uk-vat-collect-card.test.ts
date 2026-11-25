@@ -177,6 +177,37 @@ async function main(): Promise<void> {
   is("in pounds, with the VAT line on top of the product's own amount", [collected.get("line_items[0][price_data][currency]"), collected.get("line_items[0][price_data][unit_amount]"), collected.get("line_items[1][price_data][unit_amount]")], ["gbp", "2900", "580"]);
   is("the fee of the VAT and its cost (the plan's share is 0% today), marked uk_vat", [collected.get("payment_intent_data[application_fee_amount]"), collected.get("payment_intent_data[metadata][uk_vat]")], [String(580 + 12), "GB:2000:580"]);
 
+  part("A sale in euros: the expiry sent is the one the sterling month was checked for (B1, Claude 1 A's note 1 on #5032)");
+  // The clock is fixed on 30/11/2026 at noon UTC, the month's last day, so the sterling month is what decides. The
+  // November row of HMRC_PERIOD_RATES (read on 21/11) is the real one.
+  const realNow = Date.now;
+  let clock = Date.parse("2026-11-30T12:00:00Z");
+  Date.now = () => clock;
+  try {
+    await setCurrency(owner, "eur");
+    const euroStore = (await storeForEmail(owner))!;
+    const euroProduct = (await readProduct(euroStore, id))!;
+    const open = (extras: Record<string, unknown>, costsCents: () => number = () => 12) =>
+      createCheckout(euroStore, euroProduct, "https://marktmorgen.com", undefined, { digitalConsent: TEST_CONSENT, euVat: { country: "GB", now: new Date(clock), costsCents }, ...extras })
+        .then(() => "opened", (error: unknown) => (error instanceof EuVatCollectRefused ? "refused" : String(error)));
+    before = sessions.length;
+    const checkedAt = Math.floor(clock / 1000);
+    is("RED: a held unit's checkout on the month's last day at noon: opened", [await open({ held: true }), sessions.length - before], ["opened", 1]);
+    const held = sessions.at(-1)!;
+    is("collected at November's rate, closing in its own 31 minutes, inside the window checked", [held.get("payment_intent_data[metadata][uk_vat_gbp]")?.endsWith(":2026-11"), Number(held.get("expires_at")) - checkedAt <= 31 * 60 + 300], [true, true]);
+    before = sessions.length;
+    is("without a held unit, on the same day: Stripe's day reaches December, refused, Stripe not asked", [await open({}), sessions.length - before], ["refused", 0]);
+    before = sessions.length;
+    // The clock moves six minutes while the VAT is worked out: the 31 minutes counted from then pass the window checked.
+    const slow = () => {
+      clock += 6 * 60 * 1000;
+      return 12;
+    };
+    is("a held checkout whose expiry would pass the window checked: refused before Stripe is asked", [await open({ held: true }, slow), sessions.length - before], ["refused", 0]);
+  } finally {
+    Date.now = realNow;
+  }
+
   done();
 }
 

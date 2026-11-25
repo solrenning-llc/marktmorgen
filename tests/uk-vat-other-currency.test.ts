@@ -126,6 +126,25 @@ function main(): void {
   const closesIntoUkOctober = at("2026-09-30T22:10:00Z", "2026-09-30T23:30:00Z");
   is("opened on 30/09 in the UK, payable until 01/10 00:30 UK time: refused", closesIntoUkOctober.result, "refused");
 
+  part("A held checkout is checked for its own short window, the rest for Stripe's day (B1, Claude 1 A's note 1 on #5032)");
+  // The window createCheckout hands over: a held unit's 31 minutes, or Stripe's 24 hours, each with 5 minutes' margin.
+  const HELD_WINDOW = 31 * 60 + 300;
+  const DAY_WINDOW = 86_400 + 300;
+  const NOV_EARLY: HmrcPeriodRate = { ...NOV, readOn: "2026-11-01" };
+  const lastDayNoon = new Date("2026-11-30T12:00:00Z");
+  const heldNoon = body("eur");
+  is("RED: a held checkout on the month's last day at noon: collected at November's rate", [tryCollect(heldNoon, { sterlingRates: [NOV_EARLY, ROW], now: lastDayNoon, closesWithinSeconds: HELD_WINDOW }), heldNoon.get("payment_intent_data[metadata][uk_vat_gbp]")], ["collected", `${toPence(580, "1.1930")}:1.1930:2026-11`]);
+  is("a held checkout opened at 23:40 UTC on 30/11, whose window reaches December: refused", tryCollect(body("eur"), { sterlingRates: [NOV_EARLY, ROW], now: new Date("2026-11-30T23:40:00Z"), closesWithinSeconds: HELD_WINDOW }), "refused");
+  is("without a window, on the last day at noon: Stripe's day, refused as before", tryCollect(body("eur"), { sterlingRates: [NOV_EARLY, ROW], now: lastDayNoon }), "refused");
+  const reminderHour = body("eur");
+  reminderHour.set("expires_at", String(Date.parse("2026-11-30T13:00:00Z") / 1000));
+  is("RED: the window wins over an expires_at in the body (a reminder's hour that Stripe may drop): refused", tryCollect(reminderHour, { sterlingRates: [NOV_EARLY, ROW], now: lastDayNoon, closesWithinSeconds: DAY_WINDOW }), "refused");
+  const midMonth = new Date("2026-11-15T12:00:00Z");
+  is("mid-month, Stripe's day with its margin: collected", tryCollect(body("eur"), { sterlingRates: [NOV_EARLY, ROW], now: midMonth, closesWithinSeconds: DAY_WINDOW }), "collected");
+  for (const bad of [0, -60, 1.5, DAY_WINDOW + 1, Number.NaN, "1860"]) {
+    is(`RED: a window that does not read (${String(bad)}): refused`, tryCollect(body("eur"), { sterlingRates: [NOV_EARLY, ROW], now: midMonth, closesWithinSeconds: bad }), "refused");
+  }
+
   part("The cost of receiving reads the return's currency");
   const allowances: VatFxAllowance[] = [
     { currency: "eur", bps: 300, source: "https://example.invalid/fx-eur", checkedOn: "2026-11-20", validThrough: "2027-03-31" },

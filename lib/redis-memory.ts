@@ -588,6 +588,21 @@ export class MemoryRedis {
           return 1;
         }
         // lib/community-events.ts RELEASE_RSVP: a place deleted only while it holds this request's own mark.
+        // lib/affiliate-directory.ts PUBLISH_IF_OWNER and FAIL_IF_OWNER: a build's page kept, or its mark failed, only while
+        // the mark is still its own (Codex N1 on #2921).
+        if (key.startsWith("-- marktmorgen:directory-build-fail:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, mark, token, seconds] = args;
+          if (this.run(["GET", mark]) !== token) return 0;
+          this.run(["SET", mark, "failed", "EX", seconds]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:directory-build-publish:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, mark, page, token, value, seconds] = args;
+          if (this.run(["GET", mark]) !== token) return 0;
+          this.run(["SET", page, value, "EX", seconds]);
+          this.run(["DEL", mark]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:event-rsvp-release:v1\n") && args[0] === "1" && args.length === 4) {
           const [, list, member, mark] = args;
           return this.run(["HGET", list, member]) === mark ? this.run(["HDEL", list, member]) : 0;

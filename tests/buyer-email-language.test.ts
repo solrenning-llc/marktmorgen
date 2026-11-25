@@ -42,7 +42,7 @@ const BUYER = "buyer@example.com";
 const ONE_JOB = "0123456789abcdef01234567";
 const TWO_JOB = "89abcdef0123456789abcdef";
 
-/** The English email as it has always read, for one product and for two. */
+/** The English email, for one product and for two (since board #5285 row #2593, without the inbox deadline). */
 function englishOne(store: string, title: string, base: string, email: string) {
   return {
     subject: `${title} has moved to ${store}`,
@@ -52,7 +52,7 @@ function englishOne(store: string, title: string, base: string, email: string) {
       "Yours there:",
       `- ${title}`,
       "",
-      `To open it, go to ${base}/orders and type ${email}. A link to everything you have there arrives within a minute. There is no password to make.`,
+      `To open it, go to ${base}/orders and type ${email}. A link to everything you have there is emailed to that address. There is no password to make.`,
       "",
       `You are getting this one email because ${store} moved your purchases. Nothing more is sent because of it.`,
       `Sent by Marktmorgen on behalf of ${store}.`,

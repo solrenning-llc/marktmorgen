@@ -19,9 +19,9 @@ const en = {
   yours: "Yours there:",
   courseLine: (title: string, url: string) => `- ${title}: ${url}`,
   openOne: (orders: string, email: string) =>
-    `To open it, go to ${orders} and type ${email}. A link to everything you have there arrives within a minute. There is no password to make.`,
+    `To open it, go to ${orders} and type ${email}. A link to everything you have there is emailed to that address. There is no password to make.`,
   openMany: (orders: string, email: string) =>
-    `To open any of it, go to ${orders} and type ${email}. A link to everything you have there arrives within a minute. There is no password to make.`,
+    `To open any of it, go to ${orders} and type ${email}. A link to everything you have there is emailed to that address. There is no password to make.`,
   why: (store: string) => `You are getting this one email because ${store} moved your purchases. Nothing more is sent because of it.`,
   sentBy: (store: string) => `Sent by Marktmorgen on behalf of ${store}.`,
 };
@@ -35,9 +35,9 @@ const es: MovedPurchaseWords = {
   yours: "Lo que tienes allí:",
   courseLine: (title, url) => `- ${title}: ${url}`,
   openOne: (orders, email) =>
-    `Para abrirlo, ve a ${orders} y escribe ${email}. En menos de un minuto llega un enlace a todo lo que tienes allí. No hay contraseña que crear.`,
+    `Para abrirlo, ve a ${orders} y escribe ${email}. Se envía a esa dirección un enlace a todo lo que tienes allí. No hay contraseña que crear.`,
   openMany: (orders, email) =>
-    `Para abrir cualquiera de ellos, ve a ${orders} y escribe ${email}. En menos de un minuto llega un enlace a todo lo que tienes allí. No hay contraseña que crear.`,
+    `Para abrir cualquiera de ellos, ve a ${orders} y escribe ${email}. Se envía a esa dirección un enlace a todo lo que tienes allí. No hay contraseña que crear.`,
   why: (store) => `Recibes este único email porque ${store} trasladó tus compras. No se envía nada más por este motivo.`,
   sentBy: (store) => `Enviado por Marktmorgen en nombre de ${store}.`,
 };
@@ -50,9 +50,9 @@ const fr: MovedPurchaseWords = {
   yours: `Ce qui vous appartient là-bas${S}:`,
   courseLine: (title, url) => `- ${title}${S}: ${url}`,
   openOne: (orders, email) =>
-    `Pour l'ouvrir, rendez-vous sur ${orders} et saisissez ${email}. Un lien vers tout ce que vous avez là-bas arrive en moins d'une minute. Aucun mot de passe à créer.`,
+    `Pour l'ouvrir, rendez-vous sur ${orders} et saisissez ${email}. Un lien vers tout ce que vous avez là-bas est envoyé à cette adresse. Aucun mot de passe à créer.`,
   openMany: (orders, email) =>
-    `Pour ouvrir l'un d'eux, rendez-vous sur ${orders} et saisissez ${email}. Un lien vers tout ce que vous avez là-bas arrive en moins d'une minute. Aucun mot de passe à créer.`,
+    `Pour ouvrir l'un d'eux, rendez-vous sur ${orders} et saisissez ${email}. Un lien vers tout ce que vous avez là-bas est envoyé à cette adresse. Aucun mot de passe à créer.`,
   why: (store) => `Vous recevez ce seul e-mail parce que ${store} a transféré vos achats. Rien d'autre n'est envoyé pour cette raison.`,
   sentBy: (store) => `Envoyé par Marktmorgen pour le compte de ${store}.`,
 };
@@ -65,9 +65,9 @@ const de: MovedPurchaseWords = {
   yours: "Was Ihnen dort gehört:",
   courseLine: (title, url) => `- ${title}: ${url}`,
   openOne: (orders, email) =>
-    `Um es zu öffnen, gehen Sie zu ${orders} und geben Sie ${email} ein. Innerhalb einer Minute kommt ein Link zu allem, was Sie dort haben. Sie müssen kein Passwort anlegen.`,
+    `Um es zu öffnen, gehen Sie zu ${orders} und geben Sie ${email} ein. An diese Adresse wird ein Link zu allem geschickt, was Sie dort haben. Sie müssen kein Passwort anlegen.`,
   openMany: (orders, email) =>
-    `Um etwas davon zu öffnen, gehen Sie zu ${orders} und geben Sie ${email} ein. Innerhalb einer Minute kommt ein Link zu allem, was Sie dort haben. Sie müssen kein Passwort anlegen.`,
+    `Um etwas davon zu öffnen, gehen Sie zu ${orders} und geben Sie ${email} ein. An diese Adresse wird ein Link zu allem geschickt, was Sie dort haben. Sie müssen kein Passwort anlegen.`,
   why: (store) => `Sie erhalten diese eine E-Mail, weil ${store} Ihre Käufe übertragen hat. Deswegen wird sonst nichts gesendet.`,
   sentBy: (store) => `Gesendet von Marktmorgen im Auftrag von ${store}.`,
 };
@@ -80,9 +80,9 @@ const it: MovedPurchaseWords = {
   yours: "Quello che hai lì:",
   courseLine: (title, url) => `- ${title}: ${url}`,
   openOne: (orders, email) =>
-    `Per aprirlo, vai su ${orders} e scrivi ${email}. Entro un minuto arriva un link a tutto ciò che hai lì. Non c'è nessuna password da creare.`,
+    `Per aprirlo, vai su ${orders} e scrivi ${email}. A quell'indirizzo viene inviato un link a tutto ciò che hai lì. Non c'è nessuna password da creare.`,
   openMany: (orders, email) =>
-    `Per aprirne uno qualsiasi, vai su ${orders} e scrivi ${email}. Entro un minuto arriva un link a tutto ciò che hai lì. Non c'è nessuna password da creare.`,
+    `Per aprirne uno qualsiasi, vai su ${orders} e scrivi ${email}. A quell'indirizzo viene inviato un link a tutto ciò che hai lì. Non c'è nessuna password da creare.`,
   why: (store) => `Ricevi questa sola email perché ${store} ha trasferito i tuoi acquisti. Non viene inviato nient'altro per questo motivo.`,
   sentBy: (store) => `Inviato da Marktmorgen per conto di ${store}.`,
 };
@@ -95,9 +95,9 @@ const nl: MovedPurchaseWords = {
   yours: "Wat je daar hebt:",
   courseLine: (title, url) => `- ${title}: ${url}`,
   openOne: (orders, email) =>
-    `Om het te openen: ga naar ${orders} en typ ${email}. Binnen een minuut komt er een link naar alles wat je daar hebt. Je hoeft geen wachtwoord te maken.`,
+    `Om het te openen: ga naar ${orders} en typ ${email}. Er wordt een link naar alles wat je daar hebt naar dat adres gestuurd. Je hoeft geen wachtwoord te maken.`,
   openMany: (orders, email) =>
-    `Om er iets van te openen: ga naar ${orders} en typ ${email}. Binnen een minuut komt er een link naar alles wat je daar hebt. Je hoeft geen wachtwoord te maken.`,
+    `Om er iets van te openen: ga naar ${orders} en typ ${email}. Er wordt een link naar alles wat je daar hebt naar dat adres gestuurd. Je hoeft geen wachtwoord te maken.`,
   why: (store) => `Je krijgt deze ene e-mail omdat ${store} je aankopen heeft overgezet. Daarom wordt er verder niets gestuurd.`,
   sentBy: (store) => `Verstuurd door Marktmorgen namens ${store}.`,
 };
@@ -110,9 +110,9 @@ const pt: MovedPurchaseWords = {
   yours: "O que tem lá:",
   courseLine: (title, url) => `- ${title}: ${url}`,
   openOne: (orders, email) =>
-    `Para o abrir, aceda a ${orders} e escreva ${email}. Em menos de um minuto chega uma ligação para tudo o que tem lá. Não há palavra-passe para criar.`,
+    `Para o abrir, aceda a ${orders} e escreva ${email}. É enviada para esse endereço uma ligação para tudo o que tem lá. Não há palavra-passe para criar.`,
   openMany: (orders, email) =>
-    `Para abrir qualquer um deles, aceda a ${orders} e escreva ${email}. Em menos de um minuto chega uma ligação para tudo o que tem lá. Não há palavra-passe para criar.`,
+    `Para abrir qualquer um deles, aceda a ${orders} e escreva ${email}. É enviada para esse endereço uma ligação para tudo o que tem lá. Não há palavra-passe para criar.`,
   why: (store) => `Recebe este único email porque ${store} transferiu as suas compras. Não é enviado mais nada por esse motivo.`,
   sentBy: (store) => `Enviado pela Marktmorgen em nome de ${store}.`,
 };

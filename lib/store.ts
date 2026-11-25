@@ -4165,6 +4165,49 @@ function readSuggested(raw: string | null, currency: Currency): number | null | 
   return amount === null ? "bad" : amount;
 }
 
+/**
+ * The base an edit sent (issue #4165), when it reads: its title and price read as a product's would, and its suggested
+ * price, if any, reads. Otherwise undefined, and the edit is taken as having no base, so every field sent is written.
+ * The one test of a readable base, used by afterEdit and by the product route before it keeps the introductory and
+ * yearly prices and the description (Claude 5 ibuF's LEVE on #5468), so the two never disagree on whether there is one.
+ */
+export function readEditBase(base: ProductEditBase | undefined, currency: Currency): ProductEditBase | undefined {
+  if (!base) return undefined;
+  if (typeof readFields(base.title, base.price, currency) === "string") return undefined;
+  return readSuggested(base.suggested, currency) === "bad" ? undefined : base;
+}
+
+/**
+ * What an edit leaves of a product (issue #4165): each of the title, summary, price, membership and suggested price
+ * that this tab sent exactly as it opened it (`base`) keeps what is saved now, so a stale tab never undoes another
+ * tab's save. A base that does not read is no base: every typed field is written. One rule, read by editProduct under
+ * the store's lock and by the product route's checks before it (Claude 5 iYzLs's LEVE on #5468), so the two never
+ * drift. Null when the typed title or price is refused, which editProduct says as such.
+ */
+export function afterEdit(
+  product: Pick<Product, "title" | "summary" | "priceCents" | "recurring" | "pwyw">,
+  typed: { title: string; summary: string; price: string; recurring: Recurring | null; suggested: string | null },
+  base: ProductEditBase | undefined,
+  currency: Currency,
+): { title: string; summary: string; priceCents: number; recurring: Recurring | null; pwywCents: number | null | "bad" } | "title" | "price" {
+  const fields = readFields(typed.title, typed.price, currency);
+  if (typeof fields === "string") return fields;
+  const typedPwyw = readSuggested(typed.suggested, currency);
+  const readable = readEditBase(base, currency);
+  const opened = readable ? readFields(readable.title, readable.price, currency) : null;
+  const openedPwyw = readable ? readSuggested(readable.suggested, currency) : null;
+  const known = readable && opened && typeof opened !== "string" && openedPwyw !== "bad" ? { ...opened, summary: readable.summary.trim().slice(0, MAX_SUMMARY_LENGTH), recurring: readable.recurring, pwyw: openedPwyw } : null;
+  const typedSummary = typed.summary.trim().slice(0, MAX_SUMMARY_LENGTH);
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  return {
+    title: known && fields.title === known.title ? product.title : fields.title,
+    priceCents: known && fields.priceCents === known.priceCents ? product.priceCents : fields.priceCents,
+    summary: known && typedSummary === known.summary ? (product.summary ?? "") : typedSummary,
+    recurring: known && same(typed.recurring, known.recurring) ? (product.recurring ?? null) : typed.recurring,
+    pwywCents: typedPwyw === "bad" ? "bad" : known && typedPwyw === known.pwyw ? (product.pwyw?.suggestedCents ?? null) : typedPwyw,
+  };
+}
+
 /** Adds something to the store, at the end of the list. */
 export async function addProduct(
   email: string,
@@ -4242,6 +4285,13 @@ export async function addProduct(
   return result ?? { ok: false, reason: "none" };
 }
 
+/**
+ * What the studio's form showed when it was opened (issue #4165), in the form's own shape: a field the form still sends
+ * exactly as it opened it was not changed in that tab, so editProduct keeps what is saved now for it, never the copy the
+ * tab opened with. Without it (an older screen, the API), every field sent is written, as before.
+ */
+export type ProductEditBase = { title: string; summary: string; price: string; recurring: Recurring | null; suggested: string | null };
+
 /** Changes something already on the store, keeping its place in the list. */
 export async function editProduct(
   email: string,
@@ -4251,6 +4301,7 @@ export async function editProduct(
   rawPrice: string,
   recurring: Recurring | null = null,
   rawSuggested: string | null = null,
+  base?: ProductEditBase,
 ): Promise<ProductResult> {
   let pwywWhy: PwywProblem | undefined;
   let refusal: "title" | "price" | null = null;
@@ -4261,18 +4312,26 @@ export async function editProduct(
     email,
     id,
     (product, store) => {
-      // Read in the store's own currency, as the store is under the lock.
-      const fields = readFields(rawTitle, rawPrice, store.currency);
-      if (typeof fields === "string") {
-        refusal = fields;
-        return { ok: false, reason: fields };
+      // Read in the store's own currency, as the store is under the lock. Two tabs on one product (issue #4165): a
+      // field this tab sends exactly as it opened it keeps what is saved now (afterEdit, the same rule the product
+      // route checks against), so another tab's save of that field is never undone by a stale copy.
+      const left = afterEdit(product, { title: rawTitle, summary: rawSummary, price: rawPrice, recurring, suggested: rawSuggested }, base, store.currency);
+      if (typeof left === "string") {
+        refusal = left;
+        return { ok: false, reason: left };
       }
-      if (fields.priceCents === 0 && recurring) return { ok: false, reason: "free" };
-      const pwywCents = readSuggested(rawSuggested, store.currency);
-      if (pwywCents === "bad") {
+      if (left.pwywCents === "bad") {
         pwywWhy = "suggested";
         return { ok: false, reason: "pwyw" };
       }
+      const fields = { title: left.title, priceCents: left.priceCents };
+      const summary = left.summary;
+      recurring = left.recurring;
+      const pwywCents = left.pwywCents;
+      // A free product is never charged again and again. Checked on what will be written, after the swap above, so a
+      // stale tab that changed only the price (or only the schedule) cannot pair it with the other tab's (Claude 5
+      // icRk's MEDIUM on #5468).
+      if (fields.priceCents === 0 && recurring) return { ok: false, reason: "free" };
       freeNow = fields.priceCents === 0;
       // A product with several prices cannot become free: the buyer would be
       // shown prices for a thing the page says costs nothing. Take the options
@@ -4291,7 +4350,7 @@ export async function editProduct(
       const next: Product = {
         ...product,
         title: fields.title,
-        summary: rawSummary.trim().slice(0, MAX_SUMMARY_LENGTH),
+        summary,
         priceCents: fields.priceCents,
         recurring,
         pwyw: null,

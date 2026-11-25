@@ -17,9 +17,11 @@ import {
   MAX_TITLE_LENGTH,
   StoreFullError,
   addProduct,
+  afterEdit,
   editProduct,
   filesOnProduct,
   moveProduct,
+  readEditBase,
   removeProduct,
   setProductAbout,
   setProductHidden,
@@ -28,6 +30,7 @@ import {
   setProductYearly,
   storeForEmail,
   type Product,
+  type ProductEditBase,
 } from "@/lib/store";
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
 import { everyOf, readRecurring } from "@/lib/product-recurring";
@@ -216,7 +219,29 @@ export async function POST(request: NextRequest) {
   const suggested =
     body.pwyw !== undefined && body.pwyw !== null && body.pwyw !== false ? text(body.pwyw, 20) : null;
   // Only written when it was sent, so an older screen never wipes it.
-  const about = typeof body.about === "string" ? cleanAbout(body.about.slice(0, MAX_ABOUT_LENGTH * 2)) : null;
+  let about = typeof body.about === "string" ? cleanAbout(body.about.slice(0, MAX_ABOUT_LENGTH * 2)) : null;
+  // What the studio's form showed when it was opened (issue #4165), in the same shape as the fields: on an edit, a
+  // field sent exactly as it was opened was not changed in this tab, so what is saved now for it is kept, never the
+  // copy the tab opened with (lib/store.ts editProduct, under the store's lock, for the title, summary, price,
+  // membership and suggested price; here, for the introductory and yearly prices and the description, which are then
+  // simply not written). A base that does not read is no base: every field sent is written, as before.
+  const sent = body.base && typeof body.base === "object" && !Array.isArray(body.base) ? (body.base as Record<string, unknown>) : null;
+  const baseRecurring = sent ? readRecurring(text(sent.every, 10), sent.trial, sent.payments, sent.everyCount) : null;
+  const sentBase: ProductEditBase | undefined =
+    action === "edit" && sent && baseRecurring !== "trial" && baseRecurring !== "payments" && baseRecurring !== "every"
+      ? {
+          title: text(sent.title, MAX_TITLE_LENGTH),
+          summary: text(sent.summary, MAX_SUMMARY_LENGTH),
+          price: text(sent.price, 20),
+          recurring: baseRecurring,
+          suggested: sent.pwyw !== undefined && sent.pwyw !== null && sent.pwyw !== false ? text(sent.pwyw, 20) : null,
+        }
+      : undefined;
+  // Read by the same test as afterEdit's, so the route and editProduct agree on whether there is a base (Claude 5
+  // ibuF's LEVE on #5468): one that does not read keeps no field here either.
+  const base = readEditBase(sentBase, guarded.store.currency);
+  const untouched = (field: "intro" | "yearly" | "about") => base !== undefined && sent !== null && field in body && JSON.stringify(body[field]) === JSON.stringify(sent[field]);
+  if (untouched("about")) about = null;
 
   if (action !== "add" && !id) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
@@ -245,10 +270,16 @@ export async function POST(request: NextRequest) {
   // creator asked for.
   let intro: Intro | null | undefined;
   let yearly: Yearly | null | undefined;
-  if ((action === "add" || action === "edit") && ("intro" in body || "yearly" in body)) {
+  // The schedule this save leaves (afterEdit, below): the typed one, or what is saved now when this tab did not change it.
+  let schedule = recurring;
+  const introSent = "intro" in body && !untouched("intro");
+  const yearlySent = "yearly" in body && !untouched("yearly");
+  // The product as saved now, read once for both checks below (an edit only).
+  const current = action === "edit" ? await readListing(guarded.store, id) : null;
+  if (action === "add" || action === "edit") {
     const store = guarded.store;
     const typedOf = (raw: unknown) => (raw && typeof raw === "object" ? text((raw as Record<string, unknown>).price, 20).trim() : "");
-    if ("intro" in body) {
+    if (introSent) {
       const typed = typedOf(body.intro);
       if (!typed) intro = null;
       else {
@@ -258,7 +289,7 @@ export async function POST(request: NextRequest) {
         intro = { cents, count: Number.isInteger(count) ? count : 0 };
       }
     }
-    if ("yearly" in body) {
+    if (yearlySent) {
       const typed = typedOf(body.yearly);
       if (!typed) yearly = null;
       else {
@@ -267,16 +298,23 @@ export async function POST(request: NextRequest) {
         yearly = { cents };
       }
     }
-    const current = action === "edit" ? await readListing(store, id) : null;
+    // Checked on every save, not only one that changed them (Claude 3 K9t's MEDIUM on #5468): a tab that lowers the
+    // price under a saved introductory price, or under a saved yearly one, is refused as before, never saved with an
+    // offer that then silently stops. Each field is the one this save leaves, by afterEdit (lib/store.ts), the very
+    // rule editProduct applies under the lock (Claude 5 iYzLs's LEVE on #5468). A typed title, price or suggested price
+    // that does not read is refused by editProduct; the check then reads the typed values as they are.
+    const left = action === "edit" && current ? afterEdit(current, { title, summary, price, recurring, suggested }, base, store.currency) : null;
+    const leftOk = left && typeof left !== "string" && left.pwywCents !== "bad" ? left : null;
     const after = {
       id: current?.id ?? "",
-      priceCents: readMoney(price, store.currency) ?? 0,
-      recurring,
+      priceCents: leftOk ? leftOk.priceCents : (readMoney(price, store.currency) ?? 0),
+      recurring: leftOk ? leftOk.recurring : recurring,
       options: current?.options ?? [],
-      pwyw: suggested,
+      pwyw: leftOk ? (leftOk.pwywCents === null ? null : { suggestedCents: leftOk.pwywCents }) : suggested,
       intro: intro === undefined ? (current?.intro ?? null) : intro,
       yearly: yearly === undefined ? (current?.yearly ?? null) : yearly,
     };
+    schedule = after.recurring;
     const min = priceBounds(store.currency).min;
     if (after.intro) {
       const problem = introProblem(after, after.intro, min, store.tiers);
@@ -289,14 +327,14 @@ export async function POST(request: NextRequest) {
   }
 
   // Charged every N (609 [WP8]): what is still counted in single weeks or months is refused with its reason, against
-  // the product as this save leaves it, so nothing is ever charged on a schedule its page does not say.
-  if ((action === "add" || action === "edit") && recurring && everyOf(recurring) > 1) {
-    const current = action === "edit" ? await readListing(guarded.store, id) : null;
-    const problem = everyProblem(everyOf(recurring), {
+  // the product as this save leaves it, so nothing is ever charged on a schedule its page does not say. The schedule
+  // is the one the save leaves, never a stale tab's copy of it (Claude 3 K9t's LEVE on #5468).
+  if ((action === "add" || action === "edit") && schedule && everyOf(schedule) > 1) {
+    const problem = everyProblem(everyOf(schedule), {
       intro: intro === undefined ? current?.intro : intro,
       yearly: yearly === undefined ? current?.yearly : yearly,
       inTiers: action === "edit" && guarded.store.tiers.includes(id),
-      payments: recurring.payments,
+      payments: schedule.payments,
     });
     if (problem) return Response.json({ ok: false, error: `every_${problem}` }, { status: 400 });
   }
@@ -309,7 +347,7 @@ export async function POST(request: NextRequest) {
       const done =
         action === "add"
           ? await addProduct(ref, title, summary, price, recurring, suggested)
-          : await editProduct(ref, id, title, summary, price, recurring, suggested);
+          : await editProduct(ref, id, title, summary, price, recurring, suggested, base);
       result = done.ok ? { ok: true, product: done.product } : done;
       // What is taken off goes first, so the one put on in its place is never refused for the other.
       const steps: (() => Promise<{ ok: true; product: Product } | { ok: false; reason: string }>)[] = [];

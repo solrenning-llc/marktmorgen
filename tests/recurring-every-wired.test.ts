@@ -91,7 +91,8 @@ async function main(): Promise<void> {
   is("the product route reads the count and refuses each with its reason before saving", [
     route.includes("readRecurring(text(body.every, 10), body.trial, body.payments, body.everyCount)"),
     route.includes('recurring === "every"'),
-    /everyProblem\(everyOf\(recurring\), \{[\s\S]{0,300}payments: recurring\.payments,[\s\S]{0,120}`every_\$\{problem\}`/.test(route),
+    // On the schedule this save leaves (`schedule`, afterEdit's on an edit), never a stale tab's copy (#5468).
+    /everyProblem\(everyOf\(schedule\), \{[\s\S]{0,300}payments: schedule\.payments,[\s\S]{0,120}`every_\$\{problem\}`/.test(route),
     route.indexOf("everyProblem(") < route.indexOf("await addProduct(ref, title, summary, price, recurring, suggested)"),
   ], [true, true, true, true]);
 

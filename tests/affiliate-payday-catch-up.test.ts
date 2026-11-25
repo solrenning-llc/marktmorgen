@@ -166,7 +166,10 @@ async function main(): Promise<void> {
     // The month could not be confirmed kept: nothing is pressed, the hold runs out, and the next day's run pays.
     const store = await autoPayStore();
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      if (commands.some((c) => (c[0] === "EXPIRE" || (c[0] === "SET" && c[2] === "kept")) && String(c[1]).startsWith("nl:aff:payday:"))) throw new Error("no answer");
+      // The keep's write again goes in one fenced step (setWhileStoreLive, Codex L-20261119-1144): an EVAL writing "kept".
+      const keep = (c: (string | number)[]) => (c[0] === "EXPIRE" || (c[0] === "SET" && c[2] === "kept")) && String(c[1]).startsWith("nl:aff:payday:");
+      const fencedKeep = (c: (string | number)[]) => c[0] === "EVAL" && c.includes("kept") && c.some((part) => String(part).startsWith("nl:aff:payday:"));
+      if (commands.some((c) => keep(c) || fencedKeep(c))) throw new Error("no answer");
       return pipeline2(commands);
     }) as typeof redis.pipeline;
     const unkept = await run();

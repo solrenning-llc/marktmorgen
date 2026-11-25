@@ -2,8 +2,10 @@
  * Once-only emails read their Redis answers exactly (CX-123 rule 24).
  *
  * 1. The affiliate payday email (lib/affiliate-payday.ts): the store's month
- *    is claimed with SET NX before it goes. A claim answered in any other shape
- *    than "OK" or nil is never read as ours: the store is not written to on it.
+ *    is claimed before it goes, in one fenced step while the store is live
+ *    (claimWhileStoreLive; a SET NX before Codex L-20261119-1144). A claim
+ *    answered in any other shape than taken or held is never read as ours:
+ *    the store is not written to on it.
  * 2. The usage watch's over-allowance notice (app/api/cron/usage/route.ts):
  *    the list of stores already told is read before anybody is written to. A
  *    list that is not nil or a JSON list of names is never read as "nobody
@@ -100,7 +102,11 @@ async function payday(): Promise<void> {
   ]);
   const month = `${PAYNOW.getUTCFullYear()}-${String(PAYNOW.getUTCMonth() + 1).padStart(2, "0")}`;
   const claim = `nl:aff:payday:${statsId}:${month}`;
-  const isClaim = (c: (string | number)[]) => c[0] === "SET" && c[1] === claim;
+  // The month's claim is one fenced EVAL (claimWhileStoreLive, lib/store-live-cache.ts; Codex L-20261119-1144) whose
+  // key is its fifth argument, answered 1 when taken; it was a SET NX answered "OK".
+  const isClaim = (c: (string | number)[]) =>
+    (c[0] === "SET" && c[1] === claim) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-claim-live:v1\n") && c[5] === claim);
+  const tookIt = (reply: unknown) => reply === "OK" || reply === 1;
   // What a run did for the store: the emails it counts as sent, and whether it went past the claim, that is took
   // it (its SET NX answered "OK"). The PayPal link is read before the claim since Claude 5's MEDIUM on 91815567,
   // so a read of it no longer tells.
@@ -109,7 +115,7 @@ async function payday(): Promise<void> {
     const watch = redis.pipeline;
     redis.pipeline = (async (commands: (string | number)[][]) => {
       const replies = await watch(commands);
-      if (commands.length === 1 && isClaim(commands[0]) && Array.isArray(replies) && replies.length === 1 && replies[0] === "OK") took = true;
+      if (commands.length === 1 && isClaim(commands[0]) && Array.isArray(replies) && replies.length === 1 && tookIt(replies[0])) took = true;
       return replies;
     }) as typeof redis.pipeline;
     try {
@@ -126,7 +132,9 @@ async function payday(): Promise<void> {
   is("a second run, claim answered nil (held): nothing", await run(), none);
 
   part("Payday: a claim answered in another shape is never ours");
-  for (const [label, reply] of MALFORMED) {
+  // A number the fenced claim never answers (it answers 1, 0, -1 or -2): 1 is its own "taken now".
+  const claimMalformed = MALFORMED.map(([label, reply]): [string, () => unknown[]] => (label === "a number" ? [label, () => [7]] : [label, reply]));
+  for (const [label, reply] of claimMalformed) {
     inject = { when: isClaim, reply };
     is(`claim held by the first run, answered ${label}: nothing sent`, await run(), none);
     await pipeline([["DEL", claim]]);
@@ -137,7 +145,7 @@ async function payday(): Promise<void> {
 
   part("Payday: confirmed absence still sends");
   await pipeline([["DEL", claim]]);
-  is("no claim yet, SET NX answers OK: the email goes", await run(), { sent: 1, pastTheClaim: true });
+  is("no claim yet, the claim answers taken: the email goes", await run(), { sent: 1, pastTheClaim: true });
 }
 
 async function told(): Promise<void> {

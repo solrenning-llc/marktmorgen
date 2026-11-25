@@ -66,7 +66,8 @@ async function main(): Promise<void> {
       throw new Error("the function stopped here (test)");
     }
     const replies = await pipeline(commands);
-    if (commands.some((c) => c[0] === "SET" && c[1] === `nl:aff:payday:${statsId}:2026-11` && c.includes("NX"))) claimed = true;
+    // The claim is taken in one fenced step (claimWhileStoreLive, Codex L-20261119-1144): an EVAL naming the month's key.
+    if (commands.some((c) => c[0] === "EVAL" && c.includes(`nl:aff:payday:${statsId}:2026-11`))) claimed = true;
     return replies;
   }) as typeof redis.pipeline;
   const stopped = await run();

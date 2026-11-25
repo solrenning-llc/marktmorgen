@@ -52,7 +52,7 @@ export async function pushWhileStoreLive(store: Pick<Store, "email" | "sid" | "e
 // L-20261120-1842). For a store with an id, its id key must hold this store's very ref (ARGV[5]), not only exist:
 // moveAccount repoints it (Codex L-20261121-0043). -1: gone or erasing, nothing written; -2: the owner's record could
 // not be read; 1: ours; 0: taken.
-const CLAIM_IF_STORE_LIVE = `-- marktmorgen:store-claim-live:v1
+export const CLAIM_IF_STORE_LIVE = `-- marktmorgen:store-claim-live:v1
 if redis.call("HGET", KEYS[2], ARGV[1]) then return -1 end
 if ARGV[4] == "" then
   if redis.call("GET", KEYS[1]) ~= ARGV[5] then return -1 end

@@ -1,4 +1,5 @@
 import { CHAT_ADDRESS_FENCE_EXTRA_COMMANDS, CHAT_ADDRESS_FENCE_EXTRA_BYTES } from "@/lib/chat-summary";
+import { PAYDAY_FENCE_EXTRA_BYTES, PAYDAY_FENCE_EXTRA_COMMANDS, PAYDAY_RUNS_DUE } from "@/lib/affiliate-payday";
 import { CONTACT_LIVE_COMMANDS, INBOX_LIVE_BYTES, INBOX_OPEN_FENCE_COMMANDS } from "@/lib/inbox";
 import { INDEXNOW_BATCH, sitemapUrls } from "@/lib/indexnow";
 import { RELEASE } from "@/lib/redis-lock";
@@ -2852,6 +2853,16 @@ export const COST_LINES: CostLine[] = [
     basis: "A public page of the store: the page and its title share one load, which takes one of the store's public requests before the certificate, or the sample's listing and course, is read, and rests with the public pages. It reads no more than a product's page (the store, a listing, a course), 5 commands measured against COMMANDS.laterPage + COMMANDS.laterCount, so it is inside the visits and public-requests lines (tests/certificate-page-admission.test.ts).",
   },
   {
+    id: "affiliate-payday-fence",
+    feature: "The affiliate payday's month taken and kept only while the store is live: only the additional fence (Codex L-20261119-1144, #5010 row 88)",
+    monthlyUsd: () => PAYDAY_RUNS_DUE * (PAYDAY_FENCE_EXTRA_COMMANDS * COMMAND + PAYDAY_FENCE_EXTRA_BYTES * DB_BYTE),
+    sources: [
+      { file: "lib/affiliate-payday.ts", names: ["PAYDAY_RUNS_DUE", "PAYDAY_FENCE_EXTRA_COMMANDS", "PAYDAY_FENCE_EXTRA_BYTES", "claimWhileStoreLive(store, `nl:aff:payday:", "setWhileStoreLive(store, key, \"kept\", CLAIM_SECONDS)"] },
+      { file: "vercel.json", names: ['"path": "/api/cron/affiliates"', '"schedule": "0 13 * * *"'] },
+    ],
+    basis: "The payday job runs once a day and finds a store due on at most PAYDAY_RUNS_DUE days a month (its payday and PAYDAY_CATCH_UP_DAYS after it). On each, the month's claim and, when its EXPIRE finds nothing, keepMonth's write-again are each one EVAL plus HGET, GET and SET in place of one SET: three extra billed Redis commands a step, six a run, with at most 2 KiB of script, keys and owner ref a step counted whole. The book read, the PayPal press and the email are priced where they were (the studio line's KEPT_INVOICES_STUDIO_UNITS, PAYPAL_PRESS, the store's emails); this incremental line re-certifies none of them. No extra retained key: the month's mark is the one the plain SET kept.",
+  },
+  {
     id: "chat-address-fence",
     feature: "Atomic chat webhook setting: only the additional live-store fence",
     monthlyUsd: () => 10 * 24 * DAY_WINDOWS * (CHAT_ADDRESS_FENCE_EXTRA_COMMANDS * COMMAND + CHAT_ADDRESS_FENCE_EXTRA_BYTES * DB_BYTE),
@@ -3348,7 +3359,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/metered-limits.ts", names: ["withinService", "withinServiceWhy"] },
       { file: "app/api/store/affiliates/paypal/route.ts", names: ['withinServiceWhy("paypal-pay", store.handle, 6, 3600, store, paypalPressUnits(sizes))', "bookSizes(store)", "maxDuration = 60"] },
       { file: "lib/paypal-payouts.ts", names: ["payWithPayPal", "holdLock(lock)", "withLock(`nl:pp:${statsId}:lock`, 120, 5_000", "readBook(store, undefined, { titles: false })", "paypalPressUnits", "PAYPAL_PRESS_BASE_UNITS", "PAYPAL_PRESS_UNIT_COMMANDS"] },
-      { file: "lib/affiliate-payday.ts", names: ["claimMonth", "if (!(await keepMonth(store.statsId, month))) throw", "payWithPayPal(store)"] },
+      { file: "lib/affiliate-payday.ts", names: ["claimMonth", "const kept = await keepMonth(fenced, month);", 'if (kept !== "kept") throw', "payWithPayPal(store)"] },
     ],
     basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers; what the service charges is nothing to us, and AI captions are bought apart. A press of \"Pay with PayPal\" costs more than a call (its own commands with both lock EVALs, its whole book read with no product read for its title, up to sixty seconds), so it takes PAYPAL_PRESS_BASE_UNITS and one more for each PAYPAL_PRESS_UNIT_COMMANDS of its book read at the program's size, counted first, which cover it at every size; payday's auto-pay, one a month, takes no unit and is added once at its most (PAYPAL_PRESS). The bytes the press's book read moves are the open question every reader of the whole book shares, not priced here and never zero.",
   },
@@ -3880,6 +3891,8 @@ export function nonPayingWorst(): number {
     + campaignLandingFenceCost(allowances)
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS
+    // Its payday's month, taken and kept only while it is live (line affiliate-payday-fence, Codex L-20261119-1144).
+    + creator("affiliate-payday-fence")
     // Its studio picture doors, checks and page saves, at its own studio figure (line studio-blob; Claude 7 on #2852).
     + studioBlobMonthly(allowances.studio)
     // Its business-card saves and removals' store fence, at its own studio figure (line creator-card-erasure-fence).

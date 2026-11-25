@@ -67,6 +67,14 @@ function main(): void {
   is("euros on 1 December 2026", hmrcPeriodRate("eur", "2026-12-01")?.perPound, files.get("2026-12")!.get("EUR")![0].rate);
   is("dollars on 30 November 2026", hmrcPeriodRate("usd", "2026-11-30")?.perPound, files.get("2026-11")!.get("USD")![0].rate);
   is("January 2027 has no file: unknown", hmrcPeriodRate("eur", "2027-01-04"), null);
+  // Claude 2's NIT on #5024 (7061724274), the same check here: a source written "https:x" or "https:///x", which `new URL`
+  // reads as host "x", is no address of a page, so the row gives no rate.
+  const december = HMRC_PERIOD_RATES.filter((row) => row.month === "2026-12");
+  // Claude 5's NIT on #5334 (7099077097): an IP literal such as 1.2.3.4 is dotted but names no domain to review.
+  for (const source of ["https:x", "https:///x", "https://x/file.csv", "https://1.2.3.4/file.csv"]) {
+    is(`a source written ${source}: unknown`, hmrcPeriodRate("eur", "2026-12-01", december.map((row) => ({ ...row, source }))), null);
+  }
+  is("the exact HTTPS address still gives the rate", hmrcPeriodRate("eur", "2026-12-01", december)?.perPound, files.get("2026-12")!.get("EUR")![0].rate);
 
   done();
 }

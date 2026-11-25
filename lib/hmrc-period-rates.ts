@@ -14,6 +14,7 @@
  * Pure: no IO.
  */
 import type { UkSterlingRate } from "@/lib/uk-vat";
+import { httpsSource } from "@/lib/reviewed-https-source";
 
 export type HmrcPeriodRate = Readonly<{
   /** The calendar month the rate applies to, YYYY-MM. */
@@ -74,16 +75,6 @@ function realDay(value: unknown): value is string {
   if (typeof value !== "string" || !DAY.test(value)) return false;
   const time = Date.parse(`${value}T00:00:00Z`);
   return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;
-}
-
-function httpsSource(value: unknown): boolean {
-  if (typeof value !== "string") return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && url.hostname.length > 0;
-  } catch {
-    return false;
-  }
 }
 
 function positiveRate(value: unknown): value is string {

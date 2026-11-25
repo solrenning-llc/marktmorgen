@@ -13,14 +13,14 @@
  * Synthetic data, Stripe and PayPal stand-ins.
  */
 import * as rules from "@/lib/api-read-rules";
-import { BOOK_INVOICES_KEPT_BYTES } from "@/lib/api-read-rules";
+import { BOOK_INVOICES_KEPT_BYTES, BOOK_KEPT_INVOICES_BYTES, BOOK_KEPT_INVOICES_MARK_BYTES, bookWork } from "@/lib/api-read-rules";
 import { readBook } from "@/lib/affiliates";
 import { affiliates as apiAffiliates } from "@/lib/api-read";
 import { affiliatesTool } from "@/lib/mcp-tools";
 import { connectPayPal, payWithPayPal, unsettledBook } from "@/lib/paypal-payouts";
 import { takeAllowance } from "@/lib/store-allowance";
-import type { Store } from "@/lib/store";
-import { UNIT_COST, perMegabyte, request } from "./plan-cost-registry";
+import { MAX_STORE_BYTES, type Store } from "@/lib/store";
+import { AFFILIATE_PAGE_COMMANDS, TAKE_COMMANDS, UNIT_COST, affiliatePageWork, perMegabyte, request } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { markLive } from "./live-store";
 import { done, is, part } from "./check";
@@ -107,11 +107,51 @@ async function main(): Promise<void> {
 
   part("What reading and writing back the kept invoices costs, in studio requests");
   const kept = 2 * BOOK_INVOICES_KEPT_BYTES;
-  // The GET of the kept invoices, and their write back: one script of four commands (EVAL, EXISTS, HGET, SET) since
+  // The GET of the kept invoices, and their write back: one script of four commands (EVAL, HGET, GET, SET) since
   // it is fenced by the store's erasure (Codex L-20261119-1003, lib/store-live-cache.ts setWhileStoreLive).
   const cost = request("heavy", 5, kept) + perMegabyte(kept);
   is("a whole number of studio requests, at least one", Number.isSafeInteger(units) && units >= 1, true);
   is("worth at least the five commands and both megabytes at a heavy request's price", units * UNIT_COST.studio >= cost, true);
+  // Past the ceiling (Board #5285 row #3378): the GET, and the mark of it written in place of the invoices, its script
+  // sent twice when the first answer is "unknown": nine commands, the kept invoices one way and two marks the other.
+  // A mark is the record's fixed fields and the store's sale handles, which live in the store's own record: at most
+  // MAX_STORE_BYTES, and a few hundred bytes for the rest (the account id, `since` and `over`).
+  const MARK_BYTES = MAX_STORE_BYTES + 512;
+  // The readers' figure for one mark is at least this bound, and their bytes for the path cover the dearer of the write
+  // back and two marks (Claude 3 xvBY8's LEVE on #5384: two marks are past the write's bytes).
+  is("one mark's bytes, as the readers count them, cover a store record's handles and its JSON", BOOK_KEPT_INVOICES_MARK_BYTES >= MARK_BYTES, true);
+  is("the path's bytes cover the kept invoices read and the dearer of their write back and two marks",
+    BOOK_KEPT_INVOICES_BYTES >= BOOK_INVOICES_KEPT_BYTES + Math.max(BOOK_INVOICES_KEPT_BYTES, 2 * MARK_BYTES), true);
+  const ceilingCost = request("heavy", 9, BOOK_INVOICES_KEPT_BYTES + 2 * MARK_BYTES) + perMegabyte(BOOK_INVOICES_KEPT_BYTES + 2 * MARK_BYTES);
+  is("past the ceiling, worth at least the nine commands, the kept invoices read and two marks written", units * UNIT_COST.studio >= ceilingCost, true);
+  // The API and MCP readers count the same path the same way (Claude 7 HHH's MEDIO on #5384, 7110143161): the GET and
+  // the mark's script of four, sent twice, are nine commands in bookWork too, never one a script. Only the kept
+  // invoices differ between these two sizes (no entries, so no PayPal slices and no refund marks; no products).
+  const sizesWith = { kept: true, entries: 0, people: 1, leads: 0, paypalRefunds: 0, stripe: true, products: 0 };
+  const keptPart = bookWork(sizesWith, 0).commands - bookWork({ ...sizesWith, stripe: false }, 0).commands;
+  is("the API and MCP readers count the kept invoices' path as nine commands, as the studio does", keptPart, 9);
+  // And the same difference in trips and bytes: the GET, then the write back or the mark sent twice, three trips; and
+  // BOOK_KEPT_INVOICES_BYTES moved (Claude 3 xvBY8's LEVE on #5384: no check held roundTrips).
+  const withKept = bookWork(sizesWith, 0);
+  const withoutKept = bookWork({ ...sizesWith, stripe: false }, 0);
+  is("and three round trips, and the path's bytes", [withKept.roundTrips - withoutKept.roundTrips, withKept.bytes - withoutKept.bytes], [3, BOOK_KEPT_INVOICES_BYTES]);
+  // And the affiliate's own page (affiliatePageRead, the model its units are held to in tests/plan-cost-registry.test.ts)
+  // counts the same path the same way (Claude 3's LOW on #5384, 7113942268): never the two commands it counted before.
+  // Computed, not read from the registry's text (Claude 6 jAAv7's NIT on #5384): a book so large that its kept copy is
+  // at BOOK_SNAPSHOT_MAX_BYTES with or without the invoices' lines, so the same writes either way, and only the kept
+  // invoices' path differs between reading Stripe or not.
+  const bigBook = { fields: 1_000_000, rows: 0, listings: 0, stripePages: 1 };
+  const pagePart = affiliatePageWork(bigBook).commands - affiliatePageWork({ ...bigBook, stripePages: 0 }).commands;
+  is("the affiliate's page counts the kept invoices' path as BOOK_KEPT_INVOICES_COMMANDS too", [pagePart, rules.BOOK_KEPT_INVOICES_COMMANDS], [9, 9]);
+  // And its bytes, the same way: on that book only the kept invoices' path differs, so exactly BOOK_KEPT_INVOICES_BYTES
+  // (Claude 3 xvBY8's LEVE on #5384 @0664391217: no test held them).
+  const pageBytes = affiliatePageWork(bigBook).bytes - affiliatePageWork({ ...bigBook, stripePages: 0 }).bytes;
+  is("and the kept invoices' path's bytes as BOOK_KEPT_INVOICES_BYTES", pageBytes, BOOK_KEPT_INVOICES_BYTES);
+  // And nothing taken off the rest of the page: an empty book that reads no Stripe page counts the page's own commands,
+  // the window's take, two commands for its one write of the kept book (WRITE_BYTES a write, lib/affiliate-book-snapshot.ts)
+  // and the three refund marks, from the registry's figures.
+  is("an empty book, no Stripe page: the page's commands, its take, one write and the three marks, nothing less",
+    affiliatePageWork({ fields: 0, rows: 0, listings: 0, stripePages: 0 }).commands, AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + 2 + 3);
 
   part("A studio or payout reading takes them before it reads, and reads whole");
   const before = await left(store);

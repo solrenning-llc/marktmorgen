@@ -6114,7 +6114,7 @@ async function readInvoiceKeep(statsId: string, account: string, tag: string, si
  * kept from before ids its record under its owner's address, Claude 4's MEDIUM on #4951) and its erasure has not begun
  * (ERASING_KEY, written before anything of the store is deleted, removed with its record and its id in the same fenced
  * step, lib/store.ts). A reading that started before the erasure and writes after it, or after it has finished, writes
- * nothing, so the invoice, payment and affiliate ids never come back. EVAL, EXISTS, HGET and SET: four commands in
+ * nothing, so the invoice, payment and affiliate ids never come back. EVAL, HGET, GET and SET: four commands in
  * place of the SET.
  */
 async function keepIfLive(store: Store, statsId: string, value: string): Promise<boolean> {
@@ -6146,10 +6146,19 @@ async function writeInvoiceKeep(store: Store, statsId: string, keep: InvoiceKeep
   const value = JSON.stringify({ ...keep, kept, walk: walking, over: kept ? null : keep.over });
   if (!fits(value, [kept, walking])) {
     console.error("the affiliate book's kept invoices are past their ceiling: nothing kept, the book not whole", statsId);
-    // Only the mark of it, in place of what was kept (one command, as the DEL it replaces): the readings that begin
+    // Only the mark of it, in place of what was kept (the same store-fenced script of four, EVAL, HGET, GET and SET, sent
+    // once more below when its answer is "unknown": BOOK_KEPT_INVOICES_COMMANDS counts both): the readings that begin
     // again carry it, so the creator is told reloading will not help, not "try again in a moment".
     const mark = JSON.stringify({ v: 1, account: keep.account, handles: keep.handles, since: keep.since, kept: null, walk: null, over: Math.floor(Date.now() / 1000) });
-    await keepIfLive(store, statsId, mark).catch(() => undefined);
+    // Read, never ignored (Codex X6's LOW on #3378, Board #5285 row #3378): a write that does not say it kept the mark
+    // (an answer lost or in another shape) is sent once more, so the readings that begin again carry it; a store whose
+    // erasure has begun ("gone") is written nothing, as keepIfLive does. Still not kept: said in the log, and the next
+    // reading, which reads the record left, reaches the ceiling again and writes the mark then.
+    const markOnce = () => setWhileStoreLive(store, invoiceKeepKey(statsId), mark, INVOICE_KEEP_SECONDS).catch(() => "unknown" as const);
+    const marked = await markOnce();
+    if (marked === "unknown" && (await markOnce()) === "unknown") {
+      console.error("the mark of the affiliate book going past its ceiling was not kept, twice; the next reading writes it", statsId);
+    }
     return "ceiling";
   }
   return (await keepIfLive(store, statsId, value)) ? "kept" : "failed";

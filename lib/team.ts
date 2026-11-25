@@ -41,6 +41,7 @@ import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { takeOnce } from "@/lib/redis-take-once";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, ERASING_KEY, erasingField, storeIdCommand, storeForId, storeForIdExact } from "@/lib/store";
@@ -273,7 +274,11 @@ export async function teamTwoStepBlocks(store: Store, email: string, role: Role,
     },
   );
   if (!required) return false;
-  return (await liveSecondStep(email, session)) === null;
+  // A session's second step that could not be read is none: the door stays shut (#4058).
+  return (await liveSecondStep(email, session).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  })) === null;
 }
 
 /**
@@ -893,15 +898,8 @@ export type JoinResult =
  */
 export async function spendInvite(token: string): Promise<JoinResult> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return { ok: false, reason: "expired" };
-  const key = inviteKey(token);
-  let raw: unknown;
-  try {
-    [raw] = await redisPipeline([["GETDEL", key]]);
-  } catch {
-    const [read] = await redisPipeline([["GET", key]]);
-    const [removed] = await redisPipeline([["DEL", key]]);
-    raw = countOf(removed) === 1 ? read : null;
-  }
+  // Read in its exact shape, once (lib/redis-take-once.ts; #4057): an answer of another shape adds nobody.
+  const raw = await takeOnce(inviteKey(token));
   if (typeof raw !== "string" || !raw) return { ok: false, reason: "expired" };
 
   let claim: { sid?: unknown; id?: unknown; email?: unknown; role?: unknown };

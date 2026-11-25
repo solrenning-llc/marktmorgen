@@ -150,6 +150,7 @@ import { PaymentsPanel } from "@/components/payments-panel";
 import { chargeableCurrencies, readWaysToPay } from "@/lib/payment-methods";
 import { formatMoney } from "@/lib/money";
 import { TodayPanel } from "@/components/today-panel";
+import { BusinessTasks } from "@/components/business-tasks";
 import { NextActionsPanel } from "@/components/next-actions-panel";
 import { nextActions } from "@/lib/next-actions-rules";
 import { nextFactsOf } from "@/lib/next-actions-read";
@@ -1599,6 +1600,8 @@ export default async function StudioPage({
             {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
             {/* A draft written with AI only when asked (unit 3): for a role that writes drafts, on a store with the writing help. */}
             {nextScreen ? <NextActionsPanel view={nextScreen} draftable={ai.on && may("draft") ? DRAFTABLE : []} jobs={NEXT_DRAFT_JOBS} /> : null}
+            {/* The store's own task list (IA2): read by the block itself once the page is open, nothing read here. */}
+            {may("settings") ? <BusinessTasks /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
             {ai.on ? <StudioHelp left={ai.known === false ? null : ai.left} /> : null}
@@ -2749,9 +2752,9 @@ export default async function StudioPage({
               <div id="store-data-export" tabIndex={-1} className="card mt-8 scroll-mt-32 p-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your store&rsquo;s main data, as one file</p>
                 <p className="mt-2 text-ink-soft">
-                  Your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson&rsquo;s text, forms and their answers,
+                  Your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson&rsquo;s text, forms and their answers, your task list,
                   contacts and a summary of your orders. It is counted from your studio&rsquo;s requests by its size.
-                  Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio.
+                  Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and CRM tasks stay in your studio.
                 </p>
                 <form action="/api/store/export" method="get" className="mt-4 max-w-full">
                   <input type="hidden" name="store" value={store.sid} />
@@ -2846,7 +2849,7 @@ export default async function StudioPage({
                     </button>
                   </form>
                   <span className="text-sm text-ink-soft">
-                    {`One file: your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and your orders as a spreadsheet. ${ENDED_STORE_EXPORTS === 1 ? "Once" : `${ENDED_STORE_EXPORTS} times`} now that your plan has ended, whatever your store's size, so download it when you are ready to keep it. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio.`}
+                    {`One file: your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, your task list, contacts and your orders as a spreadsheet. ${ENDED_STORE_EXPORTS === 1 ? "Once" : `${ENDED_STORE_EXPORTS} times`} now that your plan has ended, whatever your store's size, so download it when you are ready to keep it. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and CRM tasks stay in your studio.`}
                   </span>
                 </div>
                 )}

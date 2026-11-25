@@ -137,7 +137,8 @@ export async function clientSessions(store: Store, token: string, reads: Session
     past: shownPast,
     upcomingMore: upcoming.length - shownUp.length,
     pastMore: past.length - shownPast.length,
-    partial: reading.partial,
+    // A booking whose buyer address did not read may be this client's: the list says it may be incomplete.
+    partial: reading.partial || shared.unsure > 0,
     notes: shared.notes.filter((note) => shown.has(note.session)),
     tasks: shared.tasks.filter((task) => shown.has(task.session)),
   };

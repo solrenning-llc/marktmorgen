@@ -73,14 +73,36 @@ is(
   }),
   { calls: [S1, S2], notes: [], tasks: ["t000000001"] },
 );
+// Claude 1 cloud's LOW 4 on #3453: a marked item of this client that does not read never shows, and the answer is
+// unknown rather than a list with one missing; an entry that is not an object could be one too.
 is(
-  "a malformed task (bad id, no words) never shows even when marked",
-  view({ client: ANA, calls: CALLS, notes: [], tasks: [task("BAD", ANA, S2, true), task("t000000005", ANA, S2, true, { text: "   " })] }),
+  "a malformed task (bad id) shared with this client: never shown, the answer is unknown",
+  view({ client: ANA, calls: CALLS, notes: [], tasks: [task("BAD", ANA, S2, true)] }),
+  { ok: false, reason: "unreadable" },
+);
+is(
+  "a malformed task (no words) shared with this client: never shown, the answer is unknown",
+  view({ client: ANA, calls: CALLS, notes: [], tasks: [task("t000000005", ANA, S2, true, { text: "   " })] }),
+  { ok: false, reason: "unreadable" },
+);
+is(
+  "a malformed note (bad id) shared with this client: never shown, the answer is unknown",
+  view({ client: ANA, calls: CALLS, notes: [note("zz", ANA, S1, true)], tasks: [] }),
+  { ok: false, reason: "unreadable" },
+);
+is(
+  "a note or a task that is not an object: the answer is unknown",
+  [view({ client: ANA, calls: CALLS, notes: [null as unknown as ShareableNote], tasks: [] }), view({ client: ANA, calls: CALLS, notes: [], tasks: [7 as unknown as ShareableTask] })],
+  [{ ok: false, reason: "unreadable" }, { ok: false, reason: "unreadable" }],
+);
+is(
+  "a shared note that reads with no words has nothing to show",
+  view({ client: ANA, calls: CALLS, notes: [note("aaaa0008", ANA, S1, true, 10, "  ")], tasks: [] }),
   { calls: [S1, S2], notes: [], tasks: [] },
 );
 is(
-  "a malformed note (bad id, no words, not an object) never shows even when marked",
-  view({ client: ANA, calls: CALLS, notes: [note("zz", ANA, S1, true), note("aaaa0008", ANA, S1, true, 10, "  "), null as unknown as ShareableNote], tasks: [] }),
+  "a malformed item on another client's booking is not this client's, so it is skipped",
+  view({ client: ANA, calls: CALLS, notes: [note("zz", BEN, S3, true)], tasks: [task("BAD", BEN, S3, true)] }),
   { calls: [S1, S2], notes: [], tasks: [] },
 );
 
@@ -124,6 +146,14 @@ is(
   "a booking with no address is nobody's",
   view({ client: ANA, calls: [call("cs_test_noaddr00001", null, 1)], notes: [note("aaaa0015", ANA, "cs_test_noaddr00001", true)], tasks: [] }),
   { calls: [], notes: [], tasks: [] },
+);
+is(
+  "and it is counted, so the list is said to be maybe incomplete (Claude 1 cloud's LOW 3 on #3453)",
+  [CALLS, [...CALLS, call("cs_test_noaddr00001", null, 1)], [...CALLS, call("cs_test_noaddr00001", ANA, 1), call("cs_test_noaddr00001", null, 1)]].map((calls) => {
+    const out = sharedWithClient({ client: ANA, calls, notes: [], tasks: [] });
+    return out.ok ? [out.calls.length, out.unsure] : out.reason;
+  }),
+  [[2, 0], [2, 1], [2, 1]],
 );
 is(
   "a booking read twice under two addresses is nobody's (no guess which)",
@@ -200,5 +230,18 @@ is(
   { ok: false, reason: "unreadable" },
 );
 is("a client with no bookings sees nothing", view({ client: "cara@example.com", calls: CALLS, notes: [note("aaaa0022", "cara@example.com", S1, true)], tasks: [] }), { calls: [], notes: [], tasks: [] });
+
+part("A booking or a note that cannot be read makes the answer unknown, never a shorter list (Claude 1 cloud on #3453)");
+{
+  const unreadable = (calls: SharedCallIn[], notes: ShareableNote[] = []) => sharedWithClient({ client: ANA, calls, notes, tasks: [] });
+  const ok = CALLS[0];
+  is("a call whose checkout reference did not read (empty) is unknown", unreadable([ok, { ...ok, session: "" }]), { ok: false, reason: "unreadable" });
+  const shared = note("aaaa0099", ANA, ok.session, true);
+  is("a shared note whose time is not a number is unknown, never 1 January 1970", unreadable([ok], [{ ...shared, at: Number.NaN }]), { ok: false, reason: "unreadable" });
+  is("control: the same note with its time is shown", (() => {
+    const r = unreadable([ok], [shared]);
+    return r.ok ? r.notes.length : r.reason;
+  })(), 1);
+}
 
 done();

@@ -39,6 +39,12 @@ import { StripeError, onAccount } from "@/lib/stripe-account";
 import { available, failedRefunds, priorRefund, refundState, settledCost } from "@/lib/closing-refunds";
 
 const AT = "2024-06-20";
+/**
+ * The plan's late invoices could not be read whole: more than one page of them (has_more), or a list that does not
+ * read. Nothing is refunded on a part of it; the plan stays owed and is read again the next day, and its creator is
+ * told, once, to refund them by hand (lib/plans.ts; #3367, LOW 2 of 6938631896).
+ */
+export class LateListUnreadable extends Error {}
 /** The most late payments one try gives back (two calls each), the rest left for the next pass. */
 export const LATE_REFUNDS_PER_TRY = 3;
 /** Stripe calls one try of a plan's late payments makes at the most: the list, the balance, and two a payment. */
@@ -148,7 +154,7 @@ export async function refundLatePayments(account: string, subscription: string, 
   // Its dispute too: `disputed` stays true after a dispute closes, and only one the buyer won gave the money back.
   query.append("expand[]", "data.charge.dispute");
   const list = objectOf(await onAccount("GET", account, `/invoices?${query}`, undefined, AT));
-  if (!list || list.object !== "list" || !Array.isArray(list.data) || list.has_more !== false) throw new Error("a plan's late invoices could not be read whole");
+  if (!list || list.object !== "list" || !Array.isArray(list.data) || list.has_more !== false) throw new LateListUnreadable("a plan's late invoices could not be read whole");
   const owed: Owed[] = [];
   const checks: Check[] = [];
   const lost: Lost[] = [];

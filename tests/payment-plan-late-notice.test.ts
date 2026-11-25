@@ -54,6 +54,8 @@ let resendUncertain = false;
 let resendPosts = 0;
 let balance = 1_000_000;
 let stripeCalls = 0;
+/** Subscriptions whose late invoices Stripe lists with more than one page (has_more). */
+const moreThanAPage = new Set<string>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -82,7 +84,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (path === "/invoices" && method === "GET") {
     const rows = (invoices[url.searchParams.get("subscription") ?? ""] ?? []).filter((row) => row.status === "paid");
-    return answer({ object: "list", data: rows, has_more: false, url: "/v1/invoices" });
+    return answer({ object: "list", data: rows, has_more: moreThanAPage.has(url.searchParams.get("subscription") ?? ""), url: "/v1/invoices" });
   }
   if (path === "/balance" && method === "GET") return answer({ object: "balance", available: [{ amount: balance, currency: "usd" }], pending: [] });
   if (path === "/refunds" && method === "GET") {
@@ -144,6 +146,18 @@ const inALine = async (session: string) => {
   const [pending, retry] = await redis.pipeline([["SMEMBERS", "nl:plans:pending"], ["ZRANGEBYSCORE", "nl:plans:retry", "-inf", "+inf"]]);
   return [...(pending as string[]), ...(retry as string[])].some((m) => m.startsWith(`${ACCOUNT}|${session}|`));
 };
+/**
+ * Settled with its late payments given back: out of the new plans, and in the retry line only to be read again
+ * LATE_REFUND_RECHECK_DAYS from now for a refund Stripe fails later (#3367, LOW 1 of 6938631896), never sooner (as a
+ * plan kept for an email is, the next day).
+ */
+const settledWatched = async (session: string) => {
+  const now = Math.floor(Date.now() / 1000);
+  const [pending, retry] = await redis.pipeline([["SMEMBERS", "nl:plans:pending"], ["ZRANGEBYSCORE", "nl:plans:retry", "-inf", "+inf", "WITHSCORES"]]);
+  const rows = retry as string[];
+  const mine = rows.flatMap((m, i) => (i % 2 === 0 && m.startsWith(`${ACCOUNT}|${session}|`) ? [Number(rows[i + 1])] : []));
+  return !(pending as string[]).some((m) => m.startsWith(`${ACCOUNT}|${session}|`)) && mine.length === 1 && mine[0] >= now + plans.LATE_REFUND_RECHECK_DAYS * 86_400;
+};
 const to = (address: string) => emails.filter((e) => e.to === address);
 
 async function main(): Promise<void> {
@@ -175,7 +189,7 @@ async function main(): Promise<void> {
     /refunded in full/i.test(letter?.text ?? ""),
     /plan has ended/i.test(letter?.text ?? ""),
   ], [true, true, true, true, true, true]);
-  is("the plan is settled and out of its lines", await inALine(a.session), false);
+  is("the plan is settled, read again only a week on for a refund failed later", await settledWatched(a.session), true);
 
   part("A second pass never emails the buyer again");
   await finishPlan(ACCOUNT, a.session);
@@ -205,7 +219,7 @@ async function main(): Promise<void> {
   resendFails = false;
   tick(1);
   await settlePlans();
-  is("sent the next day, once, and the plan settled", [to(later).length, await inALine(c.session)], [1, false]);
+  is("sent the next day, once, and the plan settled (watched a week on)", [to(later).length, await settledWatched(c.session)], [1, true]);
   tick(1);
   await remember(ACCOUNT, c.session, about);
   await settlePlans();
@@ -219,7 +233,7 @@ async function main(): Promise<void> {
   resendPosts = 0;
   await settlePlans();
   resendUncertain = false;
-  is("the plan is settled at once, not kept to try an email that may have gone", await inALine(u.session), false);
+  is("the plan is settled at once, not kept to try an email that may have gone (only watched a week on)", await settledWatched(u.session), true);
   for (let day = 0; day < 9; day += 1) {
     tick(1);
     await settlePlans();
@@ -254,7 +268,7 @@ async function main(): Promise<void> {
   is("the buyer not emailed while nothing was given back, the plan kept", [to(owedBuyer).length, await inALine(d.session)], [0, true]);
   balance = 1_000_000;
   await settlePlans();
-  is("once the balance covers it: refunded, the buyer emailed once, the plan settled", [(refunds[d.invoices[2].charge.payment_intent] ?? []).length, to(owedBuyer).length, await inALine(d.session)], [1, 1, false]);
+  is("once the balance covers it: refunded, the buyer emailed once, the plan settled", [(refunds[d.invoices[2].charge.payment_intent] ?? []).length, to(owedBuyer).length, await settledWatched(d.session)], [1, 1, true]);
   is("and the creator was told only that once", to(OWNER).length, 1);
 
   part("A refund Stripe refuses for good: the creator is told once, the others still refunded (Claude 3, MEDIUM 1; Claude 6, N2)");
@@ -308,6 +322,40 @@ async function main(): Promise<void> {
     /you must refund it yourself/.test(termsPart),
   ], [true, true, true, true]);
 
+  part("Late invoices Stripe cannot list whole: tried once a day, the creator told once (#3367, LOW 2 of 6938631896)");
+  {
+    // More late invoices than one page (has_more) or a list that does not read: nothing is refunded on a part of it.
+    // It was a plain failure, tried again at every run with nobody told; now the plan is owed, read again the next day,
+    // and its creator is told once, PLAN_OWED_TELL_DAYS after, what to refund by hand.
+    const many = plan(2, 130, 5, "late-buyer-many@example.com");
+    moreThanAPage.add(many.sub);
+    await remember(ACCOUNT, many.session, about);
+    const ownerBefore = to(OWNER).length;
+    const toldOn: number[] = [];
+    const runs: { owed: number; failed: number }[] = [];
+    let sameDay = true;
+    for (let day = 0; day <= 6; day += 1) {
+      const before = to(OWNER).length;
+      const run = await settlePlans();
+      runs.push({ owed: run.owed, failed: run.failed });
+      if (to(OWNER).length > before) toldOn.push(day);
+      if (day === 0) {
+        const [due] = await redis.pipeline([["ZRANGEBYSCORE", "nl:plans:retry", "-inf", String(Math.floor(Date.now() / 1000) + 3600)]]);
+        sameDay = (due as string[]).some((m) => m.startsWith(`${ACCOUNT}|${many.session}|`));
+      }
+      tick(1);
+    }
+    is("counted owed, not a failure", runs.every((one) => one.owed >= 1 && one.failed === 0), true);
+    is("the creator told once, PLAN_OWED_TELL_DAYS after", [toldOn, to(OWNER).length - ownerBefore], [[3], 1]);
+    const note = to(OWNER).at(-1)?.text ?? "";
+    is("naming the checkout, saying the payments could not be read whole, and what to do", [note.includes(many.session), /cannot read from Stripe the whole list/i.test(note), /Stripe dashboard/i.test(note)], [true, true, true]);
+    is("nothing refunded on a part of the list, the buyer not told", [many.invoices.map((row) => (refunds[row.charge.payment_intent] ?? []).length), to("late-buyer-many@example.com").length], [[0, 0, 0, 0, 0], 0]);
+    is("not due again within the same day (read again the next day)", sameDay, false);
+    moreThanAPage.clear();
+    const [lined] = await redis.pipeline([["ZRANGEBYSCORE", "nl:plans:retry", "-inf", "+inf"]]);
+    for (const member of lined as string[]) if (member.startsWith(`${ACCOUNT}|${many.session}|`)) await redis.pipeline([["ZREM", "nl:plans:retry", member]]);
+  }
+
   part("A try stays within the registry's figures");
   const declared = (registry as Record<string, unknown>).PLAN_SETTLE_RUN as Record<string, number>;
   const sites = (registry as Record<string, unknown>).EMAIL_SITES as Record<string, string[]>;
@@ -323,6 +371,9 @@ async function main(): Promise<void> {
     commands += sent.length;
     return real(sent);
   };
+  // Only this plan in the lines: the plans settled above are still watched for a refund failed later, and the clock
+  // moved past some of their weeks; they would be tried in this run too.
+  await redis.pipeline([["DEL", "nl:plans:retry"]]);
   stripeCalls = 0;
   const run = await settlePlans();
   (redis as unknown as { pipeline: Pipe }).pipeline = real;

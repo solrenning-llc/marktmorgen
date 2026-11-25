@@ -44,7 +44,7 @@ import { addPeriods } from "@/lib/plan-periods";
 import { withCutoff } from "@/lib/fetch-timeout";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { tellPlanOwed, tellPlanStuck } from "@/lib/plan-stuck-notice";
-import { refundLatePayments } from "@/lib/plan-late-refunds";
+import { LateListUnreadable, refundLatePayments } from "@/lib/plan-late-refunds";
 import { tellLateRefunds } from "@/lib/plan-late-notice";
 import { ACCOUNT_ID, PENDING, SESSION_ID, entryOf, memberOf } from "@/lib/plan-remember";
 import { ERASING_KEY, erasingField, storeIdCommand } from "@/lib/store";
@@ -55,10 +55,11 @@ export { rememberPlan } from "@/lib/plan-remember";
 
 /**
  * Plans tried and not settled yet, scored by when they are next due (seconds), so the one due first comes first.
- * A member is `account|session|since[|store|product[|told[|owed|owedTold]]]` (Entry): `since` is when the checkout
+ * A member is `account|session|since[|store|product[|told[|owed|owedTold[|watch]]]]` (Entry): `since` is when the checkout
  * opened, or, for a plan watched for an earlier end or one whose last try failed for a reason not its account's, when
  * that was, the moment its days of refusals by the account count from; `owed` is when a payment after its end was
- * first found owed (seconds, empty when none is), and `owedTold` marks its creator told about it.
+ * first found owed (seconds, empty when none is), `owedTold` marks its creator told about it, and `watch` is when a
+ * plan settled with late payments given back began to be watched for a refund Stripe fails later.
  */
 const RETRY = "nl:plans:retry";
 /** Plans one run tries at the most (NOT_A_COST.PLANS_PER_RUN and PLAN_SETTLE_RUN in tests/plan-cost-registry.ts). */
@@ -75,7 +76,23 @@ export const PLAN_STUCK_RETRY_DAYS = 7;
  * no longer than that for anyone to act.
  */
 export const PLAN_OWED_TELL_DAYS = 3;
+/**
+ * Days a plan settled with late payments given back stays in the retry line, read again every
+ * LATE_REFUND_RECHECK_DAYS: Stripe can fail a refund after it read succeeded (a closed card), and one that failed no
+ * longer counts on its charge, so a try then makes it again (lib/plan-late-refunds.ts). Settled at once, the plan
+ * would never be read again, though its buyer was told the money went back (#3367, LOW 1 of 6938631896). Our bound,
+ * not a period Stripe states: a refund that fails later than this is not made again from here.
+ */
+export const LATE_REFUND_WATCH_DAYS = 30;
+/** Days between the reads of a plan watched for a late refund failed later. */
+export const LATE_REFUND_RECHECK_DAYS = 7;
 const DAY = 86_400;
+/**
+ * "The next day" for a plan read again by the next daily run: an hour short of a day from this run's start, as a
+ * daily cron starts some minutes either side of 24 hours later and a run reads only what is due when it starts. Due
+ * at exactly a day, a run a few minutes early skipped the plan to the day after (#3367, LOW 3 of 6938631896).
+ */
+const NEXT_RUN = DAY - 3_600;
 
 /**
  * Whether Stripe refused a call because of the creator's own account: our access to it revoked, or the account
@@ -100,7 +117,7 @@ export type PlanState = "done" | "open" | "gone" | "early" | "unread" | "owed" |
  * What one try found, and for a plan ending sooner, when it is read again (seconds); for a plan owed a refund, the
  * invoices its creator alone can put right (`short`).
  */
-type Outcome = { state: PlanState; again?: number; short?: string[] };
+type Outcome = { state: PlanState; again?: number; short?: string[]; watch?: boolean; unlisted?: boolean };
 
 /**
  * A Stripe reply decides only when it is the object asked for (rule 30): it
@@ -136,10 +153,23 @@ export async function finishPlan(account: string, session: string, about?: { sid
  * payment is still to be given back, "untold" while a buyer is still to be told, "done" once both are.
  */
 async function settleLate(account: string, subscription: string, end: number, about?: { sid: string; product: string }): Promise<Outcome> {
-  const late = await refundLatePayments(account, subscription, end);
+  let late: Awaited<ReturnType<typeof refundLatePayments>>;
+  try {
+    late = await refundLatePayments(account, subscription, end);
+  } catch (error) {
+    // Its late invoices could not be read whole (more than a page, or a list that does not read): owed, read again
+    // the next day, its creator told once to refund them by hand, never a failure tried at every run with nobody told
+    // (#3367, LOW 2 of 6938631896).
+    if (error instanceof LateListUnreadable) {
+      console.error("a plan's late invoices could not be read whole; kept owed", subscription);
+      return { state: "owed", short: [], unlisted: true };
+    }
+    throw error;
+  }
   const told = about ? await tellLateRefunds(about, end, late.given) : { told: 0, untold: 0 };
   if (late.state === "owed") return { state: "owed", short: late.short };
-  return { state: told.untold > 0 ? "untold" : "done" };
+  // Settled with payments given back: watched a while, for a refund Stripe fails later (LATE_REFUND_WATCH_DAYS).
+  return told.untold > 0 ? { state: "untold" } : { state: "done", watch: late.given.length > 0 };
 }
 
 async function tryPlan(account: string, session: string, about?: { sid: string; product: string }): Promise<Outcome> {
@@ -299,10 +329,40 @@ export async function settlePlans(
       console.error("settling a payment plan failed", error);
     }
     const state = outcome?.state;
+    // Settled with late payments given back: read again every LATE_REFUND_RECHECK_DAYS while it is watched, a refund
+    // Stripe failed since made again by that read; let go once LATE_REFUND_WATCH_DAYS have passed from the first.
+    if (state === "done" && outcome?.watch) {
+      const watch = entry.watch || now;
+      if (now - watch < LATE_REFUND_WATCH_DAYS * DAY) {
+        if (entry.watch) counts.watched += 1;
+        else counts.done += 1;
+        const at = now + LATE_REFUND_RECHECK_DAYS * DAY;
+        await moveTo(member, at, memberOf({ ...entry, since: at, owed: 0, owedTold: false, watch }));
+        continue;
+      }
+    }
+    // A watched plan was settled and counted done when its watch began: an answer that is not good (its account
+    // refusing us, a list that does not read, Stripe down) never counts it toward PLAN_GIVE_UP_DAYS, never makes it
+    // stuck and never tells its creator it is stuck, which would be false for a plan ended and refunded (VR, item 2).
+    // Read again at its next look while it is watched, and let go once its watch is over (OWNER-20261124-0218, MEDIO 1).
+    if (entry.watch && state !== "done" && state !== "gone" && state !== "owed" && state !== "untold") {
+      if (now - entry.watch >= LATE_REFUND_WATCH_DAYS * DAY) {
+        await leave(member);
+        continue;
+      }
+      counts.watched += 1;
+      const at = now + LATE_REFUND_RECHECK_DAYS * DAY;
+      await moveTo(member, at, memberOf({ ...entry, since: at }));
+      continue;
+    }
     // An open checkout waits two days from when it was opened; one with no readable time does not wait.
     if (state === "done" || state === "gone" || (state === "open" && !(now - since < 2 * 86400))) {
-      if (state === "done") counts.done += 1;
-      else counts.dropped += 1;
+      // A watched plan was counted done when it first settled: its watch ending, or its checkout read as gone since,
+      // counts nothing more (OWNER-20261124-0218, LEVE 2).
+      if (!entry.watch) {
+        if (state !== "done") counts.dropped += 1;
+        else counts.done += 1;
+      }
       await leave(member);
       continue;
     }
@@ -315,7 +375,7 @@ export async function settlePlans(
     if (state === "untold") {
       // Every late payment given back, a buyer still to be told: tried again the next day, nothing owed any more.
       counts.untold += 1;
-      await moveTo(member, now + DAY, memberOf({ ...entry, since: now + DAY, owed: 0 }));
+      await moveTo(member, now + NEXT_RUN, memberOf({ ...entry, since: now + NEXT_RUN, owed: 0 }));
       continue;
     }
     if (state === "owed") {
@@ -323,22 +383,23 @@ export async function settlePlans(
       // left than one try gives back): its account answered, so no day of refusals counts; tried again the next day.
       counts.owed += 1;
       const owed = entry.owed || now;
-      const next = memberOf({ ...entry, since: now + DAY, owed });
+      const next = memberOf({ ...entry, since: now + NEXT_RUN, owed });
       // Owed for PLAN_OWED_TELL_DAYS for a reason only the creator can end (their balance, Stripe refusing the
       // refund): the creator is told once, the mark written before the email and given back when it was not sent.
+      // Invoices the creator alone can put right (`short`), or none named when they could not be listed whole.
       const short = outcome?.short ?? [];
-      if (entry.owedTold || !short.length || now - owed < PLAN_OWED_TELL_DAYS * DAY) {
-        await moveTo(member, now + DAY, next);
+      if (entry.owedTold || (!short.length && !outcome?.unlisted) || now - owed < PLAN_OWED_TELL_DAYS * DAY) {
+        await moveTo(member, now + NEXT_RUN, next);
         continue;
       }
-      const marked = memberOf({ ...entry, since: now + DAY, owed, owedTold: true });
-      if (!(await moveTo(member, now + DAY, marked))) continue;
+      const marked = memberOf({ ...entry, since: now + NEXT_RUN, owed, owedTold: true });
+      if (!(await moveTo(member, now + NEXT_RUN, marked))) continue;
       const said = await withCutoff(deadline, () => tellPlanOwed({ sid: entry.sid, product: entry.product, account, session, days: PLAN_OWED_TELL_DAYS, invoices: short })).catch((error: unknown) => {
         console.error("telling a creator about a plan's payment owed back failed", error);
         return "unsent" as const;
       });
       if (said === "unsent") {
-        await moveTo(marked, now + DAY, next);
+        await moveTo(marked, now + NEXT_RUN, next);
         console.error(`a plan's payment after its end has been owed for ${PLAN_OWED_TELL_DAYS} days; its creator could not be emailed now, tried again the next day`, account);
         continue;
       }

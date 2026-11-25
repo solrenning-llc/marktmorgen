@@ -68,6 +68,29 @@ export type OwedPlan = { sid: string; product: string; account: string; session:
 /** The words of the email about a payment after a plan's end still to refund (null product: no longer in the store). */
 export function owedPlanWords(storeName: string, product: string | null, session: string, invoices: string[], days: number): { subject: string; text: string } {
   const what = product ? `"${product}"` : "one of your products";
+  // None named: Stripe's list of the plan's payments after its end could not be read whole (more than one page of
+  // them, or an answer that does not read), so nothing was refunded on a part of it (#3367, LOW 2 of 6938631896).
+  if (!invoices.length) {
+    return {
+      subject: `${storeName}: payments to refund to a buyer are waiting`.slice(0, 180),
+      text: [
+        `A buyer paying for ${what} on a payment plan was charged after their last payment. The plan's end was promised to the buyer, so we end the subscription and refund such payments in full, from your Stripe balance.`,
+        "",
+        `A payment this plan took after its end has been waiting to be refunded for ${days} days. Now we cannot read from Stripe the whole list of payments it took after its end (there are too many of them, or Stripe's answer could not be read), so we cannot tell which of them are still to refund, and we refund nothing more until we can. Payments we already refunded stay refunded.`,
+        "",
+        `The plan started with this checkout: ${session}`,
+        "",
+        "What to do:",
+        "- Refund them yourself now: in your Stripe dashboard, search for the checkout above, open the subscription it started and refund in full every payment taken after the buyer's last one that is not refunded yet.",
+        "- If Stripe says a payment can no longer be refunded (it is too old, or the buyer's card is closed), we cannot give it back from here either: contact the buyer and pay them back another way.",
+        "",
+        "What we do by ourselves:",
+        "- We try again every day. When Stripe gives us the whole list, we refund what is still to refund and email the buyer. A payment you refund yourself in Stripe is not refunded again.",
+        "",
+        "We send this email once for this plan.",
+      ].join("\n"),
+    };
+  }
   const one = invoices.length === 1;
   return {
     subject: `${storeName}: a payment to refund to a buyer is waiting`.slice(0, 180),

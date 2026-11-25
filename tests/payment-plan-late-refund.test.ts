@@ -24,6 +24,7 @@
  *     settles only once the refund reads succeeded; one that then fails is made again.
  */
 import { addPeriods, finishPlan, rememberPlan, settlePlans } from "@/lib/plans";
+import { owedPlanWords } from "@/lib/plan-stuck-notice";
 import { LATE_REFUND_CALLS, LATE_REFUNDS_PER_TRY } from "@/lib/plan-late-refunds";
 import * as registry from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
@@ -64,12 +65,15 @@ let chargeLags = false;
 let refundStatus = "succeeded";
 /** Payment intents whose refund Stripe refuses for good (a 400 with this code). */
 const refusedFor = new Map<string, string>();
+/** When set, the creator's account refuses us on every request, as Stripe does once the account disconnected us. */
+let accountRefused = false;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname !== "api.stripe.com") return answer({ object: "list", data: [], has_more: false });
   stripeCalls += 1;
+  if (accountRefused) return answer({ error: { type: "invalid_request_error", message: "The provided key does not have access to account acct_synthetic (or that account does not exist)." } }, 403);
   const method = init?.method ?? "GET";
   const path = url.pathname.replace(/^\/v1/, "");
   const headers = (init?.headers ?? {}) as Record<string, string>;
@@ -188,7 +192,8 @@ async function main(): Promise<void> {
   is("the two payments after the end are refunded, each once and in full", a.invoices.map((row) => madeFor(row).map((r) => r.amount)), [[], [], [], [5_000], [5_000]]);
   is("each under its own invoice's idempotency key and mark", posts.map((p) => [p.key, p.body.get("metadata[plan_late_refund]")]), [a.invoices[3], a.invoices[4]].map((row) => [`plan-late-refund:${row.id}`, row.id]));
   is("the invoices asked for are the subscription's paid ones from its end on", invoiceQueries.map((q) => [q.get("subscription"), q.get("status"), q.get("created[gte]")]), [[a.sub, "paid", String(a.end)]]);
-  is("the plan is settled and out of its lines", [first.done, await inALine(a.session)], [1, false]);
+  // Settled, and watched a while for a refund Stripe fails later (#3367, LOW 1 of 6938631896): read further below.
+  is("the plan is settled", first.done, 1);
   posts.length = 0;
   is("a second pass, the subscription canceled, refunds nothing more", [await finishPlan(ACCOUNT, a.session), posts.length], ["done", 0]);
 
@@ -390,6 +395,120 @@ async function main(): Promise<void> {
   refunds[intent] = [{ id: "re_externalSuccess", object: "refund", payment_intent: intent, amount: 2_000, currency: "usd", status: "succeeded", metadata: {} }];
   one.charge.amount_refunded = 2_000;
   is("the confirmed partial refund counts toward the total", [await finishPlan(ACCOUNT, partialSuccess.session), posts.map((item) => item.body.get("amount")), one.charge.amount_refunded], ["done", ["3000"], 5_000]);
+
+  part("A late refund Stripe fails after the plan settled is read again and made again (#3367, LOW 1 of 6938631896)");
+  {
+    reset();
+    redis.clear();
+    // Refunded and settled; Stripe then fails the refund (a closed card), after the buyer was told it went back. The
+    // plan is read again a week later, for LATE_REFUND_WATCH_DAYS, and the refund is made again under a key of its own.
+    const w = plan(2, 70, 3);
+    await rememberPlan(ACCOUNT, w.session);
+    const settled = await settlePlans();
+    is("refunded and settled", [madeFor(w.invoices[2]).map((one) => one.status), settled.done], [["succeeded"], 1]);
+    is("still in the retry line, watched for a refund failed later", await inALine(w.session), true);
+    const failedLater = madeFor(w.invoices[2])[0];
+    failedLater.status = "failed";
+    w.invoices[2].charge.amount_refunded = 0;
+    balance += failedLater.amount;
+    posts.length = 0;
+    Date.now = () => (clock + 6 * DAY) * 1000;
+    await settlePlans();
+    is("not read again before its week", posts.length, 0);
+    Date.now = () => (clock + 8 * DAY) * 1000;
+    await settlePlans();
+    is("read again a week later: the failed refund is made again", madeFor(w.invoices[2]).map((one) => one.status), ["failed", "succeeded"]);
+    is("under a key of its own", posts.map((one) => one.key), [`plan-late-refund:${w.invoices[2].id}:1`]);
+    is("still watched", await inALine(w.session), true);
+    // Past the watch: let go.
+    Date.now = () => (clock + 40 * DAY) * 1000;
+    const letGo = await settlePlans();
+    is("let go once the watch has run out", await inALine(w.session), false);
+    // Counted done once, when it first settled: never counted again, nor as dropped (Claude 6 i51q's NIT on #5385).
+    is("the end of the watch counts it neither done again nor dropped", [letGo.done, letGo.dropped], [0, 0]);
+    // A plan whose late payments were all given back with nothing refunded here is not watched longer than one with them.
+    Date.now = () => clock * 1000;
+    reset();
+    const none = plan(3, 100, 3);
+    await rememberPlan(ACCOUNT, none.session);
+    await settlePlans();
+    is("control: a plan with no late payment is let go at once", await inALine(none.session), false);
+  }
+
+  part("A watched plan whose account refuses us is never made stuck: read again while watched, let go after (OWNER-20261124-0218, MEDIO 1)");
+  {
+    reset();
+    redis.clear();
+    Date.now = () => clock * 1000;
+    const w = plan(2, 70, 3);
+    await rememberPlan(ACCOUNT, w.session);
+    is("(setup) refunded, settled and watched", [(await settlePlans()).done, await inALine(w.session)], [1, true]);
+    // The creator disconnects us after the plan ended: every read of the watched plan is refused from now on.
+    accountRefused = true;
+    let stuck = 0;
+    let told = 0;
+    try {
+      for (const day of [8, 15, 22, 29]) {
+        Date.now = () => (clock + day * DAY) * 1000;
+        const run = await settlePlans();
+        stuck += run.stuck;
+        told += run.told;
+      }
+      is("RED: inside its watch it is never counted stuck, and its creator is never told the plan is stuck", [stuck, told], [0, 0]);
+      is("still in the line while watched", await inALine(w.session), true);
+      Date.now = () => (clock + 45 * DAY) * 1000;
+      const after = await settlePlans();
+      is("RED: past its watch, a refused read lets it go", await inALine(w.session), false);
+      is("never stuck, never told, never counted again", [after.stuck, after.told, after.done, after.dropped], [0, 0, 0, 0]);
+    } finally {
+      accountRefused = false;
+      Date.now = () => clock * 1000;
+    }
+  }
+
+  part("A watched plan read as gone is not counted dropped: it was counted done (OWNER-20261124-0218, LEVE 2)");
+  {
+    reset();
+    redis.clear();
+    Date.now = () => clock * 1000;
+    const g = plan(2, 70, 3);
+    await rememberPlan(ACCOUNT, g.session);
+    is("(setup) settled and watched", [(await settlePlans()).done, await inALine(g.session)], [1, true]);
+    delete sessions[g.session];
+    Date.now = () => (clock + 8 * DAY) * 1000;
+    const gone = await settlePlans();
+    is("RED: let go, counted neither dropped nor done again", [await inALine(g.session), gone.dropped, gone.done], [false, 0, 0]);
+    Date.now = () => clock * 1000;
+  }
+
+  part("The email for a plan whose list could not be read says only what is known (OWNER-20261124-0218, NIT 3)");
+  {
+    const words = owedPlanWords("Harbor", "Course", "cs_test_synthetic", [], 7);
+    // The plan may have been owed for another reason first, and earlier tries may have refunded part of its payments.
+    is("RED: it never says the list went unread for all those days", /For 7 days we could not read/.test(words.text), false);
+    is("RED: it never says none was refunded", /not refunded any of them/.test(words.text), false);
+    is("it says payments already refunded stay refunded", /already refunded/.test(words.text), true);
+    is("and asks to refund only what is not refunded yet", /not refunded yet/.test(words.text), true);
+  }
+
+  part("A plan owed today is read again by the next daily run, even one that starts a little early (#3367, LOW 3 of 6938631896)");
+  {
+    reset();
+    redis.clear();
+    Date.now = () => clock * 1000;
+    // The balance does not cover the refund: owed, read again "the next day". A daily cron starts some minutes either
+    // side of 24 hours after this run; due at exactly 24 hours, a run two minutes early skips it to the day after.
+    const o = plan(2, 70, 3);
+    balance = 1_000;
+    await rememberPlan(ACCOUNT, o.session);
+    const owedRun = await settlePlans();
+    is("owed, nothing refunded", [owedRun.owed, madeFor(o.invoices[2]).length], [1, 0]);
+    balance = 1_000_000;
+    Date.now = () => (clock + DAY - 120) * 1000;
+    await settlePlans();
+    is("the next daily run, two minutes early, reads it again and refunds", madeFor(o.invoices[2]).length, 1);
+    Date.now = () => clock * 1000;
+  }
 
   part("A try stays within the registry's Stripe calls");
   reset();

@@ -246,7 +246,11 @@ async function saveTeam(sid: string, team: Team): Promise<void> {
     required = parseTeam(await teamRecord(sid)).requireTwoStep === true;
   }
   const kept: Team = { members: team.members, invites: team.invites, ...(required ? { requireTwoStep: true } : {}) };
-  await redisPipeline([["SET", teamKey(sid), JSON.stringify(kept)]]);
+  // Kept only on an exact "OK" (CX-123 rule 24; #4188, Codex G): any other answer (none, short, of another kind) is
+  // not known to be kept, and throws, so no caller reports a team change, the owner's two-step rule above all, that
+  // may not have been written.
+  const written = repliesFor(await redisPipeline([["SET", teamKey(sid), JSON.stringify(kept)]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("a team's record write");
 }
 
 /**

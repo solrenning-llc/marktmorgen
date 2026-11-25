@@ -9,7 +9,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { HandInChangedError, HandInClosedError, handIn, oneHandInAtATime, releaseBytes, releaseTaskHold, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
+import { HandInChangedError, HandInClosedError, handIn, noteOwedBytes, noteTaskUpload, oneHandInAtATime, releaseBytes, releaseTaskHold, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { LockBusyError } from "@/lib/redis-lock";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
@@ -159,9 +159,25 @@ export async function POST(request: NextRequest) {
       // files' hash (lib/assignment.ts, freedBytes) and only once it is gone: a file whose delete failed is still kept
       // in storage, so its bytes stay counted, which only refuses sooner (CX-123 rule 24).
       if (done.replaced) {
-        const gone = await deleteFile(done.replaced.path).then(
+        const replaced = done.replaced.path;
+        // A delete that fails is not lost (#5285 row #4531, Codex X6): nothing else points at the file any more, so it
+        // goes to the daily job that deletes uploads nobody keeps (lib/file-drop.ts deleteOrSweep's way).
+        const gone = await deleteFile(replaced).then(
           () => true,
-          (error: unknown) => (console.error("could not delete a replaced assignment file: its room stays counted", error), false),
+          async (error: unknown) => {
+            console.error("could not delete a replaced assignment file: it goes to the daily job; its room stays counted", error);
+            // Its room is given back by that job once the file is gone (Claude 1's NIT on #5350): kept first, so the job
+            // always finds it; a mark that is not kept only leaves the bytes counted, which refuses sooner.
+            if (done.freedBytes) {
+              await noteOwedBytes(replaced, room, done.freedBytes).catch((owedError: unknown) =>
+                console.error("could not keep a replaced assignment file's room for the daily job; it stays counted", owedError),
+              );
+            }
+            await noteTaskUpload(replaced, 0).catch((noteError: unknown) =>
+              console.error("could not hand a replaced assignment file to the daily job; it is kept until the store closes", noteError),
+            );
+            return false;
+          },
         );
         if (gone && done.freedBytes) await releaseBytes(room, done.freedBytes).catch(() => {});
       }

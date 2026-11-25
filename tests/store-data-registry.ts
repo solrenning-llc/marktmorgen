@@ -348,6 +348,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:api:used:@lib/api-keys.ts": { what: "When each of the store's API keys was last used, kept apart from its record", parts: [capped(1 * KB, "One time for each of MAX_KEYS keys; a revoked key's goes with it.", src("lib/api-key-rules.ts", "MAX_KEYS"))] },
   "nl:course:@lib/assignment.ts": { what: "A course's assignments, the work handed in and what came back", room: ["lib/assignment.ts"], parts: [per("studio", 1, KEY, "The creator told of new work, an hour.")] },
   "nl:tasks:bytes:@lib/assignment.ts": { what: "What a store's students keep handed in, in bytes", parts: [capped(KEY, "One count a store.")] },
+  "nl:tasks:owed:@lib/assignment.ts": short("A replaced handed-in file whose delete failed: the room its bytes still take, by its hashed path, a week, so the daily sweep gives them back once it deleted the file", "buyer", 7, 128),
   "nl:tasks:taken:@lib/assignment.ts": short("A handed-in file's mark of the bytes it took of the store's room, an hour, so a lost answer gives them back", "buyer", 1, 128),
   "nl:tasks:doors@lib/assignment.ts": company("Hand-in doors not yet used, swept a day on", "One sorted set for every store, each door a buyer action's (priced in buyer-actions), gone within two days."),
   "nl:picture-r2:drop@lib/picture-r2-copy.ts": company("Pictures to delete again from the pictures' own bucket (#4357)", "One set, members gone when done."),

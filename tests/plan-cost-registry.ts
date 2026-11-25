@@ -821,9 +821,11 @@ export const SHORT_LINK_UNPAID_COMPANY_COST = {
  * The daily sweep's commands for one assignment door's file, on both its lists (lib/assignment.ts, sweepTaskUploads):
  * on each, its share of the list read, its ZREM, the doors' ZSCORE for a held name, the student's work read to keep a
  * handed-in file, and the ZADD when it is put back; and the hand-in's hold written, taken back or let go
- * (takeTaskUpload, releaseTaskHold).
+ * (takeTaskUpload, releaseTaskHold). Three more since Claude 1's NIT on #5350, for a replaced file whose delete failed:
+ * the hand-in's SET of the room it still takes (noteOwedBytes), the sweep's MGET of it once the file is deleted (one
+ * per run, counted here per file) and its one OWED_GIVE_BACK (giveOwedBack).
  */
-export const TASK_SWEEP_COMMANDS = 14;
+export const TASK_SWEEP_COMMANDS = 17;
 /**
  * The most one student's work on an assignment reads as (lib/assignment.ts, submissionOf), which the sweep reads to
  * keep a handed-in file: the answer and the creator's reply at their longest, each character escaped in JSON at six
@@ -3383,8 +3385,11 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/community/push/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "head(pathname)", "takePicturePlace"] },
       { file: "app/api/store/course/comment/route.ts", names: ["takeBuyerAction"] },
-      // The hand-in's head of its file and its deletes are priced with the door the file came through (TASK_DOOR_COST).
-      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)", "deleteFile(path, \"site_cleanup\")", "releaseTaskHold(file.path)"] },
+      // The hand-in's head of its file and its deletes are priced with the door the file came through (TASK_DOOR_COST); a
+      // replaced file whose delete failed is handed to the daily sweep with one ZADD (noteTaskUpload), inside the same
+      // buyer action's commands (#5285 row #4531), and the room it still takes kept with one SET (noteOwedBytes, counted
+      // in TASK_SWEEP_COMMANDS, Claude 1's NIT on #5350).
+      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)", "deleteFile(path, \"site_cleanup\")", "releaseTaskHold(file.path)", "noteOwedBytes(replaced, room, done.freedBytes)", "noteTaskUpload(replaced, 0)"] },
       // The assignment door also asks the file store once whether the browser's name is already a file (one head, and
       // a listing it may take back), after its buyer action is taken (9 November 2026).
       { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)", "head(pathname)", "dropTaskDoor(pathname)"] },

@@ -17,7 +17,7 @@
  */
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { store as redis } from "./redis-stub";
 import { answering } from "./security/next-headers";
@@ -27,8 +27,9 @@ import { POST } from "@/app/api/store/course/task/route";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setSubscription, storeFolder, storeForEmail, storeRef, type Store } from "@/lib/store";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { emailKey, mintPass, passCookieName, recordEnrollment, storeKey } from "@/lib/learn";
-import { noteTaskUpload, saveTask, submissionOf } from "@/lib/assignment";
+import { OWED_SECONDS, noteTaskUpload, saveTask, submissionOf, sweepTaskUploads } from "@/lib/assignment";
 import { taskFolder } from "@/lib/assignment-rules";
+import { CLOSING } from "@/lib/data-families";
 
 const HOST = "marktmorgen.test";
 const BUYER = "student@example.com";
@@ -104,6 +105,14 @@ async function counted(w: World): Promise<number> {
   return Number(used ?? 0);
 }
 
+/** The sweep's way of deleting from the stand-in file store. */
+const removeFiles = async (paths: string[]): Promise<void> => {
+  for (const p of paths) files.delete(p);
+};
+
+/** The key that keeps a replaced file's room for the daily job (lib/assignment.ts, noteOwedBytes). */
+const owedKeyOf = (path: string) => `nl:tasks:owed:${createHash("sha256").update(path).digest("hex").slice(0, 40)}`;
+
 /** This student's files still in the file store. */
 const keptFiles = (w: World) => [...files].filter((p) => p.startsWith(w.folder));
 
@@ -130,6 +139,86 @@ for (const review of [true, false]) {
     assert.ok(files.has(first), "the earlier file is still in the file store (its delete failed)");
     assert.ok(!deleted.includes(first), "the earlier file is not reported deleted");
     assert.equal(await counted(w), keptFiles(w).length * 1000, `both files kept in storage stay counted: ${keptFiles(w).length} kept, ${await counted(w)} bytes counted`);
+    // #5285 row #4531 (Codex X6's LOW): a replaced file whose delete failed is no longer anybody's work, so nothing
+    // else would ever delete it. It goes to the daily job that deletes uploads nobody keeps (lib/file-drop.ts).
+    const [doors] = await realPipeline([["ZSCORE", "nl:tasks:doors", first]]);
+    assert.notEqual(doors, null, "RED: the earlier file is handed to the daily job that deletes uploads nobody keeps");
+  });
+
+  test(`the replaced file the daily job deletes gives its room back once (${how}; Claude 1's NIT on #5350)`, async () => {
+    const w = await world(review ? "replowedrev" : "replowednow", review);
+    const first = await uploaded(w);
+    assert.equal((await handIn(w, first)).status, 200);
+    const second = await uploaded(w);
+    setFailDeletes(true);
+    assert.equal((await handIn(w, second)).status, 200);
+    setFailDeletes(false);
+    assert.equal(await counted(w), 2000, "both files kept in storage stay counted");
+    const [ttl] = await realPipeline([["TTL", owedKeyOf(first)]]);
+    assert.ok(typeof ttl === "number" && ttl > 0 && ttl <= OWED_SECONDS, `the room it still takes is kept a week at most (TTL ${String(ttl)})`);
+    // A closing or an erasure need not walk it: the walks read it as a family that expires within its week, holding no person.
+    assert.deepEqual(CLOSING["nl:tasks:owed:"], { how: "expires", days: OWED_SECONDS / 86_400 }, "the closing and erasure walks know the mark expires in a week");
+
+    const swept = await sweepTaskUploads(removeFiles);
+    assert.ok(swept.includes(first) && !files.has(first), "the daily job deletes the replaced file");
+    assert.ok(files.has(second), "the file the work keeps stays");
+    assert.equal(await counted(w), 1000, "RED: once the replaced file is gone, its room comes back; the count is the one file kept");
+    const [mark] = await realPipeline([["EXISTS", owedKeyOf(first)]]);
+    assert.equal(mark, 0, "the mark goes with the room given back");
+
+    // The same name listed and deleted again (a door for it, say): its room is never given back twice.
+    await noteTaskUpload(first, 0);
+    files.add(first);
+    await sweepTaskUploads(removeFiles);
+    // The second run deletes the file again (Claude 3 poda's NIT on #5350: the pair that put it back and took it out
+    // did nothing, since counted reads only Redis, and hid whether it was deleted).
+    assert.ok(!files.has(first), "the second run deletes it again");
+    assert.equal(await counted(w), 1000, "a second run gives nothing back");
+  });
+
+  test(`a store closed before the daily job deletes the replaced file never has its room written again (${how})`, async () => {
+    const w = await world(review ? "replclosedrev" : "replclosednow", review);
+    const first = await uploaded(w);
+    assert.equal((await handIn(w, first)).status, 200);
+    const second = await uploaded(w);
+    setFailDeletes(true);
+    assert.equal((await handIn(w, second)).status, 200);
+    setFailDeletes(false);
+    // The store's closing erases its counter (nl:tasks:bytes: is a store's own family, lib/data-families.ts).
+    await realPipeline([["DEL", `nl:tasks:bytes:${w.room}`]]);
+    await sweepTaskUploads(removeFiles);
+    assert.ok(!files.has(first), "the replaced file is deleted");
+    const [there] = await realPipeline([["EXISTS", `nl:tasks:bytes:${w.room}`]]);
+    assert.equal(there, 0, "the closed store's counter is not written again by the give-back");
+  });
+
+  test(`a give-back read in an unknown shape gives nothing back (${how})`, async () => {
+    const w = await world(review ? "replgarbrev" : "replgarbnow", review);
+    const first = await uploaded(w);
+    assert.equal((await handIn(w, first)).status, 200);
+    const second = await uploaded(w);
+    setFailDeletes(true);
+    assert.equal((await handIn(w, second)).status, 200);
+    setFailDeletes(false);
+    for (const shape of ["mget", "eval"] as const) {
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        const replies = await realPipeline(commands);
+        return commands.map((c, i) => (c[0] === (shape === "mget" ? "MGET" : "EVAL") && (shape === "mget" || String(c[1]).includes("task-owed-give-back")) ? "garbled" : replies[i]));
+      }) as typeof redis.pipeline;
+      try {
+        if (shape === "eval") {
+          await noteTaskUpload(first, 0);
+          files.add(first);
+        }
+        await sweepTaskUploads(removeFiles);
+      } finally {
+        redis.pipeline = realPipeline;
+      }
+      assert.ok(!files.has(first), `${shape}: the delete itself is never undone`);
+      // A mark that did not read gives nothing back: the room stays counted, which only refuses sooner. (An EVAL whose
+      // reply is lost may have run; it is said in the log, and the sweep goes on.)
+      if (shape === "mget") assert.equal(await counted(w), 2000, "mget: nothing given back on a reply that does not read");
+    }
   });
 
   test(`two hand-ins at once over an earlier file (${how}): its room is given back once, and one current file is kept`, async () => {

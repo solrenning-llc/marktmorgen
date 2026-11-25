@@ -90,6 +90,36 @@ part("Meta: a signed_request is believed only with its exact base64url signature
   }
 }
 
+part("Meta: a signature refused only for its base64 padding is refused with a log line");
+{
+  // Claude 3's LEVE on #4429 @b5343fe8d8 (6872606480): if Meta ever pads its signature with "=", every notice is
+  // refused and nothing says why. It stays refused (only the exact base64url is believed), with one fixed line.
+  process.env.META_APP_SECRET = "fuzz-meta-secret";
+  const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "123456", issued_at: Math.floor(Date.now() / 1000) })).toString("base64url");
+  const good = createHmac("sha256", "fuzz-meta-secret").update(payload).digest("base64url");
+  const said: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => void said.push(args.map(String).join(" "));
+  try {
+    const padded = signedUser(`${good}=.${payload}`);
+    const exact = signedUser(`${good}.${payload}`);
+    const other = signedUser(`*${good}.${payload}`);
+    is("the padded signature is still refused", padded, null);
+    is("the exact one is still believed", exact, "123456");
+    is("one line says a padded signature was refused, and the other garbled one says nothing", said.filter((line) => /padding/i.test(line)).length, 1);
+    is("the line names neither the signature nor the secret", said.some((line) => line.includes(good) || line.includes("fuzz-meta-secret") || line.includes(payload)), false);
+    void other;
+    // Claude 1's NIT on #5366 @bfe1f724a4: the line comes only when the signature without its padding is the app's
+    // own, so a forged padded signature sent to the public route never writes it.
+    said.length = 0;
+    const forged = createHmac("sha256", "not-the-secret").update(payload).digest("base64url");
+    is("a forged padded signature is refused", signedUser(`${forged}=.${payload}`), null);
+    is("and writes no line", said.filter((line) => /padding/i.test(line)).length, 0);
+  } finally {
+    console.warn = warn;
+  }
+}
+
 part("Sealed values: open only in their exact base64url");
 {
   const sealed = seal("fuzz-value", "fuzz-context");

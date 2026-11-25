@@ -1,0 +1,194 @@
+/**
+ * Codex L-20261120-1741 (HIGH, money and erasure; #5010 row 58): the end of a break (lib/plan-pause.ts runBreaks)
+ * reads the store, then, after awaits, starts its plan again with a POST /subscriptions charged at once (lib/billing.ts
+ * restartPlan). A store whose erasure began in between (its erasing mark, lib/store.ts ERASING_KEY, written by
+ * prepareStore before anything is deleted) still got that POST: a new paid subscription and its charge on a store being
+ * erased, while setSubscription then refused to write it down, so nothing kept its id to reconcile it.
+ *
+ * Now restartPlan asks `beforePost` right before each POST (lib/store-live-cache.ts storeIsLive, lib/live-fence.ts
+ * isStoreLive: the erasing mark absent, the id key still the store's own, read in one step without writing). A store
+ * whose erasing mark is there gets no POST: its break and its due entry are kept untouched, the creator is not told
+ * anything, and the erasure deletes them with the store. A read that is not live for any other reason (the id key
+ * missing, an unreadable reply) is tried again within RETRY_DAYS and then told as unconfirmed, never skipped for good.
+ * (Before this, setSubscription refused to write the new plan for a store being erased; billing-sync then keeps its
+ * subscription id, Claude 1 coord's B2 probe on #5174, and refuses the plan of a closing store with its refund.)
+ * Synthetic store, Stripe and Redis stand-in only.
+ */
+import { ERASING_KEY, claimHandle, ensureStatsId, ensureStoreId, erasingField, ownerKey, setSubscription, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
+import { storeIsLive } from "@/lib/store-live-cache";
+import type { Store } from "@/lib/store";
+import { pauseEmail, pauseOf, pausePlan, runBreaks } from "@/lib/plan-pause";
+import { PLAN_PRICES } from "@/lib/plan";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+process.env.STRIPE_SECRET_KEY = "sk_test_plan_restart_erasure_only";
+process.env.RESEND_API_KEY = "re_test_plan_pause_only";
+
+const DAY = 86_400;
+const NOW = 1_791_700_000;
+const emails: string[] = [];
+const subs: Record<string, Record<string, unknown>> = {};
+let created = 0;
+/** Run once, on the price lookup that comes after the store was read and before the POST. */
+let onPriceRead: (() => Promise<void>) | null = null;
+/** The store ref whose one-step live read (lib/live-fence.ts STORE_LIVE_READ) answers something unreadable: "unknown". */
+let liveReadUnknown: string | null = null;
+/** How many one-step live reads were sent for `liveReadsOf`: the restart's whole added cost (Claude 1 coord 65b4 on #5174). */
+let liveReads = 0;
+let liveReadsOf: string | null = null;
+const pipeline = redis.pipeline.bind(redis);
+redis.pipeline = (async (commands: (string | number)[][]) => {
+  liveReads += commands.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-live-read:") && c.at(-1) === liveReadsOf).length;
+  if (liveReadUnknown && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-live-read:") && c.at(-1) === liveReadUnknown)) return commands.map(() => "unreadable");
+  return pipeline(commands);
+}) as typeof redis.pipeline;
+
+function subscription(id: string, over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id, status: "active", customer: "cus_TestPause0001", default_payment_method: "pm_TestCard00001",
+    cancel_at: null, cancel_at_period_end: false, start_date: NOW - 100 * DAY, trial_end: NOW - 86 * DAY,
+    items: { data: [{ current_period_end: NOW + 10 * DAY, price: { lookup_key: "nimbus_labs_creator_month", unit_amount: 2900, recurring: { interval: "month" } } }] },
+    ...over,
+  };
+}
+
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  const method = init?.method ?? "GET";
+  if (url.hostname === "api.stripe.com") {
+    if (url.pathname.startsWith("/v1/prices") || url.pathname.startsWith("/v1/products")) {
+      const run = onPriceRead;
+      onPriceRead = null;
+      if (run) await run();
+      if (url.pathname === "/v1/prices" && method === "POST") {
+        const body = new URLSearchParams(String(init?.body ?? ""));
+        return new Response(JSON.stringify({ id: "price_creator_month", unit_amount: Number(body.get("unit_amount")), currency: body.get("currency"), recurring: { interval: body.get("recurring[interval]"), interval_count: Number(body.get("recurring[interval_count]")) } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ data: [{ id: "price_creator_month", lookup_key: "nimbus_labs_creator_month", active: true, unit_amount: 2900, recurring: { interval: "month" } }], has_more: false, id: "price_creator_month" }), { status: 200 });
+    }
+    if (url.pathname === "/v1/subscriptions" && method === "POST") {
+      created += 1;
+      const body = new URLSearchParams(String(init?.body ?? ""));
+      const now = Math.floor(Date.now() / 1000);
+      const fresh = subscription("sub_Restarted00001", {
+        start_date: NOW, trial_end: null, customer: { id: body.get("customer"), email: "x@example.com" },
+        items: { data: [{ current_period_start: now - 60, current_period_end: now + 30 * DAY, quantity: 1, price: { id: body.get("items[0][price]"), lookup_key: "nimbus_labs_creator_month", currency: "usd", unit_amount: PLAN_PRICES.creator.month, recurring: { interval: "month", interval_count: 1 } } }] },
+      });
+      subs.sub_Restarted00001 = fresh;
+      return new Response(JSON.stringify(fresh), { status: 200 });
+    }
+    const m = url.pathname.match(/^\/v1\/subscriptions\/(sub_[A-Za-z0-9]+)$/);
+    if (m && subs[m[1]]) {
+      if (method === "POST") {
+        const body = new URLSearchParams(String(init?.body ?? ""));
+        if (body.has("cancel_at_period_end")) subs[m[1]].cancel_at_period_end = body.get("cancel_at_period_end") === "true";
+      }
+      return new Response(JSON.stringify(subs[m[1]]), { status: 200 });
+    }
+    return new Response(JSON.stringify({ error: { message: `no route ${method} ${url.pathname}` } }), { status: 404 });
+  }
+  if (url.hostname === "api.resend.com") {
+    emails.push(String(JSON.parse(String(init?.body ?? "{}")).subject ?? ""));
+    return new Response(JSON.stringify({ id: "re_1" }), { status: 200 });
+  }
+  return new Response("{}", { status: 404 });
+}) as typeof fetch;
+
+/** A store on a monthly plan, on a break that has ended: its paid period over, as cancelling leaves it. */
+async function onBreakDue(email: string, handle: string, sub: string) {
+  subs[sub] = subscription(sub);
+  await claimHandle(email, handle, "A store", "");
+  await ensureStatsId(email);
+  await ensureStoreId(email);
+  await setSubscription(email, { customerId: "cus_TestPause0001", subscriptionId: sub, active: true, tier: "creator", cycle: "month" });
+  const store = (await storeForEmail(email))!;
+  const set = await pausePlan(store, 1, NOW);
+  if (set.kind !== "paused") throw new Error(`no break: ${JSON.stringify(set)}`);
+  await setSubscription(email, { active: false });
+  return { store: (await storeForEmail(email))!, until: set.record.until };
+}
+
+async function main() {
+  part("A store whose erasure begins after the store was read and before the POST gets no new plan and no charge");
+  {
+    const { store, until } = await onBreakDue("restart-erasing@example.com", "restarterasing", "sub_RestartErase1");
+    created = 0;
+    emails.length = 0;
+    // The erasure marks the store (prepareStore) while the worker looks up the plan's price (first here: the price is
+    // then kept in the process, lib/billing.ts ensurePrice, so the control below does not look it up again).
+    onPriceRead = async () => { await redis.pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(store)), String(Date.now())]]); };
+    const counts = await runBreaks(until + 60);
+    is("no POST /subscriptions: nothing is started or charged", created, 0);
+    is("nothing restarted", counts.restarted, 0);
+    is("the break is kept for the erasure to delete with the store", (await pauseOf(store)) !== null, true);
+    is("and the creator of a store being erased is told nothing", emails, []);
+  }
+  part("A store whose live read cannot tell is not skipped for good: kept and retried, then told as unconfirmed");
+  {
+    // Claude 1's LEVE on #5174: only a read that says erasing may be skipped untold. One that only could not tell goes
+    // the way of any failure that is not the card's: nothing is sent, tried again within RETRY_DAYS (3), then the creator
+    // is told the plan could not be confirmed, so the store is never left on a break that silently never ends.
+    const { store, until } = await onBreakDue("restart-unknown@example.com", "restartunknown", "sub_RestartUnkn01");
+    created = 0;
+    emails.length = 0;
+    const record = (await pauseOf(store))!;
+    liveReadUnknown = storeRef(store);
+    try {
+      const first = await runBreaks(until + 60);
+      is("within the retry days: no POST, nothing restarted", [created, first.restarted], [0, 0]);
+      is("the break is kept to be tried again", (await pauseOf(store)) !== null, true);
+      is("and nothing is told yet", emails, []);
+      const later = await runBreaks(until + 4 * DAY);
+      is("after the retry days: still no POST", [created, later.restarted], [0, 0]);
+      is("the creator is told the restart could not be confirmed", emails, [pauseEmail("unconfirmed", record).subject]);
+    } finally {
+      liveReadUnknown = null;
+    }
+  }
+  part("A live store whose id key is missing reads 0 too, and is tried again and then told, never kept untold for good");
+  {
+    // Claude 1 coord's near-MEDIUM on #5174: the read's 0 means erasing or a key that is not this store's own, and a live
+    // store whose id key is missing (ensureStoreId writes it in two steps) reads 0 as well. Skipped untold only when its
+    // erasing mark confirms it; here there is none, so it goes the way of an unknown read.
+    const { store, until } = await onBreakDue("restart-noid@example.com", "restartnoid", "sub_RestartNoId01");
+    const record = (await pauseOf(store))!;
+    redis.run(["DEL", storeIdCommand(store.sid)[1]]);
+    created = 0;
+    emails.length = 0;
+    const first = await runBreaks(until + 60);
+    is("within the retry days: no POST, nothing restarted, nothing told", [created, first.restarted, emails], [0, 0, []]);
+    is("the break is kept to be tried again", (await pauseOf(store)) !== null, true);
+    await runBreaks(until + 4 * DAY);
+    is("after the retry days: still no POST", created, 0);
+    is("the creator is told the restart could not be confirmed", emails, [pauseEmail("unconfirmed", record).subject]);
+  }
+  part("A store kept from before ids, with no statsId, is read by its erasing mark alone");
+  {
+    // Claude 1 coord's LEVE on #5174: such a store cannot be told from its owner's next one, so only its erasing mark
+    // is read; before, it was always "unknown" and its restart was lost every time.
+    // Claude 4 AC's LEVE on #5174 (7091089516): the closing walk removes the mark in the same step that deletes the
+    // owner's record, so "no mark" alone cannot tell "never erased" from "already erased"; the record is read with it.
+    const legacy: Pick<Store, "email" | "sid" | "extra" | "statsId"> = { email: "restart-legacy@example.com", sid: "", extra: false, statsId: null };
+    is("no erasing mark and no owner record (already erased): not live", await storeIsLive(legacy), false);
+    redis.run(["SET", await ownerKey(storeRef(legacy)), JSON.stringify({ handle: "restartlegacy" })]);
+    is("no erasing mark, its owner record there: live", await storeIsLive(legacy), true);
+    redis.run(["HSET", ERASING_KEY, await erasingField(storeRef(legacy)), String(Date.now())]);
+    is("its erasing mark there: not live", await storeIsLive(legacy), false);
+  }
+  part("Control: a live store's plan starts again on the day");
+  {
+    const { store, until } = await onBreakDue("restart-live@example.com", "restartlive", "sub_RestartLive01");
+    created = 0;
+    liveReads = 0;
+    liveReadsOf = storeRef(store);
+    const counts = await runBreaks(until + 60);
+    is("started again, one POST", [counts.restarted, created], [1, 1]);
+    // The fence adds one EVAL, one command, before each POST and nothing else: one restart, one read.
+    is("one live read for the one POST", liveReads, 1);
+  }
+
+  done();
+}
+
+main().catch((error) => { console.error(error); process.exit(1); });

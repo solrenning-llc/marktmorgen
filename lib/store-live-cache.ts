@@ -16,7 +16,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { claimValue } from "@/lib/claim-mark";
-import { pushIfStoreLive, setIfStoreLive, type StoreLiveFence } from "@/lib/live-fence";
+import { isStoreLive, pushIfStoreLive, setIfStoreLive, type StoreLiveFence } from "@/lib/live-fence";
 import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 
 /** The fence of this store (lib/live-fence.ts): its id key, or its record and statsId for a store kept from before ids. */
@@ -35,6 +35,11 @@ export async function storeLiveFence(store: Pick<Store, "email" | "sid" | "extra
  */
 export async function setWhileStoreLive(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, value: string, seconds: number): Promise<"kept" | "gone" | "unknown"> {
   return setIfStoreLive(await storeLiveFence(store), key, value, seconds);
+}
+
+/** Whether `store` is live now (lib/live-fence.ts isStoreLive): true; false when erasing or gone; "unknown" otherwise. */
+export async function storeIsLive(store: Pick<Store, "email" | "sid" | "extra" | "statsId">): Promise<boolean | "unknown"> {
+  return isStoreLive(await storeLiveFence(store));
 }
 
 /**

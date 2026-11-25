@@ -102,6 +102,41 @@ export async function keepIfStoreLive(fence: StoreLiveFence, key: string, value:
   return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
 }
 
+// The same identity rule as SET_IF_STORE_LIVE, read only: 1 live, 0 gone or erasing, -1 an owner's record that does not
+// parse. For a step that is not a Redis write (a provider call such as a plan's restart charge), read right before it
+// (Codex L-20261120-1741).
+export const STORE_LIVE_READ = `-- marktmorgen:store-live-read:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[2] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[3] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[2] then return 0 end
+end
+return 1`;
+
+/**
+ * Whether the fenced store is live now: true; false when its erasure has begun or its key is no longer its own; "unknown"
+ * otherwise. A store kept from before ids with no statsId cannot be told from its owner's next store, so for it its
+ * erasing mark and its owner's record are read together (Claude 1 coord's LEVE on #5174): the mark there is false; no
+ * mark with no record is false too, because the closing walk removes the mark in the step that deletes the record
+ * (Claude 4 AC's LEVE, 7091089516); no mark with the record there is true; any other answer unknown. Two commands.
+ */
+export async function isStoreLive(fence: StoreLiveFence): Promise<boolean | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  if (fence.statsId === null) {
+    const [mark, record] = repliesFor(await redisPipeline([["HGET", fence.erasing, fence.field], ["EXISTS", fence.live]]), 2) ?? [];
+    if (typeof mark === "string") return false;
+    if (mark !== null) return "unknown";
+    return record === 1 ? true : record === 0 ? false : "unknown";
+  }
+  const answer = repliesFor(await redisPipeline([["EVAL", STORE_LIVE_READ, 2, fence.live, fence.erasing, fence.field, fence.statsId, fence.ref]]), 1)?.[0];
+  return answer === 1 ? true : answer === 0 ? false : "unknown";
+}
+
 /**
  * Pushes `value` onto the list under `key`, kept to its newest `most` lines for `seconds`, while the fenced store is
  * live: "kept"; "gone" when its erasure has begun or its record is gone, and then nothing is written; "unknown" for any

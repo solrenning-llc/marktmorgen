@@ -129,6 +129,25 @@ const SCRIPTS: Record<string, Script> = {
     // An empty `seconds` keeps the mark for good (claimWhileStoreLive with null; Codex L-20261120-1745).
     return run(seconds === "" ? ["SET", key, value, "NX"] : ["SET", key, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
   },
+  // lib/live-fence.ts STORE_LIVE_READ: SET_IF_STORE_LIVE's identity rule, read only; 1 live, 0 gone or erasing, -1 unreadable.
+  "store-live-read:v1": (run, [live, erasing], [field, statsId, ref]) => {
+    if (run(["HGET", erasing, field]) !== null) return 0;
+    if (statsId === "") {
+      if (run(["GET", live]) !== ref) return 0;
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return 0;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -1;
+      }
+      if (!record || typeof record !== "object") return -1;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+    }
+    return 1;
+  },
   "zset-take-count:v1": (run, [zset]) => {
     const n = Number(run(["ZCARD", zset])) || 0;
     run(["DEL", zset]);

@@ -1690,6 +1690,65 @@ export function conferirTomada({ eu, id, agora = new Date() }) {
   return { p, head: sha };
 }
 
+/**
+ * ZA (dono, 23/11/2026, 12h29 Fortaleza): READY só com zero achados. Devolve os motivos pelos quais o texto de um READY
+ * não pode ser aceito; vazio quando pode ser gravado. Recusa o texto que:
+ * - não declara zero achados ("sem achados", "0 achados", "no findings");
+ * - nomeia um achado de qualquer tamanho (GRAVE, ALTO, MÉDIO, LEVE, NIT e os nomes em inglês, em maiúsculas);
+ * - adia um achado ("não bloqueia", "non-blocking", "follow-up", "fica para depois").
+ * Não são achado: uma contagem zero ("0 LEVE"); uma linha marcada "não é defeito" (ZA (c)); e, em cada oração (o texto
+ * entre ";" ou "."), um achado de head anterior dado como resolvido NUM FORMATO FIXO: a palavra de fechamento no passado
+ * seguida do commit que o fechou ou de "this head"/"neste head", ou "withdrawn"/"retirado" por quem o apontou, sem
+ * nenhuma marca de futuro, condição ou pendência na oração (ZA (d)). Depois de três revisões em que a leitura livre deixou
+ * passar adiamentos (Claude 3 yUZf 7107553863, Claude 5 icFoe 7107286507, Claude 5 iaqyQ 7107846397), só esse formato
+ * vale; o resto conta como achado, do lado seguro, e a mensagem de recusa mostra o formato.
+ */
+export const FORMATO_RESOLVIDO = '"<achado> fixed in <sha>" / "corrigido em <sha>" / "closed on this head" / "retirado por quem o apontou"';
+export function motivosContraReady(texto) {
+  const motivos = [];
+  const todo = String(texto ?? "");
+  if (!/\b(sem achados?|0 achados?|zero achados?|nenhum achado|no findings?|0 findings?|zero findings?)\b/i.test(todo)) motivos.push('falta dizer "sem achados" (ou "0 achados", "no findings")');
+  // Claude 5 ibuF's LEVE on #5404 (7114134035): "Nitpick:", "Minor:" and "Major:" are findings too, and so is the owner's
+  // own word, "mínimo" (ZA: "nem leve nem mínimo"), with "baixo" and "blocker".
+  const SEV = "GRAVE|ALTO|M[ÉE]DIO|LEVE|M[ÍI]NIMO|BAIXO|NITPICKS?|NIT|HIGH|MEDIUM|LOW|CRITICAL|SEVERE|MAJOR|MINOR|BLOCKER";
+  const notas = /n[ãa]o [ée] defeito|not a defect|not a finding|n[ãa]o [ée] achado/i;
+  // A oração que descreve um achado ("LEVE: o stream nunca é fechado") nunca é resolvida (Claude 5 icFoe, 7107286507).
+  const descreve = new RegExp(`\\b(${SEV})(?:S|s)?\\b\\s*(\\d+\\s*)?(\\([^)]*\\)\\s*)?([:—–]|-\\s)`);
+  // Futuro, condição, pendência ou modal: a oração promete, não fecha (Claude 3 yUZf 7107553863; Claude 5 iaqyQ 7107846397).
+  const promete = /\b(will|shall|to be|should|must|would|might|may|can be|could be|needs? to|later|next|pending|once|after|until|when|unless|if|another|separate|future|eventually|follow-?up (pr|pull request|unit))\b|\b(fica|ficar[áa]|ser[áa]o?|vai|v[ãa]o|pode ser|podem ser|deve|devem|precisa|pr[óo]xim[oa]|quando|assim que|depois|se|caso|outro|outra|futur[oa]|mais tarde|em seguida|pendente)(?![\p{L}\d])/iu;
+  const fecha = /\b(fixed|closed|addressed|resolved|corrigid[oa]s?|fechad[oa]s?|atendid[oa]s?|resolvid[oa]s?)\b[^;]{0,40}?(\b(in|by|on|at|em|no|na|pelo|pela|por)\s+(commit\s+)?([0-9a-f]{7,40}\b|this head\b|este head\b)|\s(neste|nesse) head\b)|\b(withdrawn|retirad[oa]s?)\b[^;]{0,30}?\b(by|por)\s+(its author|the reviewer who raised it|quem (o |a )?apontou|o autor do achado)/i;
+  // Claude 2 upbeat's MÉDIO (#5404): a negated or partial closure is no closure ("not fixed in", "only partly", "except",
+  // "but a new LOW"); any of these words voids it.
+  const limita = /\b(not|never|no longer|isn't|wasn't|hasn't|haven't|partly|partially|except|but|however|only|still|remains?|yet|n[ãa]o|nunca|parcial(mente)?|exceto|salvo|mas|por[ée]m|ainda|s[óo]|resta(m)?|menos)(?![\p{L}\d])/iu;
+  const resolvida = (o) => fecha.test(o) && !descreve.test(o) && !promete.test(o) && !limita.test(o);
+  const orações = todo.split("\n").filter((l) => !notas.test(l)).flatMap((l) => l.split(/;|\.(?=\s|$)/));
+  const resto = orações.filter((o) => !resolvida(o)).join("\n")
+    // A zero count stays on its own line: "[ \t]", not "\s", so "sem achados.\nLEVE: …" never hides the finding on the
+    // next line (Claude 5 iaqyQ's MÉDIO on #5404).
+    .replace(new RegExp(`\\b(0|zero|nenhum|sem|no)[ \\t]+(achados?[ \\t]+)?(${SEV})S?\\b`, "gi"), " ");
+  // Severities as reviews write them, in capitals; in any case when they name a finding: "Leve:", "One nit:", "achado leve",
+  // "1 low" (Claude 2 upbeat's MÉDIO on #5404). Each pairing stays inside one clause, "[ \t]", not "\s": the clauses are
+  // joined with a line break, so "sem achados. Alto contraste ..." never reads as "achados Alto" (Claude 5 iZByNH's LEVE on
+  // #5404, 7114392176).
+  // A capital severity's plural in either case, "NITs" and "LEVEs" as well as "NITS" (Claude 3 wSUb3's MÉDIO on #5404).
+  const tamanho = new RegExp(`\\b(${SEV})(?:S|s)?\\b`).exec(resto)
+    ?? new RegExp(`\\b(${SEV})S?\\b[ \\t]*(\\d+[ \\t]*)?(\\([^)]*\\)[ \\t]*)?[:—–]|\\b(achados?|findings?|defeitos?|defects?)[ \\t]+(${SEV})S?\\b|\\b(\\d+|one|two|three|um|uma|dois|duas|tr[êe]s)[ \\t]+(${SEV})S?\\b(?![-‐\\p{L}])(?![ \\t]+de\\b)`, "iu").exec(resto);
+  // Claude 5 ichw's two LEVE on #5404 (7116035718): a severity or a small-size word in any case right before a finding
+  // noun ("a minor nit in ...", "um pequeno problema"), the common finding nouns before a colon or a dash ("Issue:",
+  // "Cosmetic:", "Suggestion:", "Observação:") and a clause that opens with "Typo" are findings too. A net, not a proof:
+  // the reviewer still writes "sem achados" only when there are none (README). The noun with a colon or dash counts only
+  // at the start of a clause, and a count never pairs with the first half of a hyphenated word ("3 high-traffic") or with
+  // "mínimo de" ("um mínimo de 2 READY"): ordinary wording is not a finding (Claude 5 id8Ws's LEVE on #5404, 7116503145).
+  const RUIDO = "nits?|nitpicks?|issues?|problems?|problemas?|pontos?|findings?|achados?|defects?|defeitos?|typos?|bugs?";
+  const nome = tamanho ? null
+    : new RegExp(`\\b(${SEV}|small|tiny|slight|pequen[oa]s?)S?[ \\t]+(${RUIDO})\\b|(^|\\n)[ \\t]*(issues?|problems?|problemas?|pontos?|bugs?|typos?|cosmetic|cosm[ée]tic[oa]s?|suggestions?|sugest[ãa]o|sugest[õo]es|observa[çc][ãa]o|observa[çc][õo]es)[ \\t]*[:—–]|(^|\\n)[ \\t]*typos?\\b`, "iu").exec(resto);
+  if (nome) motivos.push(`o texto aponta um achado (${nome[0].trim()}); um achado de head anterior só conta como resolvido no formato ${FORMATO_RESOLVIDO}`);
+  if (tamanho) motivos.push(`o texto aponta um achado (${tamanho[0]}); um achado de head anterior só conta como resolvido no formato ${FORMATO_RESOLVIDO}`);
+  const adiado = /n[ãa]o bloque(ia|ante)|non-?blocking|follow-?up(?!\s+(commit|push)s?\b)|fica para depois|fica pra depois/i.exec(resto);
+  if (adiado) motivos.push(`o texto adia um achado ("${adiado[0]}")`);
+  return motivos;
+}
+
 /** Conclui um pedido tomado: grava o resultado e manda ao autor. */
 export function concluir({ tipo, eu, id, resultado, texto = "", agora = new Date(), conferir = true }) {
   const p = pedidos(tipo, agora).find((x) => x.id === id);
@@ -1701,6 +1760,10 @@ export function concluir({ tipo, eu, id, resultado, texto = "", agora = new Date
   if (familia(p.ultimaTomadaPor) !== familia(eu)) throw new Error(`o pedido ${id} foi pegado por ${p.ultimaTomadaPor}; só quem pegou conclui`);
   const permitidos = tipo === "fila" ? ["enfileirado", "recusado"] : ["READY", "CHANGES"];
   if (!permitidos.includes(resultado)) throw new Error(`--result deve ser ${permitidos.join(" ou ")}`);
+  if (tipo === "revisao" && resultado === "READY") {
+    const motivos = motivosContraReady(texto);
+    if (motivos.length) throw new Error(`READY recusado (ZA: só com zero achados, de qualquer tamanho): ${motivos.join("; ")}. Com qualquer achado, conclua com --result CHANGES; uma nota que não é defeito vem escrita "não é defeito".`);
+  }
   // Passo 4: "enfileirado" só com a tomada desta sessão e o head conferido agora; o registro grava o head enfileirado.
   const enfileirado = tipo === "fila" && resultado === "enfileirado" && conferir ? conferirTomada({ eu, id, agora }).head : null;
   const corpo = [`Resultado: ${resultado}`, `PR: ${p.pr}`, `Head: ${p.sha}`, ...(enfileirado ? [`Head enfileirado: ${enfileirado}`] : []), `Por: ${eu}`, `Data (UTC): ${agora.toISOString().slice(0, 16).replace("T", " ")}`, "",

@@ -236,6 +236,26 @@ node ~/.agent-mail/agent-mail.mjs complete-review --as "Claude 5" <id> --result 
 ```
 
 - A revisão é sempre de uma família diferente da do autor (FQ (2)).
+- **READY só com zero achados** (ZA, dono, 23/11/2026, 12h29 Fortaleza). O `complete-review --result READY` recusa, sem gravar nada, o texto que:
+  - não diz "sem achados" (ou "0 achados", "no findings");
+  - aponta um achado de qualquer tamanho: GRAVE, ALTO, MÉDIO, LEVE ou NIT, ou os nomes em inglês;
+  - nomeia, em minúsculas, uma gravidade que vem como achado ("Leve:", "One nit:", "achado leve", "1 low"), também no plural ("NITs", "LEVEs");
+  - põe uma gravidade ou uma palavra de tamanho antes de um nome de achado ("a minor nit", "one small issue", "um pequeno problema"), abre uma oração com um nome de achado seguido de dois-pontos ou travessão ("Issue:", "Problema:", "Cosmetic:", "Suggestion:", "Observação:") ou com "Typo". Uma contagem antes de uma palavra com hífen ("3 high-traffic") ou "um mínimo de" não conta como achado;
+  - adia um achado: "não bloqueia", "non-blocking", "follow-up" ou "fica para depois".
+
+  Essa conferência é uma rede, não uma prova: ela acha só as formas acima. Um achado escrito de outro jeito passa por ela, e quem revisa continua responsável por escrever "sem achados" só quando não há nenhum (Claude 5 ichw, #5404).
+
+  Não contam como achado:
+  - uma contagem zero ("0 LEVE");
+  - uma linha marcada "não é defeito";
+  - numa oração (o texto entre ";" ou "."), um achado de head anterior dado como resolvido **neste formato fixo**:
+    - a palavra de fechamento no passado seguida do commit que o fechou ou do head: "fixed in <sha>", "closed by <sha>", "corrigido em <sha>", "addressed on this head", "corrigido neste head";
+    - ou "withdrawn by its author" / "retirado por quem o apontou";
+    - sem nenhuma marca de futuro, condição ou pendência na oração ("will", "next", "pending", "once", "fica", "será", "próximo", "depois"), nem de negação ou correção parcial ("not", "não", "only", "partly", "except", "but", "mas", "ainda").
+
+  Qualquer outra forma conta como achado, do lado seguro. A leitura livre deixou passar adiamentos em três revisões do #5404, e a mensagem de recusa mostra o formato aceito. "the follow-up commit" e "follow-up push" não são adiamento.
+
+  Com qualquer achado, o veredito é `--result CHANGES`.
 - `claim-review` dá o pedido aberto mais antigo. Nunca dois agentes pegam o mesmo pedido.
 - A preferência (`--to`) vale por 30 minutos, e só enquanto o preferido tem cota. Depois disso, qualquer outra família pode pegar. O autor é avisado na hora se o preferido está sem cota.
 - **Só quem pode revisar recebe o pedido** (dono, 21/11/2026). O `request-review` lê os commits do PR (o que ele tem além do main) e deixa de fora, sozinho, toda família com commit nele, pelo trailer `Claude-Session` (cada família tem um prefixo de sessão), pelo nome "Claude N" do autor e, num commit de outro autor sem trailer, pelo Codex. Ele mostra quem fica de fora e quem pode revisar. Na hora de pegar, a ferramenta confere de novo: se a sua família tem commit no PR, o pedido é devolvido sozinho e você recebe o próximo.

@@ -1011,7 +1011,15 @@ console.log("a family with a verdict on the head is left out of a new review req
   is("c944: the watch does not wake that family for this request", !/revisao #944/.test(r.out), r.out);
   r = run(["claim-review", "--as", "Claude 5 X"], { ...m62, ...as("c5"), FAKE_COMMENTS: noPr });
   is("c944: another family takes it", /pegou:/.test(r.out), r.out);
+  // ZA (owner, 23/11/2026 12h29 Fortaleza): READY only with zero findings; a READY that points to or defers one is refused
+  // and nothing is written, so the request stays with the reviewer, who completes it as CHANGES.
+  const feitaA = () => { try { return g(["show", `refs/heads/correio:revisao/feitas/${idA}.md`], join(T, "mail944.git")); } catch { return ""; } };
+  r = run(["complete-review", "--as", "Claude 5 X", idA, "--result", "READY", "--text", "1 LEVE, não bloqueia"], { ...m62, ...as("c5"), FAKE_COMMENTS: noPr });
+  is("ZA: a READY with a LEVE marked 'não bloqueia' is refused and nothing is recorded", !r.ok && /READY recusado \(ZA/.test(r.out) && feitaA() === "", r.out);
   r = run(["complete-review", "--as", "Claude 5 X", idA, "--result", "READY", "--text", "ok"], { ...m62, ...as("c5"), FAKE_COMMENTS: noPr });
+  is("ZA: a READY that does not say 'sem achados' is refused", !r.ok && /falta dizer "sem achados"/.test(r.out) && feitaA() === "", r.out);
+  r = run(["complete-review", "--as", "Claude 5 X", idA, "--result", "READY", "--text", "sem achados"], { ...m62, ...as("c5"), FAKE_COMMENTS: noPr });
+  is("ZA: a READY that says 'sem achados' is recorded", r.ok && /Resultado: READY/.test(feitaA()), r.out + feitaA());
   r = run(["request-review", "--from", "Claude 4 X", "--pr", "944", "--sha", H62, "--text", "again"], { ...m62, ...as("c4"), FAKE_COMMENTS: noPr });
   const idB = /pedido registrado: (\S+)/.exec(r.out)?.[1] ?? "";
   is("c944: a family whose READY on this head is in the mail goes into Exclui of a new request on the same head", r.ok && /^Exclui: .*claude-5/m.test(pedido(idB)) && /podem revisar: (?![^\n]*claude-5)/.test(r.out), r.out + pedido(idB));
@@ -1019,7 +1027,7 @@ console.log("a family with a verdict on the head is left out of a new review req
   is("c944: and another session of that family does not take it", !/pegou:/.test(r.out), r.out);
   r = run(["claim-review", "--as", "Claude 6 X"], { ...m62, ...as("c6"), FAKE_COMMENTS: noPr });
   const outroDaFamilia = noPr + JSON.stringify([`Claude 6 Y review #944 @${H62.slice(0, 10)}: READY\n\nbody`, "COLLABORATOR"]) + "\n";
-  r = run(["complete-review", "--as", "Claude 6 X", idB, "--result", "READY", "--text", "ok"], { ...m62, ...as("c6"), FAKE_COMMENTS: outroDaFamilia });
+  r = run(["complete-review", "--as", "Claude 6 X", idB, "--result", "READY", "--text", "sem achados"], { ...m62, ...as("c6"), FAKE_COMMENTS: outroDaFamilia });
   is("c944: a verdict written on the PR by the same family during the take is warned about at completion, without refusing", r.ok && /concluído/.test(r.out) && /aviso: .*claude-6.*já tem veredito/.test(r.out), r.out);
   // LOW of Claude 2 main on #5261: a CHANGES on this head is not a reason to leave that family out. The author may answer
   // in writing with no code change and ask the same family to look again on the same head.
@@ -1310,6 +1318,72 @@ console.log("d993: a review request on a moved head is closed as superseded; a r
   is("d993: the scope lines are exact, and a release without one is the family's, as before", mod.ESCOPO_SESSAO === "escopo: sessão" && mod.ESCOPO_FAMILIA === "escopo: família" &&
     mod.devolvidoPara({ devolveram: new Set(["claude-5"]), devolveramSessoes: new Set() }, "Claude 5 Q") === true &&
     mod.devolvidoPara({ devolveram: new Set(), devolveramSessoes: new Set(["claude-5-x"]) }, "Claude 5 Q") === false, "");
+}
+
+console.log("ZA: what a READY's text may say (owner, 23/11/2026 12h29 Fortaleza: zero findings of any size, from every reviewer)");
+{
+  const { motivosContraReady: za } = await import(TOOL);
+  const aceito = (t) => za(t).length === 0;
+  is("ZA: 'sem achados', '0 achados', 'no findings' and 'zero findings' are accepted", ["sem achados", "READY, 0 achados.", "READY, no findings.", "zero findings"].every(aceito), "");
+  is("ZA: zero counts are not findings ('0 GRAVE, 0 ALTO, 0 MÉDIO, 0 LEVE, 0 NIT')", aceito("sem achados: 0 GRAVE, 0 ALTO, 0 MÉDIO, 0 LEVE, 0 NIT"), za("sem achados: 0 GRAVE, 0 ALTO, 0 MÉDIO, 0 LEVE, 0 NIT").join("; "));
+  is("ZA (c): a line marked 'não é defeito' is a note, not a finding", aceito("sem achados\nNota (não é defeito): o nome LOW do teste fica"), "");
+  // ZA (d), fixed format (after three reviews found deferrals passing as closures in free wording): an earlier finding is
+  // resolved only when the clause names the commit that closed it or "this head", or says it was withdrawn by whoever raised it.
+  for (const t of ["sem achados\nO LEVE de 7083359730 foi corrigido neste head", "0 findings. Claude 1's LEVE 1 closed on this head", "no findings; Claude 4's LOW 2 addressed by 1234abcd", "0 findings: the MEDIUM is resolved in 9e01e874f8", "sem achados; o LEVE 2 foi fechado em ab12cd34ef; o NIT foi retirado por quem o apontou", "READY #5367 @4ee6a53fd7, 0 findings (money): Claude 1's and Claude 2's LEVE closed by ff3f952468", "READY, 0 findings. Claude 1's NIT is addressed by this head.", "READY, 0 findings. Claude 1's NIT is fixed by this head.", "READY, 0 findings: the follow-up commit only moves a comment.",
+    // Claude 5 iaqyQ's LEVE (7107846397): "pode entrar" next to the closure does not refuse it.
+    "sem achados\nO LEVE do Claude 3 foi corrigido em e97ec87bbe; pode entrar.", "0 findings\nClaude 3's LEVE was fixed in e97ec87bbe; pode entrar.", "0 findings\nI could not run the Redis test; my earlier LEVE was fixed in e97ec87bbe."])
+    is(`ZA (d): the closure '${t.replace(/\n/g, " / ").slice(0, 70)}' is accepted`, aceito(t), za(t).join("; "));
+  // Free wording without the commit or "this head" is refused, on the safe side, and the refusal shows the format.
+  for (const t of ["READY #5368 @b160034bb9, 0 findings (focal; my LEVE closed: the reader)", "READY #5363 @9e01e874f8, 0 findings (focal money review; my LEVE closed).", "0 findings: the MEDIUM is resolved", "sem achados\nO LEVE de 7083359730 não foi corrigido"])
+    is(`ZA (d): the free closure '${t.slice(0, 60)}' is refused and shows the format`, !aceito(t) && za(t).some((m) => m.includes("fixed in <sha>")), za(t).join("; "));
+  // Claude 5 iaqyQ's MÉDIO (7107846397): a closure placed in a later commit, push or event is a deferral.
+  for (const t of ["0 findings\nThe one LEVE about naming is fixed in the next commit.", "sem achados\nO LEVE do nome fica corrigido no próximo commit.", "sem achados\nO LEVE do nome é corrigido no próximo push.", "0 findings\nThe LEVE is resolved once #5410 lands.", "0 findings\nThe LEVE is addressed by the pending commit.", "0 findings\nThe LEVE will be fixed in 1234abcd.", "sem achados\nO LEVE será corrigido em 1234abcd."])
+    is(`ZA: the deferral '${t.split("\n")[1].slice(0, 55)}' is refused`, !aceito(t), za(t).join("; "));
+  // Claude 5 icFoe's LEVE on #5404: a finding described with one of those words is still a finding.
+  for (const t of ["0 findings\nLEVE: the stream is never closed when the read throws", "0 findings\nLEVE: a fixed 30-second timeout", "0 findings\nNIT: the error is resolved to a string", "0 findings\nMEDIUM: the address is already addressed to another store", "0 findings\nLOW 2 (copy) — the text is fixed width", "0 findings\n- LEVE - a closed store still answers"])
+    is(`ZA: icFoe's case '${t.split("\n")[1].slice(0, 50)}' is refused`, !aceito(t), za(t).join("; "));
+  // Claude 3 yUZf's MÉDIO on #5404 (7107553863): a closure promised for later is a deferral, not a closure.
+  for (const t of ["0 findings; the LEVE is to be fixed in a later PR", "0 findings; Claude 1's NIT will be addressed later", "0 findings; the LOW can be resolved in another PR", "sem achados; o LEVE será corrigido depois", "0 findings; the LEVE should be fixed"])
+    is(`ZA: the promise '${t}' is refused`, !aceito(t), za(t).join("; "));
+  // Claude 2 upbeat's MÉDIO on #5404: a negated or partial closure, and a severity not in capitals, are findings.
+  for (const t of ["0 findings; the NIT is not fixed in 1234abcd", "sem achados; o LEVE não foi corrigido em 1234abcd", "0 findings; the LEVE is only partly fixed in 1234abcd", "0 findings; the LEVE was fixed in 1234abcd except the copy", "0 findings; the LEVE was fixed in 1234abcd, but a new LOW appears", "0 findings\nLeve: the name", "0 findings\nOne nit: the name", "sem achados\nachado leve no nome", "0 findings; 1 low in the log"])
+    is(`ZA: upbeat's case '${t.replace(/\n/g, " / ")}' is refused`, !aceito(t), za(t).join("; "));
+  // Claude 5 iaqyQ's MÉDIO on #5404 (7108552494): a zero count never reaches across a line break to hide a finding.
+  for (const t of ["sem achados.\nLEVE: the name", "0 achados.\nMÉDIO: a cap", "Nenhum achado.\nGRAVE: money", "sem achados\nLEVE: x"])
+    is(`ZA: '${t.replace(/\n/g, " / ")}' is refused`, !aceito(t), za(t).join("; "));
+  // Claude 5 ibuF's LEVE on #5404 (7114134035): more names of a finding.
+  for (const t of ["0 findings\nNitpick: the name", "0 findings\nOne nitpick: the name", "0 findings\nMinor: the copy", "0 findings\nMajor: the cap", "sem achados\nMínimo: o texto", "sem achados; 1 BAIXO no log", "0 findings; BLOCKER: the lock"])
+    is(`ZA: '${t.replace(/\n/g, " / ")}' is refused`, !aceito(t), za(t).join("; "));
+  is("ZA: 'no mínimo 48 horas' in plain words is not a finding", aceito("sem achados; o reembolso vem no mínimo 48 horas depois"), za("sem achados; o reembolso vem no mínimo 48 horas depois").join("; "));
+  is("ZA: yUZf's control 'READY, 0 findings, 1 LEVE: the log line is noisy.' is refused", !aceito("READY, 0 findings, 1 LEVE: the log line is noisy."), "");
+  for (const t of ["0 findings; the LOW is not addressed", "sem achados; o LEVE não foi resolvido", "0 findings; the MEDIUM is unresolved", "0 findings; a follow-up PR for the name"])
+    is(`ZA (d): '${t}' is refused`, !aceito(t), za(t).join("; "));
+  for (const t of ["1 LEVE", "sem achados graves; 1 NIT", "READY with 1 LOW", "MEDIUM: a name", "ALTO no fluxo", "sem achados, mas um follow-up no #1", "sem achados (non-blocking: o texto)", "sem achados; não bloqueia: a ordem", "sem achados, fica para depois: o nome"])
+    is(`ZA: a READY saying '${t}' is refused`, !aceito(t), za(t).join("; "));
+  is("ZA: lowercase words that are not severities ('low-level', 'alto contraste') are not findings", aceito("sem achados; o leitor low-level e o alto contraste ficam"), za("sem achados; o leitor low-level e o alto contraste ficam").join("; "));
+  // Claude 5 iZByNH's LEVE on #5404 (7114392176): the zero declaration's own word never pairs with the first word of the
+  // next sentence ("sem achados. Alto contraste ..." is joined as "achados\n Alto"), while a finding on one line is still one.
+  for (const t of ["READY, sem achados. Alto contraste mantido nos botões.", "READY, 0 findings. Low risk: the change only renames a test.", "READY, no findings. Minor refactor of a helper, behaviour unchanged.", "READY, no findings. Major version of the fixture unchanged.", "READY, 0 findings; Low risk overall"])
+    is(`ZA: iZByNH's '${t}' is accepted`, aceito(t), za(t).join("; "));
+  for (const t of ["sem achados; achado leve no nome", "0 findings; finding low in the log", "0 findings; 1 low in the log", "sem achados. Alto: o contraste caiu"])
+    is(`ZA: iZByNH's control '${t}' is refused`, !aceito(t), za(t).join("; "));
+  // Claude 3 wSUb3's MÉDIO on #5404 (7114133670), still open per Claude 5 iao9Ep (7115458030): a capitalised severity's
+  // lowercase plural ("NITs", "LOWs", "LEVEs") is a finding too.
+  for (const t of ["READY, no findings except the NITs on wording", "READY, sem achados; ficaram os NITs de texto", "READY, no findings. The NITs in the comments remain", "READY, no findings; the LOWs in tests are open", "READY, sem achados; os LEVEs do teste continuam", "READY, no findings; the HIGHs are open", "READY, no findings\nNITs: the wording"])
+    is(`ZA: wSUb3's plural '${t.replace(/\n/g, " / ")}' is refused`, !aceito(t), za(t).join("; "));
+  is("ZA: the plain zero declaration is still accepted", aceito("READY, sem achados."), za("READY, sem achados.").join("; "));
+  // Claude 5 ichw's two LEVE on #5404 (7116035718): a lowercase severity before a finding noun, and the common finding
+  // nouns with a colon, are findings too.
+  for (const t of ["READY, no findings. a minor nit in the test name.", "READY, sem achados. There is a minor issue with the comment wording.", "READY, no findings, but a minor nit in the test name.", "READY, no findings. One small issue: the comment says five-minute job.", "READY, no findings. Cosmetic: typo in the header.", "READY, no findings. Typo in line 3.", "READY, no findings. Suggestion: rename the variable.", "READY, sem achados. Observação: o teste não cobre a linha 304.", "READY, sem achados; um pequeno problema no nome", "READY, sem achados. Problema: o nome"])
+    is(`ZA: ichw's '${t}' is refused`, !aceito(t), za(t).join("; "));
+  for (const t of ["READY, 0 findings; the PR fixes a typo in the header", "READY, 0 findings; issue #3958 reproduced and fixed", "READY, no findings; no minor issues either", "READY, sem achados.\nObservação: não é defeito, o nome segue o padrão"])
+    is(`ZA: ichw's control '${t.replace(/\n/g, " / ")}' is accepted`, aceito(t), za(t).join("; "));
+  // Claude 5 id8Ws's LEVE on #5404 (7116503145, c4b45d5671): ordinary review wording with no finding is accepted: a count
+  // before a hyphenated adjective, "um mínimo de", and "issue —" in running prose.
+  for (const t of ["READY, sem achados. Store refunded first year 64.89, under US$66; 3 high-traffic stores in the fixture.", "READY, sem achados. O PR garante um mínimo de 2 READY por head.", "READY, no findings. Fixes Codex issue — the token is read exactly.", "READY, 0 findings; 2 low-cost reads more", "READY, sem achados; uma mínima de 3 revisões"])
+    is(`ZA: id8Ws's '${t}' is accepted`, aceito(t), za(t).join("; "));
+  for (const t of ["READY, sem achados; 1 high: the cap", "READY, sem achados. Issue — the token is not read exactly.", "READY, sem achados; um mínimo: o nome"])
+    is(`ZA: id8Ws's control '${t}' is refused`, !aceito(t), za(t).join("; "));
 }
 
 console.log(`\n${total} checks, ${falhas ? `${falhas} failing` : "all passing"}.`);

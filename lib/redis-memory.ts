@@ -2636,6 +2636,44 @@ export class MemoryRedis {
           this.run(["SET", link, value]);
           return 1;
         }
+        // lib/paypal-payouts.ts MARK_MANUAL_IF_LIVE: a batch marked for the creator's own check and counted for the
+        // month, in one step, only while the store is live (-1, nothing written); {0, 0} when it already carries the mark,
+        // otherwise {HSET's answer, 1} with the month's "manual" count gone up (Claude 5 idCF's MEDIUM on #5074).
+        if (key.startsWith("-- marktmorgen:paypal-manual-mark:v1\n") && args[0] === "4" && args.length === 11) {
+          const [, live, erasing, open, month, field, batch, value, statsId, ref, seconds] = args;
+          this.scriptCalls += 2;
+          if (this.run(["HGET", erasing, field]) !== null) return -1;
+          if (statsId === "") {
+            if (this.run(["GET", live]) !== ref) return -1;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return -1;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object" || Array.isArray(record) || (record as { statsId?: unknown }).statsId !== statsId) return -1;
+          }
+          this.scriptCalls += 1;
+          const kept = this.run(["HGET", open, batch]);
+          if (kept !== null) {
+            let marked = false;
+            try {
+              const parsed = JSON.parse(String(kept)) as unknown;
+              marked = Boolean(parsed) && typeof parsed === "object" && !Array.isArray(parsed) && (parsed as { m?: unknown }).m === 1;
+            } catch {
+              marked = false;
+            }
+            if (marked) return [0, 0];
+          }
+          this.scriptCalls += 3;
+          const held = this.run(["HSET", open, batch, value]);
+          this.run(["HINCRBY", month, "manual", "1"]);
+          this.run(["EXPIRE", month, seconds]);
+          return [held, 1];
+        }
         // lib/paypal-payouts.ts KEEP_OPEN_IF_LIVE: an open PayPal batch written (and its store watched) only while the
         // store is live; -1, nothing written, when it is gone, being erased or (from before ids) its owner's record is
         // another store's.

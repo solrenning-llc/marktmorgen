@@ -182,6 +182,35 @@ local added = 0
 if ARGV[4] ~= "" then added = redis.call("SADD", KEYS[4], ARGV[4]) end
 return {held, added}`;
 
+/**
+ * A batch whose answer was not known marked for the creator's own check and counted for the owner's monthly report, in
+ * one step (Claude 5 idCF's MEDIUM on #5074): the same live checks as KEEP_OPEN_IF_LIVE (-1, nothing written, when the
+ * store is gone, being erased or no longer its owner's); then, when the entry already carries the mark (a mark whose
+ * answer was lost, or another run's), nothing is written or counted ({0, 0}); otherwise the marked entry is written
+ * and the month's "manual" count goes up with it ({HSET's answer, 1}). So a batch is counted once whether or not the
+ * answer comes back: a lost answer to a mark that ran leaves it marked and counted, one that did not run is tried again.
+ * Billed 1 + HGET + GET + HGET + HSET + HINCRBY + EXPIRE. lib/redis-memory.ts runs it the same way.
+ */
+export const MARK_MANUAL_IF_LIVE = `-- marktmorgen:paypal-manual-mark:v1
+if redis.call("HGET", KEYS[2], ARGV[1]) then return -1 end
+if ARGV[4] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[5] then return -1 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return -1 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" or record["statsId"] ~= ARGV[4] then return -1 end
+end
+local kept = redis.call("HGET", KEYS[3], ARGV[2])
+if kept then
+  local ok, batch = pcall(cjson.decode, kept)
+  if ok and type(batch) == "table" and batch["m"] == 1 then return {0, 0} end
+end
+local held = redis.call("HSET", KEYS[3], ARGV[2], ARGV[3])
+redis.call("HINCRBY", KEYS[4], "manual", 1)
+redis.call("EXPIRE", KEYS[4], ARGV[6])
+return {held, 1}`;
+
 type Link = { client: string; secret: string; at: number; auto: boolean };
 export type PayPalView = { client: string; at: number; auto: boolean; broken: boolean };
 type OpenBatch = PendingPayoutBatch;
@@ -586,6 +615,14 @@ async function keepOpenCommand(store: Store, field: string, value: string, watch
   return ["EVAL", KEEP_OPEN_IF_LIVE, 4, live, ERASING_KEY, openKey(store.statsId as string), STORES, await erasingField(ref), field, value, watch ? store.sid : "", store.sid ? "" : (store.statsId as string), ref];
 }
 
+/** The one command that marks a batch for the creator's own check and counts it, once, only while its store is live (MARK_MANUAL_IF_LIVE). */
+async function markManualCommand(store: Store, field: string, value: string, now = Date.now()): Promise<(string | number)[]> {
+  const ref = storeRef(store);
+  const live = store.sid ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  const month = unknownMonthKey(new Date(now).toISOString().slice(0, 7));
+  return ["EVAL", MARK_MANUAL_IF_LIVE, 4, live, ERASING_KEY, openKey(store.statsId as string), month, await erasingField(ref), field, value, store.sid ? "" : (store.statsId as string), ref, MONTH_SECONDS];
+}
+
 /** Takes one open-batch entry away: true only when Redis answers the HDEL with exactly 0 or 1 (rule 24). */
 async function removedExactly(statsId: string, field: string): Promise<boolean> {
   const gone = repliesFor(await redisPipeline([["HDEL", openKey(statsId), field]]).catch(() => null), 1);
@@ -984,9 +1021,15 @@ export async function settlePayPal(store: Store, options: { paced?: boolean; pre
  */
 async function needsManualCheck(store: Store, field: string, sent: OpenBatch): Promise<"manual"> {
   if (sent.m === 1) return "manual";
-  const [held] = await redisPipeline([await keepOpenCommand(store, field, JSON.stringify({ ...sent, m: 1 }), false)]);
-  if (held === -1) return "manual";
-  await countUnknown("manual");
+  // The mark and the month's count in one step (MARK_MANUAL_IF_LIVE; Codex G-20261121-0346, Claude 5 idCF's MEDIUM on
+  // #5074): a batch is counted once, whether the answer comes back or not. An answer in any other shape (rule 24) is
+  // not known and throws: the mark either ran (marked and counted; the next run reads m and counts nothing more) or did
+  // not (the next run marks and counts it).
+  const reply = repliesFor(await redisPipeline([await markManualCommand(store, field, JSON.stringify({ ...sent, m: 1 }))]), 1);
+  if (reply?.[0] === -1) return "manual";
+  const written = reply ? repliesFor(reply[0], 2) : null;
+  const shape = written !== null && ((written[0] === 0 && written[1] === 0) || ((written[0] === 0 || written[0] === 1) && written[1] === 1));
+  if (!shape) throw new UnknownReplyError("marking a PayPal batch for a manual check");
   return "manual";
 }
 

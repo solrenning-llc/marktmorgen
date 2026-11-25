@@ -539,8 +539,13 @@ export async function agreementsOfPerson(store: Pick<Store, "sid">, email: strin
     // The person's set read exactly (rule 30, as forgetAgreementsPerson reads it): another shape is null, never "none".
     const listed = repliesFor(await redisPipeline([["SMEMBERS", personSet(store.sid, email)]]), 1);
     const members = listed ? stringList(listed[0]) : null;
-    if (!members) return null;
-    const ids = members.filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
+    // A member that is not an agreement id makes the whole set unknown, as forgetAgreementsPerson refuses it (Claude 4
+    // 3rC's LOW on #5154): a shorter list is never "these are all of them".
+    if (!members || !members.every((id) => ID_PATTERN.test(id))) return null;
+    // A set past twice the per-person limit cannot be made (the create refuses a person past MAX_PER_PERSON): it is
+    // unknown too, never cut to its first ids in silence (Claude 1's NIT on #5293).
+    if (members.length > MAX_PER_PERSON * 2) return null;
+    const ids = members;
     if (!ids.length) return [];
     const read = repliesFor(await redisPipeline([["MGET", ...ids.map(recordKey)]]), 1);
     const values = read ? repliesFor(read[0], ids.length) : null;

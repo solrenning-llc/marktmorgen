@@ -160,7 +160,9 @@ export function euReverseChargeRecord(sale: {
 }): EuReverseChargeRecord | null {
   if (!sale || typeof sale !== "object") return null;
   if (!text(sale.sale, 255) || !text(sale.store, 64) || !text(sale.service, 200) || !text(sale.invoice, 64)) return null;
-  if (typeof sale.currency !== "string" || !/^[a-z]{3}$/i.test(sale.currency)) return null;
+  // Hundredths only, as euVatRecord: amountCents is kept as cents, so a sale in yen or dinars would be recorded at a
+  // hundredth or ten times its value (Codex U-20261120-2231). One in another unit makes no record.
+  if (typeof sale.currency !== "string" || !/^[a-z]{3}$/i.test(sale.currency) || decimalsOf(sale.currency) !== 2) return null;
   const date = dayOf(sale.at);
   if (!date || !whole(sale.amountCents) || sale.amountCents <= 0) return null;
   const place = sale.place;

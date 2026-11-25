@@ -108,11 +108,18 @@ export async function stopMeta(request: NextRequest): Promise<Response> {
   if (!store.statsId) return back(origin, store, "disconnected");
   try {
     const gone = await disconnectMeta(store.statsId);
+    // Kept at Meta because another store still uses that Meta login (issue #4011): said so, never "given back". Kept
+    // because that could not be confirmed (an index or connection that did not read): said as unconfirmed, never as
+    // another store's use (Claude 3's LOW on #4159).
+    // A give-back that failed (Claude 4 2Wb's note on #4159) is said as not removed, with the way to remove it.
+    const unconfirmed = gone !== false && gone.metaAccess === "unconfirmed";
+    const kept = gone !== false && (gone.metaAccess === "kept" || unconfirmed);
+    const failed = gone !== false && gone.metaAccess === "failed";
     if (gone !== false) {
-      after(() => noticeCreator(store, { kind: "metaads-disconnected" }));
+      after(() => noticeCreator(store, { kind: "metaads-disconnected", ...(kept ? { kept: true } : {}), ...(unconfirmed ? { unconfirmed: true } : {}), ...(failed ? { failed: true } : {}) }));
       if (role !== "owner") await logTeam(store.sid, { who: email, role, what: `${PERMISSION_WORDS.settings}: disconnected Meta ads` });
     }
-    return back(origin, store, "disconnected");
+    return back(origin, store, failed ? "disconnected-not-removed" : unconfirmed ? "disconnected-unconfirmed" : kept ? "disconnected-kept" : "disconnected");
   } catch (error) {
     console.error("disconnecting Meta ads failed", error);
     return back(origin, store, "error");

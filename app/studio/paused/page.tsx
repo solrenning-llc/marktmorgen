@@ -13,6 +13,9 @@ import { standingOf } from "@/lib/plan-standing";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
+import { pausedActions } from "@/lib/studio-paused-rules";
+import { SUPPORT_EMAIL } from "@/lib/creator-research";
+import { DarkThemeColor } from "@/components/dark-theme-color";
 
 export const metadata: Metadata = {
   title: "Studio paused — Marktmorgen",
@@ -55,10 +58,54 @@ export default async function StudioPausedPage({ searchParams }: Params) {
   const why = query.why === "pool" ? "pool" : query.why === "unknown" ? "unknown" : query.why === "daily" ? "daily" : "used";
   // "Stripe could not be asked" only when the billing month is what is missing; otherwise the count itself.
   const noMonth = allowanceWindow(store) === null;
+  // What the screen offers besides its words: never nothing (lib/studio-paused-rules.ts).
+  const offer = pausedActions(why, shown);
+
+  const ways = (
+    <div className="mt-8 border-t border-line pt-6">
+      <p className="text-sm font-bold text-ink">{offer.includes("export") ? "Never paused" : "Where to go now"}</p>
+      <p className="mt-1 text-sm text-ink-soft">
+        {offer.includes("export")
+          ? PLANS_ON_SALE ? "Changing your plan, canceling it and taking your sales with you always work." : "Canceling your plan and taking your sales with you always work."
+          : "The rest of your studio still works, and support can help with anything that has to happen today."}
+      </p>
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        {offer.includes("export") && can(view.role, "export") ? (
+          <form action="/api/store/export" method="get">
+            <input type="hidden" name="store" value={store.sid} />
+            <input type="hidden" name="what" value="sales" />
+            <input type="hidden" name="range" value="all" />
+            <button type="submit" className="btn btn-secondary btn-sm">
+              Download all sales (CSV)
+            </button>
+          </form>
+        ) : null}
+        {offer.includes("cancel") ? <>{paying && mayChange && isBillingConfigured() && store.subscriptionId ? (
+          <details>
+            <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">Cancel the subscription</summary>
+            <p className="mt-2 text-sm text-ink-soft">Your store keeps taking payments until the end of the period you already paid for, and nothing more is charged.</p>
+            <form action={`/api/billing/cancel${pin}`} method="post" className="mt-3">
+              <input type="hidden" name="intent" value="cancel" />
+              <button type="submit" className="btn btn-secondary btn-sm">
+                Yes, cancel it
+              </button>
+            </form>
+          </details>
+        ) : null}</> : null}
+        <Link href={studioPath(store)} className="btn btn-secondary btn-sm">
+          Open the studio
+        </Link>
+        <a href={`mailto:${SUPPORT_EMAIL}`} className="btn btn-secondary btn-sm">
+          Email support
+        </a>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-paper text-ink">
-      <header className="sticky top-0 z-40 border-b border-line bg-white/90 backdrop-blur-xl">
+    <div className="min-h-screen bg-paper text-ink" data-dark-ready="">
+      <DarkThemeColor />
+      <header className="sticky top-0 z-40 border-b border-line bg-surface/90 backdrop-blur-xl">
         <div className="container-page flex h-16 items-center justify-between gap-2 sm:gap-3">
           <Link href="/" className="shrink-0 rounded-[10px]" aria-label="Marktmorgen, home">
             <Logo />
@@ -104,44 +151,15 @@ export default async function StudioPausedPage({ searchParams }: Params) {
                   </p>
                 </form>
               ) : null}
-              {why === "daily" ? null : (
-              <div className="mt-8 border-t border-line pt-6">
-                <p className="text-sm font-bold text-ink">Never paused</p>
-                <p className="mt-1 text-sm text-ink-soft">{PLANS_ON_SALE ? "Changing your plan, canceling it and taking your sales with you always work." : "Canceling your plan and taking your sales with you always work."}</p>
-                <div className="mt-4 flex flex-wrap items-end gap-3">
-                  {can(view.role, "export") ? (
-                    <form action="/api/store/export" method="get">
-                      <input type="hidden" name="store" value={store.sid} />
-                      <input type="hidden" name="what" value="sales" />
-                      <input type="hidden" name="range" value="all" />
-                      <button type="submit" className="btn btn-secondary btn-sm">
-                        Download all sales (CSV)
-                      </button>
-                    </form>
-                  ) : null}
-                  {paying && mayChange && isBillingConfigured() && store.subscriptionId ? (
-                    <details>
-                      <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">Cancel the subscription</summary>
-                      <p className="mt-2 text-sm text-ink-soft">Your store keeps taking payments until the end of the period you already paid for, and nothing more is charged.</p>
-                      <form action={`/api/billing/cancel${pin}`} method="post" className="mt-3">
-                        <input type="hidden" name="intent" value="cancel" />
-                        <button type="submit" className="btn btn-secondary btn-sm">
-                          Yes, cancel it
-                        </button>
-                      </form>
-                    </details>
-                  ) : null}
-                  <Link href={studioPath(store)} className="btn btn-secondary btn-sm">
-                    Open the studio
-                  </Link>
-                </div>
-              </div>
-              )}
+              {ways}
             </>
           ) : room === "unknown" ? (
             <p className="mt-4 text-ink-soft" role="status">Your studio is paused for now. More about it could not be loaded just now: reload this page in a minute.</p>
           ) : (
-            <p className="mt-4 text-ink-soft">Your studio is paused for now. Please come back tomorrow.</p>
+            <>
+              <p className="mt-4 text-ink-soft">Your studio is paused for now. Please come back tomorrow.</p>
+              {ways}
+            </>
           )}
         </div>
       </main>

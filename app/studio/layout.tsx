@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { StudioApp } from "@/components/studio-app";
 import { SkipLink } from "@/components/skip-link";
+import { LIGHT_THEME_COLOR } from "@/lib/dark-tokens";
 
 /**
  * Around every page of the studio: its own web app manifest, so a creator can
@@ -18,7 +19,8 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#ffffff",
+  // A dark-ready screen turns it to the dark paper for a reader who chose dark (components/dark-theme-color.tsx).
+  themeColor: LIGHT_THEME_COLOR,
 };
 
 export default function StudioLayout({ children }: LayoutProps<"/studio">) {

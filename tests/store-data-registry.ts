@@ -60,6 +60,7 @@ import { MAX_REMOVED_COURSES } from "@/lib/removed-courses";
 import { MAX_LESSONS, MAX_MODULES } from "@/lib/course";
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
+import { PREVIEW_MARK_LONGEST_DAYS, PROBLEM_NOTE_LONGEST_DAYS } from "@/lib/stamp-cost-rules";
 import { ERASED_MARK_SECONDS, TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
 import { MAIL_GAP_CHECKS_PER_EMAIL } from "@/lib/mail-frequency";
@@ -984,8 +985,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rcpt:n:@lib/receipt-number.ts": room("A store's receipt numbers, one field a sale given one: taken from the room in the same script that writes it (RECEIPT_NUMBER_BYTES), a re-download taking nothing", "lib/receipt-number.ts"),
   "nl:rcpt:seq:@lib/receipt-number.ts": room("A store's last receipt number: its key taken with its first number (RECEIPT_KEYS_BYTES)", "lib/receipt-number.ts"),
   "nl:preview:@lib/pdf-preview.ts": room("A PDF's preview, kept a year only while it fits", "lib/pdf-preview.ts"),
+  "nl:preview:bad:@lib/pdf-preview.ts": { what: "A PDF that failed to parse for its preview", parts: [per("upload", PREVIEW_MARK_LONGEST_DAYS, MARK, "Per file: the once-mark, then \"unreadable\" written fresh just before it runs out, PREVIEW_MARK_SECONDS each (PREVIEW_MARK_LONGEST_DAYS, lib/stamp-cost-rules.ts; Claude 5 ygH4 and Claude 3 on #5360).")] },
   "nl:stamp:copy:@lib/pdf-stamp.ts": room("A stamped copy's record, kept only while it fits", "lib/pdf-stamp.ts"),
-  "nl:stamp:problem:@lib/pdf-stamp.ts": { what: "A file that could not be stamped", parts: [per("upload", 31, KB, "Per file.")] },
+  "nl:stamp:problem:@lib/pdf-stamp.ts": { what: "A file that could not be stamped or previewed", parts: [per("upload", PROBLEM_NOTE_LONGEST_DAYS, KB, "Per file: a stamp note for PROBLEM_NOTE_SECONDS, which no stamp failure extends (lib/pdf-stamp.ts problemNoteCommands), then the preview's fresh \"unreadable\" for PREVIEW_MARK_SECONDS just before it runs out, once a mark's life (PROBLEM_NOTE_LONGEST_DAYS, lib/stamp-cost-rules.ts; Claude 5 ygH4 and iao9Ep, Claude 3 xvBY8 on #5360).")] },
   "nl:stamp:noroom:@lib/pdf-stamp.ts": { what: "A store found without room for a new stamped copy or preview", parts: [capped(KEY + MARK, "One mark a store, kept NO_ROOM_NOTE_SECONDS (an hour).", src("lib/stamp-cost-rules.ts", "NO_ROOM_NOTE_SECONDS"))] },
   "nl:stamp:drop@lib/pdf-stamp.ts": company("Folders of stamped copies to delete again", "One set, members gone when done."),
   "nl:phone:cfg:@lib/phone-alerts.ts": { what: "Phones that hear of sales", parts: [capped(MAX_DEVICES * 6 * 2 * KB, "MAX_STORE_DEVICES devices.", src("lib/phone-alerts.ts", "MAX_DEVICES"))] },

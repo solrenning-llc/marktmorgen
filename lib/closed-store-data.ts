@@ -86,7 +86,7 @@ import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
 import { forgetOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
 import { forgetStorePhones } from "@/lib/phone-alerts";
 import { claimsKey, hostId } from "@/lib/host-claims";
-import { MAX_PREVIEW_PAGES, previewKey } from "@/lib/pdf-preview";
+import { MAX_PREVIEW_PAGES, previewKey, previewMarkKey } from "@/lib/pdf-preview";
 import { problemKey } from "@/lib/pdf-stamp";
 import { tokenKey as unsubTokenKey, parseContact } from "@/lib/contacts";
 import { keyIndex as linkKeyIndex, linkKeyOf } from "@/lib/mail-clicks";
@@ -399,7 +399,7 @@ export async function deleteSalesTraces(store: Store): Promise<number> {
   const keys: string[] = [];
   for (const file of files.filter((f) => /\.pdf$/i.test(f.pathname))) {
     for (let pages = 1; pages <= MAX_PREVIEW_PAGES; pages += 1) keys.push(previewKey(file, pages));
-    keys.push(problemKey(file.pathname));
+    keys.push(problemKey(file.pathname), previewMarkKey(file.pathname));
   }
   await del(keys);
   return keys.length;

@@ -1225,6 +1225,15 @@ export class MemoryRedis {
           this.run(["HSET", members, field, claimed]);
           return 1;
         }
+        // lib/pdf-stamp.ts PROBLEM_NOTE: a file's problem note, its expiry kept, never written over "unreadable".
+        if (key.startsWith("-- marktmorgen:stamp-problem-note:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, note, value, seconds] = args;
+          const now = this.run(["GET", note]);
+          if (now === "unreadable") return 0;
+          if (now !== null && now !== undefined) this.run(["SET", note, value, "KEEPTTL"]);
+          else this.run(["SET", note, value, "EX", seconds]);
+          return 1;
+        }
         // lib/upsell.ts ORPHAN_RELEASE: an offer's orphan claim deleted only while it is still exactly the record read.
         if (key.startsWith("-- marktmorgen:upsell-orphan-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, record, read] = args;
@@ -4292,7 +4301,8 @@ export class MemoryRedis {
         const endsAt = exat >= 0 ? Number(flags[exat + 1]) : NaN;
         if (Number.isFinite(seconds)) this.until.set(key, this.now() + seconds * 1000);
         else if (Number.isFinite(endsAt)) this.until.set(key, endsAt * 1000);
-        else this.until.delete(key);
+        // KEEPTTL: the value changes and the expiry stays as it was, as in Redis (lib/pdf-stamp.ts problemNoteCommands).
+        else if (!flags.includes("KEEPTTL")) this.until.delete(key);
         return "OK";
       }
       // Redis 7's options: NX only when the key has no expiry, XX only when it has one, GT/LT only a later/earlier

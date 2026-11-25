@@ -20,6 +20,38 @@
  */
 import { MAX_STAMP_BYTES } from "@/lib/product-file";
 
+/** How long a file's shared problem note is kept: 60 days (lib/pdf-stamp.ts; the preview's "unreadable", lib/pdf-preview.ts). */
+export const PROBLEM_NOTE_SECONDS = 60 * 24 * 60 * 60;
+/** How long the preview's own mark about a path that failed to parse is kept (lib/pdf-preview.ts previewMarkKey). */
+export const PREVIEW_MARK_SECONDS = PROBLEM_NOTE_SECONDS;
+/**
+ * The longest one path's problem note (nl:stamp:problem:) can live, in days: a note, which no stamp failure extends
+ * and none writes over "unreadable" (lib/pdf-stamp.ts problemNoteCommands), then the preview's second failure writing "unreadable" fresh for
+ * PREVIEW_MARK_SECONDS just before it runs out, once a mark's life, so the studio says why as long as the preview
+ * refuses the file (Claude 5 ygH4 and iao9Ep on #5360). The data registry prices the family for it
+ * (tests/store-data-registry.ts) and its closing rule says it (lib/data-families.ts), both held in
+ * tests/stamp-problem-lifetime.test.ts.
+ */
+export const PROBLEM_NOTE_LONGEST_DAYS = (PROBLEM_NOTE_SECONDS + PREVIEW_MARK_SECONDS) / 86_400;
+/**
+ * What one write of a file's problem note bills: the script (lib/pdf-stamp.ts PROBLEM_NOTE), its GET and its SET (Claude
+ * 3 xvBY8 on #5360: the note's write was priced nowhere). Counted in FLY_BASE (tests/plan-cost-registry.ts).
+ */
+export const PROBLEM_NOTE_WRITE_COMMANDS = 3;
+/**
+ * Public requests a download pays before it writes a file's problem note, or clears the storage note, anywhere but on a
+ * copy made on the fly (whose FLY_BASE prices its note): one, which covers the script and its two calls
+ * (PROBLEM_NOTE_WRITE_COMMANDS), or the clear's compare-and-delete, three (Claude 5 icEJ on #5360: they were priced
+ * nowhere). Refused, nothing is written. Held in tests/plan-cost-registry.test.ts.
+ */
+export const PROBLEM_NOTE_UNITS = 1;
+/**
+ * The longest one path's preview mark (nl:preview:bad:) can live, in days: the once-mark (never written over, NX), then
+ * "unreadable" written fresh for PREVIEW_MARK_SECONDS just before it runs out (Claude 5 ygH4 on #5360). Priced in the
+ * data registry and said by the closing rule, held in tests/stamp-problem-lifetime.test.ts.
+ */
+export const PREVIEW_MARK_LONGEST_DAYS = (2 * PREVIEW_MARK_SECONDS) / 86_400;
+
 /** Pages each file store's listing reads at the most when a store's storage is measured. */
 export const MEASURE_LIST_PAGES = 20;
 /** Public requests one measurement of a store's storage is counted as, taken before it lists. */

@@ -47,6 +47,7 @@ import { loadFonts } from "@/lib/certificate-pdf";
 import { deleteFile, headFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { MAX_STAMP_BYTES, type ProductFile, isEpub, isStampable } from "@/lib/product-file";
 import { type EpubProblem, stampEpub } from "@/lib/epub-stamp";
@@ -55,7 +56,7 @@ import { type DataStore, keepFor } from "@/lib/store-data";
 import { standingOf } from "@/lib/plan-standing";
 import { storageBrakeFor, storageUsed } from "@/lib/storage-quota";
 import { releaseStorage, reserveStorage } from "@/lib/storage-reservations";
-import { type CopyMeter, FLY_MAX_BYTES, NO_ROOM_NOTE_SECONDS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
+import { type CopyMeter, FLY_MAX_BYTES, NO_ROOM_NOTE_SECONDS, PROBLEM_NOTE_SECONDS, PROBLEM_NOTE_UNITS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
 import type { LanguageCode } from "@/lib/store-language";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -65,7 +66,7 @@ const COPY_RECORD_SECONDS = 400 * 24 * 60 * 60;
 /** What a stamped copy's record takes in the store's data room for the time it is kept. */
 export const COPY_RECORD_BYTES = 768;
 /** How long a note about a PDF that could not be stamped stays in the studio. */
-const PROBLEM_SECONDS = 60 * 24 * 60 * 60;
+const PROBLEM_SECONDS = PROBLEM_NOTE_SECONDS;
 
 export const copyKey = (reference: string, file: Pick<ProductFile, "pathname" | "addedAt">) => `nl:stamp:copy:${sha(`${reference}|${file.pathname}|${file.addedAt}`).slice(0, 40)}`;
 export const problemKey = (pathname: string) => `nl:stamp:problem:${sha(pathname).slice(0, 40)}`;
@@ -157,9 +158,46 @@ export function wantsStamp(stamp: boolean, file: ProductFile): boolean {
   return stamp && isStampable(file);
 }
 
+/**
+ * The stamp's one write of a file's problem note (Claude 5 iao9Ep and Claude 3 xvBY8 on #5360), in one script: a new
+ * note takes PROBLEM_SECONDS; a note already there takes the new value but keeps its expiry, so no stamp failure
+ * extends it; and the preview's "unreadable" is never written over, so the studio says why as long as the preview
+ * refuses the file. The preview's second failure writes "unreadable" fresh, once a mark's life (lib/pdf-preview.ts);
+ * together a note lives at most PROBLEM_NOTE_LONGEST_DAYS (lib/stamp-cost-rules.ts). Billed as the script and its two
+ * calls, PROBLEM_NOTE_WRITE_COMMANDS.
+ */
+const PROBLEM_NOTE = `-- marktmorgen:stamp-problem-note:v1
+local now = redis.call('GET', KEYS[1])
+if now == 'unreadable' then return 0 end
+if now then redis.call('SET', KEYS[1], ARGV[1], 'KEEPTTL') else redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]) end
+return 1`;
+export function problemNoteCommands(pathname: string, value: string): (string | number)[][] {
+  return [["EVAL", PROBLEM_NOTE, 1, problemKey(pathname), value, PROBLEM_SECONDS]];
+}
+
+/**
+ * A copy that found room again clears the studio's "the storage was full" note, only while it still says so (compare
+ * and delete, lib/claim-mark.ts releaseMark, which never throws): a reason written since, the preview's "unreadable"
+ * above all, stays (Claude 3 xvBY8 on #5360).
+ */
+export async function clearStorageNote(pathname: string): Promise<void> {
+  if (!isRedisConfigured()) return;
+  await releaseMark(problemKey(pathname), "storage");
+}
+
 async function noteProblem(pathname: string, problem: StampProblem): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([["SET", problemKey(pathname), problem, "EX", PROBLEM_SECONDS]]).catch(() => {});
+  await redisPipeline(problemNoteCommands(pathname, problem)).catch(() => {});
+}
+
+/**
+ * A note a download writes outside a copy made on the fly, paid first: PROBLEM_NOTE_UNITS of the store's public requests
+ * (lib/stamp-cost-rules.ts; Claude 5 icEJ on #5360). Refused, nothing is written, and the download answers as it would.
+ */
+async function notePaid(pathname: string, problem: StampProblem, meter: CopyMeter): Promise<void> {
+  if (!isRedisConfigured()) return;
+  if (!(await meter.take(PROBLEM_NOTE_UNITS).catch(() => false))) return;
+  await noteProblem(pathname, problem);
 }
 
 /** What writeWithinStorage did: kept the copy, found no room, could not pay for the measurement, or failed to write. */
@@ -393,7 +431,7 @@ export async function stampedDelivery(
 ): Promise<StampedDelivery> {
   if (!isStampable(file) || !sale.reference || !sale.email) return ORIGINAL;
   if (file.bytes > MAX_STAMP_BYTES) {
-    await noteProblem(file.pathname, "too_big");
+    await notePaid(file.pathname, "too_big", meter);
     return ORIGINAL;
   }
   const key = copyKey(sale.reference, file);
@@ -435,12 +473,12 @@ export async function stampedDelivery(
     if (!(await roomNotedOut(file))) {
       const original = await readWhole(file.pathname, MAX_STAMP_BYTES);
       if (!original) {
-        await noteProblem(file.pathname, "too_big");
+        await notePaid(file.pathname, "too_big", meter);
         return ORIGINAL;
       }
       const result = await stampBytes(file, original, sale, store);
       if (!result.ok) {
-        await noteProblem(file.pathname, result.problem);
+        await notePaid(file.pathname, result.problem, meter);
         return ORIGINAL;
       }
       stamped = result;
@@ -462,8 +500,11 @@ export async function stampedDelivery(
       // The studio is told only what is true: no room was confirmed. A write that failed, or a measurement the store's
       // requests could not pay for, is not the storage running out.
       // Kept as long as the studio's other notes, so the creator sees it, until a copy of this file is kept again.
-      if (kept === "no_room") await noteProblem(file.pathname, "storage");
-      return await sendUnkept(file, stamped, meter);
+      // Written once the copy sent unkept is paid for: flyUnits holds FLY_BASE, which prices this note, so it is paid
+      // once, never before a send the store cannot pay (Claude 5 icEJ on #5360).
+      const sent = await sendUnkept(file, stamped, meter);
+      if (kept === "no_room" && sent.kind === "fly") await noteProblem(file.pathname, "storage");
+      return sent;
     }
     const copy: ProductFile = {
       pathname,
@@ -481,7 +522,7 @@ export async function stampedDelivery(
       console.error("a stamped copy's record could not be kept; the next download asks the file store for it", error);
     }
     // The storage has room again: the studio no longer says it ran out for this file.
-    if (storageNoted) await redisPipeline([["DEL", problemKey(file.pathname)]]).catch(() => {});
+    if (storageNoted && (await meter.take(PROBLEM_NOTE_UNITS).catch(() => false))) await clearStorageNote(file.pathname);
     // Copies left over by a removal the file store failed are tried again here too, a few at a time; the buyer's
     // copy is already made, and a failure leaves them on the list for the next try. This file's own folder is kept
     // for a later try: emptying it now would delete the copy handed over below.

@@ -93,7 +93,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:pm:c:", "nl:pm:day:", "nl:pm:done:", "nl:pm:r:", "nl:pm:t:",
   "nl:pod:by:*", "nl:pod:n:", "nl:pod:ok:", "nl:podnote:walk", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:pace:", "nl:pp:press:", "nl:pp:settle:after", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
   "nl:ppsell:canceled:", "nl:ppsell:handover:", "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:reversed:", "nl:ppsell:sales:", "nl:ppsell:tell",
-  "nl:ppsell:tell:", "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:pwyw:", "nl:quiet:at:",
+  "nl:ppsell:tell:", "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:preview:bad:", "nl:pwyw:", "nl:quiet:at:",
   "nl:quiet:lock", "nl:quiet:seen:", "nl:quiet:sent:", "nl:quiz:usage:", "nl:read:once:", "nl:recent:", "nl:recent:feed:",
   "nl:recount:", "nl:recount:ids", "nl:recount:lock", "nl:recount:state", "nl:recount:sum",
   "nl:recover:asks", "nl:recover:asks:s:", "nl:recover:carts:", "nl:recover:link:", "nl:recover:once:", "nl:recover:sent:", "nl:recover:tries:", "nl:ref:all", "nl:ref:by:",
@@ -435,6 +435,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:ppsell:mail:": er(1),
   "nl:pre:": E, "nl:pre:give:": X(1), "nl:pre:jobs": I, "nl:pre:pi:": X(430),
   "nl:preview:": T("prepare", 400),
+  // The preview's own mark about a path that failed to parse (lib/pdf-preview.ts previewMarkKey): PREVIEW_MARK_LONGEST_DAYS.
+  "nl:preview:bad:": X(120),
   "nl:product:about:": E, "nl:product:landing:": E, "nl:product:note:": E, "nl:product:page:": E, "nl:product:pages:": E, "nl:product:pics:": E,
   "nl:pwyw:": E,
   // ---------------------------------------------------------------- q-s
@@ -483,7 +485,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:sold:": E, "nl:sold:lock:": E,
   // A store whose earlier sales were not all read: one mark, erased with it (lib/yearly-offer.ts, soldBeforeUnknownKey).
   "nl:soldbefore:": E,
-  "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(31),
+  "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(120),
   "nl:stamp:drop": C,
   // A store found without room for a new stamped copy or preview: one mark a store, kept NO_ROOM_NOTE_SECONDS (an hour), erased with it.
   "nl:stamp:noroom:": E,

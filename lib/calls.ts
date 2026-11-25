@@ -113,6 +113,7 @@ import {
   holdTeam,
   hostEmails,
   moveTeamClaim,
+  possibleHosts,
   readTeams,
   releaseClaim,
   teamContext,
@@ -1894,7 +1895,7 @@ export async function moveBooking(input: {
   await callMoved({ store, product, session, from, start, end, email: input.booked.email }).catch((error) =>
     console.error("moving a booking's meeting failed", error),
   );
-  const hosts = team && teamOwn ? hostEmails(team, teamOwn.hosts) : [];
+  const hosts = await stillHosts(store, team && teamOwn ? hostEmails(team, teamOwn.hosts) : []);
   await tellMoved({ store, product, session, from, start, end, moves, email: input.booked.email, buyerTz: input.booked.buyerTz, origin, hosts }).catch(
     (error) => console.error("sending the move emails failed", error),
   );
@@ -2004,6 +2005,27 @@ async function teamForMove(store: Store, product: CallListing) {
   if (!store.callsId || product.call.kind !== "weekly" || product.call.seats !== 1) return null;
   const raw = (await readTeams(store)).get(product.id);
   return raw === undefined ? null : parseTeamSetup(raw, product.call);
+}
+
+/**
+ * A team booking's hosts who are still the store's owner or on its team now
+ * (possibleHosts), read when its emails go. The booking keeps the hosts it was
+ * held with, for their time and claim, but one taken off the team since is
+ * never sent the buyer's address, answers or meeting link, and is not named
+ * in the email or invited to the meeting. A team that cannot be read is not
+ * known (rule 24): nobody from the saved list is told, so the creator's side
+ * goes to the store's owner (hostRecipient), as lib/inbox.ts answering does.
+ */
+async function stillHosts(store: Store, emails: string[]): Promise<string[]> {
+  if (!emails.length) return [];
+  let now: Set<string>;
+  try {
+    now = new Set(await possibleHosts(store));
+  } catch (error) {
+    console.error("a team booking's team could not be read; only the owner is told", error instanceof UnknownReplyError ? error.message : error);
+    return [];
+  }
+  return emails.filter((email) => now.has(email.trim().toLowerCase()));
 }
 
 /**
@@ -2315,7 +2337,8 @@ export async function confirmBooking(input: {
       stage = "booked";
     }
   }
-  const hosts = team?.emails ?? [];
+  // Who is still on the team now, not the saved setup: a host taken off it since the hold is sent nothing (stillHosts).
+  const hosts = await stillHosts(store, team?.emails ?? []);
   // The currency Stripe charged the booking in, read exactly (chargedIn): the emails' amounts below are said only in it.
   const paidIn = chargedIn(input.currency);
   // A Google Meet or Zoom meeting, when the product makes them: made now, on

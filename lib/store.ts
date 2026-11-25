@@ -32,7 +32,7 @@
  * it `email` for the first kind and works the same for the second.
  */
 import { type PlanDispute, parsePlanDispute, parsePlanDisputes, withPlanDispute } from "@/lib/plan-dispute-rules";
-import { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin } from "@/lib/store-field-rules";
+import { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, parseJoin } from "@/lib/store-field-rules";
 export { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin } from "@/lib/store-field-rules";
 import { MAX_LINKS, type NumbersLink, parseLinks } from "@/lib/numbers-links";
 import { type ShipProblem, type Shipping, shipProblem, readShippingSku } from "@/lib/shipping";

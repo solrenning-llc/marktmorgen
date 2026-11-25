@@ -409,6 +409,8 @@ async function main(): Promise<void> {
   const nowS = Math.floor(Date.now() / 1000);
   const paid = (id: string, attempts: number, cents: number, extra: Record<string, unknown> = {}) => ({
     id,
+    object: "invoice",
+    status: "paid",
     currency: "usd",
     amount_paid: cents,
     attempt_count: attempts,

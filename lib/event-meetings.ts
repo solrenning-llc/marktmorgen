@@ -74,7 +74,11 @@ function scopeOf(store: Pick<Store, "community">, event: CommunityEvent): string
  * The event's meeting, made now when it has none. Returns its record, which
  * says the link members will be given; null for an event that is not on
  * Google Meet or Zoom. Never throws for a provider's failure (meetingFor
- * falls back to the event's room and writes the problem down). Nobody is
+ * falls back to the event's room and writes the problem down), but a meeting
+ * record that cannot be read (one that does not read, or a database that does
+ * not answer) is unknown, never "no meeting": that read's error goes to the
+ * caller, which keeps the event without a meeting record (CX-123 rule 24; Codex
+ * X6's LOW on #2619, #5285 row #2619; Claude 5 icEJ's LEVE on #5418). Nobody is
  * put on its guest list (see above).
  */
 export async function eventMeeting(store: Store, event: CommunityEvent): Promise<MeetRecord | null> {

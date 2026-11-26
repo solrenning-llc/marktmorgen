@@ -956,6 +956,18 @@ export class MemoryRedis {
           this.run(["PERSIST", index]);
           return 1;
         }
+        // lib/purchase-email.ts CLAIM_OFFER_CONFIRMATION: an offer's send claim only before the recipient's deletion (#4762).
+        if (key.startsWith("-- marktmorgen:offer-confirmation-claim:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, mark, erased, print, seconds, paidAt] = args;
+          this.scriptCalls += 1;
+          const deleted = this.run(["HGET", erased, print]);
+          if (deleted !== null && deleted !== undefined) {
+            if (typeof deleted !== "string" || !/^[0-9]+$/.test(deleted)) return -2;
+            if (paidAt === "" || Number(deleted) >= Number(paidAt)) return -1;
+          }
+          this.scriptCalls += 1;
+          return this.run(["SET", mark, "sending", "NX", "EX", seconds]) === "OK" ? 1 : 0;
+        }
         // lib/outreach.ts PITCH_IF_READ: a pitch written only over the exact record read.
         if (key.startsWith("-- marktmorgen:outreach-pitch-if-read:v1\n") && args[0] === "1" && args.length === 5) {
           const [, pitches, id, before, after] = args;

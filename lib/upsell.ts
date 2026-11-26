@@ -710,7 +710,9 @@ async function afterPaid(store: Store, session: string, slot: string, target: Li
   const listed = bundleFromMeta(pi.metadata as Record<string, string> | null, "bundle");
   const items = listed.length ? (await contentsOf(store, listed).catch(() => null))?.items : undefined;
   const metadata = (pi.metadata as Record<string, string> | null) ?? null;
-  const sent = await confirmOffer(store, { reference, parent: session, product: target, email, amountCents, currency, items, metadata }).catch((error) => {
+  // When it was paid, read exactly, for the deletion check of its confirmation (#4762); anything else is null.
+  const paidAt = Number.isSafeInteger(pi.created) && Number(pi.created) > 0 ? Number(pi.created) : null;
+  const sent = await confirmOffer(store, { reference, parent: session, product: target, email, amountCents, currency, items, metadata, paidAt }).catch((error) => {
     console.error("sending an offer's confirmation failed", error);
     return "failed" as const;
   });

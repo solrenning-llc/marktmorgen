@@ -49,8 +49,10 @@ import { videoAddress } from "@/lib/sales-page";
 import { deliverGift } from "@/lib/gifts";
 import { resendGroupReceipt, settleGroup } from "@/lib/group-buy";
 import { ordersLinkFor } from "@/lib/buyer-orders";
-import { saleHandles } from "@/lib/store";
+import { ensureListId, saleHandles, storeRef } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { stopTags } from "@/lib/mail-health-rules";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -855,6 +857,8 @@ export type TakenOffer = {
   items?: Listing[];
   /** The offer's own payment metadata, where its yes to start access at once is kept (lib/digital-consent.ts). */
   metadata?: Record<string, string> | null;
+  /** When Stripe made the offer's payment, in seconds; null when not read exactly: then any deletion mark refuses its email (#4762). */
+  paidAt?: number | null;
 };
 
 /** The email for an offer taken after paying, with its license key when it has one. */
@@ -892,6 +896,22 @@ export function offerConfirmationFor(store: Store, offer: TakenOffer, key: SaleK
 }
 
 /**
+ * The send claim of an offer's confirmation (#4762), taken only while the recipient has no deletion mark on the store's
+ * list (lib/suppression.ts, written before anything of them is deleted) at or after the offer's payment: KEYS[1] the
+ * send mark, KEYS[2] the list's deletion marks, ARGV[1] the recipient's print, ARGV[2] the mark's lifetime, ARGV[3]
+ * the payment's second ("" when not known: then any mark refuses). 1 claimed; 0 already claimed; -1 deleted at or
+ * after the payment, nothing written; -2 a mark that is not whole seconds, nothing written.
+ */
+export const CLAIM_OFFER_CONFIRMATION = `-- marktmorgen:offer-confirmation-claim:v1
+local deleted = redis.call("HGET", KEYS[2], ARGV[1])
+if deleted then
+  if not string.match(deleted, "^%d+$") then return -2 end
+  if ARGV[3] == "" or tonumber(deleted) >= tonumber(ARGV[3]) then return -1 end
+end
+if redis.call("SET", KEYS[1], "sending", "NX", "EX", ARGV[2]) then return 1 end
+return 0`;
+
+/**
  * Sends the confirmation for one offer taken after paying, once, whichever of
  * the offer's own answer and the thanks page settling it gets there first.
  * Its license key is given here if nothing gave it yet: the same key the
@@ -925,8 +945,19 @@ export async function confirmOffer(store: Store, offer: TakenOffer): Promise<Con
   }
   const letter = offerConfirmationFor(store, offer, key, keys);
   if (!letter) return "skip";
-  const [claimed] = await redisPipeline([["SET", mark, "sending", "NX", "EX", SENDING_MARK_SECONDS]]);
-  if (claimed === null) return "already";
+  // Never to a person deleted from the store at or after the offer's payment (#4762), checked in the same step as the
+  // claim. A store record read without its list is given it, as the erasure gives it (lib/person-erasure.ts
+  // erasureScope), so both check the same marks. Refused, unread or unknown: "failed", and the paid offer is still
+  // counted by the caller (lib/upsell.ts afterPaid); nothing is claimed, so nothing is sent.
+  const current = store.listId ? store : await ensureListId(storeRef(store)).catch(() => null);
+  if (!current?.listId || current.sid !== store.sid) return "failed";
+  const paidAt = Number.isSafeInteger(offer.paidAt) && Number(offer.paidAt) > 0 ? String(offer.paidAt) : "";
+  const claimed = repliesFor(
+    await redisPipeline([["EVAL", CLAIM_OFFER_CONFIRMATION, 2, mark, suppressedKey(current.listId), suppressionPrint(current.listId, letter.to), SENDING_MARK_SECONDS, paidAt]]),
+    1,
+  )?.[0];
+  if (claimed === 0) return "already";
+  if (claimed !== 1) return "failed";
   let sent = false;
   try {
     sent = await sendEmail({ meter: { by: "order", store }, tags: stopTags(store),

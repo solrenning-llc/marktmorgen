@@ -57,6 +57,7 @@ import { stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { SET_TAKE_COUNT, ZSET_TAKE_COUNT } from "@/lib/redis-take";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 /**
  * Where messages are counted in the store's data room (lib/store-data.ts):
@@ -165,7 +166,48 @@ function parseMessage(raw: unknown): Message | null {
 
 export type SendResult =
   | { ok: true; asked: boolean }
-  | { ok: false; reason: "off" | "between" | "self" | "declined" | "empty" | "full" | "slow" };
+  | { ok: false; reason: "off" | "between" | "self" | "declined" | "empty" | "full" | "slow" | "erased" };
+
+/**
+ * How long a deletion of a person may still be running after its first step, its print (lib/suppression.ts): a private
+ * message written that close to the deletion of its sender or its recipient is not written (DM_SEND_UNLESS_ERASED). The
+ * same figure as a waitlist sign-up's (lib/waitlist.ts ERASURE_SECONDS), longer than any function may run (800 s at most
+ * on Vercel).
+ */
+export const DM_ERASURE_SECONDS = 15 * 60;
+
+/**
+ * A private message's writes, made only while neither of the two people in it was deleted from the store within the
+ * last ARGV[1] seconds, in one step with the writes (#4672, Codex L): a deletion's first step is the person's print,
+ * with the second on Redis's clock (lib/suppression.ts ERASED_PRINT), and it deletes their conversations after it, so a
+ * message authorised before the deletion and written after it never puts a conversation, an inbox line or a read mark
+ * of theirs back. KEYS[1] the conversation, KEYS[2] the sender's inbox, KEYS[3] the recipient's request list or inbox,
+ * KEYS[4] the read marks, KEYS[5] the store's prints; ARGV[1] the seconds, ARGV[2] the message, ARGV[3] how many the
+ * conversation keeps, ARGV[4] the message's time, ARGV[5] the pair, ARGV[6] "ask" for a request (ZADD NX), ARGV[7] the
+ * sender's key, ARGV[8] and on the prints of the members in it (the creator has none). Answers {-1} for a deletion that
+ * recent, {-2} for a print that is not whole seconds (unknown: nothing written), else {1}. Billed 1 + one HGET a print +
+ * the same five writes as before, and 1 more (TIME) when a print is found: at most 9 commands, inside one buyer action's
+ * (lib/buyer-actions.ts). lib/redis-memory.ts runs it the same way.
+ */
+export const DM_SEND_UNLESS_ERASED = `-- marktmorgen:dm-send-unless-erased:v1
+local now
+for i = 8, #ARGV do
+  local at = redis.call('HGET', KEYS[5], ARGV[i])
+  if at then
+    if not string.match(at, '^%d+$') then return {-2} end
+    if not now then now = tonumber(redis.call('TIME')[1]) end
+    if tonumber(at) >= now - tonumber(ARGV[1]) then return {-1} end
+  end
+end
+redis.call('RPUSH', KEYS[1], ARGV[2])
+redis.call('LTRIM', KEYS[1], -tonumber(ARGV[3]), -1)
+redis.call('ZADD', KEYS[2], ARGV[4], ARGV[5])
+if ARGV[6] == 'ask' then redis.call('ZADD', KEYS[3], 'NX', ARGV[4], ARGV[5]) else redis.call('ZADD', KEYS[3], ARGV[4], ARGV[5]) end
+redis.call('HSET', KEYS[4], ARGV[7], ARGV[4])
+return {1}`;
+
+/** Whose deletion a private message is written against: the store's list, the addresses of the members in it and how long the request has run. */
+export type SendFence = { listId: string; emails: string[]; ranSeconds: number };
 
 /**
  * Whether these two may exchange messages at all, before anything is written.
@@ -204,7 +246,9 @@ export async function send(
   // to one already waiting, and a message in a conversation, still go.
   // Given as a function, it is asked only for a new request, so the day's
   // openings are counted for openings and never for any other message.
-  options: { mayAsk?: boolean | (() => Promise<boolean>) } = {},
+  // The store's list and the members' addresses: the message is written only while neither was just deleted
+  // (DM_SEND_UNLESS_ERASED). None for a store with no list, which has deleted nobody (lib/suppression.ts).
+  options: { mayAsk?: boolean | (() => Promise<boolean>); fence?: SendFence | null } = {},
 ): Promise<SendResult> {
   const blocked = mayMessage(setting, from, to);
   if (blocked) return blocked;
@@ -282,17 +326,36 @@ export async function send(
     }
   }
 
-  await redisPipeline([
-    ["RPUSH", chatKey(id, pair), JSON.stringify(message)],
-    ["LTRIM", chatKey(id, pair), -MAX_MESSAGES, -1],
-    ["ZADD", inboxKey(id, from), message.at, pair],
-    // NX: a request already in the list keeps its first place, and one a trim
-    // took out while this was on its way is put back, so what is stored stays
-    // in the recipient's list for their copy and their erasure (rule 30).
-    ...(asking ? [["ZADD", askedKey(id, to), "NX", message.at, pair]] : [["ZADD", inboxKey(id, to), message.at, pair]]),
-    // The sender has read what they just wrote.
-    ["HSET", readKey(id, pair), from, message.at],
-  ]);
+  const fence = options.fence;
+  if (fence) {
+    // The same five writes in one script, after the two people's prints (DM_SEND_UNLESS_ERASED).
+    const replies = await redisPipeline([["EVAL", DM_SEND_UNLESS_ERASED, 5, chatKey(id, pair), inboxKey(id, from),
+      asking ? askedKey(id, to) : inboxKey(id, to), readKey(id, pair), suppressedKey(fence.listId),
+      DM_ERASURE_SECONDS + Math.max(0, Math.ceil(fence.ranSeconds)), JSON.stringify(message), MAX_MESSAGES, message.at, pair,
+      asking ? "ask" : "inbox", from, ...fence.emails.map((email) => suppressionPrint(fence.listId, email))]]);
+    const reply = Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined;
+    const said = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+    if (said === -1 || said === -2) {
+      // Nothing was written: the room taken comes back. Deleted that recently is said as such; a print in another shape is unknown (rule 24).
+      await giveData(room, [{ slot: PAIR_SLOT(pair), bytes: taken }]);
+      if (said === -1) return { ok: false, reason: "erased" };
+      throw new UnknownReplyError("a private message's deletion check");
+    }
+    // Any other shape: whether it was written is not known, so the room stays taken and the route says so (503).
+    if (said !== 1) throw new UnknownReplyError("a private message's write");
+  } else {
+    await redisPipeline([
+      ["RPUSH", chatKey(id, pair), JSON.stringify(message)],
+      ["LTRIM", chatKey(id, pair), -MAX_MESSAGES, -1],
+      ["ZADD", inboxKey(id, from), message.at, pair],
+      // NX: a request already in the list keeps its first place, and one a trim
+      // took out while this was on its way is put back, so what is stored stays
+      // in the recipient's list for their copy and their erasure (rule 30).
+      ...(asking ? [["ZADD", askedKey(id, to), "NX", message.at, pair]] : [["ZADD", inboxKey(id, to), message.at, pair]]),
+      // The sender has read what they just wrote.
+      ["HSET", readKey(id, pair), from, message.at],
+    ]);
+  }
   if (asking && (await acceptedMeanwhile(id, to, pair))) return { ok: true, asked: false };
   return { ok: true, asked: asking };
 }

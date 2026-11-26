@@ -56,6 +56,8 @@ export async function POST(request: NextRequest) {
 }
 
 async function act(request: NextRequest, progress: Progress): Promise<Response> {
+  // When this request began: a private message is not written for someone deleted since (lib/community-dm.ts, #4672).
+  const startedAt = Date.now();
   const origin = originFrom(request);
   // Read only as far as 32 KB (a message's 2,000 characters, written out as a form), whether or not a length was declared (MM-SA-10).
   const form = await limited(request, 32_000).then((r) => r.formData()).catch(() => null);
@@ -116,8 +118,9 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
     // who is a member. With requests on, that is a request sent, or "slow"
     // past the day's openings (counted as for a member); with requests off, or
     // from the creator, the message sent into the conversation.
+    let them: Awaited<ReturnType<typeof readMember>> = null;
     if (to !== CREATOR) {
-      const them = await readMember(id, to);
+      them = await readMember(id, to);
       if (!them || them.removed) {
         const asking = config.dm.ask && key !== CREATOR;
         if (!asking) return back(`${box}/${pairOf(key, to)}`, "dmsent");
@@ -130,12 +133,18 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
     try {
       // Past the day's openings, a new request is refused before it is written
       // (never written and then answered "slow", which invites a second copy).
-      sent = await send(id, config.dm, key, to, text, store, { mayAsk: started });
+      // Written only while neither member in it was just deleted from the store (DM_SEND_UNLESS_ERASED); the creator has no
+      // print, and a store with no list has deleted nobody (an erasure always gives the store a list first, lib/suppression.ts).
+      const emails = [owner ? "" : viewer.email, them?.e ?? ""].filter((email) => email !== "");
+      const fence = store.listId && emails.length ? { listId: store.listId, emails, ranSeconds: (Date.now() - startedAt) / 1000 } : null;
+      sent = await send(id, config.dm, key, to, text, store, { mayAsk: started, fence });
     } catch (error) {
       // No room in the store's data room: nothing was sent (lib/store-data.ts).
       if (error instanceof DataRoomError) return back(`${box}/${pairOf(key, to)}`, "noroom");
       throw error;
     }
+    // Deleted while this request ran: what anyone not in the community is told, and nothing was written.
+    if (!sent.ok && sent.reason === "erased") return back(home, "out");
     if (!sent.ok) {
       const why =
         sent.reason === "declined"

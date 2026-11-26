@@ -13,6 +13,39 @@ export const PROVIDER_FEES = {
   stripe: { cardBps: 290, internationalBps: 150, conversionBps: 100, billingBps: 70, taxBps: 50, fixedCents: 30 },
   paddle: { bps: 500, fixedCents: 50 },
 } as const;
+/**
+ * Stripe's US ACH Direct Debit fees, checked against the official pricing page
+ * on 2026-11-11. These are inputs for later cost modeling only; this registry
+ * does not activate ACH or change any customer price or payment setting.
+ *
+ * The page's ACH Direct Debit lines, as read that day: "0.8% per transaction
+ * for standard settlement timing", "$5.00 cap", "1.2% per transaction for
+ * two-day settlement", "$1.50 per instant bank account validation", "$15.00 for
+ * disputed payments", "$4.00 for failed payments". It publishes no cap for the
+ * two-day rate and no fee for micro-deposit verification, so both are null:
+ * unknown, never zero (rule 24). A consumer reads null as "not known", never as
+ * free or uncapped.
+ *
+ * Scope: Stripe's standard US pricing for an account taking ACH itself. Whether
+ * and how each line applies to a direct charge on a creator's connected account
+ * (who pays the dispute and failure fees) is not established here; this object
+ * alone is neither a funded margin nor an approval to offer ACH.
+ *
+ * Source: https://stripe.com/pricing/local-payment-methods
+ */
+export const ACH_DIRECT_DEBIT_FEES = Object.freeze({
+  sourceUrl: "https://stripe.com/pricing/local-payment-methods",
+  verifiedOn: "2026-11-11",
+  standardRateBps: 80,
+  standardCapCents: 500,
+  twoDayRateBps: 120,
+  twoDayCapCents: null,
+  instantVerificationCents: 150,
+  microdepositVerificationCents: null,
+  disputedPaymentCents: 1_500,
+  failedPaymentCents: 400,
+} as const);
+
 /** Stripe's fees summed: 6.6%. */
 export const STRIPE_TOTAL_BPS =
   PROVIDER_FEES.stripe.cardBps + PROVIDER_FEES.stripe.internationalBps + PROVIDER_FEES.stripe.conversionBps + PROVIDER_FEES.stripe.billingBps + PROVIDER_FEES.stripe.taxBps;

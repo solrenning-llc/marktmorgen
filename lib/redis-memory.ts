@@ -274,6 +274,14 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // #4750/#4681: the erasure print, locator claim and queue write are one step.
+        if (key.startsWith("-- marktmorgen:zadd-if-mark:v2\n") && args[0] === "3" && args.length === 9) {
+          const [, mark, queue, erased, value, score, member, ttl, print] = args;
+          if (this.run(["HEXISTS", erased, print]) !== 0) return 0;
+          if (this.run(["SET", mark, value, "NX", "EX", ttl]) !== "OK") return 0;
+          this.run(["ZADD", queue, score, member]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:contact-import:v1\n")) {
           if (args[0] !== "4" || args.length <= 5 || (args.length - 5) % 6 !== 0) throw new Error("invalid contact import");
           const [, contacts, erased, agreed, unsub, ...rows] = args;

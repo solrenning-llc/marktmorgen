@@ -53,6 +53,8 @@ class Redis:
 def main():
     if os.environ.get("MARKTMORGEN_REDIS_INTEGRATION") != "1":
         raise RuntimeError("Run only against the dedicated CI Redis on loopback port 16379")
+    from test_welcome_queue_redis import main as welcome_queue_main
+    welcome_queue_main()
     root = Path(__file__).resolve().parents[1]
     source = (root / "lib/form-opportunity.ts").read_text(encoding="utf-8")
     match = re.search(r"export const CREATE_FORM_OPPORTUNITY = `([^`]+)`;", source)

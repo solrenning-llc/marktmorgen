@@ -21,7 +21,8 @@ export async function POST(request: NextRequest) {
     const allowed = new Set(team.members.filter((m) => can(m.role, "stats")).map((m) => m.email.toLowerCase()));
     const emails = body.emails.filter((e): e is string => typeof e === "string").map((e) => e.trim().toLowerCase());
     if (emails.some((e) => !allowed.has(e))) return Response.json({ ok: false, error: "member" }, { status: 400 });
-    await setWeeklyTeam(store.handle, emails);
+    // Kept only while the store is live (Codex L-20261121-0144): one whose erasure began after it was read keeps nothing.
+    if ((await setWeeklyTeam(store, emails)) === "gone") return Response.json({ ok: false, error: "gone" }, { status: 410 });
     return Response.json({ ok: true, emails: await weeklyTeam(store.handle) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("changing who gets the weekly email failed", error);

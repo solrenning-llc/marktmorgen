@@ -17,11 +17,12 @@ import { COHORT_AGES } from "@/lib/buyer-channel-rules";
 import { dailyCashflowRows } from "@/lib/daily-cashflow";
 import { campaignResultsFrom } from "@/lib/campaign-results";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { Store } from "@/lib/store";
+import { type Store, storeHandleKey } from "@/lib/store";
 import { type Ranked, type StatsData, readSales, readsSales, readStats, sourcesToday, studioStats, viewsBefore } from "@/lib/stats";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { summaryAdmission, type SummaryClaim } from "@/lib/summary-live";
 import { type Claimed, claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -354,11 +355,51 @@ export async function weeklyTeam(handle: string): Promise<string[]> {
   return members.sort();
 }
 
-export async function setWeeklyTeam(handle: string, emails: string[]): Promise<void> {
-  if (!isRedisConfigured()) return;
+/**
+ * Who gets the weekly email, replaced only while the store is live, in one step (Codex L-20261121-0144, #5010 row 65):
+ * the identity rule of lib/live-fence.ts SET_IF_STORE_LIVE (store-cache-live:v3). The route reads the store and its
+ * team first; a store whose erasure began in between, or whose handle another store took after it, must not get its
+ * old team's addresses written back under nl:weekly:to:<handle> after the closing walk deleted them. Since v2 (Claude 1's
+ * NIT on #5237), KEYS[4], the handle's key, must also still lead to the store (ARGV[3], its ref): a store renamed while
+ * the route ran, whose old handle another store then took, writes nothing into that store's list. 1 kept; 0 erasing,
+ * gone, no longer its own or its handle no longer its own; -1 an owner's record that does not parse. Billed as the EVAL,
+ * HGET, GET, the handle's GET, DEL and, with anyone chosen, SADD (WEEKLY_TEAM_FENCE_EXTRA_COMMANDS over the plain DEL and
+ * SADD).
+ */
+export const WEEKLY_TEAM_SET_IF_LIVE = `-- marktmorgen:weekly-team-live:v2
+if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+if ARGV[2] == "" then
+  if redis.call("GET", KEYS[1]) ~= ARGV[3] then return 0 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return 0 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -1 end
+  if record["statsId"] ~= ARGV[2] then return 0 end
+end
+if redis.call("GET", KEYS[4]) ~= ARGV[3] then return 0 end
+redis.call("DEL", KEYS[3])
+if #ARGV > 3 then redis.call("SADD", KEYS[3], unpack(ARGV, 4)) end
+return 1`;
+
+/** What the fence adds to a change of who gets the weekly email: the EVAL, its HGET, its GET and the handle's GET. */
+export const WEEKLY_TEAM_FENCE_EXTRA_COMMANDS = 4;
+
+/**
+ * Replaces who on the team gets the weekly email: "kept"; "gone" when the store's erasure has begun or its handle is no
+ * longer its own, and then nothing is written. Any other answer throws (CX-123 rule 24): never said as kept.
+ */
+export async function setWeeklyTeam(store: Pick<Store, "handle" | "email" | "sid" | "extra" | "statsId">, emails: string[]): Promise<"kept" | "gone"> {
+  if (!isRedisConfigured()) return "kept";
   const clean = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))].slice(0, MAX_WEEKLY_TEAM);
-  const replies = await redisPipeline([["DEL", teamKey(handle)], ...(clean.length ? [["SADD", teamKey(handle), ...clean]] : [])]);
-  confirmedWrite(replies, clean.length ? [1, clean.length] : [1], "who gets the weekly email");
+  const fence = await storeLiveFence(store);
+  // A store from before ids with no statsId cannot be told from another: nothing is written, and it is not known.
+  if (fence.statsId === null) throw new UnknownReplyError("who gets the weekly email");
+  const replies = repliesFor(await redisPipeline([["EVAL", WEEKLY_TEAM_SET_IF_LIVE, 4, fence.live, fence.erasing, teamKey(store.handle), storeHandleKey(store.handle), fence.field, fence.statsId, fence.ref, ...clean]]), 1);
+  const answer = replies?.[0];
+  if (answer === 1) return "kept";
+  if (answer === 0) return "gone";
+  throw new UnknownReplyError("who gets the weekly email");
 }
 
 export async function leaveWeeklyTeam(handle: string, email: string): Promise<void> {

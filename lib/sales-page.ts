@@ -277,15 +277,32 @@ export type BonusesBlock = { id: string; kind: "bonuses"; heading: string; items
  * creator only chooses which may appear; a number that is not there yet is
  * simply not drawn, so the block can never say something false.
  */
-export type FactKey = "lessons" | "episodes" | "products" | "length" | "buyers" | "rating";
-export const FACT_KEYS: { key: FactKey; label: string; hint: string }[] = [
+export type FactKey = "lessons" | "episodes" | "products" | "length" | "buyers" | "rating" | "finished";
+/**
+ * "Certificates earned" is off until an exact, bounded reader of standing certificates exists (Claude 6 review of
+ * #3988): earnedCount (lib/certificate.ts) cannot yet tell a held slot from a certificate, so the number could never
+ * reach ten. While false it is not offered in the studio, not read by the preview or the page, and never reported
+ * as unread. A block already saved with it keeps it (EVERY_FACT), so nothing the creator chose is dropped.
+ */
+export const FINISHED_FACT_READY = false;
+const EVERY_FACT: { key: FactKey; label: string; hint: string }[] = [
   { key: "lessons", label: "Lessons", hint: "How many lessons the course has." },
   { key: "episodes", label: "Episodes", hint: "How many episodes the private podcast has." },
   { key: "products", label: "Products inside", hint: "How many products the bundle holds." },
   { key: "length", label: "Call length", hint: "How long each call lasts." },
   { key: "buyers", label: "Times bought", hint: "Shown from 10 sales up, and only while your store's look shows how many times products were bought." },
   { key: "rating", label: "Average rating", hint: "From verified buyers' reviews, with how many there are." },
+  /*
+   * 93 [D2-VERIFIED-SOCIAL], unit 1 (12 November 2026): how many students earned the course's certificate and still
+   * hold it (withdrawn ones are not counted), from ten up (lib/certificate.ts, earnedCount). Not in a new block's
+   * default choice (FACTS_ON_BY_DEFAULT): it is a different claim from "bought", so the creator checks it.
+   */
+  { key: "finished", label: "Certificates earned", hint: "How many students finished the course and earned its certificate, withdrawn ones left out. Shown from 10 up, and only while the course gives a certificate." },
 ];
+/** The numbers the studio offers: every one, but the certificates earned only once FINISHED_FACT_READY. */
+export const FACT_KEYS = EVERY_FACT.filter((fact) => FINISHED_FACT_READY || fact.key !== "finished");
+/** The numbers a new "By the numbers" block starts with: all but the certificates earned, which the creator chooses. */
+export const FACTS_ON_BY_DEFAULT: FactKey[] = FACT_KEYS.map((f) => f.key).filter((key) => key !== "finished");
 export type FactsBlock = { id: string; kind: "facts"; heading: string; show: FactKey[] };
 
 /**
@@ -1149,9 +1166,9 @@ function parseBlock(raw: unknown): PageBlock | null {
     case "feature":
       return { id, kind: "feature", heading, body: lines(value.body, MAX_TEXT), picture: parsePicture(value.picture), side: value.side === "right" ? "right" : "left" };
     case "facts": {
-      const known = new Set(FACT_KEYS.map((f) => f.key));
+      const known = new Set(EVERY_FACT.map((f) => f.key));
       const show = Array.isArray(value.show)
-        ? FACT_KEYS.map((f) => f.key).filter((key) => (value.show as unknown[]).includes(key) && known.has(key))
+        ? EVERY_FACT.map((f) => f.key).filter((key) => (value.show as unknown[]).includes(key) && known.has(key))
         : [];
       return { id, kind: "facts", heading, show };
     }
@@ -1424,7 +1441,7 @@ export function emptyBlock(kind: BlockKind, id = newBlockId()): PageBlock {
     case "bonuses":
       return { id, kind, heading: "Also included", items: [] };
     case "facts":
-      return { id, kind, heading: "", show: FACT_KEYS.map((f) => f.key) };
+      return { id, kind, heading: "", show: [...FACTS_ON_BY_DEFAULT] };
     case "feature":
       return { id, kind, heading: "", body: "", picture: null, side: "left" };
     case "product":

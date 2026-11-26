@@ -9,12 +9,14 @@
  * factsUnread, so the editor and the coach say it could not be read just now instead of "not shown yet".
  */
 import type { Listing, Store } from "@/lib/store";
-import type { FactKey } from "@/lib/sales-page";
+import { FINISHED_FACT_READY, type FactKey } from "@/lib/sales-page";
 import { summaryOf } from "@/lib/reviews";
 import { SHOWN_FROM, readSoldCounts } from "@/lib/sold-count";
 import { offeredItems } from "@/lib/bundles";
 import { LANGUAGES } from "@/lib/store-language";
 import { type PageFacts, pageFacts } from "@/lib/page-facts";
+import { earnedCount } from "@/lib/certificate";
+import { readCourseExact } from "@/lib/course";
 
 export type ReadPageFacts = {
   facts: PageFacts;
@@ -25,15 +27,22 @@ export type ReadPageFacts = {
 const UNREAD = "unread" as const;
 
 export async function readPageFacts(store: Store, product: Listing): Promise<ReadPageFacts> {
-  const [summary, sold, inside] = await Promise.all([
+  const courseId = product.course?.id ?? null;
+  const [summary, sold, inside, finished] = await Promise.all([
     summaryOf(store.statsId, product.id).catch(() => UNREAD),
     readSoldCounts(store).catch(() => UNREAD),
     product.bundle ? offeredItems(store, [product]).then((m) => m.get(product.id) ?? []).catch(() => UNREAD) : Promise.resolve(null),
+    // How many earned the course's certificate (93 [D2-VERIFIED-SOCIAL]), for a course that gives one now only.
+    // Off until an exact reader exists (FINISHED_FACT_READY): no read, so never "unread" (Claude 6, MÉDIO 1, #3988).
+    courseId && FINISHED_FACT_READY
+      ? readCourseExact(courseId).then((course) => (course?.certificate === true ? earnedCount(courseId) : null)).catch(() => UNREAD)
+      : Promise.resolve(null),
   ]);
   const factsUnread: FactKey[] = [];
   if (summary === UNREAD) factsUnread.push("rating");
   if (sold === UNREAD) factsUnread.push("buyers");
   if (inside === UNREAD) factsUnread.push("products");
+  if (finished === UNREAD) factsUnread.push("finished");
   const count = sold === UNREAD ? 0 : (sold?.byProduct[product.id] ?? 0);
   const facts = pageFacts({
     language: store.language,
@@ -42,6 +51,7 @@ export async function readPageFacts(store: Store, product: Listing): Promise<Rea
     bundleItems: inside && inside !== UNREAD ? inside.length : null,
     sold: count >= SHOWN_FROM ? count : null,
     reviews: summary === UNREAD ? null : summary,
+    finished: finished === UNREAD ? null : finished,
   });
   return { facts, factsUnread };
 }

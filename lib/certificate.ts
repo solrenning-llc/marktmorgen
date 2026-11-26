@@ -772,3 +772,20 @@ export async function certificateCount(courseIds: string[]): Promise<number> {
     return sum + Math.min(count, LEGACY_SCAN);
   }, 0);
 }
+
+/**
+ * The standing index contains slot claims, including claims whose record was
+ * removed after an unknown write reply. Its HLEN is not a verified count of
+ * certificates. Until an exact, bounded reader is available, a nonempty index
+ * is unknown and sales/preview callers omit this optional fact.
+ */
+/** One HLEN; no extra public-page reads while verification is unavailable. */
+export const FINISHED_FACT_COMMANDS = 1;
+export async function earnedCount(courseId: string): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const what = "the certificates earned in a course";
+  const [raw] = exactReplies(await redisPipeline([["HLEN", indexKey(courseId)]]), 1, what);
+  const count = replyCount(raw, what);
+  if (count !== 0) throw new UnknownReply("the verified certificates earned in a course");
+  return 0;
+}

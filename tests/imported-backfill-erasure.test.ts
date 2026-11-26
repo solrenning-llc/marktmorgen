@@ -9,6 +9,8 @@
 import { claimHandle, ensureStatsId, setPastBuyers, storeForEmail, type Store } from "@/lib/store";
 import { forgetImportedPerson, importedBuyers, importedFor, importedKey, importedRowsFor, importedWhoKey } from "@/lib/imported-purchases";
 import { dataKey } from "@/lib/store-data";
+import { ORDER_WRITE, ORDER_WRITE_IF_KEY } from "@/lib/order-data";
+import { ORDERS_IMPORTED_COMMANDS } from "@/lib/buyer-orders-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -102,6 +104,14 @@ async function main(): Promise<void> {
     await forgetImportedPerson(store.statsId, BUYER);
     is("nothing reads", await importedFor(store, BUYER), []);
     is("no note", (await redis.pipeline([["HGET", importedWhoKey(store.statsId!), BUYER]]))[0], null);
+  }
+
+  part("the note's fence is priced where the read is metered");
+  {
+    const calls = (script: string) => (script.match(/redis\.call\(/g) ?? []).length;
+    // Upstash bills a script as one command plus every redis.call it runs: the fence adds exactly its EXISTS.
+    is("ORDER_WRITE_IF_KEY runs one redis.call more than ORDER_WRITE, the EXISTS of the grants", calls(ORDER_WRITE_IF_KEY) - calls(ORDER_WRITE), 1);
+    is("the orders page counts it: the HLEN, the record, the note's script and count, and the fence", ORDERS_IMPORTED_COMMANDS, 5);
   }
 
   done();

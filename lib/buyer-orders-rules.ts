@@ -49,8 +49,12 @@ export const ORDERS_UNIT_COMMANDS = 25;
 export const ORDERS_LISTING_COMMANDS = 5;
 /** Commands a pre-order's reading makes: its entry, and whether and when it ships. */
 export const ORDERS_PREORDER_COMMANDS = 3;
-/** Commands the purchases brought over or given make besides their entries: how many there are, the record read, and its first reading noted (a script and its count). */
-export const ORDERS_IMPORTED_COMMANDS = 4;
+/**
+ * Commands the purchases brought over or given make besides their entries: how many there are, the record read, and
+ * its first reading noted (a script and its count), with the check in that script that the address's grants are still
+ * kept (lib/order-data.ts ORDER_WRITE_IF_KEY's EXISTS, #3945; tests/imported-backfill-erasure.test.ts holds it).
+ */
+export const ORDERS_IMPORTED_COMMANDS = 5;
 /**
  * One entry of what was brought over or given, read with the address's whole
  * record, counted in commands: a product id and its { at, job, items, option },

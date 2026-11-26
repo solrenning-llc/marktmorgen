@@ -138,7 +138,7 @@ Decisão do dono DONO-20261120-1841-REGRAS-FILA (substitui DONO-20261120-1840-RE
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
-## ZA — Zero achados: só entra PR sem nenhum defeito apontado, por todos os revisores (dono, 23/11/2026, 12h29 Fortaleza)
+## ZA — Zero achados (nenhum defeito, nem mesmo defeito leve ou defeito mínimo): só entra PR assim, por todos os revisores (dono, 23/11/2026, 12h29 Fortaleza)
 
 Pedido do dono, nas palavras dele (23/11/2026, por volta das 12h25 Fortaleza): "todos revisores (nao apenas um deles) tem que dizer que nao tem nenhum defeito, nem leve nem mínimo"; aprovação dos itens 1 a 5 da proposta do Claude 6 (sessão `018ZjhH`), às 12h29: "faça". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. Motivo: conferido pelo Claude 6 em 23/11/2026, o #5130 entrou no main com 1 LEVE apontado e "não bloqueia" (comentário 7083359730), o #5251 com defeitos mínimos (NIT) apontados pelos revisores e não corrigidos (7090640746, 7090663224), e o #3650 com três LEVES de heads anteriores nunca corrigidos, porque as revisões do head final olharam só a junção do main (7058658361). É ordem posterior a FQ (1), RV (a) e (f), CV (f) e CO (e) e prevalece sobre elas onde divergirem (Pedidos repetidos, passo 3 (b)).
 
@@ -146,7 +146,7 @@ Pedido do dono, nas palavras dele (23/11/2026, por volta das 12h25 Fortaleza): "
 
 Recebido novamente em 23/11/2026, por volta das 14h05 (Fortaleza), pelo Claude 5 (sessão 012ST5ibzr); repetição sem mudança; nada alterado.
 
-(a) **READY só com zero achados.** Qualquer defeito apontado, de qualquer tamanho (GRAVE, ALTO, MÉDIO, LEVE ou mínimo, NIT inclusive), torna o veredito CHANGES, nunca READY. "Não bloqueia", "non-blocking", "fica para depois", "follow-up" e "READY com 1 LEVE" deixam de existir. O READY traz a frase "sem achados" (ou "0 achados", "no findings").
+(a) **READY só com zero achados.** Qualquer defeito apontado, de qualquer tamanho (GRAVE, ALTO, MÉDIO, LEVE ou mínimo, NIT inclusive), torna o veredito CHANGES, nunca READY. "Não bloqueia", "non-blocking", "fica para depois", "follow-up" e "READY com 1 LEVE" deixam de existir. O READY traz a frase "sem achados" (ou "0 achados", "no findings"), sempre seguida da frase de (h).
 
 (b) **Todos os revisores do head, não só dois.** O PR só está pronto (FQ (1)) quando nenhum revisor daquele head deixou defeito sem correção: o número mínimo de READY de RV (a) continua, e qualquer achado de qualquer outra família, comentário de linha inclusive, segura o PR até ser corrigido num head novo, com revisão focal, ou retirado por escrito por quem o apontou. Ninguém retira o achado de outro, nem o autor, nem quem enfileira, nem o coordenador; o achado do Codex espera o Codex.
 
@@ -160,9 +160,16 @@ Recebido novamente em 23/11/2026, por volta das 14h05 (Fortaleza), pelo Claude 5
 
 (g) **O que já entrou assim** é corrigido em PRs próprios, um por defeito (até 3 do mesmo padrão, AD (c)), cada um com teste que falha antes da correção. O escopo é tudo: todo achado deixado aberto num PR já incorporado (quadro #5285, 73ce item 4) e todo defeito do que já está no site (1d7b, as issues de defeito divididas pelo coordenador). O LEVE do #5130, os defeitos mínimos do #5251 e os três LEVES do #3650 são só exemplos, os primeiros conferidos.
 
+(h) **"Zero achado" sempre dito por extenso, e só quando é verdade** (dono, 26/11/2026, por volta das 15h35 Fortaleza, ao Claude da sessão `01FR6Z1`), nas palavras dele: "a expressao 'zero achado' tem que dizer expressamente que é nenhum defeito, nem mesmo defeito leve ou defeito mínimo. sempre tem que dizer expressamente (e deve corresponder a realidade): nenhum defeito, nem mesmo defeito leve ou defeito mínimo". Vale para todo agente deste repositório, em toda sessão:
+- **Sempre por extenso.** Todo texto que diga que um PR, um head, uma revisão, uma correção ou uma parte do site tem zero achados ("zero achado", "zero achados", "sem achados", "0 achados", "nenhum achado", "sem defeito", "no findings", "zero findings" e afins) diz junto, expressamente: **nenhum defeito, nem mesmo defeito leve ou defeito mínimo**. Vale para o texto ao dono, o veredito no PR, o correio, os comentários, os resumos, os relatórios, os painéis e os quadros. O nome da própria regra ("regra ZA") não é uma afirmação sobre um PR; quando a expressão descreve o que a regra exige, também vem por extenso, como no título desta seção.
+- **A frase é fixa.** Em português, exatamente "nenhum defeito, nem mesmo defeito leve ou defeito mínimo". Num texto em inglês (PR, commit, comentário no código), "no defects, not even a minor or trivial defect". Num veredito, por exemplo: "READY #N @sha: sem achados: nenhum defeito, nem mesmo defeito leve ou defeito mínimo". As palavras "leve" e "mínimo" ficam em letras minúsculas: em maiúsculas, "LEVE" é o nome de um achado.
+- **Só quando corresponde à realidade.** A frase só se escreve depois de conferir de verdade e não achar defeito de nenhum tamanho: o diff inteiro lido, os testes dos arquivos tocados rodados (RV (f)), os comentários e os comentários de linha do PR lidos, e cada achado de head anterior conferido como corrigido ou retirado por escrito por quem o apontou ((d)). Havendo qualquer defeito, mesmo leve ou mínimo, o texto diz o defeito e o veredito é CHANGES ((a)). O que não foi conferido é dito como não conferido (RV (f), VR, item 5); a frase nunca cobre o que não foi olhado, e escrevê-la sem a conferência é afirmação falsa.
+- **Precedência.** É ordem posterior à regra SD do #5428 (dono, 23/11/2026, por volta das 14h52 Fortaleza: "sem defeito nenhum, mesmo que leve ou mínimo"), ainda não incorporada quando este item foi gravado; onde as duas divergirem, vale esta frase (Pedidos repetidos, passo 3 (b)). O resto da SD que não diverge continua.
+- **A conferência do correio ((f)) aceita a frase.** Conferido pelo Claude da sessão `01FR6Z1` em 26/11/2026, às 15h36 Fortaleza: `motivosContraReady` do #5404 (aberto, head lido agora) recusa a frase em português, porque lê "defeito leve" como achado apontado, e aceita a frase em inglês. Antes de o #5404 entrar no main, ele passa a aceitar exatamente a frase fixa em português, com teste; nenhuma outra variação é liberada por isso.
+
 Isto garante que nenhum PR entra com defeito **conhecido**; não garante código sem nenhum defeito (VR, item 5).
 
-**Estado (regra VR):** regra vigente desde a decisão do dono; a recusa automática de (f) e as correções de (g) ainda não estão construídas.
+**Estado (regra VR):** regra vigente desde a decisão do dono; a recusa automática de (f) e as correções de (g) ainda não estão construídas; a frase de (h) vale pela conferência de quem escreve até a ferramenta a conferir.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
@@ -208,7 +215,7 @@ O coordenador publica no canal uma **tabela de capacidades**, com uma linha por 
 - a prova de RED, quando o PR corrige um defeito;
 - no PR de custo, os testes de teto (AC (l)) e o ano do Store;
 - no PR de workflow, a conferência das permissões e do risco de injeção, e a leitura de cada arquivo de workflow por um analisador de YAML (as 9 verificações não leem o workflow do próprio PR: em 21/11/2026, o head c4425f2e14 do #4941 recebeu READY sem ser YAML válido), e o que o gatilho custa aos outros workflows (no mesmo PR, um gatilho `issue_comment` criaria uma execução por comentário em todo o repositório, no head do main, e quebraria a leitura de execuções do alarme de main vermelho, `scripts/main_red_alarm.mjs`);
-- cada achado classificado como LEVE, MÉDIO, ALTO ou GRAVE, com o cenário concreto, ou a frase "sem achados";
+- cada achado classificado como LEVE, MÉDIO, ALTO ou GRAVE, com o cenário concreto, ou a frase "sem achados", seguida de "nenhum defeito, nem mesmo defeito leve ou defeito mínimo" (ZA (h));
 - o que não foi conferido.
 
 Revisão sem esses itens não conta. Os horários citados são lidos no relógio da máquina, nunca estimados.

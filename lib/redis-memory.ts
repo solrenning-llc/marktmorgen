@@ -1600,6 +1600,13 @@ export class MemoryRedis {
           if (this.run(["HGET", hash, field]) !== value) return 0;
           return this.run(["HDEL", hash, field]);
         }
+        // lib/redis-reply.ts HSET_IF_EQUAL: one hash field set only while it holds the value it was read as.
+        if (key.startsWith("-- marktmorgen:hset-if-equal:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, hash, field, read, value] = args;
+          if (this.run(["HGET", hash, field]) !== read) return 0;
+          this.run(["HSET", hash, field, value]);
+          return 1;
+        }
         // lib/paypal-delivery.ts TAKE_BACK_OWN: a deleted person's library, bond and purchase taken back together, only while
         // the purchase is still the record read (-1, nothing touched); the store out of their library only while it is their
         // only purchase here, the bond only while it names this order's affiliate, the purchase last.

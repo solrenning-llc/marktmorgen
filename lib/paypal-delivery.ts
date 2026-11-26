@@ -9,7 +9,7 @@
 import { createHmac } from "node:crypto";
 import { ordersLinkWithToken } from "@/lib/buyer-orders";
 import { type Listing, readListing, readListings } from "@/lib/catalog";
-import { dropEnrollment, recordOpenEnrollment } from "@/lib/learn";
+import { dropEnrollment, recordOpenEnrollment, restoreOpenEnrollment } from "@/lib/learn";
 import { importedKey } from "@/lib/imported-purchases";
 import { forgetBoughtCommands } from "@/lib/buyer-library";
 import { bondPlace, forgetBondCommand } from "@/lib/affiliate-bond";
@@ -641,10 +641,11 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
     },
     dropStart: (email, productId) => dropEnrollment(store, email, productId),
     // A course put back for a payment that keeps the purchase (Codex G's M1 on #2791): HSETNX, so nothing for one
-    // still there, and no email; only for a product that is a course, as handing over does.
+    // still there, and no email; only for a product that is a course, as handing over does. Never for a person erased
+    // at or after that payment (#4756): an erasure that began after the reconciler read the purchase stays whole.
     restoreStart: async (email, productId, start) => {
       const course = await readListing(store, productId);
-      if (course?.course) await recordOpenEnrollment(store, email, productId, start); // no end date was shown (24 [E7])
+      if (course?.course) await restoreOpenEnrollment(store, email, productId, start); // no end date was shown (24 [E7])
     },
     refunded: async (paid) => {
       const product = await readListing(store, paid.product).catch(() => null);

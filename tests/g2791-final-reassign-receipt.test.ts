@@ -310,7 +310,9 @@ async function main(): Promise<void> {
     let reached = 0;
     redis.pipeline = async (commands: (string | number)[][]) => {
       // Adapted by Claude 4 to the split boundary (the HSET alone, before the watch is left); assertions unchanged.
-      if(commands.length===1 && commands[0]?.[0]==="HSET" && String(commands[0]?.[1]).startsWith("nl:imp:buy:") && String(commands[0]?.[3]).includes("paypal:")) {
+      // And to its compare-and-set form (Claude 7, #4756: the grant replaced only over the one read); assertions unchanged.
+      const cas = commands[0]?.[0]==="EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:hset-if-equal:") && String(commands[0]?.[3]).startsWith("nl:imp:buy:") && String(commands[0]?.[6]).includes("paypal:");
+      if(commands.length===1 && (cas || (commands[0]?.[0]==="HSET" && String(commands[0]?.[1]).startsWith("nl:imp:buy:") && String(commands[0]?.[3]).includes("paypal:")))) {
         reached++;
         if(otherMode==="control") return actual(commands);
         return [null]; // reassignment not applied, its reply unknown

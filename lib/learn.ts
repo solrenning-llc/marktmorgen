@@ -27,7 +27,7 @@
  */
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { currentMeta } from "@/lib/tier-rules";
-import { saleHandles } from "@/lib/store";
+import { ensureListId, saleHandles, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { fileUrl } from "@/lib/file-store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, normaliseEmail } from "@/lib/auth";
@@ -38,7 +38,8 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { orderWrite } from "@/lib/order-data";
+import { orderWrite, orderWriteIfSame } from "@/lib/order-data";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { earnedCourses } from "@/lib/community-points";
 import { onAccount } from "@/lib/stripe-account";
 import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
@@ -201,6 +202,35 @@ export async function recordOpenEnrollment(store: Store, email: string, productI
     ["HSET", ledgerKey(store, email), `${productId}${OPEN_MARK}`, "1"],
     ["DEL", paidCacheKey(store, email)],
   ]);
+}
+
+/**
+ * recordOpenEnrollment for a course put back by the PayPal refund reconciler (#4756), only before the person's
+ * erasure: the write runs only while the person has no deletion mark on the store's list (lib/suppression.ts, written
+ * before anything of them is deleted), checked in the same step (orderWriteIfSame), so an erasure that began after the
+ * reconciler read the purchase leaves the course erased. A mark already there is read, and the course is put back only
+ * for a payment made after it, written over that same mark. A store with no list yet is given one first, as the
+ * erasure does (lib/person-erasure.ts erasureScope), so the two always check the same list. true: written (or the
+ * course already there); false: refused by an erasure at or after `startSeconds`. Throws on a mark that does not read
+ * exactly or that changed meanwhile, so the caller keeps the order watched and tries again.
+ */
+export async function restoreOpenEnrollment(store: Store, email: string, productId: string, startSeconds: number): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const listId = store.listId || (await ensureListId(storeRef(store)))?.listId;
+  if (!listId) throw new UnknownReplyError("the store's list, to check a deletion before a course is put back");
+  const key = suppressedKey(listId);
+  const field = suppressionPrint(listId, email);
+  const commands: (string | number)[][] = [
+    ["HSETNX", ledgerKey(store, email), productId, String(Math.floor(startSeconds))],
+    ["HSET", ledgerKey(store, email), `${productId}${OPEN_MARK}`, "1"],
+    ["DEL", paidCacheKey(store, email)],
+  ];
+  if ((await orderWriteIfSame(store, [{ key, field, sha1: "" }], commands)) !== null) return true;
+  const mark = repliesFor(await redisPipeline([["HGET", key, field]]), 1)?.[0];
+  if (typeof mark !== "string" || !/^[0-9]{1,12}$/.test(mark)) throw new UnknownReplyError("a deletion mark, before a course is put back");
+  if (Number(mark) >= Math.floor(startSeconds)) return false;
+  if ((await orderWriteIfSame(store, [{ key, field, sha1: createHash("sha1").update(mark).digest("hex") }], commands)) !== null) return true;
+  throw new UnknownReplyError("a deletion mark that changed while a course was put back");
 }
 
 /** The ledger field's ending that marks a course held with no end (recordOpenEnrollment). */

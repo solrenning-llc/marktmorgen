@@ -131,7 +131,9 @@ test("ordinary product ids still give the same plain records as before", () => {
   assert.deepEqual(parseTogether({ planner: [["lists", 3], ["x", 2], "z"], bad: "no" }), { planner: [["lists", 3]] });
   const paths = pathsFrom(["ana", "ben", "cy"].flatMap((buyer) => [sale(buyer, "guide", START), sale(buyer, "course", START + 10 * DAY_MS)]), 5);
   assert.deepEqual(paths, { at: 5, starts: { guide: 3 }, next: { guide: [{ id: "course", buyers: 3, days: 10 }] } });
-  assert.deepEqual(parsePaths({ at: 1, starts: { a: 2, b: "x" }, next: { x: [{ id: "y", buyers: 2, days: 1 }] } }), { at: 1, starts: { a: 2 }, next: {} });
+  // A part that does not read makes the whole snapshot no reading (#4071), never the rest of it.
+  assert.equal(parsePaths({ at: 1, starts: { a: 2, b: "x" }, next: { x: [{ id: "y", buyers: 2, days: 1 }] } }), null);
+  assert.deepEqual(parsePaths({ at: 1, starts: { a: 2 }, next: { x: [{ id: "y", buyers: 3, days: 1 }] } }), { at: 1, starts: { a: 2 }, next: { x: [{ id: "y", buyers: 3, days: 1 }] } });
 });
 
 // ---- Held files: proved, not fixed here (todo) -------------------------------------------------------------------

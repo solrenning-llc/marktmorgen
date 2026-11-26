@@ -117,24 +117,34 @@ export function pathsFrom(sales: SaleRow[], now = Date.now()): BuyerPaths {
 
 const nextKey = (statsId: string) => `nl:next:${statsId}`;
 
-/** Whatever came back from storage, made safe to use. */
+/** A plain object (not a list or null), as JSON.stringify writes Object.fromEntries. */
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+/** A step as pathsFrom keeps it: a product, at least MIN_NEXT buyers, whole days from 0. */
+const isStep = (value: unknown): value is NextStep => {
+  if (!isRecord(value)) return false;
+  const { id, buyers, days } = value;
+  return typeof id === "string" && Number.isInteger(buyers) && (buyers as number) >= MIN_NEXT && Number.isInteger(days) && (days as number) >= 0;
+};
+
+/**
+ * What came back from storage, read only in the shape this code writes it (#4071, rule 24): the time, every count a
+ * whole number above 0, every path a list of 1 to NEXT_KEPT steps. Anything else is no reading (null), never the part
+ * of it that read: the MCP tool then says it is unavailable, and the studio reads the paths again (pathsStale).
+ */
 export function parsePaths(raw: unknown): BuyerPaths | null {
-  if (!raw || typeof raw !== "object") return null;
-  const value = raw as { at?: unknown; starts?: unknown; next?: unknown };
-  if (typeof value.at !== "number") return null;
-  const starts = new Map<string, number>();
-  for (const [id, n] of Object.entries(value.starts && typeof value.starts === "object" ? (value.starts as Record<string, unknown>) : {})) {
-    if (typeof n === "number" && Number.isInteger(n) && n > 0) starts.set(id, n);
+  if (!isRecord(raw)) return null;
+  const { at, starts, next } = raw;
+  if (typeof at !== "number" || !isRecord(starts) || !isRecord(next)) return null;
+  for (const n of Object.values(starts)) if (!(typeof n === "number" && Number.isInteger(n) && n > 0)) return null;
+  for (const list of Object.values(next)) {
+    if (!Array.isArray(list) || list.length === 0 || list.length > NEXT_KEPT || !list.every(isStep)) return null;
   }
-  const next = new Map<string, NextStep[]>();
-  for (const [id, list] of Object.entries(value.next && typeof value.next === "object" ? (value.next as Record<string, unknown>) : {})) {
-    if (!Array.isArray(list)) continue;
-    const kept = list
-      .filter((s): s is NextStep => Boolean(s) && typeof s.id === "string" && Number.isInteger(s.buyers) && s.buyers >= MIN_NEXT && Number.isInteger(s.days) && s.days >= 0)
-      .slice(0, NEXT_KEPT);
-    if (kept.length) next.set(id, kept);
-  }
-  return { at: value.at, starts: Object.fromEntries(starts), next: Object.fromEntries(next) };
+  return {
+    at,
+    starts: Object.fromEntries(Object.entries(starts) as [string, number][]),
+    next: Object.fromEntries(Object.entries(next).map(([id, list]) => [id, (list as NextStep[]).map(({ id: step, buyers, days }) => ({ id: step, buyers, days }))])),
+  };
 }
 
 /** How many bytes what buyers bought next holds as kept, 0 when none, looked up before it is read by a reading that pays for its size (lib/mcp-tools.ts, productsTool); null when it did not come back. */

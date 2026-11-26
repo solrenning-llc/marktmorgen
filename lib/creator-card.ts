@@ -231,10 +231,17 @@ export class CardStoreGone extends Error {
 }
 const isStoreGone = (reply: unknown): boolean => Array.isArray(reply) && reply.length === 2 && reply[0] === -4 && reply[1] === 0;
 
-/** A card save whose answer could not be confirmed: it may or may not have been written. */
+/**
+ * A card save or removal whose answer could not be confirmed: it may or may not have been done. Its words say which it
+ * was, so a removal is never told as a save (Claude 1's LOW on #5071).
+ */
 export class CardSaveUnconfirmed extends Error {
-  constructor() {
-    super("We could not confirm your business card was saved. Reload the page to see what it is now, then save again if it is not what you saved.");
+  constructor(what: "saved" | "removed" = "saved") {
+    super(
+      what === "removed"
+        ? "We could not confirm your business card was removed. Reload the page to see what it is now, then remove it again if it is still there."
+        : "We could not confirm your business card was saved. Reload the page to see what it is now, then save again if it is not what you saved.",
+    );
     this.name = "CardSaveUnconfirmed";
   }
 }
@@ -268,14 +275,14 @@ export async function saveCreatorCard(statsId: string, raw: Record<string, unkno
 export async function dropCreatorCard(statsId: string | null, room: DataStore, fence: CreatorCardFence | null): Promise<void> {
   const key = dataKey(room);
   if (!statsId || !key || !isRedisConfigured()) return;
-  if (!fence || fence.statsId === null) throw new CardSaveUnconfirmed();
+  if (!fence || fence.statsId === null) throw new CardSaveUnconfirmed("removed");
   const [held] = await redisPipeline([["GET", cardKey(statsId)]]);
   const now = Date.now();
   const replies = await redisPipeline([["EVAL", DROP_CARD, 4, key, cardKey(statsId), fence.live, fence.erasing, contentRoomFor(room, now / 1000), monthOf(now), typeof held === "string" ? held : "", "", fence.field, fence.ref, fence.statsId]]);
   const reply = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
   if (isStoreGone(reply)) throw new CardStoreGone();
   if (Array.isArray(reply) && reply.length === 2 && reply[0] === 2 && reply[1] === 0) return;
-  if (!dataTakenOf(room, reply, now / 1000)?.ok) throw new CardSaveUnconfirmed();
+  if (!dataTakenOf(room, reply, now / 1000)?.ok) throw new CardSaveUnconfirmed("removed");
 }
 
 /** The data room's own steps (TAKE_DATA) for the card's slot, set to `size`, inside a script whose KEYS[1] is the room. */

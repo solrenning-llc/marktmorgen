@@ -26,11 +26,25 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { type Together, parseTogether } from "@/lib/also-bought";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 
 /** Below this, nothing is said. */
 export const SHOWN_FROM = 10;
 /** How long a reading is used as it is before it is read again in the background. */
 export const SOLD_FRESH_MS = 6 * 60 * 60 * 1000;
+/**
+ * The most refresh attempts a store makes in a day: one per SOLD_FRESH_MS whatever its outcome, since the attempt's
+ * lock is held that long (refreshSoldCounts). Priced per attempt in tests/plan-cost-registry.ts, "sold-count-refresh".
+ */
+export const SOLD_REFRESH_ATTEMPTS_PER_DAY = Math.ceil(86_400_000 / SOLD_FRESH_MS);
+/**
+ * The billed database commands of one refresh at its worst: the attempt's lock (one), the store's all-time reading on a
+ * cache miss with PayPal sales and both its writes fenced (lib/stats.ts readAllTimeSales: eleven, the PayPal read's
+ * range and the MGET of its records among them; ALL_TIME_READ_COMMANDS once #4970 is in; Claude 1 on #4966), and this
+ * count's own fenced write (lib/live-fence.ts SET_IF_STORE_LIVE: the EVAL and the HGET, GET and SET it runs).
+ * Held by tests/sold-count-refresh-bound.test.ts; priced in tests/plan-cost-registry.ts, "sold-count-refresh".
+ */
+export const SOLD_REFRESH_COMMANDS = 1 + 11 + 4;
 /** How long a reading is kept at all: a page never shows a count older than this. */
 const SOLD_KEEP_SECONDS = 7 * 24 * 60 * 60;
 
@@ -87,7 +101,9 @@ export async function refreshSoldCounts(
   now = Date.now(),
 ): Promise<SoldCounts | null> {
   if (!store.look.sold || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return null;
-  const [mine] = await redisPipeline([["SET", lockKey(store.statsId), "1", "NX", "EX", 300]]);
+  // The lock is the attempt's own bound: held SOLD_FRESH_MS whatever the outcome, so a read that fails or keeps
+  // nothing is not tried again by the next visit (SOLD_REFRESH_ATTEMPTS_PER_DAY; coordinator 20261122T023645Z on #4966).
+  const [mine] = await redisPipeline([["SET", lockKey(store.statsId), "1", "NX", "EX", SOLD_FRESH_MS / 1000]]);
   if (mine !== "OK") return null;
   try {
     const all = await read(store);
@@ -95,7 +111,10 @@ export async function refreshSoldCounts(
     const p: Record<string, number> = {};
     for (const [id, row] of Object.entries(all.byProduct)) if (id && row.sales > 0) p[id] = row.sales;
     const t = parseTogether(all.together);
-    await redisPipeline([["SET", soldKey(store.statsId), JSON.stringify({ at: now, p, t }), "EX", SOLD_KEEP_SECONDS]]);
+    // The read can outlast the store: the erasure walk may have deleted this family meanwhile,
+    // so the write is fenced on the store's life in the same script (Codex L-20261120-0538).
+    const saved = await setWhileStoreLive(store, soldKey(store.statsId), JSON.stringify({ at: now, p, t }), SOLD_KEEP_SECONDS);
+    if (saved !== "kept") return null;
     return { at: now, byProduct: p, together: t };
   } catch (error) {
     console.error("counting what each product sold failed", error);

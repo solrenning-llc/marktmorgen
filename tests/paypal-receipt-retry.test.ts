@@ -135,6 +135,19 @@ async function main(): Promise<void> {
   };
   const toBuyer = (order: string) => receipts.filter((r) => r.to[0] === BUYER && r.key === `nimbus-paypal:${order}`);
 
+  part("A newly settled pending payment is counted only after the deferred receipt is sent");
+  const pending = await openOrder(store, product, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+  if (!pending.ok) throw new Error(pending.reason);
+  await redis.pipeline([["ZADD", `nl:ppsell:pending:${statsId}`, String(Math.floor(Date.now() / 1000)), pending.order]]);
+  orders.set(pending.order, completed(pending.order, "49.00", BUYER));
+  mail = "422";
+  is("the receipt is owed, so this sweep clears zero payments", await sweep(0), 0);
+  is("the order is paid and its hand-over still listed", [Boolean(await readPaid(pending.order)), (await listed()).includes(pending.order)], [true, true]);
+  mail = "up";
+  is("the retry counts the order when the receipt is accepted", await sweep(), 1);
+  is("exactly one receipt and the order leaves the list", [toBuyer(pending.order).length, (await listed()).includes(pending.order)], [1, false]);
+  is("a later sweep does not count the order again", await sweep(), 0);
+
   part("Healthy: one receipt, and the order leaves the hand-over list at once");
   const first = await pay(1);
   is("one receipt sent, under the order's idempotency key", toBuyer(first).length, 1);

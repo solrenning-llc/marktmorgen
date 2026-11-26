@@ -1532,6 +1532,60 @@ def main():
         assert redis.command('GET', pause_key) == replacement
         print('PASS:pause notice8negative cases, exact generation/due, lostACK, replacement and KEEPTTL;commands=' + json.dumps(notice_counts, sort_keys=True))
 
+        attempt_match = re.search(r'export const PAUSE_WORKER_ATTEMPT = `([^`]+)`;', pause_source)
+        assert attempt_match and chr(36) + '{' not in attempt_match.group(1)
+        attempt_script = attempt_match.group(1)
+        attempt_record = dict(notice_record, told=1799999000)
+        attempt_raw = json.dumps(attempt_record)
+        attempt_now = 1800000060
+        attempt_next = json.dumps(dict(attempt_record, attempt=attempt_now))
+        def attempt(raw=attempt_raw, next_raw=attempt_next, now=attempt_now):
+            return redis.command('EVAL', attempt_script, 2, pause_key, due_key, 'synthetic-member', raw, next_raw, now)
+        for scenario in ('replacement', 'removed', 'due', 'funded', 'future', 'changed-plan', 'already-attempted', 'not-yet-due', 'wrong-time', 'oversized'):
+            raw = attempt_raw
+            score = 1800000000
+            next_raw = attempt_next
+            now = attempt_now
+            if scenario == 'replacement': raw = json.dumps(dict(attempt_record, until=1800086400)); score = 1800086400
+            elif scenario == 'removed': raw = None
+            elif scenario == 'due': score = 1800086400
+            elif scenario == 'funded': raw = json.dumps(dict(attempt_record, funding={'version': 1, 'grantId': None}))
+            elif scenario == 'future': raw = json.dumps(dict(attempt_record, futureEvidence='retain'))
+            elif scenario == 'changed-plan': next_raw = json.dumps(dict(attempt_record, attempt=attempt_now, tier='pro'))
+            elif scenario == 'already-attempted': raw = attempt_next; next_raw = json.dumps(dict(attempt_record, attempt=attempt_now + 86400)); now = attempt_now + 86400
+            elif scenario == 'not-yet-due': now = 1799999999; next_raw = json.dumps(dict(attempt_record, attempt=now))
+            elif scenario == 'wrong-time': next_raw = json.dumps(dict(attempt_record, attempt=attempt_now + 1))
+            elif scenario == 'oversized': next_raw = json.dumps(dict(attempt_record, attempt=attempt_now, pad='x' * 4096))
+            seed_worker(raw, score)
+            before_raw = redis.command('GET', pause_key)
+            before_due = redis.command('ZSCORE', due_key, 'synthetic-member')
+            expected = attempt_raw if raw is None else raw
+            assert attempt(expected, next_raw, now) == 0, scenario
+            assert redis.command('GET', pause_key) == before_raw, scenario
+            assert redis.command('ZSCORE', due_key, 'synthetic-member') == before_due, scenario
+        seed_worker(attempt_raw)
+        redis.command('PEXPIRE', pause_key, 60000)
+        ttl_before = redis.command('PTTL', pause_key)
+        measured_ack, attempt_counts = measured_command(redis, lambda: attempt())
+        assert measured_ack == 1
+        assert sum(attempt_counts.values()) <= 5, attempt_counts  # EVAL, GET, ZSCORE, SET, ZADD
+        ttl_after = redis.command('PTTL', pause_key)
+        assert 0 < ttl_after <= ttl_before
+        assert redis.command('GET', pause_key) == attempt_next
+        # The due member is kept, listed past every batch's deadline (PAUSE_HELD_OFFSET, 1e12): the held attempt stays
+        # enumerable for undo and a hand restart, and never fills the run's bounded batch (Claude 4 2Wb on #3671).
+        assert redis.command('ZSCORE', due_key, 'synthetic-member') == '1001800000000'
+        assert redis.command('ZRANGEBYSCORE', due_key, '-inf', '1000000000000') == []
+        assert attempt() == 0  # Lost ACK cannot replay or move the attempt.
+        # An attempted record whose member was not moved (old score) is never forgotten by a stale observation.
+        redis.command('ZADD', due_key, 1800000000, 'synthetic-member')
+        assert worker_forget('known', attempt_next) == 0
+        redis.command('ZADD', due_key, 1001800000000, 'synthetic-member')
+        assert worker_forget('known', attempt_next) == 1  # The exact attempted record is still forgettable (undo, refusal, success).
+        assert redis.command('GET', pause_key) is None
+        assert redis.command('ZSCORE', due_key, 'synthetic-member') is None
+        print('PASS:pause attempt10negative cases, exact generation, held member past every deadline, lostACK, KEEPTTL and forget of the attempted record;commands=' + json.dumps(attempt_counts, sort_keys=True))
+
 
 
         # Actual joint publisher uses canonical app key names only on this disposable CI Redis.

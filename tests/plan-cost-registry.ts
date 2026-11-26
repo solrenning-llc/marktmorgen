@@ -2605,6 +2605,16 @@ export const COST_LINES: CostLine[] = [
     basis: "The plan's access emails, each at the most an email costs and its count; taken from the store's window before sending, refused past it. Since 9 November 2026 each also carries the Path lead its sign-up or waitlist link may count when it is used (lib/path-lead.ts, 13 [D10]): PATH_LEAD_COMMANDS (one script's EVAL and the eight it runs, as Upstash bills them: the deletion check, two TYPEs, the erasure note's three, the mark and the count, taken together so an address already deleted writes nothing and a mark never stands without its note or its count), held in tests/path-lead-confirmed.test.ts; the confirmation routes take no public request. The join link is deleted on use and the waitlist's later presses do not ask (`first`); two presses at the same instant can each send the script, eight commands that write nothing more.",
   },
   {
+    id: "pause-restart-claim",
+    feature: "A legacy pause records its one restart attempt before the only subscription request",
+    monthlyUsd: () => request("light", 5, 2 * 4_096 + 2_048),
+    sources: [
+      { file: "lib/plan-pause-rules.ts", names: ["PAUSE_EVERY_DAYS"] },
+      { file: "lib/plan-pause.ts", names: ["markObservedAttempt", "PAUSE_WORKER_ATTEMPT"] },
+    ],
+    basis: "A pause can be taken at most once per PAUSE_EVERY_DAYS, and its restart is requested once. Before that request one additional atomic Redis request rewrites the exact due record with its attempt time (KEEPTTL) and moves its due member past every batch's deadline (PAUSE_HELD_OFFSET): five billed commands (the EVAL and its GET, ZSCORE, SET and ZADD, measured on a real Redis in scripts/test_contract_funding_redis.py); it sends the observed record and the next one, each at most 4 KB, plus the script and its arguments (under 2 KB); charge the full request in any billing month it occurs, with no annual discount. A held attempt is never posted again and, listed past every deadline, never read again by the daily run.",
+  },
+  {
     id: "store-email",
     feature: "The store's own emails outside the monthly ones: inbox notices and replies, a purchase sent again, contact-form and inbound-mail notices, checkout reminders, come-back, welcome and yearly offers, payment and pause notices to members, community events, affiliates, team invites (17 October 2026)",
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "email"),

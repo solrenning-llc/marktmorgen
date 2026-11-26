@@ -48,6 +48,7 @@ import {
   isBillingConfigured,
   periodEnd,
   planOf,
+  legacyRestartPrice,
   restartPlan,
   setCancelAtPeriodEnd,
   stateOf,
@@ -67,8 +68,6 @@ import {
 } from "@/lib/plan-pause-rules";
 
 const DAY = 86_400;
-/** Days a restart that failed for a reason other than the card is tried again. */
-const RETRY_DAYS = 3;
 
 /** Whether Stripe refused because of the card or the bank, which trying again will not change. */
 function declined(error: unknown): boolean {
@@ -98,6 +97,9 @@ export type PauseRecord = {
   told: number;
   /** Durable marker before the inactive store loses its funded period. Null is unknown, never legacy. */
   funding?: { version: 1; grantId: string | null };
+  /** Legacy only: when its one restart request was sent. Set before that POST and never cleared by
+   * a run, so an unknown result is never posted again; the due member stays for undo and reconciliation. */
+  attempt?: number;
 };
 
 function parseRecord(raw: unknown): PauseRecord | null {
@@ -111,7 +113,10 @@ function parseRecord(raw: unknown): PauseRecord | null {
       if (!Object.hasOwn(value, key)) return null;
     }
     if ((!Object.hasOwn(value, "told") && "told" in value) ||
-        (!Object.hasOwn(value, "funding") && "funding" in value)) return null;
+        (!Object.hasOwn(value, "funding") && "funding" in value) ||
+        (!Object.hasOwn(value, "attempt") && "attempt" in value)) return null;
+    const attempt = value.attempt;
+    if (attempt !== undefined && (typeof attempt !== "number" || !Number.isSafeInteger(attempt) || attempt <= 0 || value.funding !== undefined)) return null;
     const tier = parseTier(value.tier);
     const told = value.told === undefined ? 0 : value.told;
     const funding = value.funding as { version?: unknown; grantId?: unknown } | null | undefined;
@@ -135,6 +140,7 @@ function parseRecord(raw: unknown): PauseRecord | null {
       until: value.until,
       told,
       ...(funding ? { funding: { version: 1 as const, grantId: funding.grantId as string | null } } : {}),
+      ...(attempt !== undefined ? { attempt: attempt as number } : {}),
     };
   } catch {
     return null;
@@ -380,7 +386,9 @@ end
 if ARGV[2]~='known' or current~=ARGV[3] then return 0 end
 local ok,p=pcall(cjson.decode,current)
 if not ok or type(p)~='table' or p.funding~=nil or type(p['until'])~='number' then return 0 end
-if redis.call('ZSCORE',KEYS[2],ARGV[1])~=tostring(p['until']) then return 0 end
+local listed=p['until']
+if p.attempt~=nil then listed=listed+1000000000000 end
+if redis.call('ZSCORE',KEYS[2],ARGV[1])~=tostring(listed) then return 0 end
 redis.call('DEL',KEYS[1])
 redis.call('ZREM',KEYS[2],ARGV[1])
 return 1
@@ -416,6 +424,57 @@ if redis.call('ZSCORE',KEYS[2],ARGV[1])~=tostring(p['until']) then return 0 end
 redis.call('SET',KEYS[1],ARGV[3],'KEEPTTL')
 return 1
 `;
+
+/** Writes the one legacy restart attempt into the exact due pause before its only POST
+ * (KEYS: pause, due; ARGV: ref, observed raw, next raw, now). Same exact-generation checks as
+ * the notice: the next record is the observed one plus `attempt`=now, nothing else; the break
+ * has ended; the due member still has its score. The due member is kept, moved past every
+ * batch's deadline (PAUSE_HELD_OFFSET): a held attempt stays enumerable for undo and a hand
+ * restart, never fills the run's bounded batch, and an `attempt` is never replaced. */
+export const PAUSE_WORKER_ATTEMPT = `-- marktmorgen:pause-worker-attempt:v1
+if #KEYS~=2 or #ARGV~=4 or KEYS[1]==KEYS[2] then return 0 end
+local now=tonumber(ARGV[4])
+if not now or now<=0 or now~=math.floor(now) or #ARGV[3]>4096 then return 0 end
+local current=redis.call('GET',KEYS[1])
+if current~=ARGV[2] then return 0 end
+local ok,p=pcall(cjson.decode,current)
+local nextOK,q=pcall(cjson.decode,ARGV[3])
+if not ok or not nextOK or type(p)~='table' or type(q)~='table' or p.funding~=nil or q.funding~=nil or p.attempt~=nil then return 0 end
+local fields={subscription=true,customer=true,paymentMethod=true,tier=true,from=true,['until']=true,told=true}
+for k,_ in pairs(p) do if not fields[k] then return 0 end end
+local count=0
+for k,_ in pairs(q) do if not fields[k] and k~='attempt' then return 0 end count=count+1 end
+local pcount=0
+for _,_ in pairs(p) do pcount=pcount+1 end
+if count~=pcount+1 or q.attempt~=now or type(p['until'])~='number' or p['until']>now then return 0 end
+for k,_ in pairs(fields) do if p[k]~=q[k] then return 0 end end
+if redis.call('ZSCORE',KEYS[2],ARGV[1])~=tostring(p['until']) then return 0 end
+redis.call('SET',KEYS[1],ARGV[3],'KEEPTTL')
+redis.call('ZADD',KEYS[2],'XX',tostring(1000000000000+p['until']),ARGV[1])
+return 1
+`;
+
+/**
+ * Where a held attempt's due member is listed: its break's end plus this, past the latest deadline
+ * PAUSE_DUE_OBSERVATION reads (1e12), so a held attempt never takes a place in the bounded batch (Claude 4 2Wb,
+ * #3671), while the member stays for undo, a hand restart (dropPause) and a closing or a move that asks if a
+ * break is kept. PAUSE_WORKER_ATTEMPT writes it and PAUSE_WORKER_FORGET expects it for a record with an attempt.
+ */
+export const PAUSE_HELD_OFFSET = 1_000_000_000_000;
+
+/** The exact record now stored, with its attempt written; null when it could not be acknowledged. */
+async function markObservedAttempt(ref: string, raw: string | null, nowSeconds: number): Promise<string | null> {
+  if (raw === null || !Number.isSafeInteger(nowSeconds) || nowSeconds <= 0) return null;
+  try {
+    const observed = JSON.parse(raw) as Record<string, unknown>;
+    if (!observed || typeof observed !== "object" || Array.isArray(observed) || Object.hasOwn(observed, "attempt")) return null;
+    const next = JSON.stringify({ ...observed, attempt: nowSeconds });
+    const reply = await redisPipeline([["EVAL", PAUSE_WORKER_ATTEMPT, 2, recordKey(ref), DUE, ref, raw, next, nowSeconds]]);
+    if (!Array.isArray(reply) || reply.length !== 1) return null;
+    const ack = Object.getOwnPropertyDescriptor(reply, "0");
+    return ack && Object.hasOwn(ack, "value") && ack.value === 1 ? next : null;
+  } catch { return null; }
+}
 
 function knownNoticeSource(raw: string | null): boolean {
   if (raw === null) return false;
@@ -728,6 +787,28 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
       counts.failed += 1;
       continue;
     }
+    // A legacy restart is requested once. Its attempt is written into the exact due pause before
+    // the only POST; Stripe keeps an idempotency key for about 24 hours and this runs once a day,
+    // so an unknown result is never posted again. The held pause keeps its due member, listed past
+    // every batch's deadline (PAUSE_HELD_OFFSET), so it never fills this bounded batch; the
+    // creator's undo and a hand restart (dropPause) still reach it.
+    let current = stored.raw;
+    let priceId: string | undefined;
+    if (!record.funding) {
+      if (record.attempt !== undefined) { counts.failed += 1; continue; }
+      // Everything that can fail before the only POST (the customer, the card, the price lookup) runs before the
+      // attempt is written: a failure here posted nothing, so no attempt is kept, nobody is told, and the next daily
+      // run tries again (Claude 3's LEVE 5 on #3671). Only the POST and what follows it are held.
+      try {
+        priceId = await legacyRestartPrice({ customerId: record.customer, paymentMethod: record.paymentMethod, tier: record.tier });
+      } catch (error) {
+        console.error("a plan restart could not be prepared; tried again on the next run", store.handle, error);
+        counts.failed += 1;
+        continue;
+      }
+      current = await markObservedAttempt(ref, stored.raw, nowSeconds);
+      if (current === null) { counts.failed += 1; continue; }
+    }
     try {
       const started = await restartPlan({
         store,
@@ -735,6 +816,7 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
         paymentMethod: record.paymentMethod,
         tier: record.tier,
         idempotencyKey: `restart:${record.subscription}:${record.until}`,
+        ...(priceId !== undefined ? { priceId } : {}),
         ...(record.funding ? { funding: { statsId: store.statsId ?? "", sourceSubscriptionId: record.subscription, sourceGrantId: record.funding.grantId, ref, paused: stored.raw ?? "" } } : {}),
       });
       if(started.fundedPublication===true){
@@ -745,16 +827,18 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
       }
       let saved: Store | null;
       try { saved = await setSubscription(ref, started, store); }
-      catch {
-        // Saving failed after the provider answered. This is not a card
-        // refusal and must not enter the legacy charge-failure cleanup.
+      catch { saved = null; }
+      // A provider response is not an acknowledged store write. Saving failed or could not be confirmed after Stripe
+      // answered: not a card refusal, never the legacy charge-failure cleanup. The pause stays held with its attempt
+      // (never posted again), and, since Stripe may have started and charged the plan while the studio does not show
+      // it, a legacy creator is told once to check before starting again (triple audit of #3671). A funded pause's
+      // notices stay with its own protocol.
+      if (!saved) {
+        if (!record.funding) await tell(store, "unconfirmed", record).catch(() => false);
         counts.failed += 1;
         continue;
       }
-      // A provider response is not an acknowledged store write. Retain the
-      // exact pause and due evidence when the nullable writer cannot confirm.
-      if (!saved) { counts.failed += 1; continue; }
-      if (!(await forgetObserved(ref, stored.raw))) { counts.failed += 1; continue; }
+      if (!(await forgetObserved(ref, current))) { counts.failed += 1; continue; }
       await tell(store, "restarted", record).catch(() => false);
       counts.restarted += 1;
     } catch (error) {
@@ -762,14 +846,17 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
       // The funded protocol retains every uncertain source/intent. It must not
       // enter the legacy retry window, forget its evidence, or announce success.
       if (record.funding) { counts.failed += 1; continue; }
-      // Stripe or the network failing is not the card failing: tried again on
-      // the next run, for a few days, before the creator is told it did not work.
-      if (!declined(error) && nowSeconds - record.until < RETRY_DAYS * DAY) {
+      // Stripe or the network failing, or an answer that is not the plan asked for, is not the
+      // card failing: a charge may have gone through. The pause stays held with its attempt and
+      // due member, it is never posted again, and the creator is told once to check first.
+      if (!declined(error)) {
+        await tell(store, "unconfirmed", record).catch(() => false);
         counts.failed += 1;
         continue;
       }
-      if (!(await forgetObserved(ref, stored.raw))) { counts.failed += 1; continue; }
-      await tell(store, declined(error) ? "failed" : "unconfirmed", record).catch(() => false);
+      // A definitive refusal by the card or bank: the break ends, and the creator is told.
+      if (!(await forgetObserved(ref, current))) { counts.failed += 1; continue; }
+      await tell(store, "failed", record).catch(() => false);
       counts.failed += 1;
     }
   }

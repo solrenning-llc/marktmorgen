@@ -48,6 +48,20 @@ Continuam onde estão, porque não são conversa entre agentes: o que se escreve
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## NU — Só na nuvem, sem o computador do dono (dono, 26/11/2026, por volta das 19h12 Fortaleza)
+
+Pedido do dono ao Claude 2 (sessão 01FR6Z1Kg23), nas palavras dele: "e precisa elas saberem automaticamente de trabalharem apenas nas nuvens, sem usar meu pc". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão, sem o dono precisar lembrar.
+
+(a) **Todo trabalho é feito na nuvem:** nas sessões do Claude Code na nuvem e, no Codex, na nuvem dele. Nenhum agente liga uma pasta do computador do dono à sessão (Remote Control, `request_computer_folder`), nem usa o navegador, a área de trabalho, os aplicativos ou os arquivos do computador dele.
+
+(b) **Nada de trabalho de agente no computador do dono.** Nenhum agente pede ao dono para rodar, no computador dele, um comando que faz o trabalho do agente (testes, junções, envios, revisões, a vigia do correio). O que o dono decide e faz como dono, como uma conta, um pagamento ou um SIM, continua com ele.
+
+(c) **O que só daria para fazer no computador do dono não é feito assim.** O agente segue com o resto e escreve em "Depende do dono" o que ficou bloqueado e por quê.
+
+(d) **Ordem posterior** (Pedidos repetidos, passo 3 (b)): onde este arquivo fala de agente trabalhando no computador do dono, como o Claude 1 em CO (k), isso fica como histórico, e o trabalho passa para uma sessão na nuvem.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## LC — Cálculo de lucro mostrado ao dono (dono, 01/11/2026 00h05 Fortaleza)
 
 Regra do dono, para todo agente deste repositório: todo cálculo de lucro apresentado ao dono considera somente o cliente usando todos os recursos e limites do plano no máximo, no pior mês, e o imposto pela interpretação jurídica correta da política TX (hoje: IRPF de 15% sobre o lucro anual da LLC e IOF de 0,38% sobre o que entra no Brasil, sem ISS e sem imposto federal americano, com o imposto do comprador cobrado por fora do preço), conferida em lei e fontes oficiais. Complemento do dono (01/11/2026, 01h03 Fortaleza): no cálculo de e-mail, usar a Amazon SES pelo preço real da conta do dono (correção do dono, 01/11/2026, 01h05: "usa o preço real da amazon junto com as proteções"; hoje o avulso de US$0,10 por mil, escolhido em 30/10/2026, a reconferir se a conta mudar de plano), junto com as proteções do complemento de 309 [EM1]: queda para o Resend limitada à cota incluída no plano Pro já pago, com o e-mail esperando na fila da Amazon acima dela, nunca descartado, e prova de envio real pela SES. No código, a troca de PER_EMAIL continua dependendo dessas proteções incorporadas e publicadas. Não apresentar ao dono resultados pela leitura que dá mais imposto nem pela leitura de dimensionamento como se fossem o lucro. Enquanto o código ainda trouxer o piso de 27,5% e a leitura most-tax (retirada pendente em 472 [TX2]), o relatório diz que a conta foi feita fora desse piso. (Histórico desde 19/11/2026, substituído pela política TX: com o TX2, a tabela de margem e todo cálculo de lucro vigente (as análises datadas ficam como histórico) usam IRPF de 15% e IOF de 0,38% sobre o lucro, sem o piso de 27,5% e sem a leitura most-tax; a frase anterior fica só como registro.) Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.

@@ -81,6 +81,8 @@ export async function POST(request: NextRequest) {
 }
 
 async function act(request: NextRequest): Promise<Response> {
+  // When this request began: a member's message is not written for someone deleted since (lib/community-chat.ts, #4670).
+  const startedAt = Date.now();
   if (fromAnotherSite(request)) return new Response("forbidden", { status: 403 });
   // Read only as far as 8_000 bytes, whether or not a length was declared (docs/security-audit-2026-10-18.md, MM-SA-10).
   const body = (await limited(request, 8_000).then((r) => r.json()).catch(() => null)) as Record<string, unknown> | null;
@@ -120,7 +122,12 @@ async function act(request: NextRequest): Promise<Response> {
       return Response.json({ ok: false, error: "hourly" }, { status: 429 });
     }
     const name = wholeUnits(owner ? store.name : viewer.member?.n || "A member");
-    const said = await say(id, config.chat, key, owner, text(body.text, MAX_CHAT_TEXT), name);
+    // A member's message is written only while they were not just deleted from the store (CHAT_SAY_UNLESS_ERASED); a store
+    // with no list has deleted nobody (an erasure always gives the store a list first, lib/suppression.ts).
+    const fence = !owner && store.listId ? { listId: store.listId, email: viewer.email, ranSeconds: (Date.now() - startedAt) / 1000 } : null;
+    const said = await say(id, config.chat, key, owner, text(body.text, MAX_CHAT_TEXT), name, fence);
+    // Deleted while this request ran: what anyone not in the community is told, and nothing was written.
+    if (!said.ok && said.reason === "erased") return Response.json({ ok: false, error: "out" }, { status: 403 });
     if (!said.ok) {
       return Response.json({ ok: false, error: said.reason, wait: said.wait }, { status: said.reason === "slow" ? 429 : said.reason === "unknown" ? 503 : 400 });
     }

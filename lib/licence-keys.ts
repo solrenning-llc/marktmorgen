@@ -56,11 +56,11 @@
  */
 import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
-import { saleHandles } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, saleHandles, storeIdCommand, storeRef } from "@/lib/store";
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 // One script carries at most this many commands, which the buyers' lists fill counts in its run's commands.
-import { ORDER_WRITE_MAX } from "@/lib/order-data";
+import { ORDER_WRITE_MAX, orderWriteCallsMost, orderWriteIfStoreLive } from "@/lib/order-data";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { StripeListUnreadable, type StripeRow, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
@@ -222,7 +222,14 @@ export const HOLDER_FILL_ALL_DONE = "nl:keysfill:done";
 /** The round's mark: "clean" from the round's first store, "dirty" once a store's fill was left unfinished in it. */
 export const HOLDER_FILL_ROUND = "nl:keysfill:round";
 /** Records one HSCAN step asks for (Redis may give a whole small hash at once). */
-const FILL_PAGE = 100;
+/**
+ * Records one step reads (HSCAN COUNT): a hint Redis may pass. 30, so a step at its dearest (an HMGET a buyer, every
+ * line missing, each written behind the store-live fence with every call inside its script counted, and the place)
+ * stays well inside one run of FILL_RUN_COMMANDS (about 313 calls at 30 records), now that a script is counted with
+ * the calls inside it (Claude 4 3rC's LOW 1 and Codex N1 on #5136). A page Redis answers larger still marks the store
+ * `whole` when even one cannot fit a run.
+ */
+const FILL_PAGE = 30;
 /**
  * The most commands one store's fill sends in one run of the sweep, counted as the cost registry counts them (a script
  * is 1 plus its commands): a one-time company cost, never a store's. tests/licence-holder-fill.test.ts holds it.
@@ -237,10 +244,48 @@ export const HOLDER_FILL_WHOLE = "whole";
  * store's fill ends after at most its steps plus these tries, and the sweep's asking ends with it.
  */
 export const FILL_MAX_TRIES = 5;
-/** One orderWrite of one HSET (the place, or the `done` mark): the script and its command. */
-const FILL_MARK_COMMANDS = 2;
-/** What orderWrite of `n` commands costs: one script per ORDER_WRITE_MAX commands, each 1 plus its commands. */
-const writeCommands = (n: number) => (n ? n + Math.ceil(n / ORDER_WRITE_MAX) : 0);
+/**
+ * One fenced write of the fill's mark (the place, `done`, or `done` and `tries` together): the script and every call
+ * inside it, as the cost registry counts a script (Claude 4 3rC's LOW 1 and Codex N1 on #5136), at the dearest of the
+ * three, two fields.
+ */
+export const FILL_MARK_COMMANDS = orderWriteCallsMost([["HSET", "mark", "done", HOLDER_FILL_WHOLE, "tries", String(FILL_MAX_TRIES)]], { storeLive: true });
+/**
+ * What the fill's fenced writes of `n` missing lines cost: one script per ORDER_WRITE_MAX lines, each line a one-field
+ * HSET of its own buyer's list at the dearest (every line on a list of its own), with every call inside the script.
+ */
+const writeCommands = (n: number) => {
+  let calls = 0;
+  for (let left = n; left > 0; left -= ORDER_WRITE_MAX) {
+    const m = Math.min(left, ORDER_WRITE_MAX);
+    calls += orderWriteCallsMost(Array.from({ length: m }, (_, i) => ["HSET", `list${i}`, "line", "1"]), { storeLive: true });
+  }
+  return calls;
+};
+
+/** One step of the fill at its dearest: an HMGET a buyer, every one of `lines` missing and written, and the place. */
+export const fillStepCommandsMost = (buyers: number, lines: number) => buyers + writeCommands(lines) + FILL_MARK_COMMANDS;
+
+/**
+ * The store-live fence of every write the fill makes (Claude 1's LEVE and Codex N1 on #5136): the store's id key and
+ * its erasing mark, read in the same step as the write (lib/order-data.ts ORDER_WRITE_IF_STORE_LIVE), so a fill that
+ * reads a page while the store is being erased never writes a buyer's line, the place or a mark back after the
+ * closing walk. A store kept from before ids has no id key the fence can read, so the fill never writes for it: its
+ * copies keep main's whole read, complete (keysOf), as a store whose fill is not done.
+ */
+type FillFence = { live: string; field: string };
+async function fillFence(store: Store): Promise<FillFence | null> {
+  if (!STORE_ID_PATTERN.test(store.sid)) return null;
+  return { live: storeIdCommand(store.sid)[1], field: await erasingField(storeRef(store)) };
+}
+/** The store is gone (or erasing) under the fill: nothing more is written, and the sweep stops asking it. */
+class FillStoreGone extends Error {}
+async function fillWrite(store: Store, fence: FillFence, commands: [string, string, ...string[]][]): Promise<void> {
+  for (let i = 0; i < commands.length; i += ORDER_WRITE_MAX) {
+    const written = await orderWriteIfStoreLive(store, commands.slice(i, i + ORDER_WRITE_MAX), fence.live, ERASING_KEY, fence.field);
+    if (written === null) throw new FillStoreGone("the store was erased during its fill");
+  }
+}
 
 /**
  * What the refund job writes in a sale's place among the keys given (`:sale`) when the sale was refunded in full or
@@ -1345,6 +1390,19 @@ export async function keysWithoutHolderLine(store: Store, productIds: string[]):
  */
 export async function fillHolderLines(store: Store, deadline: number, budget = FILL_RUN_COMMANDS): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
+  // No fence to write behind (a store from before ids): nothing is written, its copies keep main's whole read.
+  const fence = await fillFence(store);
+  if (!fence) return true;
+  try {
+    return await fillRun(store, fence, deadline, budget);
+  } catch (error) {
+    // Erased while it was being filled: nothing more is written for it, and nothing is left to ask.
+    if (error instanceof FillStoreGone) return true;
+    throw error;
+  }
+}
+
+async function fillRun(store: Store, fence: FillFence, deadline: number, budget: number): Promise<boolean> {
   const state = repliesFor(await redisPipeline([["HMGET", fillKey(store), "done", "at", "tries"]]), 1)?.[0];
   if (!Array.isArray(state) || state.length !== 3) throw new UnknownReplyError("the license keys' fill state");
   const [mark, at, triedRaw] = state;
@@ -1355,7 +1413,7 @@ export async function fillHolderLines(store: Store, deadline: number, budget = F
   // One more try, kept; the last one leaves the store on main's whole read for good, complete, and asked no more.
   const tryAgain = async (): Promise<boolean> => {
     const n = tried + 1;
-    await orderWrite(store, [n >= FILL_MAX_TRIES ? ["HSET", fillKey(store), "done", HOLDER_FILL_WHOLE, "tries", String(n)] : ["HSET", fillKey(store), "tries", String(n)]]);
+    await fillWrite(store, fence, [n >= FILL_MAX_TRIES ? ["HSET", fillKey(store), "done", HOLDER_FILL_WHOLE, "tries", String(n)] : ["HSET", fillKey(store), "tries", String(n)]]);
     return n >= FILL_MAX_TRIES;
   };
   const place = typeof at === "string" ? /^([0-9a-f]{16}):(\d{1,6}):(\d{1,20})$/.exec(at) : null;
@@ -1388,12 +1446,12 @@ export async function fillHolderLines(store: Store, deadline: number, budget = F
       const holders = [...byHolder.entries()];
       const fields = holders.reduce((n, [, f]) => n + f.length, 0);
       // The step's worst case: one HMGET a buyer, every line missing, and the place.
-      const worst = holders.length + writeCommands(fields) + FILL_MARK_COMMANDS;
+      const worst = fillStepCommandsMost(holders.length, fields);
       if (used + worst + FILL_MARK_COMMANDS > budget) {
         if (steps > 0) return false;
         // Not even one page fits in a whole run: this store keeps main's read for good (complete), and is not asked again.
         if (2 + worst + FILL_MARK_COMMANDS > budget) {
-          await orderWrite(store, [["HSET", fillKey(store), "done", HOLDER_FILL_WHOLE]]);
+          await fillWrite(store, fence, [["HSET", fillKey(store), "done", HOLDER_FILL_WHOLE]]);
           return true;
         }
         return false;
@@ -1412,13 +1470,13 @@ export async function fillHolderLines(store: Store, deadline: number, budget = F
           });
         });
         if (missing.length) {
-          await orderWrite(store, missing);
+          await fillWrite(store, fence, missing);
           used += writeCommands(missing.length);
         }
       }
       cursor = page[0];
       if (cursor === "0") index += 1;
-      await orderWrite(store, [["HSET", fillKey(store), "at", `${digest}:${index}:${cursor}`]]);
+      await fillWrite(store, fence, [["HSET", fillKey(store), "at", `${digest}:${index}:${cursor}`]]);
       used += FILL_MARK_COMMANDS;
       steps += 1;
     }
@@ -1430,7 +1488,7 @@ export async function fillHolderLines(store: Store, deadline: number, budget = F
     throw error;
   }
   if (index < ids.length) return false;
-  await orderWrite(store, [["HSET", fillKey(store), "done", "1"]]);
+  await fillWrite(store, fence, [["HSET", fillKey(store), "done", "1"]]);
   return true;
 }
 

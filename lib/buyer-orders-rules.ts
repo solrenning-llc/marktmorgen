@@ -75,8 +75,14 @@ export const ORDERS_PROGRESS_COMMANDS = 10;
  * slow read of the outlines (review of #3522, MEDIUM). What was taken from the meter for it stays taken.
  */
 export const ORDERS_PROGRESS_MS = 4_000;
-/** Commands one license key makes at the most (lib/licence-keys.ts, keyForSale): read, or given with five tries at a unique one, with its writes. */
-export const ORDERS_KEY_COMMANDS = 24;
+/**
+ * Commands one license key makes at the most (lib/licence-keys.ts, keyForSale): read, or given with five tries at a
+ * unique one, with its writes, counted as the cost registry counts a script, 1 plus every call inside it (Claude 4
+ * 3rC's LOW 1 and Codex N1 on #5136): the settle's ORDER_WRITE_IF_NEW of four hash writes is 38 at its dearest
+ * (lib/order-data.ts orderWriteCallsMost; 31 to 33 measured on Redis 7), where it had been counted as 1. The dearest
+ * path, lost to the refund's mark after five tries, is 48; tests/licence-refund-sale-mark.test.ts holds it.
+ */
+export const ORDERS_KEY_COMMANDS = 48;
 /**
  * How long an opening waits on what it reads before it says the purchases could
  * not be read, inside ORDERS_OPEN_SECONDS so the page answers before it is cut.

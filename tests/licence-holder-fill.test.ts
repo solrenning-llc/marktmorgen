@@ -6,9 +6,10 @@
  * and marks the store done only when every product's records were walked to the end; after that the copy reads the
  * person's list only. Synthetic store, Redis stub, no provider.
  */
-import { addProduct, claimHandle, ensureStatsId, removeProduct, setProductKeys, setProductLink, setSubscription, storeForEmail, type Listing } from "@/lib/store";
+import { ERASING_KEY, addProduct, claimHandle, ensureStatsId, ensureStoreId, erasingField, removeProduct, setProductKeys, setProductLink, setSubscription, storeForEmail, storeRef, type Listing } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { FILL_MAX_TRIES, FILL_RUN_COMMANDS, HOLDER_FILL_WHOLE, endHolderFillRound, fillHolderLines, holderFillDone, holderFillLeft, holderFillOn, keyForSale, keyHolderDigest, keysOf, keysWithoutHolderLine, startHolderFillRound } from "@/lib/licence-keys";
+import { FILL_MARK_COMMANDS, FILL_MAX_TRIES, FILL_RUN_COMMANDS, fillStepCommandsMost, HOLDER_FILL_WHOLE, endHolderFillRound, fillHolderLines, holderFillDone, holderFillLeft, holderFillOn, keyForSale, keyHolderDigest, keysOf, keysWithoutHolderLine, startHolderFillRound } from "@/lib/licence-keys";
+import { orderEvalCallsMost } from "@/lib/order-data";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -16,9 +17,13 @@ import { paidPeriod } from "./billing-period-fixture";
 const OWNER = "fill-owner@example.com";
 const DANA = "dana@example.com";
 
-/** The commands sent, counted as the cost registry counts them: a pipelined command is 1, a script 1 plus its commands. */
+/**
+ * The commands sent, counted as the cost registry counts them: a pipelined command is 1, an order script 1 plus every
+ * call inside it at its dearest (lib/order-data.ts orderEvalCallsMost; Claude 4 3rC's LOW 1 and Codex N1 on #5136: a
+ * script had been counted as 1 plus its commands), and any other script as never free.
+ */
 function counted(commands: (string | number)[][]): number {
-  return commands.reduce((n, c) => n + (c[0] === "EVAL" ? 1 + Number(c[3 + Number(c[2])]) : 1), 0);
+  return commands.reduce((n, c) => n + (c[0] === "EVAL" ? (String(c[1]).startsWith("-- marktmorgen:order-write") ? orderEvalCallsMost(c) : 1_000) : 1), 0);
 }
 
 /** Runs `run` and answers what it answered and the commands it sent (`counted`). */
@@ -40,6 +45,7 @@ async function metered<T>(run: () => Promise<T>): Promise<{ value: T; commands: 
 async function oldKeysStore(owner: string, handle: string, perProduct: number[]) {
   await claimHandle(owner, handle, "Fill Keys", "");
   await ensureStatsId(owner);
+  await ensureStoreId(owner);
   await setSubscription(owner, { customerId: `cus_${handle}01`, subscriptionId: `sub_${handle}01`, active: true, period: paidPeriod() });
   const ids: string[] = [];
   for (let p = 0; p < perProduct.length; p += 1) {
@@ -63,6 +69,7 @@ async function main(): Promise<void> {
   console.error = () => {};
   await claimHandle(OWNER, "fillkeys", "Fill Keys", "");
   await ensureStatsId(OWNER);
+  await ensureStoreId(OWNER);
   await setSubscription(OWNER, { customerId: "cus_FillKeys01", subscriptionId: "sub_FillKeys01", active: true, period: paidPeriod() });
   const made = await addProduct(OWNER, "Fill App", "", "29", null);
   const other = await addProduct(OWNER, "Fill Book", "", "9", null);
@@ -93,18 +100,21 @@ async function main(): Promise<void> {
   is("250 keys have no line yet", (await keysWithoutHolderLine(store, ids)).length, 250);
 
   part("A fill cut short marks nothing done, and goes on from where it stopped");
-  // The Redis stub answers an HSCAN with a product's whole records, so a step is one product's: about 125 buyers, their
-  // HMGETs and lines, 257 commands. A budget of 300 lets a run take one such step and not a second.
-  const cut = await metered(() => fillHolderLines(store, Date.now() + 60_000, 300));
+  // The Redis stub answers an HSCAN with a product's whole records, so a step is one product's: 125 buyers, their HMGETs
+  // and lines (126 on the app, with Dana's new key), each fenced write with every call inside its script (Claude 4
+  // 3rC's LOW 1 on #5136). A run with room for exactly the larger step (the state read, the HSCAN, the step and the
+  // reserved mark) takes one product and not a second.
+  const oneStep = 2 + fillStepCommandsMost(125, 126) + FILL_MARK_COMMANDS;
+  const cut = await metered(() => fillHolderLines(store, Date.now() + 60_000, oneStep));
   const first = cut.value;
   is("the first small run is not done", first, false);
-  is("and it sent no more commands than its budget", cut.commands <= 300, true);
+  is("and it sent no more commands than its budget", cut.commands <= oneStep, true);
   is("so the store is not marked done", await holderFillDone(store), false);
   is("one product's lines were written, the other's not yet", (await keysWithoutHolderLine(store, ids)).length, 125);
   is("the copy still reads every key", (await keysOf(store, ids, DANA)).map((k) => k.key).sort(), [OLD, fresh.key].sort());
-  const next = await metered(() => fillHolderLines(store, Date.now() + 60_000, 300));
+  const next = await metered(() => fillHolderLines(store, Date.now() + 60_000, oneStep));
   is("the fill ends on the next run, from where the first stopped", next.value, true);
-  is("that run too stays within its budget", next.commands <= 300, true);
+  is("that run too stays within its budget", next.commands <= oneStep, true);
 
   part("After the fill: every key has its line, and the copy reads the person's list only");
   is("the store is marked done", await holderFillDone(store), true);
@@ -123,7 +133,7 @@ async function main(): Promise<void> {
   }
   is("Dana's two keys, old and new, are in her copy", after, [OLD, fresh.key].sort());
   is("and no product's whole records are read", reads.some((r) => r.startsWith("HGETALL") && r.includes(":info")), false);
-  is("a fill already done does nothing more", await fillHolderLines(store, Date.now() + 60_000, 300), true);
+  is("a fill already done does nothing more", await fillHolderLines(store, Date.now() + 60_000, oneStep), true);
 
   part("The sweep's rounds: only a whole clean round stops the asking");
   is("before any round, the sweep still asks", await holderFillOn(), true);
@@ -149,7 +159,9 @@ async function main(): Promise<void> {
 
   part("A run never sends more than FILL_RUN_COMMANDS, and the fill still ends");
   is("the cap is the constant the sweep runs with", FILL_RUN_COMMANDS, 400);
-  const big = await oldKeysStore("fill-big@example.com", "fillbig", [150, 150, 150, 40]);
+  // The stub's page is a whole product, so each product here fits one run's step (30 buyers, about 295 calls).
+  is("a 30-buyer step fits one run, with the state read, the HSCAN and the reserved mark", 2 + fillStepCommandsMost(30, 30) + FILL_MARK_COMMANDS <= FILL_RUN_COMMANDS, true);
+  const big = await oldKeysStore("fill-big@example.com", "fillbig", [30, 30, 30, 10]);
   const bigIds = big.ids;
   let bigRuns = 0;
   let most = 0;
@@ -161,7 +173,7 @@ async function main(): Promise<void> {
     bigRuns += 1;
   }
   is("every run of the sweep's budget stays at or under it", most <= FILL_RUN_COMMANDS, true);
-  is("490 keys take more than one run", bigRuns > 1, true);
+  is("100 keys take more than one run", bigRuns > 1, true);
   is("and the fill ends, every key with its line", ended && (await keysWithoutHolderLine(big.store, bigIds)).length === 0, true);
   is("that store is done", await holderFillDone(big.store), true);
 
@@ -177,17 +189,19 @@ async function main(): Promise<void> {
   is("and the sweep does not ask that store again", await fillHolderLines(huge.store, Date.now() + 60_000), true);
 
   part("A product removed between two runs does not skip the next one (Claude 4 3Kc's MEDIUM on d2df5637dd)");
-  // Claude 4 3Kc's scenario: old keys of sizes 3, 60 and 3 in id order, a run cut at the start of the big one, then the
+  // Claude 4 3Kc's scenario: old keys of sizes 3, 30 and 3 in id order (30, so the big one fits a whole run), a run cut at the start of the big one, then the
   // first product removed. The kept index would then name the third product and the big one's keys would never get
   // their lines, yet the store would be marked done.
   const moved = await oldKeysStore("fill-moved@example.com", "fillmoved", [0, 0, 0]);
   const order = [...moved.ids].sort();
-  [3, 60, 3].forEach((n, p) => {
+  [3, 30, 3].forEach((n, p) => {
     for (let i = 0; i < n; i += 1) {
       redis.run(["HSET", `nl:keys:${moved.store.statsId}:${order[p]}:info`, `MOVK-${p}-${String(i).padStart(4, "0")}-ZZZZ`, JSON.stringify({ r: `cs_test_${`m${p}x${i}`.padStart(24, "y")}`, e: `moved${p}b${i}@example.com`, at: 1_790_000_000 })]);
     }
   });
-  is("a 25-command run stops at the start of the big product", await fillHolderLines(moved.store, Date.now() + 60_000, 25), false);
+  // Room for the small first product's step and not the big one's.
+  const smallStep = 2 + fillStepCommandsMost(3, 3) + FILL_MARK_COMMANDS;
+  is("a run with room for one small step stops at the start of the big product", await fillHolderLines(moved.store, Date.now() + 60_000, smallStep), false);
   await removeProduct("fill-moved@example.com", order[0]);
   const shrunk = (await storeForEmail("fill-moved@example.com"))!;
   const left = shrunk.catalog.items.map((item) => item.id);
@@ -196,12 +210,12 @@ async function main(): Promise<void> {
   while (!(await fillHolderLines(shrunk, Date.now() + 60_000)) && movedRuns < 20) movedRuns += 1;
   is("the store ends done", await holderFillDone(shrunk), true);
   is("and no key of a product still listed is left without its line", (await keysWithoutHolderLine(shrunk, left)).length, 0);
-  is("so a buyer of the big product has their old key in their copy", (await keysOf(shrunk, left, "moved1b42@example.com")).map((k) => k.key), ["MOVK-1-0042-ZZZZ"]);
+  is("so a buyer of the big product has their old key in their copy", (await keysOf(shrunk, left, "moved1b22@example.com")).map((k) => k.key), ["MOVK-1-0022-ZZZZ"]);
 
   part("A reply no writer writes cannot hold the fill open for good (Claude 6 i51q's MEDIUM on cdafb13ff9)");
-  // i51q's scenario: 60 old keys, and one buyer's list holding "2" for one of them. Every run met it and threw, the place
+  // i51q's scenario: 30 old keys (60 in the review; 30 so the store's one product fits a whole run), and one buyer's list holding "2" for one of them. Every run met it and threw, the place
   // never moved, so the store was asked every run for good and the company's mark could never be set.
-  const odd = await oldKeysStore("fill-odd@example.com", "fillodd", [60]);
+  const odd = await oldKeysStore("fill-odd@example.com", "fillodd", [30]);
   redis.run(["HSET", `nl:keys:${odd.store.statsId}:who:${keyHolderDigest("fillodd0b5@example.com")}`, `${odd.ids[0]}\tOLDK-0-0005-ZZZZ`, "2"]);
   const outcomes: string[] = [];
   let most2 = 0;
@@ -219,19 +233,67 @@ async function main(): Promise<void> {
   part("A catalog that changes on every run cannot hold the fill open for good either");
   const busy = await oldKeysStore("fill-busy@example.com", "fillbusy", [0, 0]);
   const busyOrder = [...busy.ids].sort();
-  [3, 60].forEach((n, p) => {
+  [3, 30].forEach((n, p) => {
     for (let i = 0; i < n; i += 1) redis.run(["HSET", `nl:keys:${busy.store.statsId}:${busyOrder[p]}:info`, `BUSY-${p}-${String(i).padStart(4, "0")}-ZZZZ`, JSON.stringify({ r: `cs_test_${`b${p}x${i}`.padStart(24, "y")}`, e: `busy${p}b${i}@example.com`, at: 1_790_000_000 })]);
   });
   let busyEnded = false;
   let busyRuns = 0;
   while (!busyEnded && busyRuns < 20) {
     // Each run stops at the start of the big product, then a product is added before the next one.
-    busyEnded = await fillHolderLines((await storeForEmail("fill-busy@example.com"))!, Date.now() + 60_000, 25);
+    busyEnded = await fillHolderLines((await storeForEmail("fill-busy@example.com"))!, Date.now() + 60_000, smallStep);
     await addProduct("fill-busy@example.com", `Busy extra ${busyRuns}`, "", "9", null);
     busyRuns += 1;
   }
   is(`the store ends after ${FILL_MAX_TRIES} restarts at the most`, busyEnded && busyRuns <= FILL_MAX_TRIES + 1, true);
   is("marked whole, so its copy keeps main's read", [redis.run(["HGET", `nl:keys:${busy.store.statsId}:whofill`, "done"]), await holderFillDone(busy.store)], [HOLDER_FILL_WHOLE, false]);
+  part("A store erased before or during its fill gets no line, place or mark written back (Claude 1's LEVE and Codex N1 on #5136)");
+  // Every write of the fill carries the store-live fence: the store's id key and its erasing mark, read in the same step.
+  const writtenFor = (s: { statsId?: string | null }) => redis.run(["HLEN", `nl:keys:${s.statsId}:whofill`]);
+  const erased = await oldKeysStore("fill-erased@example.com", "fillerased", [5]);
+  redis.run(["HSET", ERASING_KEY, await erasingField(storeRef(erased.store)), String(Date.now())]);
+  is("a store whose erasure began answers that it needs no more runs", await fillHolderLines(erased.store, Date.now() + 60_000), true);
+  is("and none of its keys got a line", (await keysWithoutHolderLine(erased.store, erased.ids)).length, 5);
+  is("nor a place or a mark", writtenFor(erased.store), 0);
+
+  const gone = await oldKeysStore("fill-gone@example.com", "fillgone", [5]);
+  redis.run(["DEL", `nl:store:id:${gone.store.sid}`]);
+  is("a store whose id key is gone answers the same", await fillHolderLines(gone.store, Date.now() + 60_000), true);
+  is("with no line", (await keysWithoutHolderLine(gone.store, gone.ids)).length, 5);
+  is("and no place or mark", writtenFor(gone.store), 0);
+
+  // The erasure begins after the fill read its page and before it writes: the HMGETs of the buyers' lists are the last
+  // reads before the first write.
+  const during = await oldKeysStore("fill-during@example.com", "fillduring", [5]);
+  const duringField = await erasingField(storeRef(during.store));
+  const realPipeline = redis.pipeline.bind(redis);
+  let begun = false;
+  redis.pipeline = (async (sent: (string | number)[][]) => {
+    if (!begun && sent.some((c) => c[0] === "HMGET")) {
+      begun = true;
+      const replies = await realPipeline(sent);
+      redis.run(["HSET", ERASING_KEY, duringField, String(Date.now())]);
+      return replies;
+    }
+    return realPipeline(sent);
+  }) as typeof redis.pipeline;
+  let duringRun: boolean;
+  try {
+    duringRun = await fillHolderLines(during.store, Date.now() + 60_000);
+  } finally {
+    redis.pipeline = realPipeline;
+  }
+  is("the erasure did begin in the middle of the run", begun, true);
+  is("a store erased in the middle of its run answers that it needs no more runs", duringRun, true);
+  is("none of its keys got a line after the erasure began", (await keysWithoutHolderLine(during.store, during.ids)).length, 5);
+  is("nor a place or a mark", writtenFor(during.store), 0);
+
+  const legacy = await oldKeysStore("fill-legacy@example.com", "filllegacy", [5]);
+  const legacyStore = { ...legacy.store, sid: "" };
+  is("a store kept from before ids has no fence, so the fill writes nothing for it", await fillHolderLines(legacyStore, Date.now() + 60_000), true);
+  is("no line", (await keysWithoutHolderLine(legacy.store, legacy.ids)).length, 5);
+  is("no place or mark", writtenFor(legacy.store), 0);
+  is("so it is not done and its copy keeps main's whole read", await holderFillDone(legacyStore), false);
+  is("which still finds a buyer's old key", (await keysOf(legacyStore, legacy.ids, "filllegacy0b3@example.com")).map((k) => k.key), ["OLDK-0-0003-ZZZZ"]);
   done();
 }
 

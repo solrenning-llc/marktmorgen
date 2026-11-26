@@ -1060,6 +1060,20 @@ export class MemoryRedis {
           this.run(["SET", once, "1", "EX", onceSeconds]);
           return 1;
         }
+        // lib/checkout-recovery.ts RECOVERY_STOP_LINK: a reminder's stop link and its erasure note, only while the address is not erased (#4768).
+        if (key.startsWith("-- marktmorgen:recovery-stop-link:v1\n") && args[0] === "3" && args.length === 10) {
+          const [, prints, link, notes, print, grant, linkSeconds, at, oldest, noteSeconds] = args;
+          if (print !== "" && this.run(["HEXISTS", prints, print]) === 1) return 2;
+          if (at !== "") {
+            const type = this.run(["TYPE", notes]);
+            if (type !== "none" && type !== "zset") return -1;
+            this.run(["ZADD", notes, at, link]);
+            this.run(["ZREMRANGEBYSCORE", notes, "-inf", oldest]);
+            this.run(["EXPIRE", notes, noteSeconds]);
+          }
+          this.run(["SET", link, grant, "EX", linkSeconds]);
+          return 1;
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         // lib/store-allowance.ts GIVE_ALLOWANCE_BACK: a missing counter left missing, one never below zero, its expiry kept.
         if (key.startsWith("-- marktmorgen:allowance-give-back:v1\n") && args[0] === "1" && args.length === 3) {

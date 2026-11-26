@@ -203,7 +203,8 @@ test("control: with no contact list, healthy marks send once", async () => {
 test("an unknown stop link write leaves no stop link behind, with the address in it (Claude 5's LOW on #2951)", async () => {
   // The write may have landed although its reply is unknown; every pass that tries again would leave one more link,
   // kept 400 days with the address in it, that is never sent and that erasure may not find.
-  for (const [label, value] of [["QUEUED", "QUEUED"], ["nothing", null], ["a number", 1]] as const) {
+  // The write is one EVAL answering 1 or 2 (RECOVERY_STOP_LINK, #4768): a SET's "OK" and any other number are unknown too.
+  for (const [label, value] of [["QUEUED", "QUEUED"], ["nothing", null], ["another number", 7], ["a SET's OK", "OK"]] as const) {
     const store = await shop();
     const { id, email } = fresh();
     let key = "";

@@ -82,7 +82,8 @@ async function intercept<T>(when: (commands: Commands) => boolean, answer: (comm
   }
 }
 const starts = (op: string, prefix: string) => (commands: Commands) => commands[0]?.[0] === op && String(commands[0][1]).startsWith(prefix);
-const isLinkWrite = starts("SET", "nl:recover:link:");
+// The stop link and its erasure note are one script since #4768 (RECOVERY_STOP_LINK): the link key is its second key.
+const isLinkWrite = (c: Commands) => c.length === 1 && c[0][0] === "EVAL" && String(c[0][4]).startsWith("nl:recover:link:");
 const isLinkRead = (c: Commands) => c.length === 1 && starts("GET", "nl:recover:link:")(c);
 const isStopWrite = (c: Commands) => c.length === 1 && starts("SET", "nl:recover:off:")(c);
 const isStopRead = (c: Commands) => c.length === 1 && starts("EXISTS", "nl:recover:off:")(c);
@@ -208,12 +209,13 @@ test("F4: a list of checkouts of another shape is unknown, never 'not paid'", as
 
 test("F1: a stop link whose write is not answered in its exact shape sends no reminder", async (t) => {
   const cases: [(c: Commands, real: Pipe) => Promise<unknown>, string][] = [
-    [slotAs(0, null), "SET answered nothing"],
-    [slotAs(0, "QUEUED"), "SET answered QUEUED"],
-    [slotAs(0, 1), "SET answered 1"],
-    [slotAs(1, "x"), "ZADD answered text"],
-    [slotAs(3, null), "EXPIRE answered nothing"],
-    [async (c, real) => (await real(c)).slice(0, 1), "one reply for four commands"],
+    [slotAs(0, null), "the script answered nothing"],
+    [slotAs(0, "QUEUED"), "the script answered QUEUED"],
+    [slotAs(0, "OK"), "the script answered a SET's OK"],
+    [slotAs(0, "1"), "the script answered 1 as text"],
+    [slotAs(0, 7), "the script answered another number"],
+    [slotAs(0, -1), "the script found the notes key of another type"],
+    [async (c, real) => [...(await real(c)), 1], "two replies for one command"],
     [async () => [], "no replies"],
     [async () => ({}), "no list"],
   ];
@@ -357,9 +359,9 @@ test("an answer not known (a 500) keeps the claim, and the next pass does not se
 
 test("an unknown stop link write leaves no claim behind, and the next pass sends", async (t) => {
   const cases: [(c: Commands, real: Pipe) => Promise<unknown>, string][] = [
-    [slotAs(0, null), "SET answered nothing"],
-    [slotAs(0, "QUEUED"), "SET answered QUEUED"],
-    [slotAs(1, "x"), "ZADD answered text"],
+    [slotAs(0, null), "the script answered nothing"],
+    [slotAs(0, "QUEUED"), "the script answered QUEUED"],
+    [slotAs(0, "OK"), "the script answered a SET's OK"],
     [async () => [], "no replies"],
   ];
   for (const [answer, label] of cases) {

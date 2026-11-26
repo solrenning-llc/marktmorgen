@@ -74,7 +74,7 @@ import { isTimeZone, readableTime, zoneName } from "@/lib/call-setup";
 import { chargeNow } from "@/lib/call-deposit";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
-import { noteForErasure } from "@/lib/erasure-index";
+import { INDEX_SECONDS, noteForErasure, notesKey } from "@/lib/erasure-index";
 import { deriveKey } from "@/lib/secret-box";
 import { suppressedCommand, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { assistRemindKey } from "@/lib/assistant-reminder-rules";
@@ -166,25 +166,53 @@ export function productLink(store: Store, productId: string): string {
   return `${storeBase(store)}/p/${encodeURIComponent(productId)}`;
 }
 
+/**
+ * A reminder's stop link and its erasure note, written only while the address has no deletion print on the store's
+ * list, in one step (Codex L, #4768): the reminder read the print before it looked the purchase up, and an erasure that
+ * finished in between must not get a link with the address in it, kept LINK_SECONDS, nor a note in an index it already
+ * read. KEYS[1] the store's prints (or a key never written, with ARGV[1] "", for a store with no list yet), KEYS[2] the
+ * link, KEYS[3] the address's erasure notes; ARGV[1] the print, ARGV[2] the grant, ARGV[3] the link's seconds, ARGV[4]
+ * the note's time ("" for a store with no stats id: no note, as noteForErasure), ARGV[5] the oldest note kept, ARGV[6]
+ * the notes' seconds. 2: erased, nothing written; -1: the notes key is not a sorted set, nothing written; 1: written.
+ * The note is the three commands of noteForErasure (lib/erasure-index.ts). lib/redis-memory.ts runs it the same way.
+ */
+export const RECOVERY_STOP_LINK = `-- marktmorgen:recovery-stop-link:v1
+if ARGV[1] ~= '' and redis.call('HEXISTS', KEYS[1], ARGV[1]) == 1 then return 2 end
+if ARGV[4] ~= '' then
+  local t = redis.call('TYPE', KEYS[3]).ok
+  if t ~= 'none' and t ~= 'zset' then return -1 end
+  redis.call('ZADD', KEYS[3], ARGV[4], KEYS[2])
+  redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', ARGV[5])
+  redis.call('EXPIRE', KEYS[3], ARGV[6])
+end
+redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+return 1`;
+
+/** The address was erased from the store after the reminder's first check: no link was written, and nothing is sent. */
+class StopLinkErased extends Error {}
+
 async function stopLink(store: Store, email: string): Promise<{ token: string; page: string; oneClick: string }> {
   const token = randomBytes(20).toString("hex");
   const grant = { k: store.statsId, e: normaliseEmail(email), h: store.handle, n: store.name };
-  const notes = noteForErasure(store.statsId, email, linkKey(token));
-  // Read in their exact shape (CX-123 rule 24): the link written ("OK") and
-  // each erasure note a count. Anything else is unknown, and the reminder is
-  // not sent with a stop link that may lead nowhere or that an erasure
-  // could not find (docs/reviews/pf1-sweep-r24.md, F1).
-  let replies: unknown;
+  const noted = Date.now();
+  const note = Boolean(store.statsId && email);
+  // Read in its exact shape (CX-123 rule 24): 1 the link and its note written, 2 erased. Anything else is unknown, and
+  // the reminder is not sent with a stop link that may lead nowhere or that an erasure could not find
+  // (docs/reviews/pf1-sweep-r24.md, F1).
+  let reply: unknown;
   try {
-    replies = await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS], ...notes]);
+    reply = repliesFor(await redisPipeline([["EVAL", RECOVERY_STOP_LINK, 3,
+      store.listId ? suppressedKey(store.listId) : "nl:none", linkKey(token), note ? notesKey(store.statsId as string, email) : "nl:none",
+      store.listId ? suppressionPrint(store.listId, email) : "", JSON.stringify(grant), LINK_SECONDS,
+      note ? noted : "", noted - INDEX_SECONDS * 1000, INDEX_SECONDS]]), 1)?.[0];
   } catch (error) {
     // The call can reject after the write landed (a connection reset before the reply): the link is taken back the
     // same way as an unknown reply below, and the error goes on unchanged (#5285 row #2929, LEVE 1).
     await redisPipeline([["DEL", linkKey(token)]]).catch(() => null);
     throw error;
   }
-  const written = repliesFor(replies, 1 + notes.length);
-  if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) {
+  if (reply === 2) throw new StopLinkErased("the address was erased before its stop link was written");
+  if (reply !== 1) {
     // The write may have landed: the link, with the address in it, is taken back at once (best effort, its reply not
     // read as anything), so a pass that tries again later does not leave one more link kept LINK_SECONDS that was never
     // sent and that erasure may not find (Claude 5's LOW on #2951).
@@ -670,6 +698,8 @@ async function deliver(
     stop = await stopLink(store, email);
   } catch (error) {
     await redisPipeline([["DEL", sentKey(id)], ["DEL", onceKey(statsId, email, onceFor)]]);
+    // Erased since the first check: nothing was written and nothing is sent, as when the admission finds the print.
+    if (error instanceof StopLinkErased) return "skip";
     throw error;
   }
   // What became of the email (rule 30, as 283 [HG2]); see after the send.

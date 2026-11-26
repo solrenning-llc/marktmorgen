@@ -22,7 +22,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:imp:who:", "nl:inbox:", "nl:inbox:tok:", "nl:intro:c:", "nl:keys:", "nl:lc:", "nl:lnote:", "nl:learn:enr:", "nl:letters:i:", "nl:letters:s:", "nl:oprob:", "nl:withdraw:",
   "nl:lib:", "nl:ls:", "nl:mail:bc:", "nl:mail:bcs:", "nl:mail:enr:", "nl:mail:flowq", "nl:mail:flows:", "nl:mail:mk:",
   "nl:path:board:v1", "nl:path:board:owners:v1",
-  "nl:mail:unsub:", "nl:mv:", "nl:mv:link:", "nl:outreach:", "nl:outreach:stoplink:", "nl:path:",
+  "nl:mail:unsub:", "nl:mto:i:", "nl:mto:o:", "nl:mv:", "nl:mv:link:", "nl:outreach:", "nl:outreach:stoplink:", "nl:path:",
   "nl:payreq:due", "nl:payreq:o:", "nl:payreq:p:", "nl:payreq:r:", "nl:payreq:s:", "nl:person:",
   "nl:pfunnel:done:", "nl:pfunnel:seen:", "nl:pfunnels:", "nl:pkg:", "nl:pkg:s:", "nl:pkg:t:", "nl:pod:", "nl:pod:by:", "nl:pod:pids:",
   "nl:pod:t:", "nl:ppsell:back:", "nl:preview:", "nl:product:about:", "nl:product:landing:", "nl:product:note:", "nl:product:page:",
@@ -336,6 +336,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:ls:": E, "nl:ls:due": I,
   "nl:lostdispute:cursor:": X(30), // a job's place in a store's lost disputes (lib/refunds.ts), thirty days at the most
   // ---------------------------------------------------------------- m
+  "nl:mto:i:": E, "nl:mto:o:": E, // 761 [STN8]: a store's made-to-order list and records, named by its statsId
   "nl:mail-check:last": C, "nl:mail-check:lock": C, "nl:mail-check:runs": C,
   // The public status page's count of an hour's requests (247 [SP4] unit 2, lib/status-page.ts), the company's, kept two hours.
   "nl:status:views:": C, "nl:platform:proof": C,

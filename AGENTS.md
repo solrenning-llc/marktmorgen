@@ -166,6 +166,24 @@ Isto garante que nenhum PR entra com defeito **conhecido**; não garante código
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## FA — Família de revisão é a conta, igual para Claude e Codex (dono, 26/11/2026, 18h33 Fortaleza)
+
+Pedido do dono ao Claude 2 (sessão `01FR6Z1`), nas palavras dele: "vc considera codex dependente de outro condex mas nao considera claude dependente de outro claude?"; e, depois de o Claude 2 confirmar que as regras tratavam os dois casos de jeitos diferentes e que isso não era tecnicamente coerente: "corrija!!!!!!!!!!!!!!!!!!!!!!!!!!!!!". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. É ordem posterior a CO (b), (e) e (k), FQ (2), RV (a) a (c), ZA e RQ, e prevalece sobre elas onde divergirem (Pedidos repetidos, passo 3 (b)).
+
+**O defeito.** Até aqui, cada "Claude N" contava como uma família, e todo Codex contava como uma família só. Uma revisão é independente por dois motivos diferentes: (1) quem revisa não escreveu o código nem o tem na memória da sessão; (2) quem revisa é outro modelo, sem os mesmos pontos cegos. Pelo motivo 1, Claude X e Claude Y são independentes, e Codex X e Codex Y também; pelo motivo 2, nenhum dos dois pares é, porque todos os Claude são o mesmo modelo e todos os Codex também. A regra antiga usava o motivo 1 para o Claude e o 2 para o Codex.
+
+(a) **Família = conta.** Uma família é uma conta, com cota própria: hoje, as contas do "Claude 1" ao "Claude 7" e a conta do Codex. Todas as sessões e todos os subagentes de uma conta são a mesma família (RV (b) 6). A regra vale igual para o Claude e para o Codex: uma conta nunca revisa, enfileira nem conta como "de fora" num PR com commit dela (CO (e)), e cada conta nova, do Claude ou do Codex, é uma família nova.
+
+(b) **Conta do Codex identificada.** O Codex não grava o trailer `Claude-Session`, e a ferramenta do correio não distingue uma conta do Codex de outra. Por isso, enquanto a ferramenta não ler a conta de cada escrita e de cada commit do Codex, todo Codex continua contando como uma família só, a leitura segura, que nunca conta a mesma conta duas vezes. Uma segunda conta do Codex passa a ser família própria só quando a ferramenta a identificar (`tooling/agent-mail/`, por PR com hash novo, CO (a)).
+
+(c) **Outro modelo nos PRs de risco.** Num PR de dinheiro, imposto, cobrança, custo, segurança ou apagamento de dados (RV (a), primeira linha), pelo menos 1 das revisões READY exigidas no head é de outro modelo: do Codex num PR de uma conta Claude, de uma conta Claude num PR do Codex. Enquanto o Codex estiver sem cota ou fora (CO (g)), vale a exceção OWNER-20261121-1437: as revisões de dinheiro de fora são de contas Claude, e o Codex audita esses PRs quando voltar, antes de qualquer venda. O número de revisões não muda: continuam as 3 READY de famílias de fora no head (OWNER-20261123-1442) e zero achados (ZA).
+
+(d) **Quem diz.** Todo texto ao dono ou no correio que falar da revisão de um PR de risco diz também se a revisão de outro modelo já existe naquele head (RQ).
+
+**Estado (regra VR):** regra vigente desde a decisão do dono, sem mudança no código. Hoje há uma conta do Codex, então (a) e (b) não mudam quem pode revisar. A conferência automática de (c) no `request-review` e no `claim-enqueue`, e a identificação de (b), ainda não estão construídas; até lá, quem pede a revisão e quem enfileira conferem (c) à mão.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## RV — Revisor garantido, na quantidade e na qualidade certas (dono, 20/11/2026, por volta das 23h Fortaleza)
 
 Pedido do dono, nas palavras dele: "quero regra e politica para nao ocorrer mais de faltar revisor e revisoes na quantidade e qualidade correta". Sobre a escala de revisores: "MAS AS VEZES OCORRE DE UM AGENTE ESTAR SEM USO E DE AS VEZES ELE NAO PODER SER POR MOTIVO TECNICO". Aprovação da proposta do coordenador (Claude 5): "faça o correto". Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. Motivo: na noite de 20 para 21/11/2026, o #4984 e o #4999, de imposto, ficaram prontos sem revisor; o gargalo era revisor, não código. Esta seção completa a FQ (2) e não a substitui.

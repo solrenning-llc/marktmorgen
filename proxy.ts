@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { handleForDomain } from "@/lib/domains";
+// The domain a visit came in on and what was asked there: set here, read by lib/domain-gate.ts, one name for both.
+import { DOMAIN_HEADER, PATH_HEADER } from "@/lib/domain-gate";
 import { SITE_URL } from "@/lib/site-url";
 import { AFFILIATE_CODE_PATTERN, VIA_COOKIE_SECONDS, viaCookieName, viaCookieValue } from "@/lib/affiliate-setting";
 import { needsConsent } from "@/lib/pixels";
@@ -12,28 +14,6 @@ import { AB_COOKIE, AB_COOKIE_SECONDS, readBucket } from "@/lib/headline-test-ru
 import { CHANNEL_COOKIE_SECONDS, channelCookieName, nextChannelCookie, touchFrom } from "@/lib/visit-channel";
 import { isOwnPagePath } from "@/lib/site-page-rules";
 
-/**
- * A creator's own domain, served as their store.
- *
- * On marktmorgen.com (and the deployment's own addresses) nothing happens
- * here. On a creator's domain, the root is their store page, the store's own
- * pages keep their short paths (/thanks, /course/…, /p/<product>, /community,
- * /affiliates, /renew/<product>, /certificate/<id>, /review), and
- * anything that belongs to the site itself — signing in, the studio, the help
- * pages — is sent to marktmorgen.com, where the session lives.
- *
- * The store page is told which domain it was reached on, so it can send a
- * visitor back to marktmorgen.com if the store is no longer on Pro.
- *
- * Two more jobs happen here because this runs before everything else: every
- * page rendered for a visit gets its Content-Security-Policy with a fresh
- * nonce (lib/csp.ts), and every request to the API that changes something is
- * refused when it comes from another site or carries a body too large to
- * read (guardApi, below).
- */
-const DOMAIN_HEADER = "x-nimbus-domain";
-/** The path and query a visitor asked for on a creator's domain, before it was rewritten. */
-const PATH_HEADER = "x-nimbus-path";
 /** Which store an address belongs to, for the page that says it is not there (app/[handle]/not-found.tsx). */
 const STORE_HEADER = "x-nimbus-store";
 /** The two files a crawler asks a site for, which a creator's domain answers with the store's own (app/[handle]/store-sitemap, store-robots). */
@@ -261,6 +241,25 @@ function handleInPath(pathname: string): string {
   }
 }
 
+/**
+ * A creator's own domain, served as their store.
+ *
+ * On marktmorgen.com (and the deployment's own addresses) nothing happens
+ * here. On a creator's domain, the root is their store page, the store's own
+ * pages keep their short paths (/thanks, /course/…, /p/<product>, /community,
+ * /affiliates, /renew/<product>, /certificate/<id>, /review), and
+ * anything that belongs to the site itself — signing in, the studio, the help
+ * pages — is sent to marktmorgen.com, where the session lives.
+ *
+ * The store page is told which domain it was reached on, so it can send a
+ * visitor back to marktmorgen.com if the store is no longer on Pro.
+ *
+ * Two more jobs happen here because this runs before everything else: every
+ * page rendered for a visit gets its Content-Security-Policy with a fresh
+ * nonce (lib/csp.ts), and every request to the API that changes something is
+ * refused when it comes from another site or carries a body too large to
+ * read (guardApi, below).
+ */
 export async function proxy(request: NextRequest) {
   const host = requestHost(request);
 
@@ -286,7 +285,11 @@ export async function proxy(request: NextRequest) {
     if (STORE_SITEMAP.test(request.nextUrl.pathname)) {
       const url = request.nextUrl.clone();
       url.pathname = request.nextUrl.pathname.replace(/\/sitemap\.xml$/i, "/store-sitemap");
-      return NextResponse.rewrite(url);
+      // The domain headers are ours to set: one sent by a visitor is dropped here too (lib/domain-gate.ts).
+      const headers = new Headers(request.headers);
+      headers.delete(DOMAIN_HEADER);
+      headers.delete(PATH_HEADER);
+      return NextResponse.rewrite(url, { request: { headers } });
     }
     const params = request.nextUrl.searchParams;
     const store = params.has("via") || params.has("code") ? handleInPath(request.nextUrl.pathname) : "";

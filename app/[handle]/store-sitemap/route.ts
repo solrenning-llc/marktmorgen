@@ -1,6 +1,7 @@
 import { normaliseHandle } from "@/lib/store";
 import { storeForHandleExactly } from "@/lib/store-exact";
 import { paidStoreSitemap, sitemapXml } from "@/lib/store-sitemap";
+import { offDomainNotFound } from "@/lib/domain-gate";
 
 /**
  * A store's map for search engines (lib/store-sitemap.ts): at
@@ -14,7 +15,7 @@ import { paidStoreSitemap, sitemapXml } from "@/lib/store-sitemap";
  * search engine reads as "come back later", never as a map taken down. Until
  * 10 November 2026 a failed read was answered 404.
  */
-export async function GET(_request: Request, { params }: { params: Promise<{ handle: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ handle: string }> }) {
   const { handle: raw } = await params;
   let decoded = "";
   try {
@@ -25,6 +26,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ han
   const store = decoded.startsWith("@") ? await storeForHandleExactly(normaliseHandle(decoded)).catch(() => "unknown" as const) : "none";
   if (store === "unknown") return tryLater();
   if (store === "none" || store.suspended) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
+  // On a creator's domain only while it is this store's and the store is on Pro (lib/domain-gate.ts): a map of
+  // another host's addresses would not count there, so there is none, and nothing is paid for.
+  const offDomain = offDomainNotFound(store, request.headers);
+  if (offDomain) return offDomain;
   // Paid for in the store's public requests before it is read (lib/store-sitemap.ts, paidStoreSitemap).
   // With no room this month, a crawler is told to come back later and nothing is read.
   const entries = await paidStoreSitemap(store);

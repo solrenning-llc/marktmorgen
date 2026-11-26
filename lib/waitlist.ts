@@ -21,9 +21,11 @@ import { HASH_TAKE_ALL, HASH_TAKE_FIELD, takenPairs } from "@/lib/redis-take";
 import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
+import { type BatchRefusal, NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { fromLine, mailDay, releaseDay, render, reserveDay } from "@/lib/mail";
+import { allowancesUsedStrict } from "@/lib/store-allowance";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
 import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
@@ -702,6 +704,22 @@ async function launchTarget(
  * Each batch carries a key made of where it starts, so a batch tried again
  * is never sent twice. Returns how many emails went.
  */
+/**
+ * Whether the store's email meter would refuse `n` emails now (lib/email.ts, metered): true for a funded store whose
+ * window cannot be reserved, or a month whose room is now under `n`; null when the month cannot be read (unknown is
+ * never "room"); false otherwise, so a refusal that is none of these is the sender's own.
+ */
+async function meterWouldRefuse(store: Store, n: number): Promise<boolean | null> {
+  try {
+    if (store.period?.funded === true && (!store.tier || !(await reservePaidResourceWindow({ ...store, tier: store.tier, statsId: store.statsId ?? null })))) return true;
+    const month = await allowancesUsedStrict(store, ["email"]);
+    if (!month) return null;
+    return month[0].figure - month[0].used < n;
+  } catch {
+    return null;
+  }
+}
+
 export async function runLaunches(load: (handle: string) => Promise<Store | null>, readProduct: (store: Store, id: string) => Promise<Listing | null>, deadline: number): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const [members] = await redisPipeline([["SMEMBERS", JOBS]]);
@@ -766,7 +784,21 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
         const again = await load(job.handle).catch(() => null);
         if (!again || again.statsId !== sid || again.suspended) break;
       }
-      const [slice] = await redisPipeline([["LRANGE", sendKey(sid, pid), job.cursor, job.cursor + LAUNCH_BATCH - 1]]);
+      // The store's month first (j-mail-4): a batch is never larger than what its email figure can still take, so a
+      // month whose whole figure is smaller than a batch (Store's, a trial's) still goes out, a month's figure at a
+      // time (Claude 2 on #4473). With no room, or a figure that cannot be read, the batch waits for the next run (the
+      // month turning, or the read coming back), never passed over: left to the meter inside sendBatch, it came back
+      // "refused" like an email the sender will not take, the cursor moved past these people and the launch finished,
+      // deleting the list. While it waits, the send list is kept as long as the launch's record (Claude 2 on #4473),
+      // so a wait for the month to turn never outlives it.
+      const month = await allowancesUsedStrict(store, ["email"]);
+      const room = month ? month[0].figure - month[0].used : null;
+      if (room === null || room <= 0) {
+        if (room === null) console.error("sending a waitlist launch: the store's email figure could not be read, so the batch waits", new UnknownReplyError("a launch batch's email figure"));
+        await redisPipeline([["EXPIRE", sendKey(sid, pid), 120 * 86_400]]).catch(() => {});
+        break;
+      }
+      const [slice] = await redisPipeline([["LRANGE", sendKey(sid, pid), job.cursor, job.cursor + Math.min(LAUNCH_BATCH, room) - 1]]);
       const emails = Array.isArray(slice) ? (slice as string[]) : [];
       if (!emails.length) break;
       const [rows] = await redisPipeline([["HMGET", listKey(sid, pid), ...emails]]);
@@ -810,13 +842,25 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
         const r = render(sender, words.subject, words.body, null, door);
         return { from: fromLine(sender), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers };
       });
-      const outcome = await sendBatch(messages, `waitlist:${sid}:${pid}:${job.started}:${job.cursor}`, { by: "store", store, kind: "email" });
+      const why: BatchRefusal = { byMeter: false };
+      const outcome = await sendBatch(messages, `waitlist:${sid}:${pid}:${job.started}:${job.cursor}`, { by: "store", store, kind: "email" }, undefined, undefined, why);
       if (outcome === "retry") {
         await releaseDay(chunk.length, day);
         break;
       }
-      if (outcome === "refused") await releaseDay(chunk.length, day);
-      else {
+      if (outcome === "refused") {
+        await releaseDay(chunk.length, day);
+        // A refusal the store's meter accounts for is a wait, never a pass-over (Claude 3 cloud O's MEDIUM on #4473):
+        // a funded window it cannot reserve, the room taken by another email since the read above, or a read that
+        // cannot be made. The cursor stays, the lists stay, and the next run tries the same people again. The meter's own
+        // refusal says so as it is made (why.byMeter, Codex P's HIGH on #4473): a count that came back unknown is a
+        // refusal by the meter even when a read of the month just after finds room. The read stays as a second guard.
+        if (why.byMeter || (await meterWouldRefuse(store, chunk.length)) !== false) {
+          console.error("sending a waitlist launch: the store's email meter would not take the batch, so it waits");
+          await redisPipeline([["EXPIRE", sendKey(sid, pid), 120 * 86_400]]).catch(() => {});
+          break;
+        }
+      } else {
         job.sent += chunk.length;
         sent += chunk.length;
       }

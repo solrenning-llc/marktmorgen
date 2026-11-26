@@ -30,10 +30,12 @@ import {
   dropDue,
   dueMembers,
   forgetMember,
+  keepCheckedMember,
   keepMember,
   productRoles,
   productRolesOrThrow,
   readMember,
+  readMemberRow,
   readServer,
   readServerOrThrow,
 } from "@/lib/discord-store";
@@ -142,8 +144,10 @@ export async function checkMember(sid: string, userId: string, now = Date.now())
   const room = storeKey(store);
   // Read exactly: an unknown server, member or roles read throws (sweepDiscord keeps the person in line), never read
   // as "gone" (dropped from the checks, roles never taken back) or "no product gives a role" (a paying buyer's roles taken).
-  const [server, member] = await Promise.all([readServerOrThrow(room), readMember(room, userId)]);
-  if (!server || !member) {
+  // The row is read with its text: every write below is made only over it (keepCheckedMember, #4660).
+  const [server, row] = await Promise.all([readServerOrThrow(room), readMemberRow(room, userId)]);
+  const member = row?.member ?? null;
+  if (!server || !row || !member) {
     await dropDue(sid, userId);
     // A rejoin between the member read and dropDue wrote a fresh entry that dropDue just took off (Claude 1 cloud's
     // LOW on #4239): read the member again and put them back in line if they are there now, so a later refund is
@@ -158,7 +162,8 @@ export async function checkMember(sid: string, userId: string, now = Date.now())
   } catch (error) {
     // Stripe could not be asked: nothing is taken on a guess.
     console.error("checking a Discord member's purchases failed", error);
-    await keepMember(room, sid, userId, member, now);
+    // Changed since it was read (an erasure, a disconnect or a rejoin): nothing is written over it.
+    if (!(await keepCheckedMember(room, sid, userId, row.raw, member, now))) return "gone";
     return "later";
   }
   const wanted = rolesFor(held, byProduct);
@@ -174,7 +179,7 @@ export async function checkMember(sid: string, userId: string, now = Date.now())
       if (done === "failed") failed = true;
     }
     if (failed) {
-      await keepMember(room, sid, userId, member, now);
+      if (!(await keepCheckedMember(room, sid, userId, row.raw, member, now))) return "gone";
       return "later";
     }
     if (server.kick && !left) {
@@ -184,7 +189,7 @@ export async function checkMember(sid: string, userId: string, now = Date.now())
       const out = await removeMember(server.id, userId, reason);
       const tried = (member.k ?? 0) + 1;
       if (out === "failed" && tried <= KICK_TRIES) {
-        await keepMember(room, sid, userId, { ...member, p: held, r: [], checked: at, k: tried }, now);
+        if (!(await keepCheckedMember(room, sid, userId, row.raw, { ...member, p: held, r: [], checked: at, k: tried }, now))) return "gone";
         return "later";
       }
     }
@@ -210,7 +215,7 @@ export async function checkMember(sid: string, userId: string, now = Date.now())
     await forgetMember(room, sid, userId, member.e);
     return "gone";
   }
-  await keepMember(room, sid, userId, { ...member, p: held, r: given, checked: at }, now);
+  if (!(await keepCheckedMember(room, sid, userId, row.raw, { ...member, p: held, r: given, checked: at }, now))) return "gone";
   return diff.add.length || diff.take.length ? "changed" : "kept";
 }
 

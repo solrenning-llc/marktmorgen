@@ -16,9 +16,9 @@ const read = (file: string) => readFileSync(file, "utf8");
 part("What the code does");
 is("the next check is CHECK_HOURS after the last", read("lib/discord-store.ts").includes('["ZADD", DUE_KEY, Math.floor(now / 1000) + CHECK_HOURS * 3_600, `${sid}|${userId}`]'), true);
 is("run by a job every half hour", /"path": "\/api\/cron\/discord",\s*"schedule": "17,47 \* \* \* \*"/.test(read("vercel.json")), true);
-is("Stripe not answering: kept, and checked again later", /Stripe could not be asked: nothing is taken on a guess\.[\s\S]{0,200}await keepMember\(room, sid, userId, member, now\);/.test(read("lib/discord-access.ts")), true);
+is("Stripe not answering: kept, and checked again later", /Stripe could not be asked: nothing is taken on a guess\.[\s\S]{0,200}await keepCheckedMember\(room, sid, userId, row\.raw, member, now\)\)\) return "gone";\s*return "later";/.test(read("lib/discord-access.ts")), true);
 is("six hours", CHECK_HOURS, 6);
-is("Discord refusing a role: kept, and tried again at the next check", /if \(done === "failed"\) failed = true;[\s\S]{0,40}if \(failed\) \{\s*await keepMember\(room, sid, userId, member, now\);/.test(read("lib/discord-access.ts")), true);
+is("Discord refusing a role: kept, and tried again at the next check", /if \(done === "failed"\) failed = true;[\s\S]{0,40}if \(failed\) \{\s*if \(!\(await keepCheckedMember\(room, sid, userId, row\.raw, member, now\)\)\) return "gone";\s*return "later";/.test(read("lib/discord-access.ts")), true);
 is("only a refund in full takes access away", read("lib/community-access.ts").includes("refundedInFull"), true);
 
 part("What the pages say");

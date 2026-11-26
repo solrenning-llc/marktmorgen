@@ -17,7 +17,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { orderWrite } from "@/lib/order-data";
+import { orderWrite, orderWriteIfSame } from "@/lib/order-data";
 import { emailKey, storeKey } from "@/lib/learn";
 import { normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
@@ -299,14 +299,19 @@ export type Member = {
  * so nothing takes an unknown read as "nobody", whose roles would never be taken back (sweep A2 finding 4).
  */
 export async function readMember(room: string, userId: string): Promise<Member | null> {
+  return (await readMemberRow(room, userId))?.member ?? null;
+}
+
+/** readMember with the row's text as read, so a write decided from it is made only over that row (keepCheckedMember). */
+export async function readMemberRow(room: string, userId: string): Promise<{ member: Member; raw: string } | null> {
   if (!SNOWFLAKE.test(userId)) return null;
   const raw = oneReply(await redisPipeline([["HGET", membersKey(room), userId]]), "a Discord member record");
   if (raw === null) return null;
   const member = parse<Record<string, unknown>>(raw);
-  if (!member || typeof member !== "object" || Array.isArray(member) || typeof member.e !== "string" || !Array.isArray(member.r) || !member.r.every((r) => typeof r === "string")) {
+  if (typeof raw !== "string" || !member || typeof member !== "object" || Array.isArray(member) || typeof member.e !== "string" || !Array.isArray(member.r) || !member.r.every((r) => typeof r === "string")) {
     throw new UnknownReplyError("a Discord member record");
   }
-  return member as unknown as Member;
+  return { member: member as unknown as Member, raw };
 }
 
 /** Everyone given roles in this store's server, newest first, at most `limit`. */
@@ -336,11 +341,29 @@ export async function accountOf(room: string, email: string): Promise<string | n
 /** Keeps a person, and when they are checked next. */
 export async function keepMember(room: string, sid: string, userId: string, member: Member, now = Date.now()): Promise<void> {
   // A person given roles is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
-  await orderWrite({ sid }, [
+  await orderWrite({ sid }, memberWrites(room, sid, userId, member, now));
+}
+
+/**
+ * keepMember for the scheduled check (lib/discord-access.ts checkMember), made only while the member's row still holds
+ * the text it was read with (`raw`, from readMemberRow), in one step with the write (ORDER_WRITE_IF_SAME): a person's
+ * erasure, a disconnect or a rejoin that lands between the check's read and this write is never written over, so an
+ * erased person's row, the link from their address and their place in the line stay deleted (#4660, Codex L).
+ * Answers whether it was written; an unknown reply throws (rule 24), so the sweep puts them back in line.
+ * One command more than keepMember: the script's HGET of the row (lib/order-data.ts ORDER_WRITE_IF_SAME).
+ */
+export async function keepCheckedMember(room: string, sid: string, userId: string, raw: string, member: Member, now = Date.now()): Promise<boolean> {
+  const was = createHash("sha1").update(raw).digest("hex");
+  return (await orderWriteIfSame({ sid }, [{ key: membersKey(room), field: userId, sha1: was }], memberWrites(room, sid, userId, member, now))) !== null;
+}
+
+/** What keeping a member writes: their row, the link from their address, and their next check. */
+function memberWrites(room: string, sid: string, userId: string, member: Member, now: number): (string | number)[][] {
+  return [
     ["HSET", membersKey(room), userId, JSON.stringify({ ...member, e: normaliseEmail(member.e) })],
     ["SET", addressKey(room, member.e), userId],
     ["ZADD", DUE_KEY, Math.floor(now / 1000) + CHECK_HOURS * 3_600, `${sid}|${userId}`],
-  ]);
+  ];
 }
 
 /** Forgets a person: their access ended and their roles were taken back, or they left. */

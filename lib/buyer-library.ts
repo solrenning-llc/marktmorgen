@@ -43,7 +43,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { orderWrite } from "@/lib/order-data";
+import { orderWrite, orderWriteIfSame } from "@/lib/order-data";
 import { essentialLimitState } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { joinedKeys, personKeys, personWrite } from "@/lib/joined-stores";
@@ -173,6 +173,31 @@ export async function rememberBuyersAt(sid: string, listId: string | null, buyer
   await redisPipeline(gone.flatMap((email) => forgetBoughtCommands(sid, email))).catch((error) =>
     console.error("taking back a deleted buyer's library failed", error),
   );
+}
+
+/**
+ * rememberBuyersAt for one purchase, the thanks page's (#4754), with no read of its own in the common case: the write
+ * runs only while the person has no deletion mark on the store's list, checked in the same step (orderWriteIfSame), so
+ * a deletion before it leaves the library erased and one after it deletes what was written. Only when a mark is there
+ * is it read, and the purchase is noted only when it was paid after that mark, written over that same mark. A thanks
+ * page opened again costs the write alone, as before. A mark that does not read, a failed write or any other answer
+ * notes nothing (the five-minute sweep notes a purchase that still stands) and never throws.
+ */
+export async function rememberBuyerAt(sid: string, listId: string | null, email: string, at: number): Promise<void> {
+  if (typeof email !== "string" || !EMAIL_PATTERN.test(normaliseEmail(email)) || !Number.isFinite(at)) return;
+  if (!STORE_ID.test(sid) || !isRedisConfigured()) return;
+  if (!listId) return rememberBuyers(sid, [email]);
+  const key = suppressedKey(listId);
+  const field = suppressionPrint(listId, email);
+  const commands = personWrite(LIBRARY, LIBRARY_SALT, email, sid);
+  try {
+    if ((await orderWriteIfSame({ sid }, [{ key, field, sha1: "" }], commands)) !== null) return;
+    const mark = repliesFor(await redisPipeline([["HGET", key, field]]), 1)?.[0];
+    if (typeof mark !== "string" || !/^[0-9]{1,12}$/.test(mark) || Number(mark) >= at) return;
+    await orderWriteIfSame({ sid }, [{ key, field, sha1: createHash("sha1").update(mark).digest("hex") }], commands);
+  } catch (error) {
+    console.error("noting a buyer for their library failed", error);
+  }
 }
 
 /**

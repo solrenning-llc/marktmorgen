@@ -49,7 +49,7 @@ import { buyersJoin, noteSession } from "@/lib/affiliates";
 import { recordEnrollment } from "@/lib/learn";
 import { orderRoom, upsertContact } from "@/lib/contacts";
 import { listOrder } from "@/lib/buyer-list";
-import { rememberBuyersAt } from "@/lib/buyer-library";
+import { rememberBuyerAt } from "@/lib/buyer-library";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
 import { PENDING_GIVE_UP_SECONDS, canceledFor, readPaid, stillPending } from "@/lib/paypal-sales";
 import { paypalCancelWords } from "@/lib/buyer-words/paypal-cancel";
@@ -514,8 +514,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
     // A store made before stores had ids is given its own now.
     const sid = store.sid || (await ensureStoreId(storeRef(store)).catch(() => null))?.sid || "";
     // Against the order's own time: a buyer deleted from the store at or after it is not noted again when this page is
-    // opened later; a purchase paid after the deletion is noted as any (#4754).
-    await rememberBuyersAt(sid, store.listId ?? null, [{ email: order.email, at: order.created }]);
+    // opened later; a purchase paid after the deletion is noted as any (#4754). One step, no read of its own in the
+    // common case, so a thanks page opened again costs what it cost before.
+    await rememberBuyerAt(sid, store.listId ?? null, order.email, order.created);
   }
   if (order.state === "paid" && order.email && store.listId) {
     await listOrder(store, {

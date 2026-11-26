@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
       const asked = await askToJoin({ store, email: read.email, ip, origin: linkOrigin(request, store), fromForm: true, formId: def.id, formOutcome: outcome?.id, lead }).catch(() => "error" as const);
       joined = asked === "sent";
     }
-    await addResponse(statsId, def.id, { id: randomBytes(16).toString("hex"), at: Math.floor(Date.now() / 1000), page: page?.id ?? "", answers: read.answers, outcome: outcome?.id ?? "", joined, ...(measured ? { score: measured.total, scores: measured.categories } : {}) }, store);
+    await addResponse(statsId, def.id, { id: randomBytes(16).toString("hex"), at: Math.floor(Date.now() / 1000), page: page?.id ?? "", answers: read.answers, outcome: outcome?.id ?? "", joined, by: read.email, ...(measured ? { score: measured.total, scores: measured.categories } : {}) }, store);
     // A form is not a return: anybody can type an address into it (Revisor 2, #2287). The person comes back by
     // confirming the sign-up the form asked for (lib/store-join.ts, confirmJoin), by paying or by a copy they asked for.
     // Somebody already on the list: the sequences that start with this form start now (lib/flows.ts checks they may be written to).

@@ -184,6 +184,9 @@ const MESSAGES: Record<string, string> = {
   yearly_price: "Type a yearly price below twelve monthly payments, so paying yearly saves something, and at least the least your currency can charge.",
   free: "Something free is given once, for an email address, so it cannot be a membership or have several prices. Take those off first.",
   unknown: "That is no longer on your store.",
+  // The store's list of removed products is full (lib/removed-products.ts MAX_REMOVED_PRODUCTS, as many as a catalog
+  // holds), so a removal would lose track of a buyer's data.
+  removed_full: `Your store has removed ${MAX_PRODUCTS.toLocaleString("en-US")} products, the most we keep track of so buyers can still get a copy of their data or have it deleted. Unpublish this one instead: it comes off your store and stays here as a draft.`,
   // The file named is an episode's audio of this product's podcast (app/api/store/file/attach).
   in_use: "That file is already used on this product. Choose the file from your device again.",
   memberships: "Members or payment plans are still being charged for this on Stripe. Cancel them in your Stripe dashboard first, then remove it, so nobody keeps paying for something removed.",

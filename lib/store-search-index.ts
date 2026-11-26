@@ -26,6 +26,7 @@
  */
 import { createHash } from "node:crypto";
 import type { Store } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { type Listing, STORE_SEARCH_LIMIT, matchesSearch, readListings, visibleIds } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
 import { bumpTargets } from "@/lib/product-extras";
@@ -99,11 +100,19 @@ async function buildIndex(store: Store, visible: string[], key: string, signatur
   if (units > 0 && isRedisConfigured()) {
     const rows = all.map((listing) => [listing.id, listing.title, listing.summary]);
     const value = JSON.stringify({ sig: signature, rows });
+    // Both writes are kept only while the store is live, in one step with its fence (Codex L-20261119-2133, #5010 row 130): a build racing
+    // the store's erasure writes no index back and answers nothing. When the keeping itself could not be confirmed
+    // (Redis failed on a live store: "unknown"), the listings already paid for and read still answer this search;
+    // only the index is not counted on, so the next search builds it again (review of #5252, Claude 1 7f1a).
     if (Buffer.byteLength(value) > SEARCH_INDEX_MAX_BYTES) {
-      await redisPipeline([["SET", key, JSON.stringify({ sig: signature, large: true }), "EX", SEARCH_INDEX_SECONDS]]).catch((error) => console.error("store search: noting a large index failed", error));
+      await setWhileStoreLive(store, key, JSON.stringify({ sig: signature, large: true }), SEARCH_INDEX_SECONDS).catch((error) => console.error("store search: noting a large index failed", error));
       return "too large";
     }
-    await redisPipeline([["SET", key, value, "EX", SEARCH_INDEX_SECONDS]]).catch((error) => console.error("store search: keeping the index failed", error));
+    const kept = await setWhileStoreLive(store, key, value, SEARCH_INDEX_SECONDS).catch((error) => {
+      console.error("store search: keeping the index failed", error);
+      return "unknown" as const;
+    });
+    if (kept === "gone") return null;
   }
   const index = new Map(all.map((listing) => [listing.id, { title: listing.title, summary: listing.summary }]));
   return { index, read: new Map(all.map((listing) => [listing.id, listing])) };

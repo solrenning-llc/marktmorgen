@@ -13,7 +13,7 @@
 import { createHash } from "node:crypto";
 import type { Store } from "@/lib/store";
 import { askBillingAddress } from "@/lib/billing-address";
-import { saleHandles, storeRef } from "@/lib/store";
+import { STORE_ID_PATTERN, ensureStatsId, saleHandles, storeRef } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { canSell } from "@/lib/store-checkout";
@@ -24,6 +24,7 @@ import { isHouseStore } from "@/lib/house-store";
 import { tipsWords } from "@/lib/buyer-words/tips";
 import { MAX_TIP_MESSAGE, tipInRange } from "@/lib/store-tips";
 import { applyShare } from "@/lib/platform-share";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 
 /** What the creator's list of sales calls it, in the studio's English. */
 export const TIP_TITLE = "Support";
@@ -76,6 +77,16 @@ export async function createTipCheckout(
   channel: Record<string, string> = {},
 ): Promise<{ url: string; id: string }> {
   if (!tipsOpen(store) || !store.stripeAccountId) throw new Error("This store takes no support");
+  // A store from before ids is told from its owner's next store only by its statsId (lib/store-live-cache.ts,
+  // storeLiveFence), so one without it could never have its mark written below. It is given one first, and the
+  // record read back is used only while its handle is still this store's: otherwise the checkout is refused before
+  // Stripe is asked (Claude 1's note in the triple audit of #5213).
+  if (!STORE_ID_PATTERN.test(store.sid) && !store.statsId) {
+    const kept = await ensureStatsId(store.email);
+    if (!kept || kept.handle !== store.handle || (!STORE_ID_PATTERN.test(kept.sid) && !kept.statsId)) throw new Error("This store takes no support");
+    store = kept;
+    if (!tipsOpen(store) || !store.stripeAccountId) throw new Error("This store takes no support");
+  }
   // Checked again where the charge is built, whatever the route checked.
   if (!tipInRange(amount, store.currency)) throw new Error("An amount out of range");
   const w = tipsWords(store.language);
@@ -133,11 +144,14 @@ export async function createTipCheckout(
   // Recorded before the visitor is sent, so the page they come back to asks
   // Stripe about this session and no other (readTip). A mark Redis does not
   // confirm is a checkout not handed out: the visitor is told it failed and
-  // may try again, and the unpaid session expires on Stripe's side.
+  // may try again, and the unpaid session expires on Stripe's side. Written
+  // only while the store is still live, in one step (Codex L-20261119-1636):
+  // a store whose erasure began while Stripe was answering gets no mark back
+  // and hands out no payment page.
   const marked = SESSION_ID_PATTERN.test(session.id) && isRedisConfigured()
-    ? repliesFor(await redisPipeline([["SET", tipMarkKey(store, session.id), "1", "EX", TIP_MARK_SECONDS]]), 1)
+    ? await setWhileStoreLive(store, tipMarkKey(store, session.id), "1", TIP_MARK_SECONDS).catch(() => "unknown" as const)
     : null;
-  if (!marked || marked[0] !== "OK") throw new Error("The gift's checkout could not be recorded");
+  if (marked !== "kept") throw new Error("The gift's checkout could not be recorded");
   return { url: session.url, id: session.id };
 }
 

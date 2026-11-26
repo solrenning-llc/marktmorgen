@@ -339,6 +339,35 @@ export class MemoryRedis {
           if (members.length) gone += Number(this.run(["DEL", who]));
           return [gone, members.length];
         }
+        // lib/assistant-reminder.ts KEEP_IF_STORE_LIVE: a buyer's yes, its queue member and its erasure index written in
+        // one step only while the store is live and not being erased, by the rule of chat-address-live:v3 below.
+        if (key.startsWith("-- marktmorgen:assist-reminder-keep-live:v1\n") && args[0] === "5" && args.length === 14) {
+          const [, live, erasing, consent, queue, who, field, statsId, ref, value, seconds, due, member, session] = args;
+          // Each redis.call counted as Upstash bills it inside the EVAL (ASSIST_REMIND_KEEP_COMMANDS, lib/assistant-reminder.ts).
+          this.scriptCalls += 1;
+          if (this.run(["HGET", erasing, field]) !== null) return 0;
+          this.scriptCalls += 1;
+          if (statsId === "") {
+            if (this.run(["GET", live]) !== ref) return 0;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return 0;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return 0;
+          }
+          this.scriptCalls += 4;
+          this.run(["SET", consent, value, "EX", seconds]);
+          this.run(["ZADD", queue, due, member]);
+          this.run(["SADD", who, session]);
+          this.run(["EXPIRE", who, seconds]);
+          return 1;
+        }
         // lib/calendar-sync.ts KEEP_NEW_FEED_READING: a new feed's first reading, only while the settings still list it.
         if (key.startsWith("-- marktmorgen:calendar-new-feed-reading:v1\n") && args[0] === "3" && args.length === 8) {
           const [, cfg, busy, good, mark, value, cache, stale] = args;

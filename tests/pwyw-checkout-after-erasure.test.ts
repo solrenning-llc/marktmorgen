@@ -8,11 +8,14 @@
  * store's erasure (its erasing mark, lib/store.ts ERASING_KEY) inside the POST /prices:
  * - the checkout is refused and no checkout session is asked of Stripe;
  * - no Price is kept under nl:pwyw:;
- * - the control, a live store, still opens its checkout with the creator's choose-your-price Price.
+ * - the control, a live store, still opens its checkout with the creator's choose-your-price Price;
+ * - a store kept from before ids with no statsId yet (Claude 1's LEVE on #5192, 7088873178) is given one and opens
+ *   its checkout, its Price kept, instead of being refused on every Price; one whose record now names another
+ *   handle is refused before Stripe is asked for a Price.
  *
  * Synthetic store and replies only; nothing real is called.
  */
-import { addProduct, claimHandle, ensureStatsId, erasingField, ERASING_KEY, setStripeAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, erasingField, ERASING_KEY, ownerKey, setStripeAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { createCheckout } from "@/lib/store-checkout";
 import { store as redis } from "./redis-stub";
@@ -71,6 +74,35 @@ async function main(): Promise<void> {
   const live = await createCheckout(store, product, "https://marktmorgen.com", "", { digitalConsent: TEST_CONSENT }).then(() => "opened", (error: unknown) => `refused: ${String(error)}`);
   is("the checkout opens", [live, sessions - before], ["opened", 1]);
   is("and its Price is kept", kept(), 1);
+
+  part("A store kept from before ids with no statsId yet");
+  // Its record as it was written before ids and statsIds: no sid, no statsId.
+  const record = ownerKey(OWNER);
+  const raw = JSON.parse(String(redis.run(["GET", await record]))) as Record<string, unknown>;
+  delete raw.statsId;
+  raw.sid = "";
+  redis.run(["SET", await record, JSON.stringify(raw)]);
+  for (const key of redis.keys().filter((key) => key.startsWith("nl:pwyw:"))) redis.run(["DEL", key]);
+  const legacy = (await storeForEmail(OWNER))!;
+  const pricesBefore = prices;
+  is("the store reads as one from before ids, with no statsId", [legacy.sid, legacy.statsId ?? null], ["", null]);
+  const sessionsBefore = sessions;
+  const legacyOutcome = await createCheckout(legacy, product, "https://marktmorgen.com", "", { digitalConsent: TEST_CONSENT }).then(() => "opened", (error: unknown) => `refused: ${String(error)}`);
+  is("its checkout opens, never refused on every Price", [legacyOutcome, sessions - sessionsBefore], ["opened", 1]);
+  is("its Price is kept, so the next buyer reuses it", kept(), 1);
+  is("it was given a statsId", typeof (await storeForEmail(OWNER))?.statsId === "string" && Boolean((await storeForEmail(OWNER))?.statsId), true);
+  is("one Price was asked of Stripe for it", prices - pricesBefore, 1);
+
+  part("A store from before ids whose record now names another handle");
+  const moved = JSON.parse(String(redis.run(["GET", await record]))) as Record<string, unknown>;
+  delete moved.statsId;
+  moved.sid = "";
+  moved.handle = "someoneelse";
+  redis.run(["SET", await record, JSON.stringify(moved)]);
+  for (const key of redis.keys().filter((key) => key.startsWith("nl:pwyw:"))) redis.run(["DEL", key]);
+  const [sessionsThen, pricesThen] = [sessions, prices];
+  const movedOutcome = await createCheckout({ ...legacy, statsId: null }, product, "https://marktmorgen.com", "", { digitalConsent: TEST_CONSENT }).then(() => "opened", () => "refused");
+  is("its checkout is refused before Stripe is asked for a Price", [movedOutcome, prices - pricesThen, sessions - sessionsThen], ["refused", 0, 0]);
   done();
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -212,6 +212,57 @@ end`;
 /** The guard, then ORDER_WRITE below its first line: written out whole so scripts/test_order_data_redis.py can put it together the same way. */
 export const ORDER_WRITE_IF_NEW = `${ORDER_IF_NEW_GUARD}\n${ORDER_WRITE.slice(ORDER_WRITE.indexOf("\n") + 1)}`;
 
+/**
+ * The most calls Redis bills for one order script of hash writes (HSET, HSETNX) and deletes (HDEL), as the cost
+ * registry counts a script: the EVAL itself and every redis.call inside it, at its dearest (Claude 4 3rC's LOW 1 and
+ * Codex N1 on #5136: an order script had been counted as 1, or 1 plus its commands). Read off ORDER_WRITE: each key's
+ * EXISTS before its first command and after the last; each command's TYPE, the command, and for each field it sets an
+ * HEXISTS and an HSTRLEN before and after; the room's two HGETs and its HSET. `ifNew` adds ORDER_IF_NEW_GUARD (the
+ * room's TYPE, each command's TYPE and the HEXISTS); `storeLive` adds ORDER_WRITE_IF_STORE_LIVE's fence (an EXISTS and
+ * an HEXISTS). An upper bound, never less: on Redis 7 the four-command write a license key's settle sends was
+ * measured at 31 to 33 calls inside the script (INFO commandstats), against 37 here.
+ */
+export function orderWriteCallsMost(commands: Command[], options: { ifNew?: boolean; storeLive?: boolean } = {}): number {
+  if (!commands.length || commands.length > ORDER_WRITE_MAX) throw new Error("an order script carries 1 to ORDER_WRITE_MAX commands");
+  let calls = 1 + 3;
+  if (options.ifNew) calls += 2 + commands.length;
+  if (options.storeLive) calls += 2;
+  const keys = new Set<string>();
+  for (const command of commands) {
+    const name = String(command[0]).toUpperCase();
+    if (name !== "HSET" && name !== "HSETNX" && name !== "HDEL") throw new Error(`orderWriteCallsMost prices hash writes only, not ${name}`);
+    keys.add(String(command[1]));
+    const fields = name === "HDEL" ? 0 : Math.floor((command.length - 2) / 2);
+    calls += 2 + 4 * fields;
+  }
+  return calls + 2 * keys.size;
+}
+
+/**
+ * orderWriteCallsMost of one order script as it goes out on the wire (an EVAL built by scriptOf or orderScriptWith):
+ * the commands read back from its keys and arguments, the guard and the fence from its first line. For the tests'
+ * meters, so a script is never counted at less than it is billed. Throws on an EVAL that is not an order script.
+ */
+export function orderEvalCallsMost(sent: (string | number)[]): number {
+  if (sent[0] !== "EVAL") throw new Error("not an EVAL");
+  const head = String(sent[1]).split("\n", 1)[0];
+  const ifNew = head === "-- marktmorgen:order-write-if-new:v1";
+  const storeLive = head === "-- marktmorgen:order-write-if-store-live:v1";
+  if (!ifNew && !storeLive && head !== "-- marktmorgen:order-write:v1") throw new Error(`not an order script: ${head}`);
+  const count = Number(sent[2]);
+  const keys = sent.slice(3, 3 + count).map(String);
+  const argv = sent.slice(3 + count).map(String);
+  const n = Number(argv[0]);
+  const commands: Command[] = [];
+  let i = 1;
+  for (let c = 0; c < n; c += 1) {
+    const [name, k, argc] = [argv[i], Number(argv[i + 1]), Number(argv[i + 2])];
+    commands.push([name, keys[k - 1], ...argv.slice(i + 3, i + 3 + argc)] as Command);
+    i += 3 + argc;
+  }
+  return orderWriteCallsMost(commands, { ifNew, storeLive });
+}
+
 /** Whether a command is one an order's records may be written with, and names its key. */
 function checked(command: Command): string | null {
   const [name, key] = command;

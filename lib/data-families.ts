@@ -71,6 +71,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:imports:active", "nl:imports:busy:", "nl:imports:cf:", "nl:imports:cf:lock:", "nl:imports:list:",
   "nl:inbound:support:bytes:", "nl:inbound:support:counted:", "nl:inbound:support:held:",
   "nl:imports:lock", "nl:imports:moved:", "nl:imports:rows:", "nl:inbound:counted:", "nl:inbound:seen:", "nl:indexnow:lock", "nl:indexnow:sent", "nl:join:t:",
+  "nl:keysfill:done", "nl:keysfill:round",
   "nl:learn:link:", "nl:learn:paid:", "nl:learn:pass:", "nl:learn:passes:", "nl:learn:rate:addr:",
   "nl:learn:rate:ip:", "nl:leave:", "nl:letters:link:", "nl:letters:ok:", "nl:letters:rl:addr:", "nl:letters:rl:ip:", "nl:lib:joined:", "nl:lib:link:", "nl:list:try:", "nl:listed:", "nl:lock:plan-stop:", "nl:lostdispute:cursor:", "nl:mail-check:last",
   "nl:mail-check:lock", "nl:mail-check:runs", "nl:mail:clk:", "nl:mail:day:", "nl:mail:drafts:", "nl:mail:flowq:lease",
@@ -322,8 +323,10 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // The studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts): the company's day and its sessions, no store's; each session ends 21 hours after it opened.
   "nl:sdemo:": C, "nl:sdemo:{<session>}:<family>[:<part>]": C,
   "nl:join:t:": T("nl:erase:ix:", 7),
-  // License keys (lib/licence-keys.ts): a product's pool, keys, sales (with the mark of a sale refunded before it had a key, or whose full refund is still pending), records and buyers waiting.
+  // License keys (lib/licence-keys.ts): a product's pool, keys, sales (with the mark of a sale refunded before it had a key, or whose full refund is still pending), records, buyers waiting and each buyer's own list of keys (holderKey, kept and erased with the keys).
   "nl:keys:": E,
+  // The company's two marks of the one-time fill of the buyers' lists of license keys (#5136), never a store's.
+  "nl:keysfill:done": C, "nl:keysfill:round": C,
   "nl:lc:": E,
   // A student's private lesson notes (290 [SQ1], lib/lesson-notes.ts), named by the store's statsId.
   "nl:lnote:": E,

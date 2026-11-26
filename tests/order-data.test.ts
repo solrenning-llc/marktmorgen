@@ -6,7 +6,7 @@
  * (tests/redis-stub.ts); scripts/test_order_data_redis.py runs the same
  * script on a real Redis and holds each charge to Redis's own MEMORY USAGE.
  */
-import { ORDER_BOARD_ENTRY_BYTES, ORDER_COMMANDS, ORDER_ENTRY_BYTES, ORDER_KEY_BYTES, ORDER_WRITE, ORDER_WRITE_MAX, orderWriteCharged } from "@/lib/order-data";
+import { ORDER_BOARD_ENTRY_BYTES, ORDER_COMMANDS, ORDER_ENTRY_BYTES, ORDER_KEY_BYTES, ORDER_WRITE, ORDER_WRITE_MAX, orderEvalCallsMost, orderWriteCallsMost, orderWriteCharged, orderWriteIfNew, orderWriteIfStoreLive } from "@/lib/order-data";
 import { dataKey, dataUsed } from "@/lib/store-data";
 import { DATA_ROOM_BYTES, DATA_STEP_BYTES, orderDataBytes } from "@/lib/store-data-rules";
 import { orderRoom, upsertContact } from "@/lib/contacts";
@@ -120,6 +120,46 @@ async function main() {
     console.log(`  ${tier}: ${DATA_ROOM_BYTES[tier].toLocaleString("en-US")} bytes held ${before.toLocaleString("en-US")} orders at the fixed charge; ${now.toLocaleString("en-US")} orders of new buyers now, each a new address`);
   }
   is("the order's own records were all counted, nothing kept beside them uncounted", (await dataUsed(store))!.orders, room());
+
+  part("What an order script costs at the most, counted as the registry counts a script: 1 plus every call inside it (#5136)");
+  // A license key's settle (lib/licence-keys.ts keyForSale): four hash writes on four keys, written only if new.
+  const settle: [string, string, ...string[]][] = [
+    ["HSETNX", "nl:keys:od:p:sale", "cs_test_settle", "K-1"],
+    ["HSET", "nl:keys:od:p:info", "K-1", "{}"],
+    ["HDEL", "nl:keys:od:p:wait", "cs_test_settle"],
+    ["HSET", "nl:keys:od:who:d", "p\tK-1", "1"],
+  ];
+  // 1 for the script, 3 for the room, 2 + 4 checks for if-new, 6 + 6 + 2 + 6 for the writes, 2 for each of the 4 keys.
+  // On Redis 7 the same script makes 31 to 33 calls (scripts/test_order_data_redis.py style, measured on #5136).
+  is("a key's settle is 38 at its dearest, where it had been counted as 1 plus its 4 commands", orderWriteCallsMost(settle, { ifNew: true }), 38);
+  const sentScripts: (string | number)[][] = [];
+  const realPipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (sent: (string | number)[][]) => {
+    for (const command of sent) if (command[0] === "EVAL") sentScripts.push(command);
+    return realPipe(sent);
+  }) as typeof redis.pipeline;
+  const plain: [string, string, ...string[]][] = [["HSET", "nl:keys:od:q", "a", "1", "b", "2"], ["HDEL", "nl:keys:od:q", "c"]];
+  try {
+    await orderWriteIfNew(owner, settle);
+    await orderWriteCharged(owner, plain);
+    await orderWriteIfStoreLive(owner, plain, "nl:store:id:od-none", "nl:closed:erasing", "od-field");
+  } finally {
+    redis.pipeline = realPipe;
+  }
+  is("the three scripts were sent", sentScripts.length, 3);
+  is("read back from the script it sends, the settle costs the same", orderEvalCallsMost(sentScripts[0]), 38);
+  is("a plain order write is read back the same as it is priced", orderEvalCallsMost(sentScripts[1]), orderWriteCallsMost(plain));
+  is("the store-live fence adds its two reads", orderEvalCallsMost(sentScripts[2]), orderWriteCallsMost(plain) + 2);
+  let unpriced = 0;
+  for (const bad of [[] as [string, string, ...string[]][], [["SADD", "nl:keys:od:s", "x"]] as [string, string, ...string[]][]]) {
+    try {
+      orderWriteCallsMost(bad);
+    } catch {
+      unpriced += 1;
+    }
+  }
+  is("an empty script and a write that is not a hash write are never priced", unpriced, 2);
+  is("nor is anything that is not an order script", (() => { try { orderEvalCallsMost(["EVAL", "return 1", 0]); return "priced"; } catch { return "refused"; } })(), "refused");
   done();
 }
 

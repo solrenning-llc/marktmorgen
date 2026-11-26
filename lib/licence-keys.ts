@@ -47,13 +47,20 @@
  *   nl:keys:<store>:<product>:info     hash key -> who, when, which sale, revoked
  *   nl:keys:<store>:<product>:waiting  hash sale reference -> buyer waiting for a key
  *   nl:keys:<store>:<product>:warned   set once the low-pool email has gone
+ *   nl:keys:<store>:who:<address>      hash "<product>\t<key>" -> "1": the keys one person was given, written in
+ *                                      the same step as the key (settle), so their copy reads only their own keys
+ *                                      (issue #5125); <address> is a one-way digest of the normalised address
  *
  * <store> is the store's statsId, which follows it through a new address and
  * a new sign-in email.
  */
 import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
-import { saleHandles } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, saleHandles, storeIdCommand, storeRef } from "@/lib/store";
+import { createHash } from "node:crypto";
+import { normaliseEmail } from "@/lib/auth";
+// One script carries at most this many commands, which the buyers' lists fill counts in its run's commands.
+import { ORDER_WRITE_MAX, orderWriteCallsMost, orderWriteIfStoreLive } from "@/lib/order-data";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { StripeListUnreadable, type StripeRow, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
@@ -191,6 +198,94 @@ const saleKey = (store: Store, product: Pick<Listing, "id">) => `${base(store, p
 const infoKey = (store: Store, product: Pick<Listing, "id">) => `${base(store, product)}:info`;
 const waitingKey = (store: Store, product: Pick<Listing, "id">) => `${base(store, product)}:waiting`;
 const warnedKey = (store: Store, product: Pick<Listing, "id">) => `${base(store, product)}:warned`;
+
+/** A one-way digest of the address, normalised as the copy reads it (lib/auth.ts normaliseEmail): never the address in a key's name. */
+export const keyHolderDigest = (email: string): string => createHash("sha256").update(`marktmorgen-licence-holder:${normaliseEmail(email)}`).digest("hex").slice(0, 32);
+/** The keys one person was given in a store (issue #5125): a hash so it is written inside settle's ORDER_WRITE_IF_NEW, which takes hash writes only. */
+export const holderKey = (store: Pick<Store, "statsId">, email: string) => `nl:keys:${store.statsId}:who:${keyHolderDigest(email)}`;
+/** The field of one key in a holder's hash: the product and the key, which has no space in it (lib/licence-key-rules.ts). */
+export const holderField = (product: Pick<Listing, "id">, key: string) => `${product.id}\t${key}`;
+/**
+ * A store's fill of its buyers' lists (#5136, Claude 4 3rC's MEDIUM): `at` is where it is ("<catalog digest>:<product
+ * index>:<HSCAN cursor>" over the store's products in id order) and `done` is "1" once every product's records were
+ * walked to the end in one unchanged catalog. Keys given before the lists existed (trial stores sold until 5 October
+ * 2026) have no line until then. The digest is of the catalog's sorted ids (catalogDigest): when a product is added or
+ * removed between two runs, the index would name another product (Claude 4 3Kc's MEDIUM on d2df5637dd: a removed product
+ * before it skipped the next one, and the store was marked done with its keys left out), so the walk starts again from
+ * the top. Walking again only reads what has its lines already; it never skips a product.
+ */
+const fillKey = (store: Pick<Store, "statsId">) => `nl:keys:${store.statsId}:whofill`;
+/** The fill place's mark of the catalog it was walked in: the first 16 hex of a SHA-256 of the sorted product ids. */
+const catalogDigest = (ids: string[]) => createHash("sha256").update(ids.join("\n")).digest("hex").slice(0, 16);
+/** The company's mark that every store the sweep reached in one whole round had its fill done: the sweep stops asking. */
+export const HOLDER_FILL_ALL_DONE = "nl:keysfill:done";
+/** The round's mark: "clean" from the round's first store, "dirty" once a store's fill was left unfinished in it. */
+export const HOLDER_FILL_ROUND = "nl:keysfill:round";
+/** Records one HSCAN step asks for (Redis may give a whole small hash at once). */
+/**
+ * Records one step reads (HSCAN COUNT): a hint Redis may pass. 30, so a step at its dearest (an HMGET a buyer, every
+ * line missing, each written behind the store-live fence with every call inside its script counted, and the place)
+ * stays well inside one run of FILL_RUN_COMMANDS (about 313 calls at 30 records), now that a script is counted with
+ * the calls inside it (Claude 4 3rC's LOW 1 and Codex N1 on #5136). A page Redis answers larger still marks the store
+ * `whole` when even one cannot fit a run.
+ */
+const FILL_PAGE = 30;
+/**
+ * The most commands one store's fill sends in one run of the sweep, counted as the cost registry counts them (a script
+ * is 1 plus its commands): a one-time company cost, never a store's. tests/licence-holder-fill.test.ts holds it.
+ */
+export const FILL_RUN_COMMANDS = 400;
+/** The `done` value of a store whose fill could not fit one page in a run: its copy keeps main's whole read for good. */
+export const HOLDER_FILL_WHOLE = "whole";
+/**
+ * How many times one store's fill may stop short before it is marked `whole` (Claude 6 i51q's MEDIUM on cdafb13ff9): a
+ * run that met a reply in a shape no writer writes (rule 24, persistent, so the next run would meet it again) or a walk
+ * that had to start again from the top because the catalog changed. Each other run advances at least one step, so a
+ * store's fill ends after at most its steps plus these tries, and the sweep's asking ends with it.
+ */
+export const FILL_MAX_TRIES = 5;
+/**
+ * One fenced write of the fill's mark (the place, `done`, or `done` and `tries` together): the script and every call
+ * inside it, as the cost registry counts a script (Claude 4 3rC's LOW 1 and Codex N1 on #5136), at the dearest of the
+ * three, two fields.
+ */
+export const FILL_MARK_COMMANDS = orderWriteCallsMost([["HSET", "mark", "done", HOLDER_FILL_WHOLE, "tries", String(FILL_MAX_TRIES)]], { storeLive: true });
+/**
+ * What the fill's fenced writes of `n` missing lines cost: one script per ORDER_WRITE_MAX lines, each line a one-field
+ * HSET of its own buyer's list at the dearest (every line on a list of its own), with every call inside the script.
+ */
+const writeCommands = (n: number) => {
+  let calls = 0;
+  for (let left = n; left > 0; left -= ORDER_WRITE_MAX) {
+    const m = Math.min(left, ORDER_WRITE_MAX);
+    calls += orderWriteCallsMost(Array.from({ length: m }, (_, i) => ["HSET", `list${i}`, "line", "1"]), { storeLive: true });
+  }
+  return calls;
+};
+
+/** One step of the fill at its dearest: an HMGET a buyer, every one of `lines` missing and written, and the place. */
+export const fillStepCommandsMost = (buyers: number, lines: number) => buyers + writeCommands(lines) + FILL_MARK_COMMANDS;
+
+/**
+ * The store-live fence of every write the fill makes (Claude 1's LEVE and Codex N1 on #5136): the store's id key and
+ * its erasing mark, read in the same step as the write (lib/order-data.ts ORDER_WRITE_IF_STORE_LIVE), so a fill that
+ * reads a page while the store is being erased never writes a buyer's line, the place or a mark back after the
+ * closing walk. A store kept from before ids has no id key the fence can read, so the fill never writes for it: its
+ * copies keep main's whole read, complete (keysOf), as a store whose fill is not done.
+ */
+type FillFence = { live: string; field: string };
+async function fillFence(store: Store): Promise<FillFence | null> {
+  if (!STORE_ID_PATTERN.test(store.sid)) return null;
+  return { live: storeIdCommand(store.sid)[1], field: await erasingField(storeRef(store)) };
+}
+/** The store is gone (or erasing) under the fill: nothing more is written, and the sweep stops asking it. */
+class FillStoreGone extends Error {}
+async function fillWrite(store: Store, fence: FillFence, commands: [string, string, ...string[]][]): Promise<void> {
+  for (let i = 0; i < commands.length; i += ORDER_WRITE_MAX) {
+    const written = await orderWriteIfStoreLive(store, commands.slice(i, i + ORDER_WRITE_MAX), fence.live, ERASING_KEY, fence.field);
+    if (written === null) throw new FillStoreGone("the store was erased during its fill");
+  }
+}
 
 /**
  * What the refund job writes in a sale's place among the keys given (`:sale`) when the sale was refunded in full or
@@ -403,11 +498,15 @@ export async function keyForSale(store: Store, product: Listing, reference: stri
  */
 async function settle(store: Store, product: Listing, reference: string, email: string, key: string, fromPool: boolean): Promise<SaleKey | null> {
   const info: Info = { r: reference, e: email, at: Math.floor(Date.now() / 1000) };
-  // A key given to a sale is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
+  // A key given to a sale is kept for good: counted in the store's room at what it adds (lib/order-data.ts). The
+  // buyer's own list of keys is written in the same step, so a key is never given without it (issue #5125); a sale
+  // with no address has nobody to list it under.
+  const holder: [string, string, string, string][] = normaliseEmail(email) ? [["HSET", holderKey(store, email), holderField(product, key), "1"]] : [];
   const won = await orderWriteIfNew(store, [
     ["HSETNX", saleKey(store, product), reference, key],
     ["HSET", infoKey(store, product), key, JSON.stringify(info)],
     ["HDEL", waitingKey(store, product), reference],
+    ...holder,
   ]);
   if (!won) {
     await redisPipeline(fromPool ? [["LPUSH", poolKey(store, product), key]] : [["SREM", allKey(store, product), key]]);
@@ -1142,9 +1241,27 @@ export async function checkKey(store: Store, product: Listing, key: string): Pro
  * purpose (lib/person-data.ts): the key is what was bought. Only reads.
  */
 export async function keysOf(store: Store, productIds: string[], email: string): Promise<(IssuedKey & { product: string })[]> {
-  if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
-  const address = email.trim().toLowerCase();
-  // An unknown answer is not "no keys": the copy says it could not read them rather than leave them out (CX-123 rule 24).
+  if (!store.statsId || !isRedisConfigured() || !normaliseEmail(email)) return [];
+  // Until the store's fill is done, a key given before the lists may have no line: read every product's records, as
+  // main did (complete, never worse). After it, only the person's own list (#5136).
+  if (!(await holderFillDone(store))) return keysOfWhole(store, productIds, email);
+  return keysOfList(store, productIds, email);
+}
+
+/** Whether the store's fill of its buyers' lists is done; a mark in any other shape is unknown and throws (rule 24). */
+export async function holderFillDone(store: Pick<Store, "statsId">): Promise<boolean> {
+  if (!store.statsId || !isRedisConfigured()) return false;
+  const reply = repliesFor(await redisPipeline([["HGET", fillKey(store), "done"]]), 1);
+  const mark = reply?.[0];
+  if (!reply || (mark !== null && mark !== "1" && mark !== HOLDER_FILL_WHOLE)) throw new UnknownReplyError("the license keys' fill mark");
+  // `whole` is a store whose fill could not fit one page in a run: it keeps main's whole read, so it is never "done".
+  return mark === "1";
+}
+
+/** Main's read, kept for a store whose fill is not done: every product's whole records, filtered by the address. */
+async function keysOfWhole(store: Store, productIds: string[], email: string): Promise<(IssuedKey & { product: string })[]> {
+  if (!productIds.length) return [];
+  const address = normaliseEmail(email);
   const replies = repliesFor(await redisPipeline(productIds.map((id) => ["HGETALL", infoKey(store, { id })])), productIds.length);
   if (!replies) throw new UnknownReplyError("the license keys' records");
   return productIds.flatMap((product, i) => {
@@ -1155,10 +1272,246 @@ export async function keysOf(store: Store, productIds: string[], email: string):
       // An unreadable record is unknown, never a key left out of the copy.
       readInfo(flat[k + 1]);
       const entry = parseInfo(String(flat[k]), flat[k + 1]);
-      if (entry && entry.email.trim().toLowerCase() === address) out.push({ ...entry, product });
+      if (entry && normaliseEmail(entry.email) === address) out.push({ ...entry, product });
     }
     return out;
   });
+}
+
+/** The person's own keys, from their list: one HGETALL and one HMGET a product they hold a key of. */
+async function keysOfList(store: Store, productIds: string[], email: string): Promise<(IssuedKey & { product: string })[]> {
+  const address = normaliseEmail(email);
+  // Only this person's keys, from their own list written with each key (settle; issue #5125), never every key the
+  // store gave. An unknown answer is not "no keys": the copy says it could not read them rather than leave them out
+  // (CX-123 rule 24).
+  const listed = repliesFor(await redisPipeline([["HGETALL", holderKey(store, email)]]), 1)?.[0];
+  const flat = listed === undefined ? null : stringList(listed);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the person's list of license keys");
+  const byProduct = new Map<string, string[]>();
+  for (let i = 0; i < flat.length; i += 2) {
+    const cut = flat[i].indexOf("\t");
+    const product = cut > 0 ? flat[i].slice(0, cut) : "";
+    const key = cut > 0 ? flat[i].slice(cut + 1) : "";
+    if (!product || !key || flat[i + 1] !== "1") throw new UnknownReplyError("an entry of the person's list of license keys");
+    byProduct.set(product, [...(byProduct.get(product) ?? []), key]);
+  }
+  // The products the store still lists first, as the copy has always shown them; then any other product they hold a key of.
+  const order = [...productIds.filter((id) => byProduct.has(id)), ...[...byProduct.keys()].filter((id) => !productIds.includes(id))];
+  if (!order.length) return [];
+  const replies = repliesFor(await redisPipeline(order.map((id) => ["HMGET", infoKey(store, { id }), ...byProduct.get(id)!])), order.length);
+  if (!replies) throw new UnknownReplyError("the license keys' records");
+  return order.flatMap((product, i) => {
+    const keys = byProduct.get(product)!;
+    const values = replies[i];
+    if (!Array.isArray(values) || values.length !== keys.length) throw new UnknownReplyError("HMGET of a person's license keys");
+    const out: (IssuedKey & { product: string })[] = [];
+    values.forEach((raw, k) => {
+      // A key whose product's records are gone (the product deleted with its keys) is kept nowhere: nothing to copy.
+      if (raw === null) return;
+      if (typeof raw !== "string") throw new UnknownReplyError("a license key's record");
+      // An unreadable record is unknown, never a key left out of the copy.
+      readInfo(raw);
+      const entry = parseInfo(keys[k], raw);
+      if (entry && normaliseEmail(entry.email) === address) out.push({ ...entry, product });
+    });
+    return out;
+  });
+}
+
+/**
+ * The person's keys as their data copy reads them (lib/person-copy.ts): read once per copy, so the keys part and the
+ * devices part (lib/licence-activations.ts) share one read (issue #5125). `scope` is the copy's own scope object.
+ */
+const copyReads = new WeakMap<object, ReturnType<typeof keysOf>>();
+export function keysForCopy(scope: { store: Store; productIds: string[]; email: string }): ReturnType<typeof keysOf> {
+  let read = copyReads.get(scope);
+  if (!read) {
+    read = keysOf(scope.store, scope.productIds, scope.email);
+    copyReads.set(scope, read);
+  }
+  return read;
+}
+
+/**
+ * The opening check of issue #5125 (coordinator f416), read only and never called by a route: every key a product
+ * gave whose line is missing from its buyer's own list (holderKey), so the person's copy would leave it out. Keys are
+ * given only by settle, which writes the line in the same step; keys given before this list existed (stores sold on a
+ * trial until 5 October 2026) get theirs from the sweep's fill (fillHolderLines). Before sales open, it proves it on
+ * the real data for every store whose fill is done (holderFillDone); a store not done (marked `whole`, or never asked
+ * because it sells no keys now, Claude 6 i51q's LOW on cdafb13ff9) may still list keys here, and its copy reads every
+ * product's records as main did, complete. Reads each product's whole record hash and, per buyer, one
+ * HMGET of their list: an audit's cost, not a request's. An unknown reply throws (rule 24), never "none missing".
+ */
+export async function keysWithoutHolderLine(store: Store, productIds: string[]): Promise<{ product: string; key: string }[]> {
+  if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
+  const replies = repliesFor(await redisPipeline(productIds.map((id) => ["HGETALL", infoKey(store, { id })])), productIds.length);
+  if (!replies) throw new UnknownReplyError("the license keys' records");
+  const byHolder = new Map<string, { email: string; fields: { product: string; key: string }[] }>();
+  productIds.forEach((product, i) => {
+    const flat = stringList(replies[i]);
+    if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("HGETALL of a product's license keys");
+    for (let k = 0; k + 1 < flat.length; k += 2) {
+      const info = readInfo(flat[k + 1]);
+      // A sale with no address has nobody to list it under (settle writes no line for it).
+      if (!normaliseEmail(info.e)) continue;
+      const holder = holderKey(store, info.e);
+      const entry = byHolder.get(holder) ?? { email: info.e, fields: [] };
+      entry.fields.push({ product, key: flat[k] });
+      byHolder.set(holder, entry);
+    }
+  });
+  const holders = [...byHolder.entries()];
+  if (!holders.length) return [];
+  const lines = repliesFor(await redisPipeline(holders.map(([holder, e]) => ["HMGET", holder, ...e.fields.map((f) => holderField({ id: f.product }, f.key))])), holders.length);
+  if (!lines) throw new UnknownReplyError("the buyers' lists of license keys");
+  return holders.flatMap(([, e], i) => {
+    const values = lines[i];
+    if (!Array.isArray(values) || values.length !== e.fields.length) throw new UnknownReplyError("HMGET of a buyer's list of license keys");
+    return e.fields.filter((_, k) => {
+      if (values[k] === "1") return false;
+      if (values[k] === null) return true;
+      throw new UnknownReplyError("an entry of a buyer's list of license keys");
+    });
+  });
+}
+
+/**
+ * One run's share of a store's fill (#5136): walks the store's products in id order, each one's records with HSCAN from
+ * the kept place, writes every missing line of the buyers' lists (orderWrite, counted in the store's room), keeps its
+ * place after each step, and marks the store done only once the last product's walk is back at cursor 0. Answers whether
+ * the store needs no more runs. An unknown reply throws (rule 24): the place stays as it was, never "done".
+ *
+ * The commands a run sends never pass `budget` (coordinator 14f3), counted as the cost registry counts them: a
+ * pipelined command is 1 and an orderWrite script is 1 plus its commands. A step (one HSCAN page, its HMGETs, its
+ * missing lines and the place) runs only when its worst case, known once the page is read, still leaves room for the
+ * `done` mark; otherwise the run stops before writing anything of that page and the next run reads it again. A page that
+ * cannot fit in a whole run even alone (Redis may answer an HSCAN with more than COUNT records) marks the store
+ * `whole`: its copy keeps main's read of every product's records for good, complete, and the sweep stops asking it.
+ */
+export async function fillHolderLines(store: Store, deadline: number, budget = FILL_RUN_COMMANDS): Promise<boolean> {
+  if (!store.statsId || !isRedisConfigured()) return false;
+  // No fence to write behind (a store from before ids): nothing is written, its copies keep main's whole read.
+  const fence = await fillFence(store);
+  if (!fence) return true;
+  try {
+    return await fillRun(store, fence, deadline, budget);
+  } catch (error) {
+    // Erased while it was being filled: nothing more is written for it, and nothing is left to ask.
+    if (error instanceof FillStoreGone) return true;
+    throw error;
+  }
+}
+
+async function fillRun(store: Store, fence: FillFence, deadline: number, budget: number): Promise<boolean> {
+  const state = repliesFor(await redisPipeline([["HMGET", fillKey(store), "done", "at", "tries"]]), 1)?.[0];
+  if (!Array.isArray(state) || state.length !== 3) throw new UnknownReplyError("the license keys' fill state");
+  const [mark, at, triedRaw] = state;
+  if ((mark !== null && mark !== "1" && mark !== HOLDER_FILL_WHOLE) || (at !== null && typeof at !== "string")) throw new UnknownReplyError("the license keys' fill state");
+  if (triedRaw !== null && (typeof triedRaw !== "string" || !/^\d{1,3}$/.test(triedRaw))) throw new UnknownReplyError("the license keys' fill tries");
+  if (mark !== null) return true;
+  const tried = triedRaw === null ? 0 : Number(triedRaw);
+  // One more try, kept; the last one leaves the store on main's whole read for good, complete, and asked no more.
+  const tryAgain = async (): Promise<boolean> => {
+    const n = tried + 1;
+    await fillWrite(store, fence, [n >= FILL_MAX_TRIES ? ["HSET", fillKey(store), "done", HOLDER_FILL_WHOLE, "tries", String(n)] : ["HSET", fillKey(store), "tries", String(n)]]);
+    return n >= FILL_MAX_TRIES;
+  };
+  const place = typeof at === "string" ? /^([0-9a-f]{16}):(\d{1,6}):(\d{1,20})$/.exec(at) : null;
+  if (at !== null && !place) throw new UnknownReplyError("the license keys' fill place");
+  const ids = [...new Set(store.catalog.items.map((item) => item.id))].sort();
+  const digest = catalogDigest(ids);
+  // A place kept in another catalog would name another product (a product added or removed since): walk from the top.
+  const same = place !== null && place[1] === digest;
+  if (place !== null && !same && (await tryAgain())) return true;
+  let index = same ? Number(place[2]) : 0;
+  let cursor = same ? place[3] : "0";
+  let used = place !== null && !same ? 1 + FILL_MARK_COMMANDS : 1;
+  let steps = 0;
+  try {
+    while (index < ids.length && Date.now() < deadline && used + 1 + FILL_MARK_COMMANDS <= budget) {
+      const product = { id: ids[index] };
+      const page = repliesFor(await redisPipeline([["HSCAN", infoKey(store, product), cursor, "COUNT", FILL_PAGE]]), 1)?.[0];
+      used += 1;
+      if (!Array.isArray(page) || page.length !== 2 || typeof page[0] !== "string" || !/^\d{1,20}$/.test(page[0])) throw new UnknownReplyError("HSCAN of a product's license keys");
+      const flat = stringList(page[1]);
+      if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("HSCAN of a product's license keys");
+      const byHolder = new Map<string, string[]>();
+      for (let k = 0; k + 1 < flat.length; k += 2) {
+        const info = readInfo(flat[k + 1]);
+        // A sale with no address has nobody to list it under (settle writes no line for it either).
+        if (!normaliseEmail(info.e)) continue;
+        const holder = holderKey(store, info.e);
+        byHolder.set(holder, [...(byHolder.get(holder) ?? []), holderField(product, flat[k])]);
+      }
+      const holders = [...byHolder.entries()];
+      const fields = holders.reduce((n, [, f]) => n + f.length, 0);
+      // The step's worst case: one HMGET a buyer, every line missing, and the place.
+      const worst = fillStepCommandsMost(holders.length, fields);
+      if (used + worst + FILL_MARK_COMMANDS > budget) {
+        if (steps > 0) return false;
+        // Not even one page fits in a whole run: this store keeps main's read for good (complete), and is not asked again.
+        if (2 + worst + FILL_MARK_COMMANDS > budget) {
+          await fillWrite(store, fence, [["HSET", fillKey(store), "done", HOLDER_FILL_WHOLE]]);
+          return true;
+        }
+        return false;
+      }
+      if (holders.length) {
+        const lines = repliesFor(await redisPipeline(holders.map(([holder, f]) => ["HMGET", holder, ...f])), holders.length);
+        used += holders.length;
+        if (!lines) throw new UnknownReplyError("the buyers' lists of license keys");
+        const missing: [string, string, string, string][] = [];
+        holders.forEach(([holder, f], i) => {
+          const values = lines[i];
+          if (!Array.isArray(values) || values.length !== f.length) throw new UnknownReplyError("HMGET of a buyer's list of license keys");
+          f.forEach((field, k) => {
+            if (values[k] === null) missing.push(["HSET", holder, field, "1"]);
+            else if (values[k] !== "1") throw new UnknownReplyError("an entry of a buyer's list of license keys");
+          });
+        });
+        if (missing.length) {
+          await fillWrite(store, fence, missing);
+          used += writeCommands(missing.length);
+        }
+      }
+      cursor = page[0];
+      if (cursor === "0") index += 1;
+      await fillWrite(store, fence, [["HSET", fillKey(store), "at", `${digest}:${index}:${cursor}`]]);
+      used += FILL_MARK_COMMANDS;
+      steps += 1;
+    }
+  } catch (error) {
+    // A reply in a shape no writer writes is persistent: counted, so it cannot hold the fill open for good. Anything
+    // else (Redis not answering) is not counted and is tried again on the next run.
+    if (!(error instanceof UnknownReplyError)) throw error;
+    if (await tryAgain()) return true;
+    throw error;
+  }
+  if (index < ids.length) return false;
+  await fillWrite(store, fence, [["HSET", fillKey(store), "done", "1"]]);
+  return true;
+}
+
+/**
+ * The sweep's side of the fill (lib/checkout-sweep.ts): whether it still has to ask each store with keys (no company
+ * mark yet); a round's start, the round left unfinished by a store, and the round's end, which sets the company mark only
+ * when the round began clean here and no store was left unfinished. An unknown mark is "still on": asking costs a read,
+ * stopping early could leave a store unfilled.
+ */
+export async function holderFillOn(): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const reply = repliesFor(await redisPipeline([["GET", HOLDER_FILL_ALL_DONE]]), 1);
+  return !(reply && reply[0] === "1");
+}
+export async function startHolderFillRound(): Promise<void> {
+  await redisPipeline([["SET", HOLDER_FILL_ROUND, "clean"]]);
+}
+export async function holderFillLeft(): Promise<void> {
+  await redisPipeline([["SET", HOLDER_FILL_ROUND, "dirty"]]);
+}
+export async function endHolderFillRound(): Promise<void> {
+  const reply = repliesFor(await redisPipeline([["GET", HOLDER_FILL_ROUND]]), 1);
+  if (reply && reply[0] === "clean") await redisPipeline([["SET", HOLDER_FILL_ALL_DONE, "1"], ["DEL", HOLDER_FILL_ROUND]]);
 }
 
 // ---------------------------------------------------------------- email

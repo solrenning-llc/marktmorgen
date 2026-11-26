@@ -91,7 +91,7 @@ export const ORDER_DATA_BYTES = 4_608;
  * A course's student row is written when they first open it, and takes its
  * own room then (touchStudent).
  */
-export const ITEM_DATA_BYTES = 4_352;
+export const ITEM_DATA_BYTES = 6_000;
 
 /** The most products one order can hand over: a cart of MAX_CART, each with MAX_BUMPS added, every one a bundle of MAX_BUNDLE_ITEMS. */
 export const MAX_ORDER_ITEMS = (MAX_CART + MAX_BUMPS) * MAX_BUNDLE_ITEMS;

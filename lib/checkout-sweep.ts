@@ -80,6 +80,8 @@ import { contentRoomFor } from "@/lib/store-data-rules";
 import { certificatePassesDue, mayHaveCertificates, takeCertificatePass, withdrawRefundedCertificates } from "@/lib/certificate-refunds";
 import { OPEN_HOURS, releaseExpiredHolds } from "@/lib/order-admission";
 import { paidOrdersLimitFor } from "@/lib/order-rules";
+// The one-time fill of the buyers' lists of license keys (#5136), kept on its own line beside the other imports.
+import { endHolderFillRound, fillHolderLines, holderFillLeft, holderFillOn, startHolderFillRound } from "@/lib/licence-keys";
 
 const CURSOR_KEY = "nl:sweep:cursor";
 
@@ -455,6 +457,9 @@ async function walkDay(store: Store, kind: WalkKind, since: number, deadline: nu
   }
 }
 
+/** Whether this run of the sweep still fills the buyers' lists of license keys (#5136), keyed by the run's own counts. */
+const holderFillThisRun = new WeakMap<SweepCounts, boolean>();
+
 export type SweepCounts = {
   stores: number;
   confirmed: number;
@@ -497,6 +502,14 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       counts.revoked += await revokeRefunded(store, deadline);
     } catch (error) {
       console.error("reading a store's refunds failed", store.handle, error);
+    }
+    // Keys given before the buyers' own lists get their lines, a bounded share a run, until the store is done (#5136).
+    if (holderFillThisRun.get(counts)) {
+      const filled = await fillHolderLines(store, deadline).catch((error: unknown) => {
+        console.error("filling a store's lists of license keys failed", store.handle, describe(error));
+        return false;
+      });
+      if (!filled) await holderFillLeft().catch(() => undefined);
     }
   }
   // A gift refunded in full is taken back from whoever it was given to
@@ -887,6 +900,11 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
   // most once a run: the job's per-store figures (PAYPAL_WATCH_RANGES and
   // NOT_A_COST.PAYPAL_WATCH_BATCH in tests/plan-cost-registry.ts) hold.
   const swept = new Set<string>();
+  // The buyers' lists of license keys still to fill (#5136): one GET a run until a whole round found nothing left; a
+  // round that starts here from the top of the list is marked clean, and its end sets the company's mark.
+  const fillOn = await holderFillOn().catch(() => true);
+  holderFillThisRun.set(counts, fillOn);
+  if (fillOn && cursor === "0" && skip === 0) await startHolderFillRound().catch(() => undefined);
 
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
@@ -936,7 +954,10 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
     cursor = next;
     // The end of the list: the next run starts again from the top, rather
     // than this one reading the first stores twice in a row.
-    if (next === "0") break;
+    if (next === "0") {
+      if (fillOn) await endHolderFillRound().catch(() => undefined);
+      break;
+    }
   }
   await redisPipeline([["SET", CURSOR_KEY, `${cursor}|0`]]);
   return counts;

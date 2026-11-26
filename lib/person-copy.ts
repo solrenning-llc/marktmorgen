@@ -71,7 +71,7 @@ import { rsvpsOf } from "@/lib/community-events";
 import { challengesOf } from "@/lib/community-challenges";
 import { votesOf } from "@/lib/community-polls";
 import { heldCopy, heldOf } from "@/lib/community-approval";
-import { keysOf } from "@/lib/licence-keys";
+import { keysForCopy } from "@/lib/licence-keys";
 import { activationsOf } from "@/lib/licence-activations";
 import { paypalOrdersOf } from "@/lib/paypal-sales";
 import { preordersOf } from "@/lib/preorders";
@@ -559,8 +559,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const empty = !member && points.total === 0 && !notices.length && !devices && !conversations.length && !room.length && !events.length && !challenges.length && !votes.length && !held.length && Object.values(wrote).every((list) => !list.length);
     return empty ? [] : [record];
   },
-  "lib/licence-keys.ts": async (s) => (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),
-  "lib/licence-activations.ts": async (s) => activationsOf(s.store, (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key }))),
+  "lib/licence-keys.ts": async (s) => (await keysForCopy(s)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),
+  "lib/licence-activations.ts": async (s) => activationsOf(s.store, (await keysForCopy(s)).map((k) => ({ product: k.product, key: k.key }))),
   "lib/paypal-sales.ts": async (s) => paypalOrdersOf(s.statsId, s.productIds, s.email),
   "lib/preorders.ts": async (s) => (await preordersOf(s.store, s.productIds, s.email)).map((p) => ({ ...p, at: iso(p.at), ...(p.given ? { given: iso(p.given) } : {}), ...(p.revoked ? { revoked: iso(p.revoked) } : {}) })),
   "lib/closing-buyers.ts": async (s) => {

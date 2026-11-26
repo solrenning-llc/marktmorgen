@@ -19,6 +19,7 @@
 import { type Store, claimHandle, ensureStatsId, addProduct, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { addKeys, checkKey, keyCounts, keyForSale, readKeyList, revokeRefunded } from "@/lib/licence-keys";
 import { ORDERS_KEY_COMMANDS } from "@/lib/buyer-orders-rules";
+import { orderEvalCallsMost } from "@/lib/order-data";
 import { readListing } from "@/lib/catalog";
 import { CLOSING, closingFamilyOf, countedInRoom } from "@/lib/data-families";
 import { prepareStore, walkPage } from "@/lib/closed-store-data";
@@ -238,7 +239,9 @@ async function main(): Promise<void> {
   let marked = false;
   const costly = "cs_test_licmark000010";
   redis.pipeline = (async (sent: Command[]) => {
-    commands += sent.length;
+    // As the cost registry counts them: a command is 1, and the settle's script (ORDER_WRITE_IF_NEW) 1 plus every call
+    // inside it at its dearest (Claude 4 3rC's LOW 1 and Codex N1 on #5136: it had been counted as 1).
+    commands += sent.reduce((n, c) => n + (c[0] === "EVAL" ? orderEvalCallsMost(c) : 1), 0);
     if (!marked && sent.some(writesSale(costly))) {
       marked = true;
       await real([["HSETNX", `nl:keys:${store.statsId}:${app.id}:sale`, costly, String(await saleKeyOf(app, early.reference))]]);

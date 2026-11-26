@@ -25,6 +25,7 @@ import { KEEP_CARD_OPEN_IF_LIVE, cardGrant, cardLink, cardView, finishCardUpdate
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { recoveredFrom, recoveryReport } from "@/lib/payment-recovery-report";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ownerKey, setDunning, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { liftCommand, suppressCommand } from "@/lib/suppression";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -222,6 +223,31 @@ async function main(): Promise<void> {
   is("not told twice about the same card", mails.length, 5);
   const token = card.text.match(/manage\/card\?t=([0-9a-f]{64})/)?.[1] ?? "";
   is("with a link to the card page", token.length, 64);
+
+  part("An erased member receives no new card notice or link (#4766, Codex L)");
+  {
+    const listId = store.listId;
+    if (!listId) throw new Error("the fixture store has no list");
+    const erased = "erased-card-notice@example.com";
+    const before = mails.length;
+    const oldLinks = redis.keys().filter((key) => key.startsWith("nl:card:link:")).sort();
+    const oldMarks = redis.keys().filter((key) => key.startsWith("nl:dun:card:")).sort();
+    state.active = [{
+      ...running, id: "sub_ErasedCard0001",
+      customer: { ...running.customer, id: "cus_ErasedCard0001", email: erased },
+    }];
+    await redis.pipeline([suppressCommand(listId, erased)]);
+    try {
+      await run();
+      is("no email and no new card link for the erased member",
+        [mails.length - before, redis.keys().filter((key) => key.startsWith("nl:card:link:")).sort()],
+        [0, oldLinks]);
+      is("the notice's mark is let go, not kept for them", redis.keys().filter((key) => key.startsWith("nl:dun:card:")).sort(), oldMarks);
+    } finally {
+      state.active = [running, later, good, ending];
+      await redis.pipeline([liftCommand(listId, erased)]);
+    }
+  }
 
   part("The card page");
   state.subs.set("sub_Running000001", { ...running, customer: "cus_Member000001", latest_invoice: null });

@@ -24,8 +24,9 @@ import { readListing } from "@/lib/catalog";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { ADMITTED_FIELD, admitOrders } from "@/lib/order-admission";
 import { ordersIn } from "@/lib/orders";
-import { confirmPurchase } from "@/lib/purchase-email";
-import { addProduct, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
+import { confirmationKey, confirmPurchase } from "@/lib/purchase-email";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
+import { liftCommand, suppressCommand } from "@/lib/suppression";
 import { newUpsellKey, readUpsell, settleUpsells, takeUpsell } from "@/lib/upsell";
 import { shownRef } from "./upsell-ref-fixture";
 import { store as redis } from "./redis-stub";
@@ -278,6 +279,76 @@ async function main(): Promise<void> {
     is(`counted once (email ${refused ? "refused" : "accepted"})`, (await counted()) - before, 1);
     await settleUpsells(store, session);
     is(`settled again: not counted twice (email ${refused ? "refused" : "accepted"})`, (await counted()) - before, 1);
+  }
+
+  // #4762 (erasure, Codex L): an offer's confirmation is never sent to a person deleted from the store at or after
+  // the offer's payment; the offer is still paid and counted. Deleted long before, the email goes as any.
+  const listId = (await ensureListId(OWNER))?.listId;
+  if (!listId) throw new Error("the fixture store has no list");
+  /** The send mark of the last offer charged: null when no send was ever claimed for it. */
+  const lastMark = async () => (await plain([["GET", confirmationKey(String(made[made.length - 1].id))]]))[0] ?? null;
+
+  part("An erased recipient is not emailed when a pending offer later settles (#4762)");
+  {
+    const session = offerCheckout();
+    const before = [await counted(), emailsAccepted];
+    nextCharge = "requires_action";
+    is("the offer waits for payment confirmation", (await take(session)).kind, "confirm");
+    nextCharge = "succeeded";
+    made[made.length - 1].status = "succeeded";
+    // The print a completed erasure leaves, written now: after the offer's payment.
+    await plain([suppressCommand(listId, BUYER)]);
+    try {
+      await settleUpsells(store, session);
+      is("the offer is paid and counted, with no email and no send mark",
+        [(await readUpsell(session))?.state, (await counted()) - before[0], emailsAccepted - before[1], await lastMark()],
+        ["paid", 1, 0, null]);
+    } finally {
+      await plain([liftCommand(listId, BUYER)]);
+    }
+  }
+
+  part("An erasure while a one-click offer is charged leaves its confirmation unsent (#4762)");
+  {
+    const session = offerCheckout();
+    const before = [await counted(), emailsAccepted];
+    onCharge = async () => { await plain([suppressCommand(listId, BUYER)]); };
+    try {
+      is("taken: it was paid", (await take(session)).kind, "done");
+      is("counted once, with no email and no send mark", [(await counted()) - before[0], emailsAccepted - before[1], await lastMark()], [1, 0, null]);
+    } finally {
+      await plain([liftCommand(listId, BUYER)]);
+    }
+  }
+
+  part("A store record read without its list still checks the erasure (#4762)");
+  {
+    const session = offerCheckout();
+    const before = [await counted(), emailsAccepted];
+    nextCharge = "requires_action";
+    is("the offer waits for payment confirmation", (await take(session)).kind, "confirm");
+    nextCharge = "succeeded";
+    made[made.length - 1].status = "succeeded";
+    await plain([suppressCommand(listId, BUYER)]);
+    try {
+      await settleUpsells({ ...store, listId: null }, session);
+      is("paid and counted, with no email", [(await readUpsell(session))?.state, (await counted()) - before[0], emailsAccepted - before[1]], ["paid", 1, 0]);
+    } finally {
+      await plain([liftCommand(listId, BUYER)]);
+    }
+  }
+
+  part("(control) A person deleted long before the offer's payment gets its confirmation (#4762)");
+  {
+    const session = offerCheckout();
+    const before = [await counted(), emailsAccepted];
+    await plain([suppressCommand(listId, BUYER, NOW - 86_400)]);
+    try {
+      is("taken: it was paid", (await take(session)).kind, "done");
+      is("counted once and emailed", [(await counted()) - before[0], emailsAccepted - before[1]], [1, 1]);
+    } finally {
+      await plain([liftCommand(listId, BUYER)]);
+    }
   }
 
   console.error = realError;

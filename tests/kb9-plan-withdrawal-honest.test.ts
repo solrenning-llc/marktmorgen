@@ -22,6 +22,7 @@ import { done, is, part } from "./check";
 import { POST } from "@/app/api/billing/withdraw/route";
 import StudioRefundPage from "@/app/studio/refund/page";
 import { planWithdrawKey } from "@/lib/plan-withdrawal";
+import { PLAN_WITHDRAW_WORDS as W } from "@/lib/plan-withdrawal-words";
 import { redisPipeline } from "@/lib/redis";
 import { who } from "./plan-refund-route-world";
 import { paidShop, world } from "./plan-refund-stripe-world";
@@ -96,6 +97,8 @@ async function main() {
   const downState = await post({ name: NAME, email: ADDRESS });
   stripeDown = false;
   is("offered (never hidden on a guess)", downPage.includes("Withdraw from contract here"), true);
+  is("a failed reading is said as a failed reading", downPage.includes(W.noEnd), true);
+  is("a failed reading is never said as a skipped reading", downPage.includes(W.notReadHere), false);
   is("the page does not promise a full refund it has not read", downPage.includes(FULL), false);
   is("recorded and handed to support", downState, "handled");
   is("the receipt went and promises no full refund", [receipts().length, receipts().some((e) => e.text.includes(FULL))], [1, false]);

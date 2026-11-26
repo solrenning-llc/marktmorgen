@@ -95,6 +95,7 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "outreach", title: "Write a pitch to a sponsor or a partner", segment: "outreach", permission: "draft", words: ["sponsor", "pitch", "partnership", "brand deal", "outreach", "collaboration"] },
   { id: "affiliates", title: "Let affiliates share your store", segment: "affiliates", permission: "settings", words: ["affiliate", "referral", "partner program", "share of sale", "ambassador"] },
   { id: "memberships", title: "See your membership numbers", segment: "memberships", permission: "stats", words: ["mrr", "churn", "subscription", "recurring", "trial", "members who left", "monthly income"] },
+  { id: "fees", title: "See your sales fees and what you keep", segment: "fees", permission: "payments", words: ["fees", "stripe fees", "processing fee", "what i keep", "net", "kept", "fee by month"] },
   { id: "integrations", title: "Connect Mailchimp, Kit, beehiiv or MailerLite", segment: "integrations", permission: "settings", words: ["mailchimp", "kit", "convertkit", "beehiiv", "mailerlite", "integration", "connect", "sync list"] },
   { id: "import", title: "Move from another platform", segment: "import", permission: "import", words: ["import", "migrate", "move", "transfer", "gumroad", "kajabi", "teachable", "thinkific", "csv", "upload list"] },
   { id: "phone", title: "Get notifications on your phone", segment: "phone", permission: "member", words: ["notification", "push", "phone", "alert", "buzz", "mobile app"] },

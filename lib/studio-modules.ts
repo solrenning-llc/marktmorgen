@@ -113,6 +113,7 @@ export const NOT_MODULES: Readonly<Record<string, string>> = {
   agent: "The changes an AI assistant prepared through the store's API, waiting for the owner to confirm; not a part of the store.",
   card: "The business card, one address with a Save contact button, opened from Your pages.",
   invoices: "The invoices of the store's own Marktmorgen plan, opened from the plan card on the studio home.",
+  fees: "Fees and what the owner kept on each sale, read from the store's Stripe account: a report for the owner, not a part of the store.",
   tax: "The tax registrations active on the store's Stripe account, read from Stripe: a report for the owner, not a part of the store.",
   "learning-paths": "Several of the store's courses in an order the creator sets; no card yet, because students cannot open a path until 249 [ST2] unit 4 shows it to them.",
   "check-in": "The door of one in-person event, where tickets are checked as people arrive; opened from that event, never on its own.",

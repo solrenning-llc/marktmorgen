@@ -51,6 +51,7 @@ export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   discord: ["Can my buyers get into my Discord server?"],
   disputes: ["Who handles refunds and disputes?"],
   email: ["Can I email the people on my list?", "Can I bring my email sequences from another service?", "Can I publish an email I sent on my store?"],
+  fees: ["Whose account is the buyer charged on?"],
   forms: ["Can I add a form, a survey or a quiz?"],
   funnels: [
     "Can I offer something extra, before or after they pay, or sell a limited number?",

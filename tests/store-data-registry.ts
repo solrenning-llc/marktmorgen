@@ -63,6 +63,7 @@ import { ENTRY_BYTES } from "@/lib/store-data-rules";
 import { ERASED_MARK_SECONDS, TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
 import { MAIL_GAP_CHECKS_PER_EMAIL } from "@/lib/mail-frequency";
+import { SALE_FEES_COPY_MAX_BYTES } from "@/lib/sale-fees-reading";
 import { SEARCH_INDEX_MAX_BYTES } from "@/lib/store-search-index";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { PATH_LEAD_DAYS } from "@/lib/path-lead";
@@ -822,6 +823,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:mgap:last:@lib/mail-frequency.ts": short("When a person was last sent one of the store's emails, seven days", "monthly", 7, 2 * MAIL_GAP_CHECKS_PER_EMAIL * MARK),
   "nl:mgap:gate:@lib/mail-frequency.ts": short("The one claim on a person's next email from the store, seven days", "monthly", 7, 2 * MAIL_GAP_CHECKS_PER_EMAIL * MARK),
   "nl:mgap:checks:@lib/mail-frequency.ts": { what: "The store's count of gap checks in a calendar month, forty days", parts: [capped(windowsOver(40) * MARK, "One count a calendar month, forty days from its first check: up to three calendar months alive at once.", src("lib/mail-frequency.ts", "MAIL_GAP_CHECK_WINDOW_SECONDS = 40 * 86_400"))] },
+  // 282 [HG1] unit 3: the store's reading of its fees, a day, and the day's count of readings, two days.
+  "nl:salefees:copy:@lib/sale-fees-reading.ts": short("The last reading of the store's fees from its Stripe account, money fields only, a day", "day", 1, SALE_FEES_COPY_MAX_BYTES),
+  "nl:salefees:day:@lib/sale-fees-reading.ts": short("The day's count of fee readings, two days", "day", 2, MARK),
   "nl:mail:health:@lib/list-health-read.ts": company("The same seven days of email health, read exactly for the studio's table (#2314)", "Read only: one GET of the pause's end and one HMGET a day, the same keys and commands lib/mail-health.ts listHealth reads, in place of that read on the studio's email page; nothing is written. The keys are bounded by lib/mail-health.ts's entry."),
   "nl:mail:health:@lib/mail-health.ts": { what: "Sent, bounced and complained, by the day; addresses already counted", parts: [per("day", 33, 128, "A day's counts."), per("monthly", 33, MARK, "An address counted this week.", MAIL("list"))] },
   "nl:mail:paused:@lib/mail-health.ts": { what: "Why sending is paused", parts: [capped(KB, "One a store.")] },

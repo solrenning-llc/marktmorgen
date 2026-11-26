@@ -118,6 +118,12 @@ export function readFeeLine(raw: unknown): FeeLine | "other" | null {
   let feeTax = 0;
   let applicationFee = 0;
   let otherFee = 0;
+  // A fee line is never negative here. Stripe, read 23 November 2026: "For businesses outside Mexico, the dispute
+  // received fee is non-refundable" (docs.stripe.com/disputes/how-disputes-work) and "For businesses in Mexico, the
+  // dispute fee might also be returned. Otherwise, the dispute fee isn't returned" (docs.stripe.com/disputes/responding);
+  // a won dispute returns the disputed amount (reporting category dispute_reversal, docs.stripe.com/reports/
+  // reporting-categories). How a returned fee shows in Mexico is not stated, so a negative fee line stays unread and the
+  // reading is refused, never guessed.
   for (const d of details) {
     if (!record(d) || !whole(d.amount) || d.amount < 0 || d.currency !== currency || typeof d.type !== "string") return null;
     if (STRIPE_FEE_DETAILS.has(d.type)) stripeFee += d.amount;

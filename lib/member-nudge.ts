@@ -28,12 +28,26 @@ import { membershipWords } from "@/lib/buyer-words/membership";
 import type { LanguageCode } from "@/lib/store-language";
 import { nudgeFits } from "@/lib/member-health-rules";
 import { type MemberRow, runningMembers, scoreMembers } from "@/lib/member-health";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 const CURSOR_KEY = "nl:nudge:cursor";
 const KEEP_SECONDS = 400 * 86_400;
 const sentKey = (statsId: string, sub: string, periodEnd: number) => `nl:nudge:${statsId}:${sub}:${periodEnd}`;
 const countKey = (statsId: string, month: string) => `nl:nudge:count:${statsId}:${month}`;
 const monthOf = (ms: number) => new Date(ms).toISOString().slice(0, 7);
+
+/**
+ * The period's mark, taken only while the member has no deletion print on the store's list, in one step (Codex L,
+ * #4764): the job reads the list's tokens before it reaches each member, and an erasure that finished in between must
+ * not get a notice, a period mark or a count. A list email, so any print refuses (it is lifted only by the person's
+ * own yes again, lib/suppression.ts). KEYS[1] the period's mark, KEYS[2] the store's prints; ARGV[1] the member's
+ * print, ARGV[2] the mark's value, ARGV[3] its seconds. 1: taken; 0: taken before; -1: erased, nothing written.
+ * Billed as the EVAL, its HEXISTS and, when not erased, its SET; lib/redis-memory.ts runs it the same way.
+ */
+export const NUDGE_CLAIM = `-- marktmorgen:nudge-claim:v1
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return -1 end
+if redis.call("SET", KEYS[1], ARGV[2], "NX", "EX", ARGV[3]) then return 1 end
+return 0`;
 
 /** The email, pure: what a member reads. */
 export function nudgeEmail(input: { storeName: string; title: string; courseUrl: string; communityUrl: string; language?: LanguageCode }): { subject: string; body: string } {
@@ -70,14 +84,17 @@ export async function nudgeStore(store: Store, deadline: number, now = Date.now(
     if (!unsub || !listing) continue;
     const away = new Set(member.factors.map((f) => f.reason));
     const key = sentKey(statsId, member.sub, member.periodEnd);
-    const claim = await redisPipeline([["SET", key, String(now), "NX", "EX", KEEP_SECONDS]]);
-    if (!Array.isArray(claim) || claim.length !== 1 || !Object.hasOwn(claim, 0) || (claim[0] !== "OK" && claim[0] !== null)) {
+    const claim = await redisPipeline([[
+      "EVAL", NUDGE_CLAIM, 2, key, suppressedKey(store.listId), suppressionPrint(store.listId, member.email), String(now), KEEP_SECONDS,
+    ]]);
+    if (!Array.isArray(claim) || claim.length !== 1 || !Object.hasOwn(claim, 0) || (claim[0] !== 1 && claim[0] !== 0 && claim[0] !== -1)) {
       // The mark may already exist. Never send or delete it without proof
       // that this attempt owns it.
       throw new Error("Member notice ownership could not be confirmed");
     }
-    const [claimed] = claim;
-    if (claimed === null) continue;
+    // 0: another run took this period's mark. -1: the member was erased after
+    // the tokens were read: no mark, no email and no count.
+    if (claim[0] !== 1) continue;
     let accepted = false;
     try {
       const mail = nudgeEmail({

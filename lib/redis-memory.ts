@@ -956,6 +956,12 @@ export class MemoryRedis {
           this.run(["PERSIST", index]);
           return 1;
         }
+        // lib/member-nudge.ts NUDGE_CLAIM: a come-back notice's period mark, taken only while the member is not erased (#4764).
+        if (key.startsWith("-- marktmorgen:nudge-claim:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, mark, erased, print, value, seconds] = args;
+          if (this.run(["HEXISTS", erased, print]) === 1) return -1;
+          return this.run(["SET", mark, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
+        }
         // lib/outreach.ts PITCH_IF_READ: a pitch written only over the exact record read.
         if (key.startsWith("-- marktmorgen:outreach-pitch-if-read:v1\n") && args[0] === "1" && args.length === 5) {
           const [, pitches, id, before, after] = args;

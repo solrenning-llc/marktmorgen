@@ -23,6 +23,10 @@ export const readListings = async () => [{ id: "prod000001", title: "The course"
 export const storeBase = () => "https://marktmorgen.com/@club";
 export const fromLine = () => "club@example.com";
 export const render = (_store: unknown, subject: string, text: string) => ({ subject, text, headers: {} });
+// Only so lib/suppression (through lib/auth) bundles against this world: the nudge never calls them.
+export const NIMBUS_FROM = "Marktmorgen <synthetic@example.com>";
+export const normaliseHandle = (raw: string) => raw;
+export const newAddressProblem = () => null;
 export let sent = 0;
 export const sendEmail = async () => { sent += 1; return true; };
 

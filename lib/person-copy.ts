@@ -77,8 +77,10 @@ import { paypalOrdersOf } from "@/lib/paypal-sales";
 import { preordersOf } from "@/lib/preorders";
 import { toldOf } from "@/lib/closing-buyers";
 import { MAX_PAID_CHECKOUTS, paidCheckoutsOf } from "@/lib/person-copy-stripe";
-import { readGift } from "@/lib/gifts";
-import { isGroupJob, readGroup } from "@/lib/group-buy";
+import { type Gift, giftKeys } from "@/lib/gifts";
+import { GIFT_ID } from "@/lib/gift-rules";
+import { type Group, groupKeys, isGroupJob } from "@/lib/group-buy";
+import { GROUP_ID, readPeople } from "@/lib/group-rules";
 import { type Bought, packageKeys } from "@/lib/call-packages";
 import { readShipped } from "@/lib/shipments";
 import { callScope, readRecords } from "@/lib/meet-records";
@@ -260,6 +262,54 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
 const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true });
+
+/**
+ * A gift for the person's copy (Codex P-20261119-0651): an index names a gift, but is not proof of its store or, for a
+ * gift received, its recipient. Read exactly; the record must carry this id and this store, and a received one this
+ * person's address, or the copy is unknown (UnknownReplyError). Only a confirmed missing record is absent.
+ */
+async function giftForCopy(statsId: string, id: string, recipient?: string): Promise<Gift | null> {
+  if (!GIFT_ID.test(id)) throw new UnknownReplyError("a gift's identity for the copy");
+  const replies = repliesFor(await redisPipeline([["GET", giftKeys(id, "")[0]]]), 1);
+  if (!replies || (replies[0] !== null && typeof replies[0] !== "string")) throw new UnknownReplyError("a gift for the copy");
+  if (replies[0] === null) return null;
+  let value: unknown;
+  try { value = JSON.parse(replies[0]); } catch { throw new UnknownReplyError("a gift's contents for the copy"); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError("a gift's contents for the copy");
+  const gift = value as Record<string, unknown>;
+  // Bounded as groupForCopy's are, so iso() below never throws a RangeError on a far date (Claude 5 ibuF's LOW on #5198):
+  // a time out of range is an unknown copy, like every other field out of shape.
+  const seconds = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= 8_640_000_000_000;
+  if (gift.id !== id || gift.s !== statsId || typeof gift.p !== "string" || !gift.p ||
+      typeof gift.to !== "string" || !gift.to.trim() || typeof gift.from !== "string" || typeof gift.message !== "string" ||
+      !seconds(gift.at) || (gift.given !== undefined && !seconds(gift.given)) || (gift.revoked !== undefined && !seconds(gift.revoked)) ||
+      (recipient !== undefined && !same(gift.to, recipient))) throw new UnknownReplyError("a gift's ownership or contents for the copy");
+  return gift as Gift;
+}
+
+/**
+ * A group purchase for the person's copy (Codex P-20261119-0811): only an exact nil proves that a referenced group
+ * purchase expired. The copy cannot drop an unread purchase, or copy another store's record through an inconsistent
+ * reference. It validates the fields it exports, with the same one GET as the general group reader, and leaves the
+ * access, settlement and refund readers as they are.
+ */
+async function groupForCopy(id: string, statsId: string): Promise<Group | null> {
+  if (!GROUP_ID.test(id)) throw new UnknownReplyError("a group purchase's reference");
+  const replies = repliesFor(await redisPipeline([["GET", groupKeys(id, "")[0]]]), 1);
+  if (!replies) throw new UnknownReplyError("a group purchase for the person's copy");
+  const [raw] = replies;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a group purchase for the person's copy");
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); } catch { throw new UnknownReplyError("a group purchase for the person's copy"); }
+  if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) throw new UnknownReplyError("a group purchase for the person's copy");
+  const group = decoded as Record<string, unknown>;
+  const seconds = (value: unknown): boolean => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 8_640_000_000_000;
+  if (group.id !== id || group.s !== statsId || typeof group.p !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(group.p) ||
+      typeof group.people !== "number" || readPeople(group.people) !== group.people || !seconds(group.at) ||
+      (group.paid !== undefined && !seconds(group.paid))) throw new UnknownReplyError("a group purchase for the person's copy");
+  return group as Group;
+}
 
 /**
  * The most Redis commands the call-packages copier sends for one copy (#5125 (1)): one GET a package checkout of the
@@ -572,12 +622,12 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const received = (await grantsOf(s)).map((g) => g.job).filter((job) => job.startsWith("gift:")).map((job) => job.slice(5));
     const out: unknown[] = [];
     for (const id of [...new Set(bought)]) {
-      const gift = await readGift(id);
+      const gift = await giftForCopy(s.statsId, id);
       // A gift they bought: they typed who it was for.
       if (gift) out.push({ youBought: true, product: gift.p, to: gift.to, from: gift.from, message: gift.message, at: iso(gift.at), ...(gift.given ? { given: iso(gift.given) } : {}), ...(gift.revoked ? { refunded: iso(gift.revoked) } : {}) });
     }
     for (const id of [...new Set(received)]) {
-      const gift = await readGift(id);
+      const gift = await giftForCopy(s.statsId, id, s.email);
       // A gift to them: the name and words the giver chose to send, not the giver's payment.
       if (gift) out.push({ youReceived: true, product: gift.p, from: gift.from, message: gift.message, at: iso(gift.at), ...(gift.given ? { given: iso(gift.given) } : {}), ...(gift.revoked ? { refunded: iso(gift.revoked) } : {}) });
     }
@@ -589,11 +639,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const out: unknown[] = [];
     // Who took the places they bought are those people's addresses, not theirs: the number is given.
     for (const id of [...new Set(bought)]) {
-      const group = await readGroup(id);
+      const group = await groupForCopy(id, s.statsId);
       if (group) out.push({ youBought: true, product: group.p, places: group.people, at: iso(group.at), ...(group.paid ? { paid: iso(group.paid) } : {}) });
     }
     for (const id of [...new Set(taken)]) {
-      const group = await readGroup(id);
+      const group = await groupForCopy(id, s.statsId);
       if (group) out.push({ youTookAPlace: true, product: group.p, at: iso(group.at) });
     }
     return out;

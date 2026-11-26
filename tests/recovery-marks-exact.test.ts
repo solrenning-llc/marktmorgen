@@ -21,6 +21,7 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import { remindAbandoned } from "@/lib/checkout-recovery";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { suppressCommand } from "@/lib/suppression";
+import { forgetNoted } from "@/lib/erasure-index";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -56,6 +57,18 @@ async function intercept<T>(when: (commands: Commands) => boolean, answer: (comm
     redis.pipeline = original;
   }
 }
+/**
+ * The key a checkout reminder's stop link is written under, or "" when the call writes none: a plain SET, or the one
+ * EVAL that checks the deletion print and writes the link and its note (RECOVERY_STOP_LINK, #4768), whose link is
+ * KEYS[2].
+ */
+const linkWritten = (commands: Commands): string => {
+  const [c] = commands;
+  if (c?.[0] === "SET" && String(c[1]).startsWith("nl:recover:link:")) return String(c[1]);
+  if (c?.[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:recovery-stop-link:") && String(c[4]).startsWith("nl:recover:link:")) return String(c[4]);
+  return "";
+};
+const isLink = (commands: Commands) => linkWritten(commands) !== "";
 const starts = (op: string, prefix: string) => (commands: Commands) => commands[0]?.[0] === op && String(commands[0][1]).startsWith(prefix);
 const isAssisted = (commands: Commands) => commands.length === 1 && starts("EXISTS", "nl:assist:remind:")(commands);
 const isMarks = (commands: Commands) => commands.length === 5 && starts("EXISTS", "nl:recover:sent:")(commands);
@@ -190,14 +203,13 @@ test("control: with no contact list, healthy marks send once", async () => {
 test("an unknown stop link write leaves no stop link behind, with the address in it (Claude 5's LOW on #2951)", async () => {
   // The write may have landed although its reply is unknown; every pass that tries again would leave one more link,
   // kept 400 days with the address in it, that is never sent and that erasure may not find.
-  const isLink = (commands: Commands) => commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:recover:link:");
   for (const [label, value] of [["QUEUED", "QUEUED"], ["nothing", null], ["a number", 1]] as const) {
     const store = await shop();
     const { id, email } = fresh();
     let key = "";
     await assert.rejects(
       intercept(isLink, async (commands, real) => {
-        key = String(commands[0][1]);
+        key = linkWritten(commands);
         const replies = await real(commands);
         replies[0] = value as never;
         return replies;
@@ -215,7 +227,6 @@ test("a stop link write that lands and then fails leaves no stop link behind (#5
   // The link, with the address in it, must not stay 400 days, unsent and unknown to erasure.
   // Claude 5's two cases (6702209293): the whole write lands and the reply times out; or only the SET runs and a
   // later command in the same call answers with an error, which lib/redis.ts throws.
-  const isLink = (commands: Commands) => commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:recover:link:");
   const cases: [string, (commands: Commands, real: Pipe) => Promise<unknown[]>][] = [
     ["timeout", async (commands, real) => { await real(commands); throw new Error("Redis request timed out"); }],
     ["command error", async (commands, real) => { await real([commands[0]]); throw new Error("Redis error: OOM command not allowed"); }],
@@ -226,7 +237,7 @@ test("a stop link write that lands and then fails leaves no stop link behind (#5
     let key = "";
     await assert.rejects(
       intercept(isLink, async (commands, real) => {
-        key = String(commands[0][1]);
+        key = linkWritten(commands);
         return answer(commands, real);
       }, () => remindAbandoned(store, left(id, email))),
       /^Error: Redis (request timed out|error: OOM)/,
@@ -241,9 +252,8 @@ test("control: a stop link written whole stays for the reminder it is sent in", 
   const store = await shop();
   const { id, email } = fresh();
   let key = "";
-  const isLink = (commands: Commands) => commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:recover:link:");
   await intercept(isLink, async (commands, real) => {
-    key = String(commands[0][1]);
+    key = linkWritten(commands);
     return real(commands);
   }, () => remindAbandoned(store, left(id, email)));
   assert.ok(key, "the stop link was written");
@@ -312,4 +322,24 @@ test("the erasure check of any other shape is unknown, never 'not erased'", asyn
     assert.deepEqual(sent.slice(at), [], `erasure check ${String(value)}: a reminder went to an erased address`);
     assert.notEqual(await markOf(id), "sent", `erasure check ${String(value)}: the checkout was marked as sent`);
   }
+});
+
+test("an erasure that finishes before the stop link is written leaves no link and sends nothing (#4768, Codex L)", async () => {
+  // The reminder read the deletion print before it looked the purchase up; the erasure finishes after that read and
+  // before the link's write: its print is down and the person's notes are already deleted.
+  const store = await shop();
+  const { id, email } = fresh();
+  const before = sent.length;
+  let key = "";
+  const outcome = await intercept(isLink, async (commands, real) => {
+    key = linkWritten(commands);
+    await real([suppressCommand(store.listId!, email)]);
+    await forgetNoted(store.statsId, email);
+    return real(commands);
+  }, () => remindAbandoned(store, left(id, email)).then((r) => r, () => "threw"));
+  assert.ok(key, "the stop link's write was reached");
+  assert.deepEqual(sent.slice(before), [], "no reminder went to the erased address");
+  assert.equal((await redis.pipeline([["GET", key]]))[0], null, "no stop link with the address is kept after the erasure");
+  assert.notEqual(await markOf(id), "sent", "the checkout is not marked as sent");
+  assert.notEqual(outcome, "threw", "an erased address is a skip, not an unknown");
 });

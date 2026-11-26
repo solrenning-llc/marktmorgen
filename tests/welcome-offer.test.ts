@@ -64,7 +64,9 @@ async function withOddWrite<T>(prefix: string, reply: unknown, run: () => Promis
   const real = redis.pipeline.bind(redis);
   let used = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (!used && commands[0]?.[0] === "SET" && String(commands[0]?.[1] ?? "").startsWith(prefix)) {
+    const command = commands[0];
+    const writesMark = command?.[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:zadd-if-mark:") && String(command[3]).startsWith(prefix);
+    if (!used && (writesMark || (command?.[0] === "SET" && String(command[1] ?? "").startsWith(prefix)))) {
       used = true;
       return reply;
     }
@@ -154,7 +156,7 @@ async function main(): Promise<void> {
   await recordLead(store, (await readClaimFull(odd))!, "Pantry Guide");
   store = (await storeForEmail(OWNER))!;
   const oddClaim = (await readClaimFull(odd))!;
-  is("a once-only mark answered oddly that did not land schedules nothing", await withOddWrite("nl:wo:r:", ["QUEUED"], () => scheduleReminder(store, oddClaim, odd, asked + HOUR)), false);
+  is("an unknown atomic queue answer is reported instead of success", await withOddWrite("nl:wo:r:", ["QUEUED"], () => scheduleReminder(store, oddClaim, odd, asked + HOUR)).then(() => "resolved", (e) => e.name), "UnknownReplyError");
   is("the next whole answer schedules it, once", [await scheduleReminder(store, oddClaim, odd, asked + HOUR), await scheduleReminder(store, oddClaim, odd, asked + HOUR)], [true, false]);
 
   part("A reminder whose send failed before the email service was asked is tried again at its own hour, a few times at the most, never twice");

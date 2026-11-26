@@ -17,7 +17,8 @@
  *   nl:wo:n:<statsId>              how many people have been offered it, for the studio
  */
 import { type DigitalConsent, DigitalConsentMissing } from "@/lib/digital-consent";
-import { claimMark, claimValue } from "@/lib/claim-mark";
+import { claimValue } from "@/lib/claim-mark";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { createHash } from "node:crypto";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
@@ -93,7 +94,7 @@ export async function welcomeFor(store: Store, claim: Pick<Claim, "e" | "p" | "a
  * creator asked for it, and there is still time before it would go.
  */
 export async function scheduleReminder(store: Store, claim: Claim, token: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<boolean> {
-  if (!claim.c || !store.welcomeOffer.remind || !store.welcomeOffer.address || !store.statsId || !store.sid) return false;
+  if (!claim.c || !store.welcomeOffer.remind || !store.welcomeOffer.address || !store.statsId || !store.sid || !store.listId) return false;
   const offer = await welcomeFor(store, claim, nowSeconds);
   if (!offer || offer.ended) return false;
   const began = offer.until - store.welcomeOffer.hours * 3600;
@@ -102,11 +103,22 @@ export async function scheduleReminder(store: Store, claim: Claim, token: string
   // One reminder per person and store, whatever else they ask for.
   // Ours only on OK or our own value read back (CX-123 rule 24, L9): anything else schedules nothing.
   // The mark keeps the reminder's hour, its score in the queue: forgetWelcomePerson reads the queue at that second only.
-  if ((await claimMark(remindedKey(store.statsId, claim.e), Math.max(60, offer.until - nowSeconds + 86_400), `due:${when}:${claimValue()}`)) !== "ours") return false;
+  const mark = `due:${when}:${claimValue()}`;
   const member = JSON.stringify({ s: store.sid, i: store.statsId, h: hash(claim.e), e: claim.e, t: token });
-  await redisPipeline([["ZADD", DUE_KEY, String(when), member]]);
+  // Claim and queue together, only before the person's erasure print. A lost reply keeps the locator; never release it.
+  const queued = repliesFor(await redisPipeline([["EVAL", ZADD_IF_MARK, 3, remindedKey(store.statsId, claim.e), DUE_KEY, suppressedKey(store.listId), mark, String(when), member, Math.max(60, offer.until - nowSeconds + 86_400), suppressionPrint(store.listId, claim.e)]]), 1)?.[0];
+  if (queued === 0) return false;
+  if (queued !== 1) throw new UnknownReplyError("a welcome reminder queued");
   return true;
 }
+
+/** Claim the locator and queue together before erasure: 1 queued, 0 suppressed or already claimed. */
+export const ZADD_IF_MARK = `-- marktmorgen:zadd-if-mark:v2
+if redis.call("HEXISTS", KEYS[3], ARGV[5]) ~= 0 then return 0 end
+local claimed = redis.call("SET", KEYS[1], ARGV[1], "NX", "EX", ARGV[4])
+if not claimed or claimed.ok ~= "OK" then return 0 end
+redis.call("ZADD", KEYS[2], ARGV[2], ARGV[3])
+return 1`;
 
 /** "October 14, 2026, 3:00 PM UTC", in the store's language. */
 function moment(seconds: number, language: unknown): string {
@@ -378,13 +390,19 @@ export async function forgetWelcomePerson(statsId: string | null, email: string)
   const hour = typeof mark === "string" ? (/^due:(\d{1,12}):\d+\.\d{9}$/.exec(mark)?.[1] ?? null) : null;
   const older = typeof mark === "string" && (mark === "1" || /^\d+\.\d{9}$/.test(mark));
   if (mark !== null && !hour && !older) throw new UnknownReplyError("the read of a person's welcome reminder mark");
+  // The reminder that holds the address leaves the queue first, and the mark that locates it goes only once that
+  // removal is confirmed (#4681): a queue read or removal that fails throws with the mark still there, so the next
+  // try finds the reminder again, rather than finding no mark and calling the erasure done.
+  const h = hash(email);
+  const waiting = hour ? await dueAt(statsId, h, hour) : older ? await dueScan(statsId, h) : [];
+  let taken = 0;
+  if (waiting.length) {
+    const removed = countOf(repliesFor(await redisPipeline([["ZREM", DUE_KEY, ...waiting]]), 1)?.[0]);
+    if (removed === null || removed > waiting.length) throw new UnknownReplyError("the removal of a person's welcome reminder from the queue");
+    taken = removed;
+  }
   const gone = countOf(repliesFor(await redisPipeline([["DEL", startKey(statsId, email), remindedKey(statsId, email)]]), 1)?.[0]);
   // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
   if (gone === null || gone > 2) throw new UnknownReplyError("the deletion of a person's welcome offer start and reminder mark");
-  const h = hash(email);
-  const waiting = hour ? await dueAt(statsId, h, hour) : older ? await dueScan(statsId, h) : [];
-  if (!waiting.length) return gone;
-  const taken = countOf(repliesFor(await redisPipeline([["ZREM", DUE_KEY, ...waiting]]), 1)?.[0]);
-  if (taken === null || taken > waiting.length) throw new UnknownReplyError("the removal of a person's welcome reminder from the queue");
   return gone + taken;
 }

@@ -2530,6 +2530,9 @@ export const COST_LINES: CostLine[] = [
       // STOCK_CONFIRM_COMMANDS_MOST for MAX_CART limited products, inside STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE (tests/stock-sell-cost.test.ts).
       { file: "lib/stock.ts", names: ["STOCK_SELL", "confirmCartStock", "heldBy"] },
       { file: "app/api/store/free/download/route.ts", names: ["recordAffiliateLead", "countConfirmedLead"] },
+      // #4750/#4681: suppression check, locator claim and queue write share one script (HEXISTS, SET NX, ZADD).
+      // At most 7 commands including the script's own, held by i4750-welcome-erased; inside the free copy's order.
+      { file: "lib/welcome-offer-send.ts", names: ["ZADD_IF_MARK", "scheduleReminder"] },
       // A course's checkout sent from a page that said its end date reads the course once, exactly (24 [E7], 9 November 2026).
       { file: "app/api/store/checkout/route.ts", names: ["readCourseForSale(product.course.id)"] },
       { file: "lib/course-access-end.ts", names: ["readCourseExact(id)"] },

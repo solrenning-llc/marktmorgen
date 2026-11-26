@@ -247,6 +247,30 @@ async function main(): Promise<void> {
       state.active = [running, later, good, ending];
       await redis.pipeline([liftCommand(listId, erased)]);
     }
+
+    part("Erased at or after the membership began: refused; erased before it (bought again): told");
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const cases: [string, Record<string, unknown>, number | string, number][] = [
+      ["erased the second the membership began: refused", { start_date: nowSeconds - 86_400 }, nowSeconds - 86_400, 0],
+      ["erased after it began: refused", { start_date: nowSeconds - 86_400 }, nowSeconds - 3_600, 0],
+      ["a deletion mark that is not whole seconds: refused as unknown", { start_date: nowSeconds - 86_400 }, "soon", 0],
+      ["erased a day before this membership began: told", { start_date: nowSeconds - 3_600, created: nowSeconds - 3_600 }, nowSeconds - 90_000, 1],
+    ];
+    for (const [name, began, mark, told] of cases) {
+      const who = `card-${cases.findIndex((c) => c[0] === name)}@example.com`;
+      const sub = `sub_ErasedCard000${cases.findIndex((c) => c[0] === name) + 2}`;
+      const mailsBefore = mails.length;
+      const linksBefore = redis.keys().filter((key) => key.startsWith("nl:card:link:")).length;
+      state.active = [{ ...running, ...began, id: sub, customer: { ...running.customer, id: `cus_${sub.slice(4)}`, email: who } }];
+      redis.run(["HSET", `nl:erased:${listId}`, suppressCommand(listId, who, 1)[2], mark]);
+      try {
+        await run();
+        is(name, [mails.length - mailsBefore, redis.keys().filter((key) => key.startsWith("nl:card:link:")).length - linksBefore], [told, told]);
+      } finally {
+        state.active = [running, later, good, ending];
+        await redis.pipeline([liftCommand(listId, who)]);
+      }
+    }
   }
 
   part("The card page");
@@ -303,7 +327,7 @@ async function main(): Promise<void> {
   is("control: its own page and membership still set the card", [await finishCardUpdate(store, sessionId), touched(mark)], ["updated", ["/subscriptions/sub_Running000001"]]);
 
   part("A setup page cannot recreate its pointer after store erasure");
-  const erasedToken = await cardLink("acct_1TestHarbor0001", "cus_Member000001", "sub_Running000001");
+  const erasedToken = await cardLink("acct_1TestHarbor0001", "cus_Member000001", "sub_Running000001", { listId: store.listId!, email: "cy@example.com", since: null });
   eraseStoreDuringSetup = {
     liveKey: `nl:store:id:${store.sid}`,
     openKey: openKey("acct_1TestHarbor0001", "sub_Running000001"),
@@ -321,13 +345,13 @@ async function main(): Promise<void> {
   const legacy = { ...store, sid: "", extra: false };
   const legacyOpenKey = openKey("acct_1TestHarbor0001", "sub_Running000001");
   await redis.pipeline([["DEL", legacyOpenKey]]);
-  const legacyOpen = await openCardUpdate(legacy, await cardLink("acct_1TestHarbor0001", "cus_Member000001", "sub_Running000001"), "https://marktmorgen.com");
+  const legacyOpen = await openCardUpdate(legacy, await cardLink("acct_1TestHarbor0001", "cus_Member000001", "sub_Running000001", { listId: store.listId!, email: "cy@example.com", since: null }), "https://marktmorgen.com");
   const [legacyKept] = await redis.pipeline([["GET", legacyOpenKey]]);
   is("a store from before ids opens its card page, and its page is kept", [legacyOpen.ok, typeof legacyKept === "string" && legacyKept.startsWith("cs_test_")], [true, true]);
   const legacyRecord = await ownerKey(OWNER);
   const [legacySaved] = await redis.pipeline([["GET", legacyRecord]]);
   eraseStoreDuringSetup = { liveKey: legacyRecord, openKey: legacyOpenKey };
-  const legacyErased = await openCardUpdate(legacy, await cardLink("acct_1TestHarbor0001", "cus_Member000001", "sub_Running000001"), "https://marktmorgen.com");
+  const legacyErased = await openCardUpdate(legacy, await cardLink("acct_1TestHarbor0001", "cus_Member000001", "sub_Running000001", { listId: store.listId!, email: "cy@example.com", since: null }), "https://marktmorgen.com");
   eraseStoreDuringSetup = null;
   const [legacyRecreated] = await redis.pipeline([["GET", legacyOpenKey]]);
   is("a store from before ids whose record went during the setup gets no URL and no recreated open pointer", [legacyErased.ok, legacyRecreated], [false, null]);

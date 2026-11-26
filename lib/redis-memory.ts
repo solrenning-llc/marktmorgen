@@ -3729,6 +3729,16 @@ export class MemoryRedis {
           const taken = this.storeData([room, limit, "1", month, "a", NOTES_TOTAL_FIELD, String(-back)]);
           return [gone.length, Array.isArray(taken) ? taken[0] : -1];
         }
+        // lib/card-update.ts CARD_LINK_IF_NOT_ERASED: a card link written only while its member is not erased (#4766).
+        if (key.startsWith("-- marktmorgen:card-link-if-not-erased:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, link, erased, print, grant, seconds, since] = args;
+          const deleted = this.run(["HGET", erased, print]);
+          if (deleted !== null) {
+            if (!/^[0-9]+$/.test(String(deleted))) return -2;
+            if (since === "" || Number(deleted) >= Number(since)) return -1;
+          }
+          return this.run(["SET", link, grant, "EX", seconds]);
+        }
         // lib/creator-card.ts v2: identity/erasure and the room/card mutation in the same step.
         if ((key.startsWith("-- marktmorgen:card-save:v2\n") || key.startsWith("-- marktmorgen:card-drop:v2\n")) && args[0] === "4" && args.length === 12) {
           const [, room, target, liveKey, erasing, limit, month, third, fourth, field, ref, legacyStatsId] = args;

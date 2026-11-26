@@ -27,9 +27,10 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, saleHandles, storeIdCommand, storeRef, type Store } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, ensureListId, erasingField, ownerKey, saleHandles, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 export const CARD_LINK_SECONDS = 21 * 86_400;
 const MAX_OPENS = 20;
@@ -75,27 +76,86 @@ return 1`;
 export type CardGrant = { a: string; c: string; s: string };
 
 /**
- * A new link for one membership, to put in an email, only once Redis answered its SET with exactly "OK" (CX-123
- * rule 24, the exact SET of lib/membership-manage.ts and lib/buyer-library.ts). Any other answer (none, nil, a
- * word, two replies, or a reply lost after the SET may have landed) throws, so the caller emails nothing and lets
- * its mark go for the next run (lib/payment-recovery.ts, noticeCards); the link, in case it did land, is removed
- * first, since nobody was given it. Removal is best effort: CARD_LINK_SECONDS still ends it.
+ * A card link written only while the member it is for was not erased from the store at or after their membership
+ * began, in one step (Codex L, #4766): the daily job reads the member's address from Stripe, which keeps it after the
+ * store erased them, so the link and its email must not go to them. A person erased before they took this membership
+ * bought again and is told, the rule lib/paypal-delivery.ts (erasedSincePaid) uses. KEYS[1] the link, KEYS[2] the
+ * store's prints; ARGV[1] the member's print, ARGV[2] the grant, ARGV[3] its seconds, ARGV[4] when the membership
+ * began (seconds), or "" when that is unknown, and then any print refuses. -1: erased, nothing written; -2: a print
+ * that is not whole seconds, unknown, nothing written; otherwise the SET's own reply ("OK"). Billed as the EVAL, its
+ * HGET and, when not refused, its SET; lib/redis-memory.ts runs it the same way.
+ */
+export const CARD_LINK_IF_NOT_ERASED = `-- marktmorgen:card-link-if-not-erased:v1
+local deleted = redis.call("HGET", KEYS[2], ARGV[1])
+if deleted then
+  if not string.match(deleted, "^%d+$") then return -2 end
+  if ARGV[4] == "" or tonumber(deleted) >= tonumber(ARGV[4]) then return -1 end
+end
+return redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3])`;
+
+/**
+ * The member a card link is for: the store's list, whose deletion prints are read, the address it is emailed to, and
+ * when their membership began (seconds), or null when Stripe did not say.
+ */
+export type CardRecipient = { listId: string; email: string; since: number | null };
+
+/**
+ * The member a card notice is for, on the store's list. A store record read without its list is given it first, as
+ * the erasure does (lib/person-erasure.ts, erasureScope), so both read the same prints; no list after that throws,
+ * and no notice goes.
+ */
+export async function cardRecipient(
+  store: Pick<Store, "email" | "sid" | "extra" | "listId">,
+  email: string,
+  membership: object,
+): Promise<CardRecipient> {
+  const listId = store.listId || (await ensureListId(storeRef(store)))?.listId;
+  if (!listId) throw new Error("the store has no list to check a deletion before a card notice");
+  // Stripe's subscription: start_date, or created when it has none (a row read as the job reads it, unknown fields).
+  const { start_date, created } = membership as { start_date?: unknown; created?: unknown };
+  const began = [start_date, created].find((v) => typeof v === "number" && Number.isSafeInteger(v) && v > 0);
+  return { listId, email, since: typeof began === "number" ? began : null };
+}
+
+/** The member was erased from the store: no link was written, and no notice may go. */
+export class CardRecipientErased extends Error {
+  constructor() {
+    super("the member was erased from the store, so no card link is made for them");
+    this.name = "CardRecipientErased";
+  }
+}
+
+/**
+ * A new link for one membership, to put in an email, only once Redis answered its write with exactly "OK" (CX-123
+ * rule 24, the exact SET of lib/membership-manage.ts and lib/buyer-library.ts). The write is CARD_LINK_IF_NOT_ERASED:
+ * a member erased from the store at or after `to.since` gets no link, and CardRecipientErased is thrown, with nothing
+ * written and nothing to remove. Any other answer (none, nil, a word, two replies, or a reply lost after the write may have
+ * landed) throws, so the caller emails nothing and lets its mark go for the next run (lib/payment-recovery.ts,
+ * noticeCards); the link, in case it did land, is removed first, since nobody was given it. Removal is best effort:
+ * CARD_LINK_SECONDS still ends it.
  *
  * A link that was stored is kept when its email then fails: the notice is sent under an idempotency key, and a
  * send whose outcome was unknown may have reached the member, so their link must still open.
  */
-export async function cardLink(account: string, customer: string, subscription: string): Promise<string> {
+export async function cardLink(account: string, customer: string, subscription: string, to: CardRecipient): Promise<string> {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const token = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   const grant: CardGrant = { a: account, c: customer, s: subscription };
   const key = await linkKey(token);
   let stored = false;
+  let erased = false;
   try {
-    stored = repliesFor(await redisPipeline([["SET", key, JSON.stringify(grant), "EX", CARD_LINK_SECONDS]]), 1)?.[0] === "OK";
+    const reply = repliesFor(await redisPipeline([[
+      "EVAL", CARD_LINK_IF_NOT_ERASED, 2, key, suppressedKey(to.listId), suppressionPrint(to.listId, to.email), JSON.stringify(grant), CARD_LINK_SECONDS,
+      to.since === null ? "" : String(to.since),
+    ]]), 1)?.[0];
+    erased = reply === -1;
+    stored = reply === "OK";
   } finally {
-    if (!stored) await redisPipeline([["DEL", key]]).catch((error) => console.error("removing a card link that was not stored failed", error));
+    if (!stored && !erased) await redisPipeline([["DEL", key]]).catch((error) => console.error("removing a card link that was not stored failed", error));
   }
+  if (erased) throw new CardRecipientErased();
   if (!stored) throw new Error("a card link was not stored, so no notice is sent with it");
   return token;
 }

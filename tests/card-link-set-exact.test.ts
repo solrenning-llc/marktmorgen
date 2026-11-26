@@ -39,8 +39,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 const original = redis.pipeline.bind(redis);
+// The link's write is one EVAL whose first key is the link (CARD_LINK_IF_NOT_ERASED, #4766).
 const isLinkSet = (commands: (string | number)[][]) =>
-  commands.length === 1 && String(commands[0][0]).toUpperCase() === "SET" && String(commands[0][1]).startsWith("nl:card:link:");
+  commands.length === 1 && String(commands[0][0]).toUpperCase() === "EVAL" && String(commands[0][3]).startsWith("nl:card:link:");
 const links = () => redis.keys().filter((k) => k.startsWith("nl:card:link:"));
 const marks = () => redis.keys().filter((k) => k.startsWith("nl:dun:card:"));
 const tokenIn = (mail: Mail) => mail.text.match(/manage\/card\?t=([0-9a-f]{64})/)?.[1] ?? "";

@@ -54,7 +54,7 @@ import { sellsMemberships } from "@/lib/membership-manage";
 import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-language";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { CARD_NOTICE_DAYS, cardNoticeDue, reminderDue } from "@/lib/dunning-rules";
-import { cardLink, finishCardUpdate, openKey, waitingCardPage } from "@/lib/card-update";
+import { cardLink, cardRecipient, finishCardUpdate, openKey, waitingCardPage } from "@/lib/card-update";
 import { countSent, sentKey } from "@/lib/dunning-keys";
 
 const CURSOR_KEY = "nl:dun:cursor";
@@ -455,7 +455,7 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     const value = claimValue();
     if ((await claimMark(key, CARD_SENT_SECONDS, value)) !== "ours") continue;
     try {
-      const token = await cardLink(account, customer, subId);
+      const token = await cardLink(account, customer, subId, await cardRecipient(store, email, sub));
       const mail = cardNoticeEmail({
         storeName: store.name,
         title: titles.get(sub.metadata?.product ?? "") || null,

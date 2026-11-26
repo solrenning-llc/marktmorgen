@@ -191,7 +191,7 @@ async function main(): Promise<void> {
 
   part("The card link: presses counted before Stripe is asked (lib/card-update.ts)");
   {
-    const token = await cardLink(ACCOUNT, CUSTOMER, SUB);
+    const token = await cardLink(ACCOUNT, CUSTOMER, SUB, { listId: "listgates", email: "member@example.com", since: null });
     const isOpens = (commands: Command[]) => commands[0]?.[0] === "SET" && key(commands[0]).startsWith("nl:card:opens:");
     const open = () => outcome(() => openCardUpdate(store, token, "https://marktmorgen.com"));
     for (const [label, reply] of SET_INCR_UNKNOWN) {

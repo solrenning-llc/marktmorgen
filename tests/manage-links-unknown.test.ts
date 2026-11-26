@@ -174,7 +174,7 @@ async function main(): Promise<void> {
   posts.length = 0;
   is("portal: used", await openPortal(store, used, origin), { ok: false, reason: "used" });
   is("cancel: used", await openCancel(store, used, "sub_Member0000001", origin), { ok: false, reason: "used" });
-  const card = await cardLink(ACCOUNT, "cus_Member000001", "sub_Member0000001");
+  const card = await cardLink(ACCOUNT, "cus_Member000001", "sub_Member0000001", { listId: "listmanage", email: "member@example.com", since: null });
   await redis.pipeline([["SET", `nl:card:opens:${sha(`nimbus-card-opens:${card}`)}`, "20"]]);
   is("card: used", await openCardUpdate(store, card, origin), { ok: false, reason: "used" });
   is("and no Stripe page was made", sessions(), 0);
@@ -182,7 +182,7 @@ async function main(): Promise<void> {
   part("2. The opens counter: control, a fresh link opens Stripe");
   const live = "d".repeat(64);
   await grantLink(live);
-  const liveCard = await cardLink(ACCOUNT, "cus_Member000001", "sub_Member0000001");
+  const liveCard = await cardLink(ACCOUNT, "cus_Member000001", "sub_Member0000001", { listId: "listmanage", email: "member@example.com", since: null });
   posts.length = 0;
   is("portal, cancel and card each open their Stripe page", [(await openPortal(store, live, origin)).ok, (await openCancel(store, live, "sub_Member0000001", origin)).ok, (await openCardUpdate(store, liveCard, origin)).ok, sessions()], [true, true, true, 3]);
 

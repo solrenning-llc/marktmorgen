@@ -24,6 +24,7 @@ import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { listPasskeys } from "@/lib/passkeys";
 import { lockedUntil, openLockedSession } from "@/lib/two-step";
+import { LOCK_UNREAD_MESSAGE } from "@/lib/two-step-unknown";
 import { claimHandle, ensureStatsId } from "@/lib/store";
 import StudioPage from "@/app/studio/page";
 import { TwoStepManager } from "@/components/two-step-manager";
@@ -34,6 +35,7 @@ import { done, is, part } from "./check";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 const LOCK_NOTICE = "Whether some things are locked could not be checked just now";
+const PAGE_NOTICE = "That page was not opened";
 const MANAGER_NOTICE = "This page could not check just now whether this browser got in without its second step";
 
 /** Every element of `type` in the tree, with the page's async parts awaited, and every string drawn. */
@@ -56,7 +58,27 @@ async function walk(node: unknown, type: unknown, found: Record<string, unknown>
   }
 }
 
-async function studioOf(session: string, fault: boolean) {
+/** Each `role="status"` region of the tree, with its heading's id and every string drawn inside it. */
+async function statuses(node: unknown, found: { labelledBy: unknown; text: string }[], seen = new Set<unknown>()): Promise<void> {
+  if (!node || typeof node !== "object" || seen.has(node)) return;
+  seen.add(node);
+  if (typeof (node as PromiseLike<unknown>).then === "function") return statuses(await node, found, seen);
+  if (Array.isArray(node)) {
+    await Promise.all(node.map((child) => statuses(child, found, seen)));
+    return;
+  }
+  if (isValidElement(node)) {
+    const props = node.props as Record<string, unknown>;
+    if (props.role === "status") {
+      const text: string[] = [];
+      await walk(props.children, null, [], text, new Set());
+      found.push({ labelledBy: props["aria-labelledby"], text: text.join(" ") });
+    }
+    await Promise.all(Object.values(props).map((value) => statuses(value, found, seen)));
+  }
+}
+
+async function studioOf(session: string, fault: boolean, params: Record<string, string> = {}) {
   const kept = redis.pipeline;
   let faults = 0;
   if (fault)
@@ -69,13 +91,15 @@ async function studioOf(session: string, fault: boolean) {
     };
   answering(new NextRequest("https://marktmorgen.com/studio", { headers: { cookie: `${SESSION_COOKIE}=${session}` } }));
   try {
-    const tree = await StudioPage({ searchParams: Promise.resolve({}) });
+    const tree = await StudioPage({ searchParams: Promise.resolve(params) });
     const managers: Record<string, unknown>[] = [];
     const invites: Record<string, unknown>[] = [];
     const text: string[] = [];
+    const regions: { labelledBy: unknown; text: string }[] = [];
     await walk(tree, TwoStepManager, managers, text);
     await walk(tree, AppCodeInvite, invites, [], new Set());
-    return { managers, invites: invites.length, text: text.join("\n"), faults };
+    await statuses(tree, regions);
+    return { managers, invites: invites.length, text: text.join("\n"), faults, regions };
   } finally {
     redis.pipeline = kept;
     answering(null);
@@ -131,6 +155,22 @@ async function main(): Promise<void> {
   is("it says to open the page again to cancel it", pending.includes("open this page again in a moment to cancel it"), true);
   const pendingKnown = drawn({ on: true, codesLeft: 8, reset: resetAt, backup: "", fresh: true, locked: false, lockUnknown: false });
   is("control, lock read as none: Cancel is offered", pendingKnown.includes("Cancel: keep two-step login on"), true);
+
+  part("a studio page sent this browser home because its lock could not be read (lib/studio-route.ts, #3973)");
+  // studioView redirects to /studio?two-step=unread; on the next request the home's own read of the lock may answer, so
+  // the home says, from the marker, why the page asked for was not opened, in plain words (lib/two-step-unknown.ts).
+  const sentHome = await studioOf(session, false, { "two-step": "unread" });
+  const pageNotice = sentHome.regions.find((region) => region.text.includes(PAGE_NOTICE));
+  is("the top says the page asked for was not opened, and why", Boolean(pageNotice), true);
+  is("in a status region named by its own heading", pageNotice?.labelledBy, "lock-page-unread-title");
+  is("with the same plain sentence the routes give (LOCK_UNREAD_MESSAGE)", pageNotice?.text.includes(LOCK_UNREAD_MESSAGE), true);
+  is("the home's own lock read answered: it never says this browser's lock is unknown, nor locked", [sentHome.text.includes(LOCK_NOTICE), sentHome.text.includes("Some things are locked until")], [false, false]);
+  is("nothing was written: this browser is still not locked", await lockedUntil(session), 0);
+  const sentHomeUnread = await studioOf(session, true, { "two-step": "unread" });
+  is("when the home's read fails too, both are said", [sentHomeUnread.text.includes(PAGE_NOTICE), sentHomeUnread.text.includes(LOCK_NOTICE)], [true, true]);
+  is("control: without the marker, no such notice", [read.text.includes(PAGE_NOTICE), unread.text.includes(PAGE_NOTICE)], [false, false]);
+  const otherMark = await studioOf(session, false, { "two-step": "elsewhere" });
+  is("control: any other value of the marker says nothing", otherMark.text.includes(PAGE_NOTICE), false);
 
   part("control: this browser is really locked");
   const lockedSession = await openLockedSession(OWNER, Date.now() + 3 * 86_400_000);

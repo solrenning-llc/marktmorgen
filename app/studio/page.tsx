@@ -1114,10 +1114,10 @@ export default async function StudioPage({
         answered.then(() => keptStats(current, undefined, freshNumbers)).then((kept) => kept, () => null),
         readsSales(current)
           ? answered.then(() => keptSales(current, undefined, freshNumbers)).then(
-              (kept) => ({ state: "ok" as const, value: kept.value, at: kept.at, used: false, failed: kept.failed === true, unnamed: kept.unnamed === true }),
-              (error: unknown) => ({ state: "error" as const, value: null, at: null, used: error instanceof ReadingsUsed, failed: error instanceof ReadingFailed, unnamed: false }),
+              (kept) => ({ state: "ok" as const, value: kept.value, at: kept.at, used: false, failed: kept.failed === true, unnamed: kept.unnamed === true, oversized: kept.oversized === true }),
+              (error: unknown) => ({ state: "error" as const, value: null, at: null, used: error instanceof ReadingsUsed, failed: error instanceof ReadingFailed, unnamed: false, oversized: false }),
             )
-          : Promise.resolve({ state: "none" as const, value: null, at: null, used: false, failed: false, unnamed: false }),
+          : Promise.resolve({ state: "none" as const, value: null, at: null, used: false, failed: false, unnamed: false, oversized: false }),
         readNotes(current.statsId).catch(() => []),
         // Which part of the spend is unread is said, never that part as $0 (Claude 5 on #2924); it never throws.
         spendsForStudio(current.statsId),
@@ -1290,8 +1290,9 @@ export default async function StudioPage({
         backAt: readingsBackAt(),
         salesUsed: salesRead?.used === true,
         // Its biggest buyers left out for lack of a list (lib/store-readings.ts, listForNaming): back on their own, or
-        // after the next saved change of a store not yet moved to product records.
-        buyersLater: salesRead?.unnamed ? (current.catalog.id ? ("on-their-own" as const) : ("after-change" as const)) : undefined,
+        // after the next saved change of a store not yet moved to product records; a reading too large to keep (#4758) has
+        // no such time, and says so.
+        buyersLater: salesRead?.unnamed ? (salesRead.oversized ? ("too-large" as const) : current.catalog.id ? ("on-their-own" as const) : ("after-change" as const)) : undefined,
         // A reading that failed after calling Stripe was counted (inbox C4-53): said, with what is left of the day.
         failed: salesRead?.failed === true || visitsKept?.failed === true,
         left: readsSales(current) ? left.heavyLeft : left.anyLeft,

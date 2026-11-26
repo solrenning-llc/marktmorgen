@@ -146,8 +146,13 @@ async function main() {
   is("the report tag is shared by the email and contains no recipient", healthTags({ sid: STORE, listId: LIST }, true, CAMPAIGN), tags);
   is("a recipient cannot be a report identity", healthTags({ sid: STORE, listId: LIST }, true, "reader@example.test"), { nl_store: STORE, nl_list: LIST });
   const previousDay = new Date(Date.now() - 86_400_000).toISOString();
-  for (const [kind, field] of [["Delivery", "delivery"], ["Bounce", "bounce"], ["Complaint", "complaint"], ["DeliveryDelay", "deliveryDelay"]]) {
-    is(`${kind} uses its own event time, not the send time`, readSesEvent(JSON.stringify({ eventType: kind, [field]: { timestamp: EVENT_AT }, mail: { timestamp: previousDay, messageId: `ses_${kind}`, tags } }))?.occurredAt, Date.parse(EVENT_AT));
+  for (const [kind, field, recipients] of [
+    ["Delivery", "delivery", { recipients: ["reader@example.test"] }],
+    ["Bounce", "bounce", { bouncedRecipients: [{ emailAddress: "reader@example.test" }] }],
+    ["Complaint", "complaint", { complainedRecipients: [{ emailAddress: "reader@example.test" }] }],
+    ["DeliveryDelay", "deliveryDelay", { delayedRecipients: [{ emailAddress: "reader@example.test" }] }],
+  ] as const) {
+    is(`${kind} uses its own event time, not the send time`, readSesEvent(JSON.stringify({ eventType: kind, [field]: { timestamp: EVENT_AT, ...recipients }, mail: { timestamp: previousDay, messageId: `ses_${kind}`, tags } }))?.occurredAt, Date.parse(EVENT_AT));
   }
   is("SES keeps the delivery recipients and shared tags", readSesEvent(JSON.stringify({ eventType: "Delivery", delivery: { timestamp: EVENT_AT, recipients: ["reader@example.test"] }, mail: { messageId: "ses_delivery_1", tags } })), { kind: "delivered", permanent: false, recipients: ["reader@example.test"], tags, messageId: "ses_delivery_1", occurredAt: Date.parse(EVENT_AT) });
   for (const kind of ["delivered", "delayed"] as const) {

@@ -269,6 +269,29 @@ end
 return write({unpack(ARGV, 1, #ARGV - 1)})`;
 
 /**
+ * ORDER_WRITE only while one key still exists (the last key): the write and its room charge run in the same Redis
+ * step as the check, so a writer that read that key before it went cannot write records it would have named (Board
+ * #5010 row 187: a Discord person kept after their server was disconnected, lib/discord-store.ts keepMember).
+ */
+export const ORDER_WRITE_IF_KEY = `-- marktmorgen:order-write-if-key:v1
+if redis.call('EXISTS', KEYS[#KEYS]) ~= 1 then return {-3} end
+${ORDER_WRITE.slice(ORDER_WRITE.indexOf("\n") + 1)}`;
+
+/**
+ * Writes and charges an order record only while `key` exists. Null means the key was gone and nothing was written;
+ * every other reply is checked exactly as orderWrite checks it.
+ */
+export async function orderWriteIfKey(owner: DataOwner, commands: Command[], key: string): Promise<unknown[] | null> {
+  if (!commands.length || commands.length > ORDER_WRITE_MAX) throw new Error("a keyed order write is one script");
+  for (const command of commands) if (!checked(command)) throw new Error(`not a command an order's records are written with: ${String(command[0])}`);
+  if (!key || key.length > 512) throw new Error("a keyed order write needs its key");
+  const reply = repliesFor(await redisPipeline([orderScriptWith(owner, commands, ORDER_WRITE_IF_KEY, [key], [])]), 1)?.[0];
+  const slots = listSlots(reply);
+  if (slots && slots.length === 1 && slots[0] === ORDER_STORE_GONE) return null;
+  return readScript(reply, commands).replies;
+}
+
+/**
  * Writes and charges an order record only while its store is live. Null means the closing fence refused the write;
  * every other reply is checked exactly as orderWrite checks it.
  */

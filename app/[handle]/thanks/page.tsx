@@ -49,7 +49,7 @@ import { buyersJoin, noteSession } from "@/lib/affiliates";
 import { recordEnrollment } from "@/lib/learn";
 import { orderRoom, upsertContact } from "@/lib/contacts";
 import { listOrder } from "@/lib/buyer-list";
-import { rememberBuyers } from "@/lib/buyer-library";
+import { rememberBuyersAt } from "@/lib/buyer-library";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
 import { PENDING_GIVE_UP_SECONDS, canceledFor, readPaid, stillPending } from "@/lib/paypal-sales";
 import { paypalCancelWords } from "@/lib/buyer-words/paypal-cancel";
@@ -513,7 +513,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   if (order.state === "paid" && order.email && !order.gift && !order.group && !isHouseStore(store)) {
     // A store made before stores had ids is given its own now.
     const sid = store.sid || (await ensureStoreId(storeRef(store)).catch(() => null))?.sid || "";
-    await rememberBuyers(sid, [order.email]);
+    // Against the order's own time: a buyer deleted from the store at or after it is not noted again when this page is
+    // opened later; a purchase paid after the deletion is noted as any (#4754).
+    await rememberBuyersAt(sid, store.listId ?? null, [{ email: order.email, at: order.created }]);
   }
   if (order.state === "paid" && order.email && store.listId) {
     await listOrder(store, {

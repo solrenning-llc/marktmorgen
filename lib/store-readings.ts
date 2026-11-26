@@ -180,7 +180,7 @@ export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date
  * try failed (counted), and whether who it would name was left out for lack of a list to look them up in (keptReading;
  * the studio says so, never inferring it from an empty list).
  */
-export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean; unnamed?: boolean };
+export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean; unnamed?: boolean; oversized?: boolean };
 
 /**
  * The copy kept only when nobody it names was deleted from the store, in one
@@ -273,10 +273,11 @@ export async function keptReading<T>(store: ReadingStore, kind: ReadingKind, rea
   if (value === null || value === undefined) return { value, at: now, stale: false };
   const names = guard ? [...new Set(guard.names(value))] : [];
   // Too large to keep: never kept, so never checked where it is written (READING_COPY) against the people deleted while
-  // it was made. Shown with its totals and naming nobody, as a reading with no list is (#4758, Codex L); one naming
-  // nobody is shown as it was read.
+  // it was made. Shown with its totals and naming nobody, as a reading with no list is (#4758, Codex L), and marked
+  // `oversized`: it is too large on every reading, so its names do not come back on their own. One naming nobody is
+  // shown as it was read.
   if (Buffer.byteLength(text, "utf8") > READING_COPY_MAX_BYTES) {
-    return guard && names.length ? { value: guard.without(value, new Set(names)), at: now, stale: false, unnamed: true } : { value, at: now, stale: false };
+    return guard && names.length ? { value: guard.without(value, new Set(names)), at: now, stale: false, unnamed: true, oversized: true } : { value, at: now, stale: false };
   }
   if (!guard || !names.length) {
     await keepCopy(store, key, text);

@@ -31,9 +31,10 @@ export function BuyerNumbers({
   top?: TopBuyer[];
   /**
    * The biggest buyers were left out of the kept reading for lack of a list to look a deleted buyer up in
-   * (lib/store-readings.ts, Kept.unnamed): said, and when they come back. Never inferred from an empty list.
+   * (lib/store-readings.ts, Kept.unnamed): said, and when they come back; a reading too large to keep (Kept.oversized,
+   * #4758) says they are not listed, with no time it cannot keep. Never inferred from an empty list.
    */
-  buyersLater?: "on-their-own" | "after-change";
+  buyersLater?: "on-their-own" | "after-change" | "too-large";
 }) {
   const sid = useStudioStore();
   const money = (cents: number) => formatMoney(cents, currency);
@@ -61,9 +62,11 @@ export function BuyerNumbers({
 
       {top && !top.length && buyersLater ? (
         <p className="mt-4 text-sm text-ink">
-          {buyersLater === "after-change"
-            ? "Your biggest buyers show here again after your next saved change to your store, when these numbers are next updated."
-            : "Your biggest buyers show here again on their own, usually within a day, when these numbers are next updated."}
+          {buyersLater === "too-large"
+            ? "Your biggest buyers are not listed here: these numbers are too large for us to check them against the people who asked us to delete their data. The totals above are not affected."
+            : buyersLater === "after-change"
+              ? "Your biggest buyers show here again after your next saved change to your store, when these numbers are next updated."
+              : "Your biggest buyers show here again on their own, usually within a day, when these numbers are next updated."}
         </p>
       ) : null}
       {top && top.length ? (

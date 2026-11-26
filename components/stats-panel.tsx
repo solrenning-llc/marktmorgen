@@ -420,7 +420,7 @@ export type NumbersReading = {
   /** None of the sales kept and none may be read today. */
   salesUsed: boolean;
   /** The biggest buyers left out of the kept sales for lack of a list (components/buyer-numbers.tsx says when they come back). */
-  buyersLater?: "on-their-own" | "after-change";
+  buyersLater?: "on-their-own" | "after-change" | "too-large";
   /** The last try failed after calling Stripe, and was counted (inbox C4-53). */
   failed?: boolean;
   /** Readings of this kind left today. */

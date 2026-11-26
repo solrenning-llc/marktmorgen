@@ -34,7 +34,7 @@ import { shippingWords } from "@/lib/buyer-words/shipping";
 import { GIFT_ID } from "@/lib/gift-rules";
 import { GROUP_ID, canGroup, payable, peopleWords } from "@/lib/group-rules";
 import { commissionRate } from "@/lib/affiliate-setting";
-import { saleHandles } from "@/lib/store";
+import { ensureStatsId, saleHandles, STORE_ID_PATTERN } from "@/lib/store";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readListings } from "@/lib/catalog";
 import type { ProductFile } from "@/lib/product-file";
@@ -931,8 +931,18 @@ export async function createCheckout(
       for (const key of [...body.keys()]) {
         if (key.startsWith("line_items[0][price_data]")) body.delete(key);
       }
-      // Kept only while the store is live (lib/store-live-cache.ts, Codex G-1346).
-      body.set("line_items[0][price]", await pwywPriceId(store, product, pwyw, fresh, (key, id, seconds) => setWhileStoreLive(store, key, id, seconds)));
+      // Kept only while the store is live (lib/store-live-cache.ts, Codex G-1346). A store from before ids is told from
+      // its owner's next store only by its statsId (storeLiveFence), so one without it would have every new Price refused
+      // and the product could never be bought (Claude 1's LEVE on #5192, 7088873178). It is given one first, before
+      // Stripe is asked for a Price, and the record read back is used only while its handle is still this store's, as
+      // the tip checkout does (lib/store-tip-checkout.ts, #5213); otherwise the checkout is refused.
+      let fenced = store;
+      if (!STORE_ID_PATTERN.test(store.sid) && !store.statsId) {
+        const kept = await ensureStatsId(store.email);
+        if (!kept || kept.handle !== store.handle || (!STORE_ID_PATTERN.test(kept.sid) && !kept.statsId)) throw new Error("The choose-your-price Price could not be kept");
+        fenced = kept;
+      }
+      body.set("line_items[0][price]", await pwywPriceId(store, product, pwyw, fresh, (key, id, seconds) => setWhileStoreLive(fenced, key, id, seconds)));
       body.set("metadata[pwyw]", "yes");
     }
     // Set just before the request, because Stripe counts its minimum from then.

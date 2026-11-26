@@ -112,6 +112,14 @@ const priceKey = (account: string, print: string) => `nl:pwyw:${account}:${print
 /** A year: long enough that a steady seller never waits for Stripe twice. */
 const KEEP_SECONDS = 365 * 24 * 60 * 60;
 
+/** The store's erasure began, or its record is gone, while Stripe made its choose-your-price Price: no checkout. */
+export class PwywStoreGoneError extends Error {
+  constructor() {
+    super("The store is gone; no checkout is opened");
+    this.name = "PwywStoreGoneError";
+  }
+}
+
 /**
  * The id of the Price on the creator's account that lets a buyer choose the
  * amount of this product, made the first time it is needed.
@@ -128,7 +136,7 @@ export async function pwywPriceId(
   product: Listing,
   pwyw: PayWhatYouWant,
   fresh: boolean,
-  keep: (key: string, id: string, seconds: number) => Promise<unknown>,
+  keep: (key: string, id: string, seconds: number) => Promise<"kept" | "gone" | "unknown">,
 ): Promise<string> {
   const account = store.stripeAccountId;
   if (!account) throw new Error("This store has no account");
@@ -171,6 +179,12 @@ export async function pwywPriceId(
   // Two buyers pressing buy at the same moment make one Price, not two.
   const price = await onAccount("POST", account, "/prices", body, undefined, `pwyw-${print}${fresh ? `-${Date.now()}` : ""}`);
   if (typeof price.id !== "string" || !price.id) throw new Error("Stripe did not return a price");
-  if (cache) await keep(key, price.id, KEEP_SECONDS).catch(() => {});
+  // What the keeper answered decides whether the checkout goes on (Codex L-20261119-1405): a store whose erasure began
+  // while Stripe was making the Price gets no checkout, and an answer that is not "kept" is not taken as one.
+  if (cache) {
+    const kept = await keep(key, price.id, KEEP_SECONDS).catch(() => "unknown" as const);
+    if (kept === "gone") throw new PwywStoreGoneError();
+    if (kept !== "kept") throw new Error("The choose-your-price Price could not be kept");
+  }
   return price.id;
 }

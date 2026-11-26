@@ -28,6 +28,16 @@ const CASES: Record<string, Case[]> = {
     { what: "no store", setup: [], keys: ["k:id", "k:erasing", "k:open"], argv: ["f1", "sess", 600] },
     { what: "an erasing store", setup: [["SET", "k:id", "s1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:id", "k:erasing", "k:open"], argv: ["f1", "sess", 600] },
   ],
+  "checkout-trouble-live:v1": [
+    { what: "an id key holding its ref, the mark taken", setup: [["SET", "k:live", "ref1"]], keys: ["k:live", "k:erasing", "k:trouble", "k:mail"], argv: ["f1", "", "ref1", "2026-10-20", "{}", 3024000, "m1", 172800, "1"] },
+    { what: "an id key holding its ref, counted only", setup: [["SET", "k:live", "ref1"]], keys: ["k:live", "k:erasing", "k:trouble", "k:mail"], argv: ["f1", "", "ref1", "2026-10-20", "{}", 3024000, "m1", 172800, "0"] },
+    { what: "the day's mark already taken", setup: [["SET", "k:live", "ref1"], ["SET", "k:mail", "w"]], keys: ["k:live", "k:erasing", "k:trouble", "k:mail"], argv: ["f1", "", "ref1", "2026-10-20", "{}", 3024000, "m1", 172800, "1"] },
+    { what: "an id key holding another ref", setup: [["SET", "k:live", "ref2"]], keys: ["k:live", "k:erasing", "k:trouble", "k:mail"], argv: ["f1", "", "ref1", "2026-10-20", "{}", 3024000, "m1", 172800, "1"] },
+    { what: "an owner's record carrying its statsId", setup: [["SET", "k:live", record("st1")]], keys: ["k:live", "k:erasing", "k:trouble", "k:mail"], argv: ["f1", "st1", "", "2026-10-20", "{}", 3024000, "m1", 172800, "1"] },
+    { what: "an owner's record of another store", setup: [["SET", "k:live", record("st2")]], keys: ["k:live", "k:erasing", "k:trouble", "k:mail"], argv: ["f1", "st1", "", "2026-10-20", "{}", 3024000, "m1", 172800, "1"] },
+    { what: "an owner's record that does not parse", setup: [["SET", "k:live", "{not json"]], keys: ["k:live", "k:erasing", "k:trouble", "k:mail"], argv: ["f1", "st1", "", "2026-10-20", "{}", 3024000, "m1", 172800, "1"] },
+    { what: "an erasing store", setup: [["SET", "k:live", "ref1"], ["HSET", "k:erasing", "f1", "1"]], keys: ["k:live", "k:erasing", "k:trouble", "k:mail"], argv: ["f1", "", "ref1", "2026-10-20", "{}", 3024000, "m1", 172800, "1"] },
+  ],
   "hash-take-all:v1": [
     { what: "a hash", setup: [["HSET", "k:h", "a", "1", "b", "2"]], keys: ["k:h"], argv: [] },
     { what: "no hash", setup: [], keys: ["k:h"], argv: [] },

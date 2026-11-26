@@ -259,7 +259,7 @@ async function checkoutTrouble(): Promise<void> {
   for (const [label, reply] of SHAPES) {
     const store = await storeAlertsAndSales();
     emails.length = 0;
-    const outcome = await withReplyOnly("SET", "nl:cotrouble:mail:", reply, () => noteCheckoutTrouble(store, refused, now));
+    const outcome = await withReplyOnly("EVAL", "-- marktmorgen:checkout-trouble-live:v1", reply, () => noteCheckoutTrouble(store, refused, now));
     is(`the email's mark answered ${label}, not written: counted, no email`, [outcome, emails.length], ["counted", 0]);
   }
   const store = await storeAlertsAndSales();

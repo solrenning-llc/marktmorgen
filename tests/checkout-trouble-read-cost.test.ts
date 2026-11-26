@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { noteCheckoutTrouble, readTrouble, readTroubleStrict } from "@/lib/checkout-trouble";
 import { StripeError } from "@/lib/stripe-account";
 import { store as redis } from "./redis-stub";
-import type { Store } from "@/lib/store";
+import { type Store, claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { CHECKOUT_TROUBLE_READ } from "./plan-cost-registry";
 
 const DAY = 86_400_000;
-const sid = "c".repeat(32);
-const store = { statsId: sid } as Store;
+// A real store, live: the writer counts only while the store's id key still holds its own ref (row 104 of #5010).
+let store: Store;
+let sid = "";
 const pipeline = redis.pipeline.bind(redis);
 let checks = 0;
 async function check(name: string, run: () => Promise<void>) {
@@ -16,6 +17,11 @@ async function check(name: string, run: () => Promise<void>) {
 }
 
 async function main() {
+  await claimHandle("cotrouble-read@example.com", "cotroubleread", "Trouble read", "");
+  await ensureStoreId("cotrouble-read@example.com");
+  await ensureStatsId("cotrouble-read@example.com");
+  store = (await storeForEmail("cotrouble-read@example.com"))!;
+  sid = store.statsId!;
   // Exercise the actual writer every day: renewing the hash TTL does not expire
   // old fields. No provider is called for a server-side Stripe failure.
   const first = Date.parse("2010-01-01T12:00:00Z");

@@ -287,6 +287,12 @@ export type Product = {
    * here. A hidden product can still be part of a bundle.
    */
   hidden: boolean;
+  /**
+   * How many times the studio's product form has saved it (lib/store.ts editProduct), so a save made from a form
+   * opened before another one saved is refused rather than putting the older words back. Absent on a product never
+   * saved from the form since it was written, which reads as 0.
+   */
+  rev?: number;
 };
 
 /**
@@ -456,7 +462,13 @@ export function parseProduct(entry: unknown): Product | null {
     shipping,
     ...(legal ? { legal } : {}),
     hidden: value.hidden === true,
+    rev: parseRev(value.rev),
   };
+}
+
+/** A stored revision: a whole number from 0 up, and 0 for anything else, as a product never saved from the form. */
+export function parseRev(raw: unknown): number {
+  return typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0 ? raw : 0;
 }
 
 function parseCourseRef(raw: unknown): CourseRef | null {
@@ -506,6 +518,7 @@ export function listingOf(product: Listing): Listing {
     // From a full product, computed from its own legal record; from a listing, its mark as stored.
     ...((Object.hasOwn(product, "fields") ? safetyComplete(product as Product) : product.safetyFilled === true) ? { safetyFilled: true } : {}),
     hidden: product.hidden,
+    rev: product.rev ?? 0,
   };
 }
 

@@ -4,6 +4,7 @@ import { BookBusy } from "@/lib/agent-book";
 import { BATCH_MAX } from "@/lib/agent-proposal-rules";
 import { confirmFor, declineFor, undoFor } from "@/lib/agent-confirm";
 import { DataRoomError } from "@/lib/store-data";
+import { StoreFullError } from "@/lib/store-full";
 
 /**
  * The creator confirming, declining or undoing what the AI agent prepared
@@ -52,7 +53,9 @@ export async function POST(request: NextRequest) {
     return refuse("invalid", "That is not something this page can do.");
   } catch (error) {
     if (error instanceof BookBusy) return refuse("busy", "Another change to these proposals is being made right now. Try again in a moment.", 409);
-    if (error instanceof DataRoomError) return refuse("full", "Your store has no room for this change right now.", 409);
+    // A description that does not fit: refused by its room (DataRoomError) or, since an agent's description goes in the
+    // product's catalog commit (lib/store.ts setProductAboutIf), by the commit's one take (StoreFullError). Same answer.
+    if (error instanceof DataRoomError || error instanceof StoreFullError) return refuse("full", "Your store has no room for this change right now.", 409);
     console.error("an action on the agent's proposals failed", error);
     return refuse("server_error", "That could not be done just now. Try again in a moment.", 500);
   }

@@ -1045,6 +1045,17 @@ export class MemoryRedis {
           this.run(["EXPIRE", log, keep]);
           return 1;
         }
+        // lib/store.ts PRODUCT_WITH_ABOUT: a product's record and its description, written together, only while the store
+        // is not erasing and its id key still holds its ref: 1 written, -1 gone, moved or erasing (nothing written).
+        if (key.startsWith("-- marktmorgen:product-with-about:v2\n") && args[0] === "4" && args.length === 9) {
+          const [, record, about, storeId, erasing, json, text, field, ref] = args;
+          if (this.run(["HGET", erasing, field]) !== null) return -1;
+          if (this.run(["GET", storeId]) !== ref) return -1;
+          this.run(["SET", record, json]);
+          if (text === "") this.run(["DEL", about]);
+          else this.run(["SET", about, text]);
+          return 1;
+        }
         // lib/checkout-recovery.ts RECOVERY_ADMIT: a reminder's note and claims, only while the address is not erased.
         if (key.startsWith("-- marktmorgen:recovery-admit:v1\n") && args[0] === "4" && args.length === 11) {
           const [, prints, sent, once, carts, print, member, noteSeconds, sentSeconds, onceSeconds, claim] = args;
@@ -4077,6 +4088,20 @@ export class MemoryRedis {
           }
           this.run(["SET", state, next]);
           return 1;
+        }
+        // lib/store-data.ts TAKE_DATA_KEEP: the take, then one slot raised back to the count still kept, in one step.
+        if (key.startsWith("-- marktmorgen:store-data-take-keep:v1\n") && args[0] === "1") {
+          const inner = args.slice(1, -3);
+          const [slot, newRaw, keepRaw] = args.slice(-3);
+          const fresh = Number(newRaw);
+          const keep = Number(keepRaw);
+          const named = (() => { for (let i = 4; i < inner.length; i += 3) if (inner[i] === "s" && inner[i + 1] === slot && Number(inner[i + 2]) === fresh) return true; return false; })();
+          if (!slot || slot === "#" || slot.startsWith("~") || !Number.isSafeInteger(fresh) || !Number.isSafeInteger(keep) || fresh < 0 || keep < fresh || !named) return [-1, 0];
+          const taken = this.storeData(inner) as [number, number];
+          if (!Array.isArray(taken) || taken[0] !== 1 || keep === fresh) return taken;
+          const total = taken[1] + (keep - fresh) + (fresh === 0 ? 64 : 0);
+          this.run(["HSET", inner[0], slot, String(keep), "#", String(total)]);
+          return [1, total];
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:store-for-hit:v1\n") && args[0] === "1" && args.length === 5) return this.storeForHit(args.slice(1));

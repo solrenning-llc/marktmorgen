@@ -257,6 +257,42 @@ def main():
         redis.command("SET", counter, "7")
         assert number("cs_test_bad") == [3, 8]
         print("PASS: a receipt count that is not a whole number takes no room and gives no number")
+
+        # TAKE_DATA_KEEP (#4238, triple audit LEVE 3): checked at the new size, kept at the larger count in the same step.
+        source = (root / "lib/store-data.ts").read_text(encoding="utf-8")
+        match = re.search(r"export const TAKE_DATA_KEEP = `([^`]+)`;", source)
+        if not match:
+            raise RuntimeError("Expected application script TAKE_DATA_KEEP")
+        keep_script = match.group(1).replace("${TAKE_DATA}", take_data)
+        if "${" in keep_script:
+            raise RuntimeError("TAKE_DATA_KEEP puts in something this test does not")
+
+        def keep(limit, slot, new, kept, *triples):
+            flat = [str(part) for triple in triples for part in triple]
+            return redis.command("EVAL", keep_script, 1, room, limit, "0", "2026-10", *flat, slot, new, kept)
+
+        redis.command("DEL", room)
+        assert take(redis, 10_000, ("s", "ab:x", 4_000), ("s", "p:x", 1_000)) == [1, 5_128]
+        # At 5,128 of 5,150: the title grows by 50 while the description shrinks to 100. Checked at 100, taken; kept at 4,000.
+        assert take(redis, 5_150, ("s", "ab:x", 4_000), ("s", "p:x", 1_050)) == [0, 5_128]
+        assert keep(5_150, "ab:x", 100, 4_000, ("s", "ab:x", 100), ("s", "p:x", 1_050)) == [1, 5_178]
+        assert redis.command("HGET", room, "ab:x") == "4000" and redis.command("HGET", room, "p:x") == "1050" and total() == 5_178
+        print("PASS: a shorter description frees room for the same save's check and is still counted at its kept size")
+
+        # Settled once written: the slot down to the new text, as the caller's noteData does.
+        assert take(redis, 5_200, ("s", "ab:x", 100), always=True) == [1, 1_278]
+        # Past the room even at the new size: nothing written, the slot and the total as they were.
+        assert keep(1_200, "ab:x", 50, 100, ("s", "ab:x", 50), ("s", "p:x", 2_000)) == [0, 1_278]
+        assert redis.command("HGET", room, "ab:x") == "100" and total() == 1_278
+        # Down to nothing and kept: the field and its 64 bytes come back with the kept count.
+        assert keep(10_000, "ab:x", 0, 100, ("s", "ab:x", 0)) == [1, 1_278]
+        assert redis.command("HGET", room, "ab:x") == "100"
+        # A keep that the take does not name, or a kept count below the new size, is refused before anything runs.
+        assert keep(10_000, "ab:x", 10, 100, ("s", "ab:y", 10)) == [-1, 0]
+        assert keep(10_000, "ab:x", 100, 10, ("s", "ab:x", 100)) == [-1, 0]
+        assert keep(10_000, "#", 0, 10, ("s", "ab:x", 0)) == [-1, 0]
+        assert redis.command("HGET", room, "ab:x") == "100" and total() == 1_278
+        print("PASS: a keep past the room, unnamed, smaller than the new size or on the total itself writes nothing")
     finally:
         redis.command("DEL", room, numbers, counter)
         redis.close()

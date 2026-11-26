@@ -11,8 +11,7 @@
  */
 import type { Json, ProposalKind } from "@/lib/agent-proposal-rules";
 import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, readAboutExact } from "@/lib/product-about";
-import { writeStoreAboutIf } from "@/lib/product-about-live";
-import { setProductAbout, setProductSummary, setProductTitle, type Store } from "@/lib/store";
+import { setProductAboutIf, setProductSummary, setProductTitle, type Store } from "@/lib/store";
 import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH, readListing } from "@/lib/catalog";
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
@@ -103,16 +102,11 @@ export const PRODUCT_DESCRIPTION: AgentKind = {
     // Checked again here: the product may have been published since it was proposed.
     if (await descriptionRefusal(store, target, value)) return "terms";
     const text = cleanAbout(value);
-    // The words first, only over the ones it was decided on; then the product's mark that it has some.
-    const written = await writeStoreAboutIf(store, target, expected, text);
-    if (written !== true) return written;
-    const marked = await setProductAbout(ref, target, text !== "");
-    if (!marked.ok) {
-      // The mark could not follow: the words go back to what they were, so the two never disagree.
-      await writeStoreAboutIf(store, target, text, expected).catch((error: unknown) => console.error("putting back a description failed", error));
-      return false;
-    }
-    return true;
+    // The words, only over the ones it was decided on, with the product's mark and a new revision, in one step under the
+    // store's lock (lib/store.ts setProductAboutIf; 36th triple audit on #4238, MEDIUMs 2 and 3).
+    const written = await setProductAboutIf(ref, target, expected, text);
+    if (written.ok) return true;
+    return written.reason === "changed" ? "changed" : false;
   },
 };
 

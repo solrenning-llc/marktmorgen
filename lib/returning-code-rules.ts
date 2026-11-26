@@ -168,7 +168,7 @@ export function otherDiscountForAll(
 export function returningCodeOffered(
   store: { returningCodes: readonly ReturningCode[]; stripeAccountId: string | null; sale?: StoreSale; tiers?: readonly string[] },
   product: { pwyw?: unknown } & Partial<Omit<SaleCandidate, "pwyw">> & Partial<Pick<IntroCandidate, "recurring">>,
-  nowSeconds: number,
+  nowSeconds = Math.floor(Date.now() / 1000),
 ): boolean {
   if (!store.stripeAccountId || otherDiscountForAll(store, product, nowSeconds)) return false;
   return store.returningCodes.some((entry) => entry.endsAt === null || entry.endsAt > nowSeconds);

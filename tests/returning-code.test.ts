@@ -193,7 +193,10 @@ async function main(): Promise<void> {
     // The field's own button asks for the link; the buy button never does.
     if (fields.rcode !== undefined && fields.buy !== "yes") f.set("rask", "1");
     const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(f), headers: { host: "marktmorgen.com", "x-forwarded-for": ip } }));
-    const location = response.headers.get("location") ?? "";
+    const raw = response.headers.get("location") ?? "";
+    // The typed code rides back in the address for the field (checked below); compared without it.
+    if (fields.rcode) is(`the typed code goes back with the answer (${fields.rcode})`, raw.includes(`&rc=${fields.rcode.trim().toUpperCase()}#`) || !raw.includes("?returning="), true);
+    const location = raw.replace(/&rc=[A-Z0-9-]+#/, "#");
     const writesBefore = linkWrites;
     await runAfter();
     return { location, session: opened.length > before ? opened.at(-1)! : null, reads: reads - readsBefore, link: linkWrites > writesBefore };
@@ -221,7 +224,7 @@ async function main(): Promise<void> {
   bare.set("rask", "1");
   const asked = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: bare, headers: { host: "marktmorgen.com", "x-forwarded-for": "198.51.100.50" } }));
   await runAfter();
-  is("'sent', not sent back for the consent box", asked.headers.get("location"), back("sent"));
+  is("'sent', not sent back for the consent box", asked.headers.get("location"), back("sent").replace("#", "&rc=THANKYOU#"));
 
   part("A code left in the field never stops the buy button");
   r = await post({ rcode: "THANKYOU", remail: PAST, buy: "yes" }, "198.51.100.51");
@@ -281,6 +284,65 @@ async function main(): Promise<void> {
   is("its claim now lasts as long as the link could, so nothing reopens it", typeof keptClaim, "string");
   r = await post({ rtoken: kept }, "198.51.100.34");
   is("and a second use is told the link is spent, not opened", [r.location, r.session], [back("link"), null]);
+
+  part("A link whose spending fails entirely still never opens a second checkout");
+  // Codex N1 LOW on #3690 @8632219273 (and X6's re-check): when both of spendReturningLink's writes failed, the spent
+  // mark and the delete, the short claim ran out while the link still worked for the rest of its half hour.
+  const unspent = await linkFor(PAST, productId);
+  (redis as unknown as { pipeline: typeof pipe }).pipeline = async (commands: (string | number)[][]) => {
+    const linkDelete = commands.some((c) => c[0] === "DEL" && String(c[1]).startsWith("nl:rcode:link:") && !String(c[1]).endsWith(":claim"));
+    const spentMark = commands.some((c) => c[0] === "SET" && String(c[1]).endsWith(":claim") && c[2] === "spent");
+    if (linkDelete || spentMark) throw new Error("connection reset (synthetic)");
+    return pipe(commands);
+  };
+  try {
+    r = await post({ rtoken: unspent }, "198.51.100.35");
+  } finally {
+    (redis as unknown as { pipeline: typeof pipe }).pipeline = pipe;
+  }
+  is("the first use opens its checkout", r.location, "https://checkout.stripe.com/c/pay/test");
+  redis.advance((RETURNING_CLAIM_SECONDS + 1) * 1000);
+  r = await post({ rtoken: unspent }, "198.51.100.36");
+  is("once the claim has run out, a second use is still refused, not opened", [r.location, r.session], [back("link"), null]);
+
+  part("A spent link is never given back by a failure after its checkout opened");
+  // The second half of the same LOW: the route's cleanup after a throw let the link go even once it was spent, which
+  // erased the spent mark of a link whose delete had failed. Here the delete fails and the work the route leaves for
+  // after its answer throws once, after the checkout opened.
+  const after = await linkFor(PAST, productId);
+  const push = afterTasks.push.bind(afterTasks);
+  let thrown = false;
+  afterTasks.push = (...items: unknown[]) => {
+    if (!thrown) {
+      thrown = true;
+      throw new Error("after() refused (synthetic)");
+    }
+    return push(...items);
+  };
+  (redis as unknown as { pipeline: typeof pipe }).pipeline = async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "DEL" && String(c[1]).startsWith("nl:rcode:link:") && !String(c[1]).endsWith(":claim"))) throw new Error("connection reset (synthetic)");
+    return pipe(commands);
+  };
+  const openedThen = opened.length;
+  try {
+    await post({ rtoken: after }, "198.51.100.39");
+  } finally {
+    (redis as unknown as { pipeline: typeof pipe }).pipeline = pipe;
+    afterTasks.push = push;
+  }
+  is("control: its checkout opened, then the route threw", [opened.length - openedThen, thrown], [1, true]);
+  r = await post({ rtoken: after }, "198.51.100.40");
+  is("a second use is told the link is spent, and nothing more is opened", [r.location, r.session, opened.length - openedThen], [back("link"), null, 1]);
+
+  part("A link let go without a checkout keeps the rest of its half hour");
+  // The other side of the same fix: a use refused before any checkout opened gives the link back whole, so the buyer
+  // can still use it after the claim's two minutes.
+  const given = await linkFor(PAST, productId);
+  r = await post({ rtoken: given, product: otherId }, "198.51.100.37");
+  is("on another product: refused, nothing opened", [r.location, r.session], [back("link", otherId), null]);
+  redis.advance((RETURNING_CLAIM_SECONDS + 1) * 1000);
+  r = await post({ rtoken: given }, "198.51.100.38");
+  is("after the claim's time, on its own product: it opens the checkout", r.location, "https://checkout.stripe.com/c/pay/test");
 
   part("A link is for its product, and for a code still running");
   const second = await linkFor(PAST, productId);

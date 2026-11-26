@@ -31,6 +31,9 @@ export async function POST(request: NextRequest) {
   // The box to start access at once (lib/digital-consent.ts): from the PayPal
   // form, or from the card checkout's form when its PayPal button sent it.
   let digitalConsent: DigitalConsent | null = null;
+  // A returning-buyer code's link or a typed code from the same form (components/returning-code-box.tsx):
+  // PayPal cannot take the code, so the buyer is told, never charged the full price as if it had gone on.
+  let withCode = false;
   // The form as sent, for the billing country the EU VAT gate reads (lib/eu-vat-gate.ts consumerGate).
   let sent: FormData = new FormData();
   try {
@@ -41,6 +44,9 @@ export async function POST(request: NextRequest) {
     const p = form.get("product");
     handle = typeof h === "string" ? normaliseHandle(h) : "";
     productId = typeof p === "string" ? p.slice(0, 64) : "";
+    const rtoken = form.get("rtoken");
+    const rcode = form.get("rcode");
+    withCode = (typeof rtoken === "string" && rtoken.trim() !== "") || (typeof rcode === "string" && rcode.trim() !== "");
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -50,6 +56,7 @@ export async function POST(request: NextRequest) {
   if (!store) return new Response("No such store.", { status: 404 });
   const product = await readProduct(store, productId);
   if (!product) return away(`/@${store.handle}`);
+  if (withCode) return away(`/@${store.handle}/p/${product.id}?returning=other#returning`);
   const room = await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600).catch(unknownLimit);
   if (room === "unknown") return away(`/@${store.handle}?status=error`);
   if (!room) return away(`/@${store.handle}?status=slow`);

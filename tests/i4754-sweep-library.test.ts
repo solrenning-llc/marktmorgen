@@ -84,6 +84,49 @@ async function main(): Promise<void> {
   await sweepCheckouts(Date.now() + 20_000);
   is("the store is in their library again, for the new purchase", (await storesBoughtFrom(email)).length, 1);
 
+  part("a store with no list yet: an erasure between the sweep's check and its write still takes effect");
+  // The store's first erasure gives it its list while the sweep is running: the sweep gives the store its list first
+  // too, so both check the same deletion marks, and the note never lands after the erasure unchecked.
+  const OWNER2 = "o1-nolist@example.com", HANDLE2 = "o1nolist";
+  await claimHandle(OWNER2, HANDLE2, "Rye House", "");
+  await ensureStatsId(OWNER2); await ensureStoreId(OWNER2);
+  await setStripeAccount(OWNER2, "acct_1TestO1Swp1", true);
+  await setSubscription(OWNER2, { customerId: "cus_O1NoList1", subscriptionId: "sub_O1NoList1", active: true, tier: "pro", period: paidPeriod() });
+  await setMailSettings(OWNER2, { fromName: "Rye House", address: "2 Main St, Portland, OR 97201" });
+  const rye = await addProduct(OWNER2, "Rye Course", "Ten loaves.", "49", null);
+  if (!rye.ok) throw new Error("no product");
+  await setProductLink(OWNER2, rye.product.id, "https://example.com/rye");
+  // A store from before lists has none (every store made since #1680 has one): taken off the kept record, as
+  // tests/ad-events-legacy-list.test.ts does.
+  for (const key of redis.keys().filter((k) => k.startsWith("nl:store:owner:"))) {
+    const raw = redis.run(["GET", key]);
+    if (typeof raw !== "string") continue;
+    const record = JSON.parse(raw) as Record<string, unknown>;
+    if (record.email !== OWNER2) continue;
+    record.listId = null;
+    redis.run(["SET", key, JSON.stringify(record)]);
+  }
+  is("(control) the store has no list yet", (await storeForEmail(OWNER2))!.listId ?? null, null);
+  const listless = "listless-buyer@example.com";
+  sessions = [{ id: "cs_test_o1000000000004", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", created, amount_total: 4900, currency: "usd", customer_details: { email: listless }, metadata: { store: HANDLE2, product: rye.product.id } }];
+  let racedNoList = false;
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    if (!racedNoList && batch.some((c) => c.some((arg) => typeof arg === "string" && arg.startsWith("nl:lib:")) && c.some((arg) => arg === "SADD" || String(arg).includes("SADD")))) {
+      racedNoList = true;
+      redis.pipeline = real;
+      const r = await erasePerson((await storeForEmail(OWNER2))!, listless, { kind: "person" });
+      if (!r.ok) throw new Error("racing erasure not ok");
+    }
+    return real(batch);
+  }) as typeof redis.pipeline;
+  try {
+    await sweepCheckouts(Date.now() + 20_000);
+  } finally {
+    redis.pipeline = real;
+  }
+  is("the erasure ran between them", racedNoList, true);
+  is("the buyer's library stays empty", (await storesBoughtFrom(listless)).length, 0);
+
   part("the deletion check adds what the cost registry says, a pass with buyers");
   sessions = [
     { id: "cs_test_o1000000000004", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", created: Math.floor(Date.now() / 1000) + 5, amount_total: 4900, currency: "usd", customer_details: { email: "first@example.com" }, metadata: { store: HANDLE, product } },

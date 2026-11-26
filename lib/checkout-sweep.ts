@@ -58,7 +58,7 @@ import { CONFIRM_WITHIN_SECONDS, type SessionRecord, canConfirm, confirmPurchase
 import { REMIND_WITHIN_SECONDS, remindAbandoned } from "@/lib/checkout-recovery";
 import { enroll, readFlows } from "@/lib/flows";
 import { recoveryOn } from "@/lib/recovery-setting";
-import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
+import { type Store, ensureListId, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
 import { noteKept } from "@/lib/move-members";
 import { listingsNamed, sellsThings } from "@/lib/catalog";
 import { AFFILIATE_ID_PATTERN, type Affiliate, VIA_PENDING_META, affiliatesOn, listPartners, notePayPalPendings, notePendingDue, notePendingLinks, noteSession, settleUnconfirmed } from "@/lib/affiliates";
@@ -773,7 +773,10 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       if (buyers.length && !isHouseStore(store)) {
         // A store made before stores had ids is given its own now.
         const sid = store.sid || (await ensureStoreId(storeRef(store)).catch(() => null))?.sid || "";
-        await rememberBuyersAt(sid, store.listId ?? null, buyers);
+        // The list where the deletion marks are kept, given to a store with none first, as an erasure gives it
+        // (lib/person-erasure.ts erasureScope), so both check the same list; not given, nothing is noted this pass.
+        const listId = store.listId || (await ensureListId(storeRef(store)).catch(() => null))?.listId;
+        if (listId) await rememberBuyersAt(sid, listId, buyers);
       }
     }
     // A buyer who never reached the thanks page is put on the list all the

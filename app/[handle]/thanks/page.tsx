@@ -18,7 +18,7 @@ import { GroupLinkBox } from "@/components/group-link-box";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { type Listing, ensureStoreId, normaliseHandle, storeForPage, storeRef } from "@/lib/store";
+import { type Listing, ensureListId, ensureStoreId, normaliseHandle, storeForPage, storeRef } from "@/lib/store";
 import { formatMoney, toMajor } from "@/lib/money";
 import { linkHost } from "@/lib/product-link";
 import { DOWNLOAD_WINDOW_SECONDS, type Order, readOrder } from "@/lib/store-checkout";
@@ -516,7 +516,10 @@ export default async function ThanksPage({ params, searchParams }: Params) {
     // Against the order's own time: a buyer deleted from the store at or after it is not noted again when this page is
     // opened later; a purchase paid after the deletion is noted as any (#4754). One step, no read of its own in the
     // common case, so a thanks page opened again costs what it cost before.
-    await rememberBuyerAt(sid, store.listId ?? null, order.email, order.created);
+    // The list where the deletion marks are kept, given to a store with none first, as an erasure gives it
+    // (lib/person-erasure.ts erasureScope); not given, nothing is noted here and the five-minute sweep notes it.
+    const listId = store.listId || (await ensureListId(storeRef(store)).catch(() => null))?.listId;
+    if (listId) await rememberBuyerAt(sid, listId, order.email, order.created);
   }
   if (order.state === "paid" && order.email && store.listId) {
     await listOrder(store, {

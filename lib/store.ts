@@ -47,7 +47,7 @@ import type { CallPackage } from "@/lib/call-package-rules";
 import type { PodcastRef } from "@/lib/podcast-rules";
 import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
-import { rememberListing } from "@/lib/directory-index";
+import { DIRECTORY_CACHE, rememberListing, wouldList } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type FencedChange, type Held, LockBusyError, applyIfHeld, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
@@ -2966,6 +2966,12 @@ export async function setSubscription(
     // when they had been turned off (lib/short-link-rest.ts, the owner's decision 14 on #3330). Only when it changes.
     if (paysNow(saved) && (!paysNow(store) || saved.tier !== store.tier || saved.subscriptionId !== store.subscriptionId || saved.period?.start !== store.period?.start)) {
       await shortLinksBackOn(saved.sid).catch((error) => console.error("could not turn the store's short links back on", error));
+    }
+    // A listed store whose plan stops can no longer sell, so the affiliate directory leaves it out
+    // (lib/affiliate-directory.ts, directoryRow): its kept rows go now, as a consent withdrawn drops them
+    // (rememberListing), never shown for up to their ten minutes more (#5010 row 154). Only when it changes.
+    if (store.subscriptionActive && !saved.subscriptionActive && wouldList(saved)) {
+      await redisPipeline([["DEL", DIRECTORY_CACHE]]).catch((error) => console.error("could not drop the directory's kept rows", error));
     }
     // The stores whose sales pay a share, for the daily job that keeps what
     // was taken to what is owed (lib/share-settle.ts). Only when it changes.

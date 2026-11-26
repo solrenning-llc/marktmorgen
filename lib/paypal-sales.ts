@@ -12,6 +12,8 @@
  *   nl:ppsell:refunded:<stats>  paid orders PayPal says were refunded in full, scored by when that was seen
  *   nl:ppsell:back:<stats>      the same refunds by payment, kept for good, for the affiliate book's lines
  *   nl:ppsell:reversed:<stats>  of those, the ones taken back by another way than a refund (reversed, failed, declined)
+ *   nl:ppsell:partback:<stats>  the payments PayPal says were refunded in part, by payment, kept for good: how much is
+ *                               not known here, so the affiliate book pays nothing on them
  *   nl:ppsell:tell:<order>    when telling the store's webhooks of an order's refund first failed (REFUND_TELL_MARK_SECONDS)
  *
  * How it fits together. Marktmorgen is a PayPal partner; a creator connects their
@@ -204,6 +206,17 @@ export const ownKey = (statsId: string, email: string, productId: string) => `nl
 export const salesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
 /** Exported for the affiliate book's count of what it will read (lib/affiliates.ts, bookSizes). */
 export const refundedKey = (statsId: string) => `nl:ppsell:refunded:${statsId}`;
+/**
+ * The payments PayPal said were refunded IN PART (PARTIALLY_REFUNDED), a field per payment named as the affiliate book
+ * names it (paypalPaymentId), its value when the refund watch first saw it. PayPal's capture does not say how much was
+ * given back and nothing here receives PayPal's webhooks, so what such a sale still earns an affiliate or a partner is
+ * not known: the affiliate book (lib/affiliates.ts readBook) pays nothing on it (rule 24), never the commission on the
+ * whole price (Claude 1 cloud's money audit in #3869). Kept for good, as backKey is, and for the same reason: the
+ * book's lines are kept for good, so what holds one back must be too, or the line would earn the whole commission once
+ * the mark expired; and the book asks about its own payments by name, never lists these since its oldest line, so a
+ * store with many never has its whole book held (Claude 4 on #4131). A refund in full later goes the way of any.
+ */
+export const partlyRefundedKey = (statsId: string) => `nl:ppsell:partback:${statsId}`;
 /**
  * The store's PayPal payments refunded in full, kept for good (a field per payment, named as the affiliate book names
  * it, paypalPaymentId; its value when the refund was seen): the affiliate book's lines are kept for good, so what
@@ -1737,6 +1750,34 @@ export async function watchPayPal(
       console.error("reading a PayPal capture failed", error);
       await watchAt(now + 3600, order).catch(() => undefined);
       continue;
+    }
+    // Refunded in part: kept for good before anything else (partlyRefundedKey), so the affiliate book holds back what it
+    // no longer knows is owed. The order stays watched for a refund in full, so a later look first asks whether it is
+    // kept already (one HEXISTS); only the first is written, through lib/order-data.ts and charged to the store's room
+    // as backKey is, HSETNX keeping when it was first seen. Each reply read exactly, 0 or 1; anything else, or a write
+    // that failed, is unknown, never "marked": the order stays watched and is looked at again in an hour (rule 24).
+    if (status === "PARTIALLY_REFUNDED") {
+      const field = paypalPaymentId(paid.capture);
+      // The read is inside the same unknown as the write (Codex P on #4131): a HEXISTS that throws leaves this order
+      // for its next look and lets the pass go on to the others, never stops it.
+      let kept: unknown;
+      try {
+        const there = repliesFor(await redisPipeline([["HEXISTS", partlyRefundedKey(statsId), field]]), 1)?.[0];
+        if (there === 1) kept = 1;
+        if (there === 0) {
+          const written = await orderWrite(store, [["HSETNX", partlyRefundedKey(statsId), field, String(now)]]);
+          kept = written.length === 1 ? written[0] : undefined;
+        }
+      } catch (error) {
+        console.error("a PayPal refund in part could not be read or kept for the affiliate book", error);
+      }
+      if (!(kept === 0 || kept === 1)) {
+        console.error("a PayPal refund in part could not be marked; looked at again in an hour", order);
+        // A reschedule not confirmed leaves the order due, where the next pass finds it again.
+        // Fenced against the store's erasure, as every other put-back (PAYPAL_WATCH_IF_LIVE; #4892).
+        await watchAt(now + 3600, order).catch(() => undefined);
+        continue;
+      }
     }
     if (!CAPTURE_TAKEN_BACK.has(status)) {
       const known = CAPTURE_KEEPS.has(status);

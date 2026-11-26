@@ -966,6 +966,7 @@ export const FAMILIES: Record<string, Family> = {
   // A field of "paypal:" and a capture id of up to 64 characters, a time of up to 12 digits, ORDER_ENTRY_BYTES and a
   // quarter more, rounded up (lib/order-data.ts): 192 bytes; 256 with the key's own share.
   "nl:ppsell:back:@lib/paypal-sales.ts": { what: "PayPal payments refunded in full, kept for good for the affiliate book's lines (9 November 2026)", parts: [item(256, "One field per refunded PayPal order, written through lib/order-data.ts.", "paypal")] },
+  "nl:ppsell:partback:@lib/paypal-sales.ts": { what: "PayPal payments refunded in part, kept for good for the affiliate book's lines (Claude 4 on #4131)", parts: [item(256, "One field per PayPal order refunded in part, written through lib/order-data.ts.", "paypal")] },
   "nl:ppsell:reversed:@lib/paypal-sales.ts": short("Of those, the orders PayPal took back by another way than a refund (reversed, failed, declined)", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:sales:@lib/paypal-sales.ts": short("Every paid order", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:tell:@lib/paypal-sales.ts": short("When telling a refunded order's webhooks first failed, a month (REFUND_TELL_MARK_SECONDS)", "order", 30, MARK, KIND("paypal")),

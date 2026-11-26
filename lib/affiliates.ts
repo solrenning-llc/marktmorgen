@@ -75,7 +75,7 @@
  */
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { rememberAffiliate } from "@/lib/affiliate-hub";
-import { BOOK_KEPT_SLICE, type Paid, backKey as paypalBackKey, paypalPaymentId, readPaidExact, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
+import { BOOK_KEPT_SLICE, type Paid, backKey as paypalBackKey, partlyRefundedKey as paypalPartlyRefundedKey, paypalPaymentId, readPaidExact, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { ERASING_KEY, MAX_STORE_BYTES, erasingField, saleHandles, storeForEmailSeen, storeForId, storeIdCommand, storeRef } from "@/lib/store";
 import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { storeForIdExactly } from "@/lib/store-exact";
@@ -5540,6 +5540,9 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   const bookings = leads.filter((l) => l.kind === "booking" && l.pi);
   let refunds = new Map<string, number>();
   let refundsChecked = true;
+  // PayPal payments refunded in part (lib/paypal-sales.ts partlyRefundedKey), named as the lines name them: how much
+  // was given back is not known, so nothing is paid on them (below), never the commission on the whole price.
+  let partlyRefunded = new Set<string>();
   // Whether Stripe's refunds and disputes were both read in full on the store's account: only then is a mark written.
   let stripeRefundsRead = false;
   let stripeDisputesRead = false;
@@ -5605,7 +5608,11 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
         const slices = <T,>(list: T[]) => Array.from({ length: Math.ceil(list.length / BOOK_KEPT_SLICE) }, (_, i) => list.slice(i * BOOK_KEPT_SLICE, (i + 1) * BOOK_KEPT_SLICE));
         const kept = slices(pis).map((names) => ["HMGET", paypalBackKey(statsId), ...names]);
         const marked = slices(orders).map((names) => ["ZMSCORE", paypalRefundedKey(statsId), ...names]);
-        const replies = repliesFor(await redisPipeline([...kept, ...marked]), kept.length + marked.length);
+        // And the third question, in the same slices: the payments refunded in part, kept for good by payment
+        // (lib/paypal-sales.ts, partlyRefundedKey). Asked by name, never listed since the book's oldest line, so neither
+        // an old mark nor a store with many is lost (Claude 4 on #4131).
+        const partly = slices(pis).map((names) => ["HMGET", paypalPartlyRefundedKey(statsId), ...names]);
+        const replies = repliesFor(await redisPipeline([...kept, ...marked, ...partly]), kept.length + marked.length + partly.length);
         const answers = (from: number, commands: (string | number)[][]) => {
           const out: unknown[] = [];
           commands.forEach((command, i) => {
@@ -5617,11 +5624,13 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
         };
         const back = answers(0, kept);
         const seen = answers(kept.length, marked);
+        const part = answers(kept.length + marked.length, partly);
         const answer = (v: unknown) => v === null || typeof v === "string";
-        if (!replies || back.length !== pis.length || seen.length !== orders.length || !back.every(answer) || !seen.every(answer)) refundsChecked = false;
+        if (!replies || back.length !== pis.length || seen.length !== orders.length || part.length !== pis.length || !back.every(answer) || !seen.every(answer) || !part.every(answer)) refundsChecked = false;
         else {
           for (const [i, pi] of pis.entries()) if (back[i] !== null) refundedInFull(pi);
           for (const [i, order] of orders.entries()) if (seen[i] !== null) refundedInFull(paypalOrders.get(order) as string);
+          partlyRefunded = new Set(pis.filter((_, i) => part[i] !== null));
         }
       }
     } catch (error) {
@@ -5700,10 +5709,17 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   }
   // The account a sale was paid into is for the check above only: never on a line, so no page, file or kept book shows it.
   const refundOf = (r: Referral) => kept.get(r) ?? (r.pi ? refunds.get(r.pi) ?? 0 : 0);
-  const settled = everything.map((r) => ({
-    ...settleLine(withoutAccount(r), refundOf(r), r.how === "partner" ? partOf.get(r.ref) : undefined),
-    ...(unchecked.has(r.ref) ? { unchecked: true as const } : {}),
-  }));
+  // A PayPal sale refunded in part, not in full: what it still earns is not known, so it earns nothing until it is (it
+  // is marked "partly refunded", the same for the affiliate's line and every partner's share of it). It also counts
+  // toward no monthly goal and no second tier, which are worked out from what the sales earn.
+  const settled = everything.map((r) => {
+    const line = {
+      ...settleLine(withoutAccount(r), refundOf(r), r.how === "partner" ? partOf.get(r.ref) : undefined),
+      ...(unchecked.has(r.ref) ? { unchecked: true as const } : {}),
+    };
+    return partlyRefunded.has(r.pi) && (line.status === "earned" || line.status === "partly refunded") ? { ...line, commission: 0, status: "partly refunded" as const } : line;
+  });
+  const earning = settled.filter((l) => !partlyRefunded.has(l.pi));
   // Each lead as it stands: the program's caps and budget counted across every affiliate's, then only the ones asked for.
   let ends = new Map<string, number>();
   const openBookings = leads.filter((l) => l.kind === "booking" && l.state === "open" && l.ref && mine(l.aff)).slice(0, 200);
@@ -5726,7 +5742,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // as they stand after refunds. Then only the one affiliate's, when it is one.
   // A second tier on a held sale is held with it, and so is a bonus of a month with a held sale among its sales.
   const heldMonths = new Set(settled.filter((l) => l.unchecked).map((l) => `${l.aff}:${new Date(l.at * 1000).toISOString().slice(0, 7)}:`));
-  const derived = [...bonusLines(store, settled), ...tierLines(everyone, [...settled, ...otherShares], flagsOf)].map((l) =>
+  const derived = [...bonusLines(store, earning), ...tierLines(everyone, [...earning, ...otherShares], flagsOf)].map((l) =>
     (l.how === "tier2" && unchecked.has(l.ref.slice("tier2:".length))) || (l.how === "bonus" && [...heldMonths].some((m) => l.ref.startsWith(`bonus:${m}`)))
       ? { ...l, unchecked: true as const }
       : l,

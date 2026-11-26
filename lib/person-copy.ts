@@ -190,6 +190,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/review-requests.ts": { how: "within", in: "lib/suppression.ts", what: "If you pressed stop on review requests, that is in your no" },
   "lib/product-updates.ts": { how: "passing", days: 60, what: "If a product update email from the store is going out to you now, its sending list holds your address until it finishes. If you pressed stop on update emails, that is in your no" },
   "lib/broadcasts.ts": { how: "passing", days: 60, what: "If one of the store's emails to its list is going out to you now, its sending list holds your address until it finishes" },
+  "lib/batch-count.ts": { how: "passing", days: 1, what: "If the email service's answer to a batch of the store's emails to you was lost, a mark that the batch's count is already kept, named by a one-way fingerprint of the batch and its addresses, with no address in it" },
   "lib/email-polls.ts": { how: "passing", days: 60, what: "If you answered a poll in one of the store's emails, your answer is kept under your place in that email's list, never your address, so it cannot be found for you; it is deleted by itself 30 days after the poll closes" },
   "lib/community-event-mail.ts": { how: "passing", days: 30, what: "If an email about a community event is going out to you now, its sending list holds your address until it finishes" },
   "lib/stock-alert-send.ts": { how: "passing", days: 1, what: "If a back-in-stock email from the store is going out to you now, its batch holds your address until it is sent, a day at the most" },

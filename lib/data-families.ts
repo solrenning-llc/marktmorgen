@@ -129,7 +129,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:ls:due", "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
   "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
-  "nl:mail:pin:", "nl:ppsell:receipt:", "nl:ppsell:mail:", "nl:ppsell:start:", "nl:ppsell:try:",
+  "nl:mail:pin:", "nl:mail:kept:", "nl:ppsell:receipt:", "nl:ppsell:mail:", "nl:ppsell:start:", "nl:ppsell:try:",
   // A gift's checkout mark (lib/store-tip-checkout.ts, R20 finding 3).
   "nl:tip:co:",
 ];
@@ -424,7 +424,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:ppsell:canceled:": X(30), "nl:ppsell:tell": Cr(30),
   // A PayPal receipt tried again (lib/paypal-delivery.ts, lib/email.ts sendEmailPinned): the time of its first try,
   // named by the order and holding only that time, gone within RECEIPT_MARK_SECONDS; the sender kept for its key, the company's, a day.
-  "nl:ppsell:receipt:": X(7), "nl:mail:pin:": Cr(1),
+  "nl:ppsell:receipt:": X(7), "nl:mail:pin:": Cr(1), "nl:mail:kept:": Cr(1),
   // A PayPal connect started from the studio (lib/paypal-sales.ts, markOnboarding): one a store, holding "1", gone within a day.
   "nl:ppsell:start:": X(1),
   // A PayPal order's count of capture tries (lib/paypal-sales.ts, watchFirst): a number named by the order, gone

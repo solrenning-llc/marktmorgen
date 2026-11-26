@@ -55,6 +55,8 @@ let balanceTxns: BalanceTxn[] = [];
 let creditAnswerLost = false;
 /** The video service refuses to write captions. */
 let transcribeRefused = false;
+/** The video service's answer to a transcription request never comes back as a refusal: "throw" (a timeout or a network error) or a 5xx. */
+let transcribeLost: "" | "throw" | 503 = "";
 /** The languages the video service lists captions in for the video. */
 let serviceCaptions: string[] = [];
 
@@ -79,6 +81,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (url.pathname.includes("/transcribe")) {
       transcribes.push(JSON.parse(String(init?.body)));
       if (transcribeRefused) return json({ success: false, statusCode: 400 }, 400);
+      if (transcribeLost === "throw") throw new TypeError("fetch failed");
+      if (transcribeLost) return json({ success: false, statusCode: transcribeLost }, transcribeLost);
       return json({ success: true, statusCode: 200 });
     }
     return json({ guid: VIDEO, status: 4, captions: serviceCaptions.map((lang) => ({ srclang: lang, label: lang })) });
@@ -218,6 +222,7 @@ function reset(): void {
   balanceTxns = [];
   creditAnswerLost = false;
   transcribeRefused = false;
+  transcribeLost = "";
   serviceCaptions = [];
   redis.run(["SET", `nl:stream:v:${VIDEO}`, JSON.stringify({ id: VIDEO, path: PATH, name: "Knife skills.mp4", type: "video/mp4", bytes: 1, state: "ready", at: Date.now(), seconds: 600, width: 1920, height: 1080, settled: true })]);
 }
@@ -570,6 +575,26 @@ async function main(): Promise<void> {
   serviceCaptions = ["es"];
   await syncAutoCaptions(VIDEO, T + 15 * 60_000);
   is("each language delivered once, at a different look: all of it delivered, nothing refunded", [refunds.length, kept(), redis.run(["GET", KEY])], [0, PRICE, null]);
+
+  for (const lost of ["throw", 503] as const) {
+    part(`The transcription request is sent and its answer is lost (${lost}): the service may be writing, so nothing is refunded yet`);
+    reset();
+    transcribeLost = lost;
+    const unanswered = await ask(T);
+    transcribeLost = "";
+    is("not said refused, nothing refunded, the request kept and queued for its look", [unanswered, transcribes.length, refunds.length, kept(), redis.run(["GET", KEY]) !== null, redis.run(["ZSCORE", "nl:stream:autoq", VIDEO]) !== null], ["checking", 1, 0, PRICE, true, true]);
+    is("a retry asks the service nothing more and charges nothing more", [await ask(T + 1_000), transcribes.length, paidCount()], ["busy", 1, 1]);
+    serviceCaptions = ["en", "es"];
+    await syncAutoCaptions(VIDEO, T + 5 * 60_000);
+    is("the service wrote them after all: kept, nothing refunded, the request over", [refunds.length, kept(), redis.run(["GET", KEY])], [0, PRICE, null]);
+    reset();
+    transcribeLost = lost;
+    await ask(T);
+    transcribeLost = "";
+    advance(50 * 3_600_000);
+    await syncAutoCaptions(VIDEO, T + 50 * 3_600_000);
+    is("nothing written by GIVE_UP_HOURS: refunded in full, once", [refunds.length, kept(), redis.run(["GET", KEY])], [1, 0, null]);
+  }
 
   done();
 }

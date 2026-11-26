@@ -28,7 +28,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
-import { type BatchMessage, sendListBatch } from "@/lib/email";
+import { batchCountKept, batchCountSettled, keepBatchCount } from "@/lib/batch-count";
+import { type BatchMessage, sendListBatchOutcome } from "@/lib/email";
 import { stopTags } from "@/lib/mail-health-rules";
 import { CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { SITE_URL } from "@/lib/site-url";
@@ -467,8 +468,12 @@ export async function advanceAnnouncement(
       }
       const { recipients, tokens, skipped } = read;
       if (recipients.length) {
+        const batchKey = `cm:${id}:${job.done}:${keys.length}`;
+        const to = recipients.map((m) => m.e);
+        // A retry of a batch whose answer was not known sends under the count kept for it (lib/batch-count.ts).
+        const kept = await batchCountKept(batchKey, to);
         const day = mailDay();
-        const reserved = await reserve(store, recipients.length, false, day);
+        const reserved = kept ? "ok" : await reserve(store, recipients.length, false, day);
         if (reserved !== "ok") {
           job = {
             ...job,
@@ -495,15 +500,26 @@ export async function advanceAnnouncement(
           });
           messages.push({ from: fromLine(store), to: member.e, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags: stopTags(store) });
         }
-        const outcome = await sendListBatch(messages, `cm:${id}:${job.done}:${keys.length}`, { by: "monthly" });
+        const outcome = await sendListBatchOutcome(messages, batchKey, { by: "monthly" });
+        if (outcome === "sent") await batchCountSettled(batchKey, to);
         if (outcome === "waiting") {
-          // Known not handed to any provider: it waits for the sender in the queue, never counted as a failure.
-          await release(store, recipients.length, day);
+          // Known not handed to any provider: it waits for the sender in the queue, never counted as a failure. A count
+          // kept by an earlier unknown answer for this same batch stays kept (below).
+          if (!kept) await release(store, recipients.length, day);
           job = { ...job, status: "waiting", note: SENDER_WAIT_NOTE };
           break;
         }
         if (outcome !== "sent") {
-          await release(store, recipients.length, day);
+          // An answer not known (lib/email.ts, sendListBatchOutcome) may have sent them: their count is kept, never given
+          // back, and marked so that the same batch tried again is not counted again. A count kept by an earlier
+          // unknown answer stays whatever this one says.
+          // Amazon's unknown answer ("unconfirmed") is kept and marked too (Codex X6 on #4073, replacing #4073 MEDIUM 1).
+          // A list batch carries no maybe-taken marks (lib/email.ts, dispatchBatch, listOnly), so the retry may write
+          // again to whoever Amazon took when its answer was lost; that retry is counted under this kept count, as the
+          // release-and-reserve before it was, never twice.
+          if (outcome === "uncertain" || outcome === "unconfirmed") {
+            if (!kept) await keepBatchCount(batchKey, to);
+          } else if (!kept) await release(store, recipients.length, day);
           const failures = job.failures + 1;
           // Only a refusal ends it: a provider that is down keeps the email waiting, never abandoned (outage drill).
           job = outcome === "refused"

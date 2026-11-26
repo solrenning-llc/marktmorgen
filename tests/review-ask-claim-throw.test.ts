@@ -462,12 +462,18 @@ test("a batch the provider refused whose clean-up throws still gives its allowan
 // Codex X2 on #4360: "retry" also means the provider may have taken the batch (a lost answer). When giving the
 // allowance back then throws, the claims are kept stretched, as main keeps them: the order is never put in another
 // batch under another key, so an email that went is never sent twice.
-test("a batch that may have gone whose give-back throws keeps its claims and is never sent again", async () => {
+test("a batch that may have gone keeps its claims and its count, and is never sent again", async () => {
   const oldFetch = globalThis.fetch;
   const r = await setup();
   try {
-    const { run, posted, threw } = await failingBatch(r, "lost");
-    assert.deepEqual([posted, threw], [true, true], "the answer was lost and the give-back threw (diagnostic)");
+    const month = () => redis.keys().filter((key) => key.startsWith("nl:mail:used:")).reduce((sum, key) => sum + Number(redis.run(["GET", key]) ?? 0), 0);
+    const before = month();
+    const { run, posted } = await failingBatch(r, "lost");
+    // Since #4073 (coordinator's option (A), 20261122T025459Z-claude-1-coord-4e56) a batch whose answer was lost keeps
+    // its count and marks it (lib/batch-count.ts): nothing is given back, so no give-back can throw. The premise is the
+    // kept count; what is held below is unchanged.
+    const keptMarks = redis.keys().filter((key) => key.startsWith("nl:mail:kept:")).length;
+    assert.deepEqual([posted, keptMarks], [true, 1], "the answer was lost and its count kept and marked (diagnostic)");
     assert.equal(run.sent, 0, "not counted as sent");
     assert.match(String(redis.run(["GET", SENT])), /^sending:/, "the claim is kept");
     assert.ok(Number(redis.run(["TTL", SENT])) > 3600, "stretched, so no run reads it as a short claim");
@@ -476,6 +482,7 @@ test("a batch that may have gone whose give-back throws keeps its claims and is 
       assert.equal(after.sent, 0, "no later run sends it again");
     }
     assert.equal(r.batches.flat().length, 1, "the provider was given the email once");
+    assert.equal(month() - before, 1, "its count is kept: never given back, never taken twice");
   } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
 });
 

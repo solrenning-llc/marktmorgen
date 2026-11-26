@@ -37,7 +37,8 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { normaliseEmail } from "@/lib/auth";
-import { type BatchMessage, sendBatch } from "@/lib/email";
+import { batchCountKept, batchCountSettled, keepBatchCount } from "@/lib/batch-count";
+import { type BatchMessage, sendBatchOutcome } from "@/lib/email";
 import { stopTags } from "@/lib/mail-health-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
@@ -492,6 +493,9 @@ export async function sendReviewRequests(
     // A batch refused for good went nowhere: its whole share is owed back, and the finally gives it once, so a throw in
     // its clean-up (a ZREM in drop) never keeps the month counted for an email that never went (Codex G on #4360).
     let refusedOwed = 0;
+    // A batch whose earlier answer was not known already holds its count (lib/batch-count.ts, #4073): this run's own
+    // reservation for it is owed back, given once by the finally, so it is counted once, never twice.
+    let keptOwed = 0;
     // Every give-back goes to the day the allowance was taken from (lib/mail.ts mailDay, #3928), never to a later one.
     const day = mailDay();
     try {
@@ -522,26 +526,44 @@ export async function sendReviewRequests(
       undone = true;
       continue;
     }
-    const outcome = await sendBatch(
-      ready.map((item) => item.message),
-      `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
-    );
+    const batchKey = `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`;
+    const to = ready.map((item) => item.message.to);
+    // A retry of a batch whose answer was not known sends under the count kept for it (lib/batch-count.ts, #4073). It
+    // is read after the claims are stretched, so it is the batch that goes, under the key it goes with.
+    const kept = await batchCountKept(batchKey, to);
+    if (kept) keptOwed = ready.length;
+    const outcome = await sendBatchOutcome(ready.map((item) => item.message), batchKey, { by: "monthly" });
+    if (outcome === "sent") await batchCountSettled(batchKey, to);
     if (outcome === "refused") {
       // Refused for good, so nothing went: its share is owed back from here, given once by the finally even when the
       // undo below throws (Codex G on #4360), and a give-back that throws leaves the undo done (Codex X2 on #4360).
-      // The order leaves the list, as on main.
-      refusedOwed = ready.length;
+      // The order leaves the list, as on main. A count kept by an earlier unknown answer stays (#4073): only this
+      // run's own reservation goes back, already in keptOwed.
+      refusedOwed = kept ? 0 : ready.length;
       await unclaim(ready, null);
       for (const item of ready) await drop(item.member);
       undone = true;
       continue;
     }
+    if (outcome === "uncertain" || outcome === "unconfirmed") {
+      // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given
+      // back, and marked so that the same batch tried again is not counted again; a count kept by an earlier unknown
+      // answer stays whatever this one says. Amazon's unknown answer ("unconfirmed") is kept and marked too: the same
+      // batch tried again never writes to whoever Amazon may have taken (lib/email.ts, notMaybeTaken), and the mark
+      // ends before that evidence does (lib/batch-count.ts), so the retry is not counted again (Codex X6 on #4073).
+      // Its claims stay stretched, as for any batch that may have gone (#4360): the email is never handed over again,
+      // under this key or another, and its count is never taken twice.
+      if (!kept) await keepBatchCount(batchKey, to);
+      maybeSent = true;
+      continue;
+    }
     if (outcome !== "sent") {
       // "retry" may also mean the provider took the batch and its answer was lost (lib/email.ts). The claims are let
       // go only once the give-back succeeded; when it throws they stay stretched, as on main, so the order is never
-      // put in another batch under another key and sent twice (Codex X2 on #4360).
+      // put in another batch under another key and sent twice (Codex X2 on #4360). Under a kept count, nothing more
+      // is given back than this run's own reservation (keptOwed).
       maybeSent = true;
-      await release(store, ready.length, day);
+      if (!kept) await release(store, ready.length, day);
       maybeSent = false;
       await unclaim(ready, nowSeconds + RETRY_SECONDS.sender);
       undone = true;
@@ -558,7 +580,7 @@ export async function sendReviewRequests(
       // Nothing went for the claims not stretched, nor for a batch refused for good: their share of the allowance is
       // given back once, best effort (a give-back that fails only leaves the month counted higher, never an email sent
       // past it).
-      const owed = unheld + refusedOwed;
+      const owed = unheld + refusedOwed + keptOwed;
       if (owed > 0) await release(store, owed, day).catch((error) => console.error("giving back a review request's allowance failed", error));
     }
   }

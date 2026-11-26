@@ -36,7 +36,8 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { type BatchMessage, type SendOutcome, NIMBUS_FROM, sendBatch, sendEmailOutcome } from "@/lib/email";
+import { batchCountKept, batchCountSettled, keepBatchCount } from "@/lib/batch-count";
+import { type BatchMessage, type SendOutcome, NIMBUS_FROM, sendBatchOutcome, sendEmailOutcome } from "@/lib/email";
 import { stopTags } from "@/lib/mail-health-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -549,8 +550,11 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
         break;
       }
       if (recipients.length) {
+        const batchKey = `upd:${id}:${job.done}:${emails.length}`;
+        // A retry of a batch whose answer was not known sends under the count kept for it (lib/batch-count.ts).
+        const kept = await batchCountKept(batchKey, recipients);
         const day = mailDay();
-        const reserved = await reserve(store, recipients.length, false, day);
+        const reserved = kept ? "ok" : await reserve(store, recipients.length, false, day);
         if (reserved !== "ok") {
           job = {
             ...job,
@@ -571,7 +575,8 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
         } catch {
           // A stop link that could not be written sends nothing (rule 24): what reserve() took from the store's month
           // and the company's day is given back now, exactly, or the run fails, never taking it again on every run.
-          await giveBack(store, recipients.length, day);
+          // A count kept by an earlier unknown answer was not taken by this run, so it stays (lib/batch-count.ts).
+          if (!kept) await giveBack(store, recipients.length, day);
           job = { ...job, status: "waiting", note: "The stop links could not be saved just now. Nothing more was sent. We will try again." };
           break;
         }
@@ -591,9 +596,18 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           });
           messages.push({ from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags: stopTags(store) });
         }
-        const outcome = await sendBatch(messages, `upd:${id}:${job.done}:${emails.length}`, { by: "monthly" });
+        const outcome = await sendBatchOutcome(messages, batchKey, { by: "monthly" });
+        if (outcome === "sent") await batchCountSettled(batchKey, recipients);
         if (outcome !== "sent") {
-          await giveBack(store, recipients.length, day);
+          // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given
+          // back, and marked so that the same batch tried again is not counted again. A count kept by an earlier
+          // unknown answer stays whatever this one says. A give-back that does not read is unknown (giveBack).
+          // Amazon's unknown answer ("unconfirmed") is kept and marked too: the same batch tried again never writes to
+          // whoever Amazon may have taken (lib/email.ts, notMaybeTaken), and the mark ends before that evidence does
+          // (lib/batch-count.ts), so the retry is not counted again (Codex X6 on #4073, replacing #4073 MEDIUM 1).
+          if (outcome === "uncertain" || outcome === "unconfirmed") {
+            if (!kept) await keepBatchCount(batchKey, recipients);
+          } else if (!kept) await giveBack(store, recipients.length, day);
           const failures = job.failures + 1;
           job =
             // Only a refusal ends it: a provider that is down or slow keeps the update waiting in the queue, never

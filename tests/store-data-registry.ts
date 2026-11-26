@@ -793,6 +793,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:imports:list:@lib/imports.ts": { what: "A store's imports", parts: [capped((tier) => IMPORT_ALLOWANCES[tier].starts * 14 * 512, "One entry per start, 400 days.", src("lib/import-limits.ts", "IMPORT_ALLOWANCES"))] },
   "nl:imports:moved:@lib/imports.ts": short("People brought over and emailed, a month, kept at least as long as its window (windowKeySeconds)", "day", 63, 128),
   "nl:imports:rows:@lib/imports.ts": short("Rows counted in the window, kept at least as long as it (windowKeySeconds)", "day", 63, 128),
+  "nl:blk:@lib/buyer-block.ts": { what: "The people a creator blocked from writing to the store (567 [GD1] (f)): an HMAC of each address and the creator's reason, at most MAX_BLOCKED, each counted at BLOCK_ENTRY_BYTES before it is written", room: ["lib/buyer-block.ts"] },
   "nl:inbox:@lib/inbox.ts": { what: "The inbox: conversations and their messages", room: ["lib/inbox.ts"] },
   "nl:inbox:tok:@lib/inbox.ts": { what: "What a visitor's chat opens", room: ["lib/inbox.ts"] },
   "nl:intro:c:@lib/intro-coupon.ts": { what: "An introductory price's coupon: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },

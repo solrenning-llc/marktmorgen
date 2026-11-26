@@ -85,6 +85,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/member-health.ts", how: "erased", what: "The ten-minute copy of your members' scores" },
   { file: "lib/tier-benefits.ts", how: "erased", what: "Your marks of the membership benefits you handed them, with when and who on your team marked each" },
   { file: "lib/inbox.ts", how: "erased", what: "Their conversations in your inbox: what they wrote and what you answered" },
+  { file: "lib/buyer-block.ts", how: "erased", what: "Your reason for blocking them from writing to your store" },
   { file: "lib/imports.ts", how: "expires", days: 14, what: "A file you imported is kept for 14 days after the import began, then deleted with everything in it" },
 
   // ---------------------------------------------------------------- what the store keeps about them
@@ -152,6 +153,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/community-event-mail.ts", how: "expires", days: 30, what: "An event email already going out keeps its readers until it finishes; a deleted member is passed over" },
   { file: "lib/community.ts", how: "open", what: "Posts and comments they wrote in your community, and their likes and reports, stay, shown without their name. Delete them from the community if they ask." },
   { file: "lib/community-polls.ts", how: "open", what: "Their votes in community polls stay in the totals, without their name" },
+  { file: "lib/buyer-block.ts", how: "kept", what: "Your choice to block them from writing to your store", why: "It is your protection from their messages, holds only a one-way key and no reason, and you can lift it yourself." },
   { file: "lib/community-dm.ts", how: "kept", what: "Another member's choice to decline their messages", why: "It is that other member's protection, and holds only a one-way key." },
 
   // ---------------------------------------------------------------- orders and money

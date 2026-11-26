@@ -982,6 +982,38 @@ export class MemoryRedis {
           if (n >= Number(below)) return -1;
           return this.run(["INCR", counter]);
         }
+        // lib/buyer-block.ts BLOCK_LUA: a person added only while not on the list and the list has room.
+        if (key.startsWith("-- marktmorgen:buyer-block:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, list, mark, entry, most] = args;
+          if (this.run(["HEXISTS", list, mark]) === 1) return 0;
+          if (Number(this.run(["HLEN", list])) >= Number(most)) return -1;
+          this.run(["HSET", list, mark, entry]);
+          return 1;
+        }
+        // lib/buyer-block.ts FORGET_REASON_LUA: a block's reason erased, the block and its date kept, only while the
+        // entry is the one read.
+        if (key.startsWith("-- marktmorgen:buyer-block-forget:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, list, mark, entry, read] = args;
+          if (this.run(["HGET", list, mark]) !== read) return 0;
+          this.run(["HSET", list, mark, entry]);
+          return 1;
+        }
+        // lib/buyer-block.ts UNBLOCK_LUA: the block and its fixed data-room charge leave together.
+        if (key.startsWith("-- marktmorgen:buyer-unblock:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, list, room, mark, slot, rawBytes] = args;
+          if (Number(this.run(["HEXISTS", list, mark])) !== 1) return 0;
+          const old = Number(this.run(["HGET", room, slot]) ?? 0);
+          const total = Number(this.run(["HGET", room, "#"]) ?? 0);
+          const bytes = Number(rawBytes);
+          if (!Number.isFinite(old) || !Number.isFinite(total) || !Number.isFinite(bytes) || bytes < 0) return -1;
+          this.run(["HDEL", list, mark]);
+          const next = Math.max(0, old - bytes);
+          let delta = next - old;
+          if (old > 0 && next === 0) delta -= 64;
+          this.run(next > 0 ? ["HSET", room, slot, String(next)] : ["HDEL", room, slot]);
+          this.run(["HSET", room, "#", String(Math.max(0, total + delta))]);
+          return 1;
+        }
         // lib/flows.ts FLOW_QUEUED: each claim still pending becomes the 400-day mark and its run is queued, in one step.
         if (key.startsWith("-- marktmorgen:flow-queued:v1\n") && Number(args[0]) >= 3) {
           const keys = args.slice(1, 1 + Number(args[0])), argv = args.slice(1 + Number(args[0]));

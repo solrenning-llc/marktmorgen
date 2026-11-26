@@ -54,7 +54,7 @@ export const CHAT_TOKEN = /^[A-Za-z0-9_-]{32}$/;
  * Where a conversation began: the store's chat, its contact form, the creator writing first to an affiliate
  * (630 [HN6](5)), or a buyer's report of a problem with an order (567 [GD1] (a)), which a block never stops.
  */
-export type Source = "chat" | "contact" | "affiliate" | "order";
+export type Source = "chat" | "contact" | "affiliate" | "order" | "withdrawal";
 export type Status = "open" | "closed";
 
 export type Message = { at: number; from: "visitor" | "store"; text: string; /** Who of the store's team wrote it. */ by?: string };
@@ -133,7 +133,7 @@ export function parseConversation(raw: unknown): Conversation | null {
       id: v.id,
       email: v.email,
       name: typeof v.name === "string" ? v.name : "",
-      source: v.source === "contact" ? "contact" : v.source === "affiliate" ? "affiliate" : v.source === "order" ? "order" : "chat",
+      source: v.source === "contact" ? "contact" : v.source === "affiliate" ? "affiliate" : v.source === "order" ? "order" : v.source === "withdrawal" ? "withdrawal" : "chat",
       status: v.status === "closed" ? "closed" : "open",
       assigned: typeof v.assigned === "string" ? v.assigned : "",
       startedAt: Number(v.startedAt) || 0,

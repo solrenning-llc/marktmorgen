@@ -28,6 +28,7 @@
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { blockForCopy } from "@/lib/buyer-block";
 import { type ErasureScope } from "@/lib/erasure-rules";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { readDeals, readFields, readPersonTasks, readStages, readValues } from "@/lib/crm";
@@ -137,6 +138,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/assistant-reminder.ts": { how: "copied", what: "A checkout reminder you asked for with the store's assistant box" },
   "lib/move-members.ts": { how: "copied", what: "Invitations to keep a membership you had elsewhere" },
   "lib/inbox.ts": { how: "copied", what: "Your conversations with the store's inbox" },
+  "lib/buyer-block.ts": { how: "copied", what: "Whether the store chose not to take messages from you, since when, and the reason it wrote" },
   "lib/discord-access.ts": { how: "copied", what: "Your Discord account's link to the store, and its roles" },
   "lib/email-sync.ts": { how: "copied", what: "The record of sending you to the store's connected email platform" },
   "lib/segments.ts": { how: "marks", what: "A ten-minute copy of the store's buyers, made from its Stripe account" },
@@ -479,6 +481,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     }
     return out;
   },
+  "lib/buyer-block.ts": (s) => blockForCopy(s.store, s.email),
   "lib/inbox.ts": async (s) => {
     const out: unknown[] = [];
     for (const conversation of (await readInbox(s.statsId)).filter((c) => same(c.email, s.email))) {

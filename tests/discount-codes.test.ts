@@ -8,7 +8,8 @@
  *     code from a link, a code for returning buyers, a call's code), compared
  *     upper case as Stripe compares codes; a code a buyer typed in Stripe's
  *     own box is not named by the checkout, so those are one row, said
- *     plainly, never guessed;
+ *     plainly, never guessed; a link's note that is not a code joins that
+ *     row, whose name is true for both (#4824, Claude 4's LEVE);
  *   - the same days, currency and checkouts as the table by kind (no
  *     one-click extras, tips, other currencies, other kinds of discount), and
  *     the rows add up to its "Discount code" row;
@@ -129,7 +130,12 @@ const table = html.slice(html.indexOf("data-discount-codes"));
 is("a table with its own caption", table.includes('<caption id="numbers-discount-codes"') && table.includes("Sales by discount code, last 90 days"), true);
 is("column headers", ["Code", "Sales", "Revenue", "Given off", "Refunded"].every((h) => table.includes(`<th scope="col"`) && table.includes(`>${h}</th>`)), true);
 is("each code is a row header, as the creator would type it", ['<th scope="row"', ">SPRING</th>", ">CALL20</th>", ">THANKS</th>"].every((part) => table.includes(part)), true);
-is("typed codes said plainly", table.includes("Typed at checkout (Stripe does not say which code)"), true);
+is("codes the note does not name said plainly, true for both ways in (#4824, Claude 4's LEVE)", [table.includes("Not named: typed at checkout, or from a link note this page cannot read"), table.includes("Stripe does not say which code")], [true, false]);
+// A link's note that is not a code as lib/discount-rules.ts allows one (an old or hand-written note) still counts as a
+// code sale, in the same unnamed row as a code typed in Stripe's box; the row's name must be true for it too.
+const unread = discountCodes([checkout(2, 1700, 300, { code: "not a code!" }, "pi_unread_1")], new Set(), "usd", NOW);
+const unreadHtml = renderToStaticMarkup(createElement(DiscountImpact, { rows: kinds ?? [], refundsRead: true, currency: "usd", codes: unread }));
+is("a note that is not a code lands in the unnamed row, never called typed in Stripe's box", [unread.map((r) => [r.code, r.group, r.sales]), unreadHtml.includes("Not named: typed at checkout, or from a link note this page cannot read"), unreadHtml.includes("Stripe does not say which code")], [[[null, "typed", 1]], true, false]);
 is("money with its currency", table.includes("$30") && table.includes("$10"), true);
 is("the scrolling region is named by its caption and reachable by keyboard", table.includes('aria-labelledby="numbers-discount-codes"') && table.includes('tabindex="0"'), true);
 const noRefunds = renderToStaticMarkup(createElement(DiscountImpact, { rows: kinds ?? [], refundsRead: false, currency: "usd", codes }));

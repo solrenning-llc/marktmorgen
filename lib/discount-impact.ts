@@ -136,9 +136,10 @@ export function discountImpact(sales: DiscountSale[], refunded: Set<string>, cur
  * One discount code's sales over the same days (760 [STN7], unit 2), so the
  * creator sees which code sold, not only that codes did. `group` is "code"
  * for a code the checkout named; "others" adds up the codes past
- * CODE_ROWS_MAX; "typed" holds the codes a buyer typed in Stripe's own box,
- * which the checkout cannot name (Stripe says only that a discount came off),
- * so they are one row and never guessed. `code` is null except for "code".
+ * CODE_ROWS_MAX; "typed" holds the codes the checkout does not name: a code
+ * a buyer typed in Stripe's own box, or a link's note that is not a code
+ * (codeOf), which discountKindOf still counts as a code sale (#4824). Stripe
+ * says only that a discount came off, so they are one row and never guessed. `code` is null except for "code".
  */
 export type DiscountCodeRow = {
   code: string | null;
@@ -182,7 +183,8 @@ export function codeOf(row: Record<string, unknown>): string | null {
  * (the same days, the store's currency, no one-click extras or tips), each
  * under the code it named, most sales first, then more revenue, then the
  * code's letters; past CODE_ROWS_MAX codes the rest are added into one
- * "others" row, and codes typed in Stripe's box come last as one "typed"
+ * "others" row, and the codes not named (typed in Stripe's box, or a note
+ * that is not a code) come last as one "typed"
  * row. The rows add up to that "Discount code" row. Empty when no sale had
  * a code. Worked out from the sales already read: nothing more is asked of
  * Stripe. Pure.

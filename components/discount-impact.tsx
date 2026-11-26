@@ -71,7 +71,7 @@ export function DiscountImpact({ rows, refundsRead, currency, elsewhere = [], co
 /** A code's row header: the code as a buyer types it, or what the row holds. */
 function codeName(row: DiscountCodeRow): string {
   if (row.group === "code" && row.code) return row.code;
-  return row.group === "others" ? "Other codes" : "Typed at checkout (Stripe does not say which code)";
+  return row.group === "others" ? "Other codes" : "Not named: typed at checkout, or from a link note this page cannot read";
 }
 
 /** The checkouts with a code, by the code they used, in the store's currency (lib/discount-impact.ts, discountCodes). */

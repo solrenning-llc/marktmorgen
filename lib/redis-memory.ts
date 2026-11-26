@@ -394,6 +394,20 @@ export class MemoryRedis {
           }
           return this.run(["SET", keys[2], argv[1]]);
         }
+        // lib/community-chat.ts CHAT_SAY_UNLESS_ERASED: a member's room message, written only while their print is not that
+        // recent on Redis's clock (this stand-in's); {-1} too recent, {-2} a print not in whole seconds, nothing written.
+        if (key.startsWith("-- marktmorgen:chat-say-unless-erased:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, room, prints, print, seconds, score, message, keep] = args;
+          this.scriptCalls += 1;
+          const at = this.run(["HGET", prints, print]);
+          if (at !== null && at !== undefined) {
+            if (!/^\d+$/.test(String(at))) return [-2];
+            this.scriptCalls += 1;
+            if (Number(at) >= Math.floor(this.now() / 1000) - Number(seconds)) return [-1];
+          }
+          this.scriptCalls += 2;
+          return [this.run(["ZADD", room, score, message]), this.run(["ZREMRANGEBYRANK", room, 0, -(Number(keep) + 1)])];
+        }
         // lib/stats-notes.ts ADD_NOTE_IF_LIVE: a chart note and its list's expiry, only while the store is live and not
         // being erased (Codex L-20261119-1516, #5010 row 128); each inner call counted as Upstash bills it.
         if (key.startsWith("-- marktmorgen:stats-note-add-live:v1\n") && args[0] === "3" && args.length === 10) {

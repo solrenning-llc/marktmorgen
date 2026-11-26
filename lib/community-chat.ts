@@ -44,6 +44,7 @@ import { UnknownReplyError, countOf, countWithin, repliesFor } from "@/lib/redis
 import { cleanText, linkCount } from "@/lib/community-text";
 import { holdsAll } from "@/lib/community-search";
 import { stringList } from "@/lib/redis-reply";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 const base = (id: string) => `nl:cm:${id}`;
 const roomKey = (id: string) => `${base(id)}:ch`;
@@ -189,7 +190,39 @@ function copyArray(raw: unknown): unknown[] {
 
 export type SaidResult =
   | { ok: true; message: ChatMessage }
-  | { ok: false; reason: "off" | "empty" | "links" | "slow" | "creatorOnly" | "unknown"; wait?: number };
+  | { ok: false; reason: "off" | "empty" | "links" | "slow" | "creatorOnly" | "erased" | "unknown"; wait?: number };
+
+/**
+ * How long a deletion of a person may still be running after its first step, its print (lib/suppression.ts): a member's
+ * message written that close to one is not written (CHAT_SAY_UNLESS_ERASED). The same figure as a waitlist sign-up's
+ * (lib/waitlist.ts ERASURE_SECONDS), longer than any function may run (800 s at most on Vercel).
+ */
+export const CHAT_ERASURE_SECONDS = 15 * 60;
+
+/**
+ * A member's room message, written only while that member was not deleted from the store within the last ARGV[2]
+ * seconds, in one step with the write (#4670, Codex L): a deletion's first step is the person's print, with the second
+ * on Redis's clock (lib/suppression.ts ERASED_PRINT), and it deletes the room's messages of theirs after it, so a
+ * message authorised before the deletion and written after it is never left in the room with their name and words.
+ * KEYS[1] the room, KEYS[2] the store's prints; ARGV[1] the member's print, ARGV[2] the seconds, ARGV[3] the message's
+ * number, ARGV[4] the message, ARGV[5] how many the room keeps. Answers {-1} for a deletion that recent, {-2} for a
+ * print that is not whole seconds (unknown: nothing written), else the ZADD's and the ZREMRANGEBYRANK's replies.
+ * Billed 1 + 1 (HGET) + 2, the same two writes as before, and 1 more (TIME) for a member who has a print;
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const CHAT_SAY_UNLESS_ERASED = `-- marktmorgen:chat-say-unless-erased:v1
+local at = redis.call('HGET', KEYS[2], ARGV[1])
+if at then
+  if not string.match(at, '^%d+$') then return {-2} end
+  local now = tonumber(redis.call('TIME')[1])
+  if tonumber(at) >= now - tonumber(ARGV[2]) then return {-1} end
+end
+local added = redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])
+local trimmed = redis.call('ZREMRANGEBYRANK', KEYS[1], 0, -(tonumber(ARGV[5]) + 1))
+return {added, trimmed}`;
+
+/** Whose deletion a member's message is written against: the store's list, the member's address and how long the request has run. */
+export type SayFence = { listId: string; email: string; ranSeconds: number };
 
 function singleReply(reply: unknown): unknown {
   return Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
@@ -209,6 +242,8 @@ export async function say(
   raw: unknown,
   /** The name it is said under: the store's for the creator, the member's own otherwise. */
   name = "",
+  /** A member's message is written only while they were not just deleted (CHAT_SAY_UNLESS_ERASED); none for the creator. */
+  fence: SayFence | null = null,
 ): Promise<SaidResult> {
   if (!setting.on) return { ok: false, reason: "off" };
   if (setting.creatorOnly && !owner) return { ok: false, reason: "creatorOnly" };
@@ -234,11 +269,20 @@ export async function say(
     if (typeof n !== "number" || !Number.isSafeInteger(n) || n <= 0) return { ok: false, reason: "unknown" };
     const said = cleanText(name, 80);
     const message: ChatMessage = { i: n, a: who, text, at: now(), ...(said ? { n: said } : {}) };
-    const written = await redisPipeline([
-      ["ZADD", roomKey(id), message.i, JSON.stringify(message)],
-      // The room keeps its last MAX_CHAT_KEPT and forgets the rest.
-      ["ZREMRANGEBYRANK", roomKey(id), 0, -(MAX_CHAT_KEPT + 1)],
-    ]);
+    // The room keeps its last MAX_CHAT_KEPT and forgets the rest.
+    const written = fence
+      ? await redisPipeline([["EVAL", CHAT_SAY_UNLESS_ERASED, 2, roomKey(id), suppressedKey(fence.listId), suppressionPrint(fence.listId, fence.email),
+          CHAT_ERASURE_SECONDS + Math.max(0, Math.ceil(fence.ranSeconds)), message.i, JSON.stringify(message), MAX_CHAT_KEPT]]).then((replies) => {
+          const reply = singleReply(replies);
+          // A deletion that recent: nothing written, said as such. Any other shape stays unknown below (rule 24).
+          if (Array.isArray(reply) && reply.length === 1 && reply[0] === -1) return "erased" as const;
+          return reply;
+        })
+      : await redisPipeline([
+          ["ZADD", roomKey(id), message.i, JSON.stringify(message)],
+          ["ZREMRANGEBYRANK", roomKey(id), 0, -(MAX_CHAT_KEPT + 1)],
+        ]);
+    if (written === "erased") return { ok: false, reason: "erased" };
     if (!Array.isArray(written) || written.length !== 2 || written[0] !== 1
       || typeof written[1] !== "number" || !Number.isSafeInteger(written[1]) || written[1] < 0) return { ok: false, reason: "unknown" };
     return { ok: true, message };

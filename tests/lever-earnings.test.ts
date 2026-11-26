@@ -194,7 +194,7 @@ test("a kept row whose figures do not read exactly is 'Not measured yet', never 
   const kept = { ...reading, rows: { ...reading.rows, upsell: row([usd(900, 1), null]), bump: row([usd(null, 1)]) } } as unknown as LeverReading;
   let html = "";
   try {
-    html = renderToStaticMarkup(createElement(SalesLevers, { store, reading: kept, canConfigure: false }));
+    html = renderToStaticMarkup(createElement(SalesLevers, { store, reading: kept, canConfigure: false, role: "support", addOn: false }));
   } catch (error) {
     html = `threw ${String(error)}`;
   }
@@ -224,13 +224,13 @@ test("each card shows what it earned or 'Not measured yet', and a kept reading f
   await claimHandle("earned@example.test", "earnedfixture", "Synthetic earned", "");
   const store = (await storeForEmail("earned@example.test"))!;
   const reading = leverEarnings([offer({ amount: 900 }), checkout({ bump: "extra001", bump_cents: "1500" })], "usd", false, now);
-  const html = renderToStaticMarkup(createElement(SalesLevers, { store, reading, canConfigure: false }));
+  const html = renderToStaticMarkup(createElement(SalesLevers, { store, reading, canConfigure: false, role: "support", addOn: false }));
   assert.match(html, /Earned in the last 30 days: \$15 from 1 order\./);
   assert.match(html, /Earned in the last 30 days: \$9 from 1 order\./);
   assert.equal((html.match(/Not measured yet\./g) ?? []).length, 3);
   assert.doesNotMatch(html, /tagged paid records/);
   const kept = { ...reading, rows: { ...reading.rows, upsell: { records: 1, cents: 900, scope: "old" } } } as unknown as LeverReading;
-  assert.equal((renderToStaticMarkup(createElement(SalesLevers, { store, reading: kept, canConfigure: false })).match(/Not measured yet\./g) ?? []).length, 4);
-  const none = renderToStaticMarkup(createElement(SalesLevers, { store, reading: null, canConfigure: false }));
+  assert.equal((renderToStaticMarkup(createElement(SalesLevers, { store, reading: kept, canConfigure: false, role: "support", addOn: false })).match(/Not measured yet\./g) ?? []).length, 4);
+  const none = renderToStaticMarkup(createElement(SalesLevers, { store, reading: null, canConfigure: false, role: "support", addOn: false }));
   assert.equal((none.match(/Not measured yet\./g) ?? []).length, 6);
 });

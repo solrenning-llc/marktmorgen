@@ -34,12 +34,27 @@ export function RecoveryEditor({
   const [address, setAddress] = useState(recovery.address || suggestedAddress);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The saved setting the page last drew. A refresh that draws another one (the card's switch, another tab) is taken
+  // into each field the person has not edited, so a save never sends back a value it was first drawn with; an edit
+  // that now differs from what is saved is kept, and the person is told (Codex X6's LOW on #3563).
+  const [drawn, setDrawn] = useState({ enabled: recovery.enabled, address: recovery.address });
+  const [moved, setMoved] = useState<string | null>(null);
+  if (drawn.enabled !== recovery.enabled || drawn.address !== recovery.address) {
+    const nowAddress = recovery.address || suggestedAddress;
+    const keptEnabled = enabled !== drawn.enabled && enabled !== recovery.enabled;
+    const keptAddress = address !== (drawn.address || suggestedAddress) && address !== nowAddress;
+    setDrawn({ enabled: recovery.enabled, address: recovery.address });
+    if (!keptEnabled) setEnabled(recovery.enabled);
+    if (!keptAddress) setAddress(nowAddress);
+    setMoved(keptEnabled || keptAddress ? `This setting was changed elsewhere: reminders are now ${recovery.enabled ? "on" : "off"}. Your edits are kept; check them before you save.` : null);
+  }
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
     setError(null);
+    setMoved(null);
     try {
       const response = await fetch("/api/store/recovery", {
         method: "POST",
@@ -152,6 +167,7 @@ export function RecoveryEditor({
             </p>
           </div>
 
+          <div role="status">{moved ? <p className="notice">{moved}</p> : null}</div>
           {error ? (
             <p className="notice notice-error" role="alert">
               {error}

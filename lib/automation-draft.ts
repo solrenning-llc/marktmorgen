@@ -22,12 +22,12 @@
  *     it through the Email Studio's own route, where every check of a
  *     workflow runs again and a new one is always saved paused (saveFlow).
  */
-import { type FlowGoal, MAX_CONDITION_TAG, cleanTag, goalClash } from "@/lib/flow-rules";
+import { type FlowGoal, MAX_CONDITION_TAG, cleanTag, goalClash, isReachedShare } from "@/lib/flow-rules";
 import { hasPlaceholder } from "@/lib/mail-body";
 import { MAX_DRAFTED_BODY, MAX_DRAFTED_SUBJECT, keepOwnLinks } from "@/lib/sequence-draft";
 
 /** The starts a draft may use: those that need nothing but one of the store's products or a label. */
-export const DRAFT_TRIGGERS = ["joined", "product", "bought", "tagged", "finished", "started", "abandoned"] as const;
+export const DRAFT_TRIGGERS = ["joined", "product", "bought", "tagged", "finished", "reached", "started", "abandoned"] as const;
 export type DraftTrigger = (typeof DRAFT_TRIGGERS)[number];
 
 /** The most steps a draft holds: well inside a workflow's (lib/flow-limits.ts, MAX_STEPS). */
@@ -59,6 +59,8 @@ export type AutomationDraft = {
   trigger: DraftTrigger;
   productId: string | null;
   tag: string | null;
+  /** How much of the course, in percent of its lessons, a "reached" start waits for (lib/flow-rules.ts isReachedShare); only on that start. */
+  share?: number;
   goal: FlowGoal | null;
   steps: DraftStep[];
 };
@@ -66,9 +68,9 @@ export type AutomationDraft = {
 /** What the studio is sent: the draft, and the titles of the products it names, for the explanation. */
 export type AutomationDraftValue = { draft: AutomationDraft; titles: Record<string, string> };
 
-export type DraftRefusal = "shape" | "trigger" | "product" | "tag" | "goal" | "steps" | "step" | "placeholder";
+export type DraftRefusal = "shape" | "trigger" | "product" | "share" | "tag" | "goal" | "steps" | "step" | "placeholder";
 
-const ABOUT_PRODUCT: ReadonlySet<DraftTrigger> = new Set(["product", "finished", "started", "abandoned"]);
+const ABOUT_PRODUCT: ReadonlySet<DraftTrigger> = new Set(["product", "finished", "reached", "started", "abandoned"]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const absent = (value: unknown) => value === undefined || value === null || value === "";
@@ -130,11 +132,18 @@ export function readAutomationDraft(raw: unknown, facts: DraftFacts): { ok: true
   if (ABOUT_PRODUCT.has(trigger)) {
     const product = byRef(raw.product);
     if (!product) return { ok: false, why: "product" };
-    // Finishing and opening are things only a course can be done to; a checkout is left only where money is asked.
-    if ((trigger === "finished" || trigger === "started") && !product.course) return { ok: false, why: "product" };
+    // Finishing, a share and opening are things only a course can be done to; a checkout is left only where money is asked.
+    if ((trigger === "finished" || trigger === "reached" || trigger === "started") && !product.course) return { ok: false, why: "product" };
     if (trigger === "abandoned" && !product.paid) return { ok: false, why: "product" };
     productId = product.id;
   } else if (!absent(raw.product)) return { ok: false, why: "product" };
+
+  // A share is what a "reached" start waits for, one the Email Studio takes (5% to 95%, in steps of 5), never guessed.
+  let share: number | undefined;
+  if (trigger === "reached") {
+    if (!isReachedShare(raw.share)) return { ok: false, why: "share" };
+    share = raw.share;
+  } else if (!absent(raw.share)) return { ok: false, why: "share" };
 
   let tag: string | null = null;
   if (trigger === "tagged") {
@@ -171,7 +180,7 @@ export function readAutomationDraft(raw: unknown, facts: DraftFacts): { ok: true
   }
   // A part left to write is a direction, never words sent in the creator's name (lib/mail-body.ts).
   if (steps.some((s) => s.kind === "email" && (hasPlaceholder(s.subject) || hasPlaceholder(s.body)))) return { ok: false, why: "placeholder" };
-  return { ok: true, draft: { name, trigger, productId, tag, goal, steps } };
+  return { ok: true, draft: { name, trigger, productId, tag, ...(share === undefined ? {} : { share }), goal, steps } };
 }
 
 /** The workflow the Email Studio saves (lib/flows.ts, saveFlow): new, so no id, and switched off. */
@@ -181,6 +190,7 @@ export function toFlowRaw(draft: AutomationDraft): Record<string, unknown> {
     trigger: draft.trigger,
     productId: draft.productId,
     tag: draft.trigger === "tagged" ? draft.tag : null,
+    ...(draft.trigger === "reached" ? { share: draft.share } : {}),
     active: false,
     goal: draft.goal,
     steps: draft.steps.map((step) =>
@@ -202,6 +212,7 @@ export function explainDraft(draft: AutomationDraft, titles: Readonly<Record<str
     bought: "Starts when someone buys from you for the first time.",
     tagged: `Starts when another workflow gives someone the label “${draft.tag ?? ""}”.`,
     finished: `Starts when someone finishes every lesson of ${title(draft.productId)}.`,
+    reached: `Starts when someone has done ${draft.share ?? 0}% of the lessons of ${title(draft.productId)}.`,
     started: `Starts when someone opens ${title(draft.productId)} for the first time.`,
     abandoned: `Starts when someone leaves the checkout for ${title(draft.productId)} without paying, after agreeing to hear from you.`,
   };
@@ -226,6 +237,7 @@ export function isAutomationDraftValue(value: unknown): value is AutomationDraft
   if (!isRecord(value) || !isRecord(value.draft) || !isRecord(value.titles)) return false;
   const draft = value.draft;
   if (typeof draft.name !== "string" || !draft.name || !DRAFT_TRIGGERS.some((t) => t === draft.trigger)) return false;
+  if (draft.trigger === "reached" ? !isReachedShare(draft.share) : draft.share !== undefined) return false;
   if (!Array.isArray(draft.steps) || draft.steps.length === 0 || draft.steps.length > MAX_DRAFT_STEPS) return false;
   return draft.steps.every(
     (s) =>

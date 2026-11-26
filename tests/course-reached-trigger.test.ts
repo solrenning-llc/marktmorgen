@@ -1,0 +1,345 @@
+/**
+ * Workflows that start when a student has done a share of a course (287 [H4-1], unit 1; lib/flow-rules.ts
+ * reachedShare and isReachedShare, lib/flows.ts saveFlow and enroll, lib/flow-list.ts, lib/flow-review.ts,
+ * lib/course-finish.ts; added 12 November 2026). Checked:
+ *
+ *   - the share is the whole percent of the course's lessons done, rounded down, so it is said only once reached;
+ *   - a "reached" workflow is saved only for a course, with a share from 5% to 95% in steps of 5; a list kept with a
+ *     share on another trigger, or a "reached" one without a valid share, is not read as a list (strict read);
+ *   - the studio's review names a missing share and a course that is gone;
+ *   - each lesson marked done starts the workflows at every share now reached, each once per student: a lesson
+ *     undone and done again starts nothing more, and a student who jumps past several shares starts each of them;
+ *   - finishing the course starts what finishing starts and any share not started yet, still once;
+ *   - nobody who never agreed to hear from the creator is written to;
+ *   - getting the course is an end a "reached" workflow would reach at once, and is refused.
+ */
+import { goalClash, isReachedShare, reachedShare } from "@/lib/flow-rules";
+import { type Flow, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
+import { parseFlowList } from "@/lib/flow-list";
+import { flowConfigurationIssues } from "@/lib/flow-review";
+import { upsertContact } from "@/lib/contacts";
+import { emailKey, markLesson } from "@/lib/learn";
+import { noteIfFinished } from "@/lib/course-finish";
+import { erasePerson } from "@/lib/person-erasure";
+import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, ownerKey, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
+import { advance, store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
+import { ROOM } from "./data-room";
+import { installSesMailFixture } from "./ses-mail-fixture";
+
+const mail = installSesMailFixture({
+  fallback: () => new Response(JSON.stringify({ object: "list", data: [], has_more: false })),
+});
+const to = (subject: string) =>
+  mail.ses.filter((message) => message.subject === subject).flatMap((message) => message.to).sort();
+const run = () => sendDueSteps((handle) => storeForHandle(handle), Date.now() + 20_000);
+
+/** How many times the store's sequences were read: the list's key, by GET. */
+let flowReads = 0;
+let unknownMark = false;
+/** The store's sequences cannot be read (a passing Redis failure while a workflow would start). */
+let flowsDown = false;
+let finishReleaseDown = false;
+let beforeNextFlowRead: (() => Promise<void>) | undefined;
+let finishConfirmUnknown = false;
+/** Runs once, just before the next write of a share mark (a plain SET of it, or the script that raises it). */
+let beforeReachWrite: (() => Promise<void>) | undefined;
+const reachWrite = (list: (string | number)[][]) => list.some((c) => (c[0] === "SET" && String(c[1]).includes(":reach:")) || (c[0] === "EVAL" && String(c[3] ?? "").includes(":reach:")));
+const real = redis.pipeline.bind(redis);
+(redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
+  if (beforeReachWrite && reachWrite(list)) {
+    const work = beforeReachWrite; beforeReachWrite = undefined; await work();
+  }
+  if (beforeNextFlowRead && list.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:"))) {
+    const work = beforeNextFlowRead; beforeNextFlowRead = undefined; await work();
+  }
+  if (finishConfirmUnknown && list.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:course-finish-confirm:v1\n"))) {
+    await real(list); return [] as never;
+  }
+  flowReads += list.filter((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:")).length;
+  if (finishReleaseDown && list.some((c) => (c[0] === "DEL" && String(c[1]).includes(":fin:")) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:release:v1\n") && String(c[3]).includes(":fin:")))) return Promise.reject(new Error("synthetic release timeout")) as ReturnType<typeof redis.pipeline>;
+  if (flowsDown && list.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:"))) return Promise.reject(new Error("synthetic Redis timeout")) as ReturnType<typeof redis.pipeline>;
+  // The share mark's read (alone, or with the store's deletion print since Codex X6's LOW): its mark answers in a shape that is not a share.
+  if (unknownMark && list[0]?.[0] === "GET" && String(list[0][1]).includes(":reach:")) {
+    const replies = (await real(list)) as unknown[];
+    return ["half", ...replies.slice(1)] as never;
+  }
+  return real(list);
+}) as typeof redis.pipeline;
+
+async function main(): Promise<void> {
+  redis.clear();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
+  process.env.STRIPE_SECRET_KEY = "sk_test_course_reached_only_a_stand_in";
+  process.env.RESEND_API_KEY = "re_test_course_reached_only_a_stand_in";
+
+  part("The share");
+  is("whole percent, rounded down", [reachedShare(1, 4), reachedShare(1, 3), reachedShare(2, 3), reachedShare(3, 3)], [25, 33, 66, 100]);
+  is("nothing done, no lessons or a bad count: zero", [reachedShare(0, 4), reachedShare(2, 0), reachedShare(-1, 4), reachedShare(1.5, 4)], [0, 0, 0, 0]);
+  is("never more than the whole course", reachedShare(9, 4), 100);
+  is(
+    "a share a workflow may start at: 5% to 95%, in steps of 5",
+    [isReachedShare(5), isReachedShare(25), isReachedShare(95), isReachedShare(0), isReachedShare(100), isReachedShare(33), isReachedShare("50"), isReachedShare(50.5)],
+    [true, true, true, false, false, false, false, false],
+  );
+  is("getting the course is an end it would reach at once", goalClash("reached", "course1", { productId: "course1" }, true), true);
+
+  const OWNER = "reached@example.com";
+  await claimHandle(OWNER, "reachedshop", "Reached Kitchen", "");
+  await ensureStatsId(OWNER);
+  await ensureListId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestReached001", true);
+  await setSubscription(OWNER, { customerId: "cus_Reached0001", subscriptionId: "sub_Reached0001", active: true, tier: "pro", period: paidPeriod() });
+  await setMailSettings(OWNER, { fromName: "Reached Kitchen", address: "1 Main St, Portland, OR 97201" });
+  const made = await addProduct(OWNER, "Weeknight Course", "Thirty dinners.", "49", null);
+  const guide = await addProduct(OWNER, "Pantry Guide", "A list.", "9", null);
+  if (!made.ok || !guide.ok) throw new Error("no product");
+  let course = emptyCourse();
+  for (const title of ["One", "Two", "Three", "Four"]) {
+    const added = editCourse(course, { op: "lesson-add", moduleId: course.modules[0].id, title });
+    if (!added.ok) throw new Error("no lesson");
+    course = added.course;
+  }
+  await saveCourse(course, ROOM);
+  const set = await setProductCourse(OWNER, made.product.id, { id: course.id, lessons: 4 });
+  if (!set.ok) throw new Error(`not a course: ${JSON.stringify(set)}`);
+  const [one, two, three, four] = course.modules[0].lessons.map((l) => l.id);
+  let store = (await storeForEmail(OWNER))!;
+  const courseId = made.product.id;
+  const step = (subject: string) => [{ delayHours: 0, subject, body: "Hi." }];
+
+  part("Saved, and checked when saved");
+  const save = (share: unknown, productId = courseId) => saveFlow(store, { name: "Quarter", trigger: "reached", productId, share, active: true, steps: step("Quarter") }, { activate: true });
+  is("only for a course", (await save(25, guide.product.id)).ok, false);
+  const refused = await Promise.all([save(undefined), save(0), save(100), save(33), save("25")]);
+  is("never without a share it may have", refused.map((r) => (r.ok ? "saved" : r.reason)), ["share", "share", "share", "share", "share"]);
+  const quarter = await save(25);
+  const half = await saveFlow(store, { name: "Half", trigger: "reached", productId: courseId, share: 50, active: true, steps: step("Halfway there") }, { activate: true });
+  const most = await saveFlow(store, { name: "Most", trigger: "reached", productId: courseId, share: 75, active: true, steps: step("Almost done") }, { activate: true });
+  const end = await saveFlow(store, { name: "End", trigger: "finished", productId: courseId, active: true, steps: step("You finished it") }, { activate: true });
+  is("saved, each with its share", [quarter.ok, half.ok, most.ok, end.ok, (await readFlows(store.listId)).map((f) => [f.trigger, f.share ?? null])], [true, true, true, true, [["reached", 25], ["reached", 50], ["reached", 75], ["finished", null]]]);
+  is("a share on another trigger is never kept", (await saveFlow(store, { name: "Other", trigger: "finished", productId: courseId, share: 50, active: false, steps: step("x") })).ok && (await readFlows(store.listId)).find((f) => f.name === "Other")?.share, undefined);
+  store = (await storeForEmail(OWNER))!;
+
+  part("Read strictly");
+  const base = { id: "f1", name: "x", productId: courseId, active: true, createdAt: 1, steps: [] };
+  is("a kept list with a valid share is read", parseFlowList([{ ...base, trigger: "reached", share: 50 }]) !== null, true);
+  is(
+    "a reached one without a valid share, or a share on another trigger, is not a list",
+    [parseFlowList([{ ...base, trigger: "reached" }]), parseFlowList([{ ...base, trigger: "reached", share: 30.5 }]), parseFlowList([{ ...base, trigger: "finished", share: 50 }])],
+    [null, null, null],
+  );
+  const review = (flow: Partial<Flow>, courses: string[]) =>
+    flowConfigurationIssues({ ...(base as unknown as Flow), steps: [{ id: "s1", delayHours: 0, subject: "a", body: "b" }], trigger: "reached", ...flow } as Flow, { products: [{ id: courseId }], courses } as never);
+  is("the review names a missing share", review({ share: undefined }, [courseId]).some((issue) => issue.includes("how much of the course")), true);
+  is("and a course that is gone", review({ share: 50 }, []).some((issue) => issue.includes("trigger course is unavailable")), true);
+  is("and has nothing to say of a good one", review({ share: 50 }, [courseId]).filter((issue) => issue.includes("course")), []);
+
+  part("Partway through");
+  for (const email of ["ana@example.com", "ben@example.com"]) {
+    await upsertContact(store.listId as string, email, { agreed: true, explicit: true, productId: courseId, title: "Weeknight Course", source: "buyer" }, ROOM);
+  }
+  await markLesson(course.id, "ana@example.com", one, true, ROOM);
+  is("a quarter done is not finishing", await noteIfFinished(store, courseId, course.id, "ana@example.com"), false);
+  await run();
+  is("and starts the quarter workflow", [to("Quarter"), to("Halfway there")], [["ana@example.com"], []]);
+  await markLesson(course.id, "ana@example.com", two, true, ROOM);
+  await noteIfFinished(store, courseId, course.id, "ana@example.com");
+  await run();
+  is("half done starts the half one, and the quarter one not again", [to("Quarter"), to("Halfway there"), to("Almost done")], [["ana@example.com"], ["ana@example.com"], []]);
+  flowReads = 0;
+  await markLesson(course.id, "ana@example.com", two, false, ROOM);
+  await noteIfFinished(store, courseId, course.id, "ana@example.com");
+  await markLesson(course.id, "ana@example.com", two, true, ROOM);
+  await noteIfFinished(store, courseId, course.id, "ana@example.com");
+  const toggledReads = flowReads;
+  await run();
+  is("undone and done again starts nothing more, and reads no sequence", [to("Quarter"), to("Halfway there"), toggledReads], [["ana@example.com"], ["ana@example.com"], 0]);
+  for (const lesson of [one, two, three]) await markLesson(course.id, "ben@example.com", lesson, true, ROOM);
+  unknownMark = true;
+  await noteIfFinished(store, courseId, course.id, "ben@example.com");
+  unknownMark = false;
+  await run();
+  is("a kept step that cannot be read starts nothing on a guess", to("Almost done"), []);
+  flowReads = 0;
+  await noteIfFinished(store, courseId, course.id, "ben@example.com");
+  is("a new step reads the sequences once", flowReads, 1);
+  await run();
+  is("three quarters at once starts every share reached, each once", [to("Quarter"), to("Halfway there"), to("Almost done")], [["ana@example.com", "ben@example.com"], ["ana@example.com", "ben@example.com"], ["ben@example.com"]]);
+
+  part("Finishing it");
+  await markLesson(course.id, "ana@example.com", three, true, ROOM);
+  await markLesson(course.id, "ana@example.com", four, true, ROOM);
+  is("the last lesson finishes it", await noteIfFinished(store, courseId, course.id, "ana@example.com"), true);
+  await run();
+  is("and starts what finishing starts and the share not started yet, still once each", [to("You finished it"), to("Almost done"), to("Quarter")], [["ana@example.com"], ["ana@example.com", "ben@example.com"], ["ana@example.com", "ben@example.com"]]);
+
+  part("A start that failed is tried again (Codex X5's MEDIUM on #3989)");
+  await upsertContact(store.listId as string, "dee@example.com", { agreed: true, explicit: true, productId: courseId, title: "Weeknight Course", source: "buyer" }, ROOM);
+  for (const lesson of [one, two]) await markLesson(course.id, "dee@example.com", lesson, true, ROOM);
+  flowsDown = true;
+  await noteIfFinished(store, courseId, course.id, "dee@example.com");
+  flowsDown = false;
+  await run();
+  is("the sequences could not be read: nothing started", to("Halfway there").includes("dee@example.com"), false);
+  await noteIfFinished(store, courseId, course.id, "dee@example.com");
+  await run();
+  is("the next lesson view starts the half one, its share not spent by the failed try", to("Halfway there").includes("dee@example.com"), true);
+  for (const lesson of [three, four]) await markLesson(course.id, "dee@example.com", lesson, true, ROOM);
+  flowsDown = true;
+  is("finishing while the sequences cannot be read starts nothing", await noteIfFinished(store, courseId, course.id, "dee@example.com"), false);
+  flowsDown = false;
+  is("and the next view finishes it", await noteIfFinished(store, courseId, course.id, "dee@example.com"), true);
+  await run();
+  is("starting what finishing starts, once", to("You finished it").filter((a) => a === "dee@example.com").length, 1);
+
+  part("A failed course start remains retryable when releasing its finish mark also fails");
+  await upsertContact(store.listId as string, "ellie@example.test", { agreed: true, explicit: true, productId: courseId, title: "Weeknight Course", source: "buyer" }, ROOM);
+  for (const lesson of [one, two, three, four]) await markLesson(course.id, "ellie@example.test", lesson, true, ROOM);
+  flowsDown = true;
+  finishReleaseDown = true;
+  is("the outage starts nothing", await noteIfFinished(store, courseId, course.id, "ellie@example.test"), false);
+  flowsDown = false;
+  finishReleaseDown = false;
+  is("a pending finish does not allow a concurrent view to start", await noteIfFinished(store, courseId, course.id, "ellie@example.test"), false);
+  advance(61_000);
+  is("after recovery the same completed course can start its workflow", await noteIfFinished(store, courseId, course.id, "ellie@example.test"), true);
+  await run();
+  is("the recovered finish workflow goes exactly once", to("You finished it").filter((a) => a === "ellie@example.test").length, 1);
+  is("a later completed view does not start it again", await noteIfFinished(store, courseId, course.id, "ellie@example.test"), false);
+
+  part("A late course attempt cannot replace or erase another attempt's mark");
+  async function completed(email: string) {
+    await upsertContact(store.listId as string, email, { agreed: true, explicit: true, productId: courseId, title: "Weeknight Course", source: "buyer" }, ROOM);
+    for (const lesson of [one, two, three, four]) await markLesson(course.id, email, lesson, true, ROOM);
+    return `nl:course:${course.id}:fin:${emailKey(email)}`;
+  }
+  let key = await completed("late-success@example.test");
+  beforeNextFlowRead = async () => { await real([["SET", key, "successor", "EX", 60]]); };
+  is("a stale successful attempt cannot confirm a newer owner", await noteIfFinished(store, courseId, course.id, "late-success@example.test"), false);
+  is("its successor is kept", await real([["GET", key]]), ["successor"]);
+  key = await completed("late-failure@example.test");
+  beforeNextFlowRead = async () => { await real([["SET", key, "successor", "EX", 60]]); throw new Error("synthetic stale failure"); };
+  is("a stale failed attempt is not a completed event", await noteIfFinished(store, courseId, course.id, "late-failure@example.test"), false);
+  is("its cleanup does not delete the successor", await real([["GET", key]]), ["successor"]);
+  key = await completed("removed-mark@example.test");
+  beforeNextFlowRead = async () => { await real([["DEL", key]]); };
+  is("an attempt whose mark was removed cannot confirm it", await noteIfFinished(store, courseId, course.id, "removed-mark@example.test"), false);
+  is("confirming does not recreate the removed mark", await real([["GET", key]]), [null]);
+
+  part("A course finish deferred by the daily run allowance can retry next day");
+  key = await completed("daily-deferred@example.test");
+  is("the existing daily allowance defers completion", await noteIfFinished(store, courseId, course.id, "daily-deferred@example.test"), false);
+  is("a deferred finish is not a permanent mark", await real([["GET", key]]), [null]);
+
+  part("An applied finish confirmation with a lost acknowledgement is not repeated");
+  const oldDateNow = Date.now, oldRedisNow = redis.now;
+  const tomorrow = Math.max(Date.now(), redis.now()) + 86_400_000;
+  Date.now = () => tomorrow;
+  redis.now = Date.now;
+  try {
+    is("next day the same completed course can start", await noteIfFinished(store, courseId, course.id, "daily-deferred@example.test"), true);
+    key = await completed("lost-confirmation@example.test");
+    finishConfirmUnknown = true;
+    is("a lost confirmation is not called a confirmed event", await noteIfFinished(store, courseId, course.id, "lost-confirmation@example.test"), false);
+    finishConfirmUnknown = false;
+    is("cleanup leaves the confirmed durable mark", await real([["GET", key]]), ["1"]);
+    is("a later view cannot start a confirmed event twice", await noteIfFinished(store, courseId, course.id, "lost-confirmation@example.test"), false);
+    const [waiting] = await real([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
+    is("the confirmed finish workflow has exactly one queued first step", (waiting as string[]).filter((m) => m.endsWith("|lost-confirmation@example.test") && m.includes(`|${end.ok ? end.flows.find((f) => f.trigger === "finished")?.id : "missing"}|`)).length, 1);
+  } finally { finishConfirmUnknown = false; Date.now = oldDateNow; redis.now = oldRedisNow; }
+
+  part("The share mark only rises, and an erasure is never undone by it (Codex X6's LOW on #3989)");
+  {
+    // A higher share written by another view between this one's read and its write: the lower one does not land over it.
+    const fay = "fay-reach@example.com";
+    for (const lesson of [one, two]) await markLesson(course.id, fay, lesson, true, ROOM);
+    const fayMark = `nl:course:${course.id}:reach:${emailKey(fay)}`;
+    beforeReachWrite = async () => { await real([["SET", fayMark, "75", "EX", 3_600]]); };
+    await noteIfFinished(store, courseId, course.id, fay);
+    beforeReachWrite = undefined;
+    const [kept] = (await real([["GET", fayMark]])) as unknown[];
+    is("75% written first, then 50% lands: the mark stays at 75", kept, "75");
+
+    // The person erased between their start and the write: the erasure leaves no mark behind it.
+    const gil = "gil-reach@example.com";
+    // Not on the list: nothing starts for them, so the day's start allowance this file already spent does not defer the
+    // write; the erasure lands at the same place, after the start and before the write.
+    for (const lesson of [one, two]) await markLesson(course.id, gil, lesson, true, ROOM);
+    const gilMark = `nl:course:${course.id}:reach:${emailKey(gil)}`;
+    let erasedOk = false;
+    beforeReachWrite = async () => { erasedOk = (await erasePerson(store, gil, { kind: "person" })).ok; };
+    await noteIfFinished(store, courseId, course.id, gil);
+    beforeReachWrite = undefined;
+    const [left] = (await real([["EXISTS", gilMark]])) as unknown[];
+    is("the erasure ran between the start and the write", erasedOk, true);
+    is("and no share mark is left for the erased person", left, 0);
+  }
+
+  part("A store with no list yet: an erasure between the start and the write leaves no share mark (Claude 5 ibqho's NIT on #3989)");
+  {
+    // A store from before list ids has no deletion print to compare. The person's erasure gives it its list
+    // (lib/person-erasure.ts erasureScope, ensureListId), so the write checks the store record's list instead.
+    const LEGACY = "legacy-reached@example.com";
+    await claimHandle(LEGACY, "legacyreached", "Legacy Kitchen", "");
+    await ensureStatsId(LEGACY);
+    await setStripeAccount(LEGACY, "acct_1TestReached002", true);
+    await setSubscription(LEGACY, { customerId: "cus_Reached0002", subscriptionId: "sub_Reached0002", active: true, tier: "pro", period: paidPeriod() });
+    const legacyMade = await addProduct(LEGACY, "Legacy Course", "Four dinners.", "29", null);
+    if (!legacyMade.ok) throw new Error("no legacy product");
+    let legacyCourse = emptyCourse();
+    for (const title of ["L1", "L2", "L3", "L4"]) {
+      const added = editCourse(legacyCourse, { op: "lesson-add", moduleId: legacyCourse.modules[0].id, title });
+      if (!added.ok) throw new Error("no legacy lesson");
+      legacyCourse = added.course;
+    }
+    await saveCourse(legacyCourse, ROOM);
+    const legacySet = await setProductCourse(LEGACY, legacyMade.product.id, { id: legacyCourse.id, lessons: 4 });
+    if (!legacySet.ok) throw new Error(`not a legacy course: ${JSON.stringify(legacySet)}`);
+    const [l1, l2] = legacyCourse.modules[0].lessons.map((l) => l.id);
+    // New stores get a list at creation (lib/store.ts freshStore), so the record is turned into one from before list ids.
+    const legacyKey = await ownerKey(LEGACY);
+    const [legacyRaw] = (await real([["GET", legacyKey]])) as unknown[];
+    await real([["SET", legacyKey, JSON.stringify({ ...JSON.parse(legacyRaw as string), listId: null })]]);
+    const legacy = (await storeForEmail(LEGACY))!;
+    is("the store has no list yet", legacy.listId, null);
+
+    // With no erasure, the step is written as before.
+    const hal = "hal-reach@example.com";
+    for (const lesson of [l1, l2]) await markLesson(legacyCourse.id, hal, lesson, true, ROOM);
+    await noteIfFinished(legacy, legacyMade.product.id, legacyCourse.id, hal);
+    const [halKept] = (await real([["GET", `nl:course:${legacyCourse.id}:reach:${emailKey(hal)}`]])) as unknown[];
+    is("a listless store still keeps the step reached", halKept, "50");
+
+    // The request read the store before the erasure: the store it holds still has no list.
+    const ivy = "ivy-reach@example.com";
+    for (const lesson of [l1, l2]) await markLesson(legacyCourse.id, ivy, lesson, true, ROOM);
+    const ivyMark = `nl:course:${legacyCourse.id}:reach:${emailKey(ivy)}`;
+    let ivyErased = false;
+    beforeReachWrite = async () => { ivyErased = (await erasePerson(legacy, ivy, { kind: "person" })).ok; };
+    await noteIfFinished(legacy, legacyMade.product.id, legacyCourse.id, ivy);
+    beforeReachWrite = undefined;
+    const [ivyLeft] = (await real([["EXISTS", ivyMark]])) as unknown[];
+    is("the erasure ran between the start and the write, and gave the store its list", [ivyErased, typeof (await storeForEmail(LEGACY))?.listId], [true, "string"]);
+    is("and no share mark is left for the person erased in a listless store", ivyLeft, 0);
+  }
+
+  part("Only who agreed");
+
+  part("Only who agreed");
+  for (const lesson of [one, two]) await markLesson(course.id, "cy@example.com", lesson, true, ROOM);
+  await noteIfFinished(store, courseId, course.id, "cy@example.com");
+  await run();
+  is("somebody who never agreed to hear from the creator is not written to", [to("Quarter").includes("cy@example.com"), to("Halfway there").includes("cy@example.com")], [false, false]);
+
+  mail.restore();
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

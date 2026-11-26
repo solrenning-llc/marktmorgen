@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   if (!read.ok) throw new Error("no draft");
   is("its steps keep their kind, wait and words", read.draft.steps.map((s) => (s.kind === "email" ? [s.kind, s.waitDays, s.subject] : [s.kind, s.waitDays, s.label])), [["email", 0, "Welcome to Harbor Kitchen"], ["tag", 2, "warm"], ["email", 1, "The course is open"]]);
   is("the goal is the studio's own", read.draft.goal, { any: true });
-  is("only the triggers that need nothing but a product or a label", DRAFT_TRIGGERS, ["joined", "product", "bought", "tagged", "finished", "started", "abandoned"]);
+  is("only the triggers that need nothing but a product or a label", DRAFT_TRIGGERS, ["joined", "product", "bought", "tagged", "finished", "reached", "started", "abandoned"]);
   is("anything that is not a workflow is refused", [refusal(null), refusal("text"), refusal([]), refusal({ ...good(), name: "  " })], ["shape", "shape", "shape", "shape"]);
   is("a trigger the draft cannot set up is refused, never swapped", [refusal({ ...good(), trigger: "form" }), refusal({ ...good(), trigger: "stage" }), refusal({ ...good(), trigger: "nope" })], ["trigger", "trigger", "trigger"]);
   is("a product reference the request never gave is refused", [
@@ -101,6 +101,17 @@ async function main(): Promise<void> {
     refusal({ ...good(), trigger: "product" }),
   ], ["product", "product", "product"]);
   is("finishing or opening is for a course only", [refusal({ ...good(), trigger: "finished", product: "p2", goal: null }), refusal({ ...good(), trigger: "started", product: "p1", goal: null })], ["product", "ok"]);
+  // 287 [H4-1]: a share of a course is a start the draft can set up too (the LEVE in #3989's own review: before, a goal
+  // asking for one was drafted as another start).
+  is("a share of a course, from 5% to 95% in steps of 5, and only on that start", [
+    refusal({ ...good(), trigger: "reached", product: "p1", share: 80, goal: null }),
+    refusal({ ...good(), trigger: "reached", product: "p2", share: 80, goal: null }),
+    refusal({ ...good(), trigger: "reached", product: "p1", goal: null }),
+    refusal({ ...good(), trigger: "reached", product: "p1", share: 33, goal: null }),
+    refusal({ ...good(), trigger: "reached", product: "p1", share: "80", goal: null }),
+    refusal({ ...good(), trigger: "reached", product: "p1", share: 100, goal: null }),
+    refusal({ ...good(), share: 50 }),
+  ], ["ok", "product", "share", "share", "share", "share", "share"]);
   is("a product named where the trigger takes none is refused", refusal({ ...good(), product: "p1" }), "product");
   is("a checkout reminder is for a product sold for money, and must end once they buy", [
     refusal({ ...good(), trigger: "abandoned", product: "p2" }),
@@ -161,6 +172,12 @@ async function main(): Promise<void> {
     "Step 1, 1 day after it starts: sends the email “Still thinking?”.",
     "Stops early for anyone who gets “Weeknight Course”.",
   ]);
+  const reached = readAutomationDraft({ ...good(), trigger: "reached", product: "p1", share: 80, goal: null, steps: [email(0, "A call?")] }, FACTS);
+  is("a share is said with its course", reached.ok ? explainDraft(reached.draft, titles)[0] : null, "Starts when someone has done 80% of the lessons of “Weeknight Course”.");
+  is("and saved with its share, which only that start carries", reached.ok ? [toFlowRaw(reached.draft).trigger, toFlowRaw(reached.draft).productId, toFlowRaw(reached.draft).share, "share" in toFlowRaw(read.draft)] : null, ["reached", "prodcourse01", 80, false]);
+  is("the browser's check wants a share on that start", reached.ok ? [isAutomationDraftValue({ draft: reached.draft, titles }), isAutomationDraftValue({ draft: { ...reached.draft, share: 33 }, titles }), isAutomationDraftValue({ draft: { ...reached.draft, share: undefined }, titles })] : null, [true, false, false]);
+  const asks = automationDraftRequest({ storeName: "Harbor Kitchen", creator: "Ana", storeLink: FACTS.links[0], ordersLink: FACTS.links[1], language: "English", products: [] }, "Offer a call at 80%").system;
+  is("the request offers the share start and its share", [asks.includes('- "reached":'), asks.includes('"share": number or null')], [true, true]);
   is("the shape the browser checks before showing it", [isAutomationDraftValue({ draft: read.draft, titles }), isAutomationDraftValue({ draft: { ...read.draft, steps: [] }, titles }), isAutomationDraftValue({ draft: read.draft }), isAutomationDraftValue(null)], [true, false, false, false]);
 
   part("What is saved: the studio's own workflow, paused");

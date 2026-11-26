@@ -1,0 +1,10 @@
+{
+  "@/lib/request-guard": "monthly-catch-up-world.ts",
+  "@/lib/email": "monthly-catch-up-world.ts",
+  "@/lib/traffic": "monthly-catch-up-world.ts",
+  "@/lib/usage-billing": "monthly-catch-up-world.ts",
+  "@/lib/numbers-ask": "monthly-catch-up-world.ts",
+  "@/lib/ai": "monthly-catch-up-world.ts",
+  "@/lib/team": "monthly-catch-up-world.ts",
+  "@/lib/stats": "monthly-catch-up-world.ts"
+}

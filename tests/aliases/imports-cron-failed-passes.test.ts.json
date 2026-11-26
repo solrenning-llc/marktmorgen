@@ -1,0 +1,12 @@
+{
+  "@/lib/request-guard": "imports-cron-failed-passes-world.ts",
+  "@/lib/fetch-timeout": "imports-cron-failed-passes-world.ts",
+  "@/lib/redis": "imports-cron-failed-passes-world.ts",
+  "@/lib/claim-mark": "imports-cron-failed-passes-world.ts",
+  "@/lib/imports": "imports-cron-failed-passes-world.ts",
+  "@/lib/meta-ads": "imports-cron-failed-passes-world.ts",
+  "@/lib/welcome-offer-send": "imports-cron-failed-passes-world.ts",
+  "@/lib/discount-schedule": "imports-cron-failed-passes-world.ts",
+  "@/lib/store": "imports-cron-failed-passes-world.ts",
+  "@/lib/account-notice": "imports-cron-failed-passes-world.ts"
+}

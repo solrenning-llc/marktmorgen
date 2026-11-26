@@ -13,6 +13,8 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type SavedSection, parseSection } from "@/lib/saved-blocks";
+import { storeLiveFence } from "@/lib/store-live-cache";
+import type { Store } from "@/lib/store";
 
 const sectionsKey = (statsId: string) => `nl:sblocks:${statsId}`;
 export const sectionUsesKey = (statsId: string, id: string) => `nl:sblock:uses:${statsId}:${id}`;
@@ -98,16 +100,63 @@ elseif ARGV[4] ~= "edit" or exists == 0 then return -2 end
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
 return 1`;
 
-/** Keeps a section. "full" when the library has no room for a new one, "gone" when an edited one was removed meanwhile. */
-export async function writeSection(statsId: string, section: SavedSection, isNew: boolean, limit: number): Promise<"ok" | "full" | "gone"> {
-  const replies = repliesFor(await redisPipeline([["EVAL", SAVE_SECTION, 1, sectionsKey(statsId), section.id, JSON.stringify(section), limit, isNew ? "new" : "edit"]]), 1);
+/**
+ * SAVE_SECTION for a store's own library, fenced by the store (#5010 row 126, Codex X4-20261119-1750), by the rule of
+ * store-cache-live:v3 (lib/live-fence.ts): KEYS[2] the store's live key (its id key, or for a store from before ids its
+ * owner's record) and KEYS[3] the erasing hash; ARGV[5] the store's erasing field, ARGV[6] "" for a store with an id
+ * (whose id key must hold ARGV[7], the store's ref) or the statsId its record must carry. Read in the same step as the
+ * write, so a save that waited while the store was erased, started erasing or was moved writes nothing, and the erased
+ * store's nl:sblocks: library is never made again. -4: gone, erasing or moved, nothing written; -5: the owner's record
+ * did not parse (unknown); otherwise SAVE_SECTION's own answers. SAVE_SECTION itself stays as it is for the other
+ * bounded hashes that use it (lib/sales-filters.ts).
+ */
+export const SAVE_STORE_SECTION = `-- marktmorgen:saved-store-section:v1
+if redis.call("HGET", KEYS[3], ARGV[5]) then return -4 end
+if ARGV[6] == "" then
+  if redis.call("GET", KEYS[2]) ~= ARGV[7] then return -4 end
+else
+  local raw = redis.call("GET", KEYS[2])
+  if not raw then return -4 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -5 end
+  if record["statsId"] ~= ARGV[6] then return -4 end
+end
+local kind = redis.call("TYPE", KEYS[1]).ok
+if kind ~= "none" and kind ~= "hash" then return -3 end
+local exists = redis.call("HEXISTS", KEYS[1], ARGV[1])
+if ARGV[4] == "new" then
+  if exists == 1 then return -2 end
+  if redis.call("HLEN", KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
+elseif ARGV[4] ~= "edit" or exists == 0 then return -2 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+return 1`;
+
+/**
+ * The billed commands of one section save at its worst, as Upstash bills a script (the EVAL and every redis.call
+ * written in it): the EVAL, the erasing field, the live key, TYPE, HEXISTS, HLEN and HSET, and the second GET of the
+ * legacy branch counted too, since each written call is a bound on its branch.
+ */
+export const SAVE_STORE_SECTION_COMMANDS = 1 + (SAVE_STORE_SECTION.match(/redis\.call\(/g) ?? []).length;
+
+/**
+ * Keeps a section of `store`'s library, only while the store is live (SAVE_STORE_SECTION). "full" when the library has
+ * no room for a new one, "gone" when an edited one was removed meanwhile or the store is erased, erasing or moved
+ * (nothing is written then). A store from before ids with no statsId cannot be told from another: nothing is written,
+ * and the save is not confirmed.
+ */
+export async function writeSection(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, section: SavedSection, isNew: boolean, limit: number): Promise<"ok" | "full" | "gone"> {
+  const statsId = store.statsId;
+  if (!statsId) throw new Error("Saved section write could not be confirmed");
+  const fence = await storeLiveFence(store);
+  if (fence.statsId === null) throw new Error("Saved section write could not be confirmed");
+  const replies = repliesFor(await redisPipeline([["EVAL", SAVE_STORE_SECTION, 3, sectionsKey(statsId), fence.live, fence.erasing, section.id, JSON.stringify(section), limit, isNew ? "new" : "edit", fence.field, fence.statsId, fence.ref]]), 1);
   if (!replies) throw new Error("Saved section write could not be confirmed");
   // Only the script's own whole number counts (CX-123 rule 24): a "1" or a [1] is not a section kept.
   const [answer] = replies;
   const reply = typeof answer === "number" && Number.isSafeInteger(answer) ? answer : null;
   if (reply === 1) return "ok";
   if (reply === 0) return "full";
-  if (reply === -2) return "gone";
+  if (reply === -2 || reply === -4) return "gone";
   throw new Error("Saved section write could not be confirmed");
 }
 

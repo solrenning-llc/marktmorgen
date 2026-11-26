@@ -3,6 +3,7 @@ import { cronAllowed } from "@/lib/request-guard";
 import { BACKUP_COST_REVIEW, backupKey, runBackup } from "@/lib/backup-run";
 import { backupKeyFingerprint } from "@/lib/backup-codec";
 import { backupAlarmConfig, backupAlarmSignal, sendBackupAlarm } from "@/lib/backup-alarm";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 /**
  * 273 [BK1] (inbox C1-20261108-1353-C4-33 item 1, C1-20261108-2017-C4-36 item 4): the daily backup run on Vercel.
@@ -21,6 +22,11 @@ import { backupAlarmConfig, backupAlarmSignal, sendBackupAlarm } from "@/lib/bac
 export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   const headers = { "Cache-Control": "no-store" };
   if (!(await cronAllowed(request))) return new Response("Unauthorized", { status: 401, headers });
   // Checked here too, before anything else: nothing at all is sent while there is no reviewed cost ceiling.

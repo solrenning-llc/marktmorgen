@@ -40,11 +40,14 @@ import { carryTags } from "@/lib/pdf-preview-tags";
 import { readFileWhole } from "@/lib/file-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
-import { copyFolder, problemKey, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
+import { copyFolder, dropWrittenCopy, problemKey, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
 import type { CopyMeter } from "@/lib/stamp-cost-rules";
 import { type DataStore, dataUsed, keepFor } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+
+/** The caller keeps a record only while its exact store scope is still live. */
+export type PreviewKeeper = (key: string, value: string, seconds: number) => Promise<"kept" | "gone" | "unknown">;
 
 /** The most pages a preview may hold. */
 export const MAX_PREVIEW_PAGES = 10;
@@ -94,7 +97,7 @@ export async function firstPages(bytes: Uint8Array, pages: number): Promise<Uint
  * Every Redis reply is read in its exact shape (rule 24): anything else is
  * unknown and means no preview right now, with no file read and no room taken.
  */
-export async function previewCopy(file: ProductFile, pages: number, store: DataStore, meter: CopyMeter): Promise<ProductFile | null> {
+export async function previewCopy(file: ProductFile, pages: number, store: DataStore, meter: CopyMeter, keep: PreviewKeeper): Promise<ProductFile | null> {
   if (!previewable(file) || pages < 1) return null;
   const key = previewKey(file, pages);
   try {
@@ -140,8 +143,15 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
     if ((await writeWithinStorage(file, pathname, bytes, "application/pdf", store, meter)) !== "kept") return null;
     const copy: ProductFile = { pathname, name, bytes: bytes.byteLength, contentType: "application/pdf", addedAt: new Date().toISOString() };
     if (isRedisConfigured()) {
-      const saved = repliesFor(await redisPipeline([["SET", key, JSON.stringify(copy), "EX", PREVIEW_SECONDS]]), 1);
-      if (!saved || saved[0] !== "OK") throw new UnknownReplyError("keeping a preview's record");
+      // This is after the file write: deletion may have passed this key while the preview was being made.
+      const saved = await keep(key, JSON.stringify(copy), PREVIEW_SECONDS);
+      // The store is gone or being erased: the file just written would stay in its folder with nothing pointing to
+      // it, since the erasure's walk may already have passed (Claude 4 Z's LOW on #5068). It is deleted now.
+      if (saved === "gone") {
+        await dropWrittenCopy(file, pathname);
+        return null;
+      }
+      if (saved !== "kept") throw new UnknownReplyError("keeping a preview's record");
     }
     return copy;
   } catch (error) {

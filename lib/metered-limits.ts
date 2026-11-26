@@ -17,12 +17,15 @@
 import { withinEssentialLimit, withinLimit } from "@/lib/request-guard";
 import type { Store } from "@/lib/store";
 import { takeAllowance } from "@/lib/store-allowance";
-import { type RequestTake, takePublicRequest, takePublicRequestWhy } from "@/lib/traffic";
+import { type RequestTake, takePublicRequestExact, takePublicRequestWhy } from "@/lib/traffic";
 
-/** An unknown short-window count throws UnknownReplyError (withinLimit), never said as a spent window; callers read it with `.catch(unknownLimit)`. */
+/**
+ * An unknown count throws UnknownReplyError, the short window's (withinLimit) or the store's public requests' (takePublicRequest),
+ * never said as a spent window; callers read it with `.catch(unknownLimit)`.
+ */
 export async function withinStore(scope: string, who: string, limit: number, windowSeconds: number, store: Store, side: "public" | "buyer" = "public"): Promise<boolean> {
   if (!(await withinLimit(scope, who, limit, windowSeconds))) return false;
-  return takePublicRequest(store, side);
+  return takePublicRequestExact(store, side);
 }
 
 /**

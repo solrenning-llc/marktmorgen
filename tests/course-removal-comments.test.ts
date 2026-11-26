@@ -18,6 +18,7 @@ import {
   claimHandle,
   ensureStatsId,
   ensureStoreId,
+  setProductHidden,
   setStripeAccount,
   setSubscription,
   storeForEmail,
@@ -155,6 +156,8 @@ async function main(): Promise<void> {
   const second = await makeCourse("Course disabled after comments");
   const secondLesson = await addLesson(second.id, second.courseId, "Last lesson");
   await seedComments(second.courseId, secondLesson);
+  // The last lesson of a course on the store stays (#5285 row #3432): the course is taken off the store first.
+  await setProductHidden(OWNER, second.id, true);
   const lessonRemoved = await courseCall({ action: "edit", id: second.id, op: "lesson-remove", lessonId: secondLesson });
   is("the last lesson is removed first", [lessonRemoved.status, lessonRemoved.body.ok, lessonsInOrder((await readCourse(second.courseId))!).length], [200, true, 0]);
   const secondKeys = commentKeys(second.courseId, []);

@@ -25,6 +25,7 @@ import { BODIES_PER_READ, type Course, MAX_LESSONS, readAllBodies, readCoursesEx
 import { ListNotWholeError, listAsCsv, listSize } from "@/lib/free";
 import { dataUsed } from "@/lib/store-data";
 import { readForms, readResponses } from "@/lib/form-store";
+import { MAX_FORMS } from "@/lib/forms";
 import { readAbouts } from "@/lib/product-about";
 import { readPages } from "@/lib/sales-page-store";
 import { EXPORT_PAGES, type SalesGap, salesCsv, readsSales } from "@/lib/stats";
@@ -109,7 +110,11 @@ async function roomShape(store: Store): Promise<ExportShape> {
   // and the file says the posts could not be read, reading none of them.
   const postList = await allPosts(store.statsId).catch(unmeasured("blog list"));
   const posts = postList ? postList.length : MAX_POSTS;
-  const forms = (await readForms(store.statsId)).length;
+  // The forms the same way (Claude 6's LEVE on #3397): a form record that does not read made readForms throw, and with
+  // it the measuring, so the store's whole file was refused on every try. Priced at the most a store keeps (MAX_FORMS);
+  // the file then says the forms could not be read, reading none of their answers.
+  const formList = await readForms(store.statsId).catch(unmeasured("forms"));
+  const forms = formList ? formList.length : MAX_FORMS;
   const contacts = (await listSize(store)).total;
   return {
     bytes: used.used,

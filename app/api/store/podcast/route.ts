@@ -5,6 +5,7 @@ import { setPodcastEpisodes, setProductPodcast, storeFolder, storeForEmail } fro
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath } from "@/lib/product-file";
 import { readListing } from "@/lib/catalog";
+import { leavesNothingToHandOver } from "@/lib/product-option";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { dropPodcast, editPodcast, newPodcastId, readPodcast, savePodcast, type PodcastEdit } from "@/lib/podcast";
@@ -81,6 +82,11 @@ export async function POST(request: NextRequest) {
         // record; its cost is bounded where it was let in: the door reserved its full size from the store's monthly
         // upload room (reserveStoreUpload, never refunded) and the store's storage brake counts it (lib/storage-quota.ts).
         return fail(result.reason);
+      }
+      // The last episode of a podcast on the store stays: without it the checkout sells nothing (#5285 row #3432).
+      // Checked before anything is saved or deleted, so a refusal leaves the feed and its audio as they were.
+      if (edit.op === "remove" && leavesNothingToHandOver(product, { ...product, podcast: { id: podcastId, episodes: result.podcast.episodes.length } })) {
+        return Response.json({ ok: false, error: "last_delivery", product: product.title }, { status: 409 });
       }
       await savePodcast(result.podcast);
       await setPodcastEpisodes(ref, id, result.podcast.episodes.length);

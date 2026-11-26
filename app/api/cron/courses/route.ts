@@ -12,6 +12,7 @@ import { deleteFile } from "@/lib/file-store";
 import { sweepCommunityUploads } from "@/lib/community-files";
 import { noticeHeldStores } from "@/lib/community-held-notice";
 import { settleSubmissionSlots, sweepSubmissions } from "@/lib/submission-store";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 /**
  * Run on a schedule by Vercel: tells each student when a module of their
@@ -25,6 +26,11 @@ import { settleSubmissionSlots, sweepSubmissions } from "@/lib/submission-store"
  * (lib/community-held-notice.ts, 543 [CM2]).
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   // Vercel sends the secret with every scheduled run, compared here in
   // constant time. Without one set, only a local development server runs the
   // job on request; in production that is a closed door, not an open one.

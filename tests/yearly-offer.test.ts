@@ -74,7 +74,9 @@ async function withOddWrite<T>(prefix: string, reply: unknown, run: () => Promis
   const real = redis.pipeline.bind(redis);
   let used = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (!used && commands[0]?.[0] === "SET" && String(commands[0]?.[1] ?? "").startsWith(prefix)) {
+    // The write is a plain SET, or claimWhileStoreLive's EVAL whose key is its fifth argument (Codex L-20261120-1745).
+    const write = commands[0]?.[0] === "SET" ? String(commands[0]?.[1] ?? "") : commands[0]?.[0] === "EVAL" && String(commands[0]?.[1] ?? "").startsWith("-- marktmorgen:store-claim-live:v1\n") ? String(commands[0]?.[5] ?? "") : "";
+    if (!used && write.startsWith(prefix)) {
       used = true;
       return reply;
     }

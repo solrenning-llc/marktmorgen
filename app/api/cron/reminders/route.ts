@@ -9,6 +9,7 @@ import { runBreaks } from "@/lib/plan-pause";
 import { PLAN_BREAKS_ENABLED } from "@/lib/plan-pause-rules";
 import { sendTrialNudges } from "@/lib/trial-nudges";
 import { sendDueReminders } from "@/lib/payment-requests";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 /** Four passes over our subscriptions, one after another. */
 export const maxDuration = 60;
@@ -27,6 +28,11 @@ export const maxDuration = 60;
  * paying it, and one run at a time.
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   const started = Date.now();
   // Vercel sends the secret with every scheduled run, compared here in
   // constant time. Without one set, only a local development server runs the

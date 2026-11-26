@@ -46,8 +46,18 @@ function inject(match: (c: Command) => boolean, reply: unknown) {
  * the one bent, at its own place in that pipeline.
  */
 function injectZoomStores(reply: unknown[]) {
-  // The same pipeline shape as a Meta user's deletion (SET of the gone mark, then SMEMBERS of the stores).
-  injectMetaStores(reply);
+  // The gone mark is now a script that never lowers it (MARK_GONE, Claude 3's LEVE on #5368), then SMEMBERS of the
+  // stores: the mark gets its real reply, the store list the bent one.
+  let used = false;
+  redis.pipeline = (async (commands: Command[]) => {
+    sent.push(...commands);
+    if (!used && commands.length === 2 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:meet-gone:v1\n") && commands[1][0] === "SMEMBERS") {
+      used = true;
+      const [marked] = (await real([commands[0]])) as unknown[];
+      return [marked, ...reply];
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
 }
 /**
  * Changed with #3322's merge (rule 23): a Meta user's deletion now marks them gone in the same pipeline as, and before,

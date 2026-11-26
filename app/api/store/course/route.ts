@@ -41,6 +41,7 @@ import { EMAIL_PATTERN } from "@/lib/auth";
 import { dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
 import { CERT_ID_PATTERN, courseIndexes, withdrawCertificate } from "@/lib/certificate";
 import { hasProduct, productIds, readListing } from "@/lib/catalog";
+import { leavesNothingToHandOver } from "@/lib/product-option";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { claimUpload, dropStream } from "@/lib/stream";
@@ -545,6 +546,14 @@ export async function POST(request: NextRequest) {
       const result = editCourse(course, edit);
       if (!result.ok) {
         return Response.json({ ok: false, error: result.reason }, { status: result.reason === "unknown" ? 404 : 400 });
+      }
+      // The last lesson of a course on the store stays: without it the checkout sells nothing (#5285 row #3432).
+      // Checked before anything is read, saved or deleted, so a refusal leaves the course exactly as it was.
+      if (
+        (edit.op === "lesson-remove" || edit.op === "module-remove") &&
+        leavesNothingToHandOver(product, { ...product, course: { ...courseInfo, lessons: lessonCount(result.course) } })
+      ) {
+        return Response.json({ ok: false, error: "last_delivery", product: product.title }, { status: 409 });
       }
       // An assignment that goes with its lesson is read before the course is saved without it (Revisor 1 on #2810): a
       // read that fails keeps the lesson, its assignment and the work handed in, for the next try.

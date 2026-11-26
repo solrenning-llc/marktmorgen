@@ -7,6 +7,8 @@
  * test does not run it, the product checks' Redis job does.
  */
 import { type Sent, type StripeWorld, runClosingJourney, standIns } from "./closing-journey";
+// TEAM_INDEX_OFF_TEAM on a real Redis (#5010 row 133), which the in-memory stand-in cannot show.
+import { runTeamIndexShapeCheck } from "./team-index-real-redis";
 
 const sent: Sent[] = [];
 const stripe: StripeWorld = { sessions: [], memberships: [], posted: [] };
@@ -35,6 +37,7 @@ async function main(): Promise<void> {
   process.env.RESEND_API_KEY = "re_test_closed_store_only_a_stand_in";
   for (const name of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"]) delete process.env[name];
   await runClosingJourney(is, sent, stripe);
+  await runTeamIndexShapeCheck(is);
   console.log(failures ? `${checks} checks, ${failures} failing.` : `${checks} checks, all passing.`);
   process.exit(failures ? 1 : 0);
 }

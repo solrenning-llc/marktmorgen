@@ -55,9 +55,57 @@ const sentKey = (session: string, start: number, mark: string) => `nl:call:remin
 const creatorKey = (callsId: string, product: string, start: number, mark: string) =>
   `nl:call:creator-reminded:${callsId}:${product}:${start}:${mark}`;
 
+/**
+ * How long a timed reminder that could not be dealt with waits before it is tried again (Claude 1 E's LEVE on #5103,
+ * agreed by Claude 4 AC): kept at its due score it would come back at the head of every five-minute run for as long as
+ * it is of use, so BATCH of them stuck at once would hold every other store's reminder back for up to a day.
+ */
+const RETRY_MS = 15 * 60_000;
+
+/**
+ * The score a timed reminder ("24" or "1") that could not be dealt with is put off to: RETRY_MS on, but never past a
+ * minute before it stops being of use (stillUseful), so it is still tried once more. Null for anything else (the
+ * confirmation "c", a member that does not read), whose give-up counts from its score (givenUp) and so must keep it,
+ * and for a timed one with less than that minute left.
+ */
+function retryScore(member: string, now: number): number | null {
+  const item = parseMember(member);
+  if (!item || (item.mark !== "24" && item.mark !== "1")) return null;
+  const usefulUntil = item.mark === "24" ? item.start - 3600_000 : item.start;
+  const at = Math.min(now + RETRY_MS, usefulUntil - 60_000);
+  return at > now ? at : null;
+}
+
+/**
+ * The commands that put off the timed reminders kept after a failure (retryScore), in one ZADD: XX, so a member a
+ * move or another run took out meanwhile is never put back. None when there is nothing to put off. At most one a
+ * store's group a run, and it takes the place of the store and Stripe reads the group would have made on the runs in
+ * between, so a stuck booking costs fewer commands than before, not more.
+ */
+function retryLater(members: string[], now: number): (string | number)[][] {
+  const pairs = members.flatMap((m) => {
+    const at = retryScore(m, now);
+    return at === null ? [] : [at, m];
+  });
+  return pairs.length ? [["ZADD", REMINDER_QUEUE, "XX", ...pairs]] : [];
+}
+
 /** Whether a reminder is still worth sending: the day-before one gives way to the hour-before one. */
 function stillUseful(mark: "24" | "1", start: number, now: number): boolean {
   return mark === "24" ? now < start - 3600_000 : now < start;
+}
+
+/**
+ * Whether an entry that could not be dealt with this run (its store, the paid calls or its one paid call unreadable)
+ * is given up on. A timed reminder is kept while it is still of use, however late the outage has made it: a day-before
+ * reminder due six hours ago still has almost eighteen hours to go (Codex X2, #4812). The confirmation, and an entry
+ * whose member does not read, are given up on once they are GIVE_UP_MS late, as before. Either way the wait is
+ * bounded, so one store or session that cannot be read never holds the head of the queue for good.
+ */
+function givenUp(member: string, score: number, now: number): boolean {
+  const item = parseMember(member);
+  if (item && (item.mark === "24" || item.mark === "1")) return !stillUseful(item.mark, item.start, now);
+  return now - score > GIVE_UP_MS;
 }
 
 /** One email, as the sender takes it. */
@@ -241,11 +289,12 @@ export async function sendCallReminders(
       store = await findStore(handle);
     } catch (error) {
       // Unknown, not gone: tried again next run, and given up on only once it
-      // is hours late, as when Stripe does not answer below, so one store that
-      // cannot be read never holds the head of the queue for good.
+      // is of no use any more (givenUp), as when Stripe does not answer below,
+      // so one store that cannot be read never holds the head of the queue for good.
       console.error("reading the store for call reminders failed", error);
-      const stale = members.filter((m) => now - m.score > GIVE_UP_MS).map((m) => m.member);
-      if (stale.length) await redisPipeline([["ZREM", REMINDER_QUEUE, ...stale]]);
+      const stale = members.filter((m) => givenUp(m.member, m.score, now)).map((m) => m.member);
+      const kept = retryLater(members.map((m) => m.member).filter((m) => !stale.includes(m)), now);
+      if (stale.length || kept.length) await redisPipeline([...(stale.length ? [["ZREM", REMINDER_QUEUE, ...stale]] : []), ...kept]);
       counts.dropped += stale.length;
       continue;
     }
@@ -253,6 +302,10 @@ export async function sendCallReminders(
     // call, and the reminder carries only the booking's own details (its time, its place or room, its calendar file
     // and the buyer's page to move it), nothing of the store's switched-off pages. Held in tests/suspended-store-updates-calls.test.ts.
     const done: string[] = [];
+    // Timed reminders kept for a later run (their one paid call could not be read, or their send failed): put off
+    // together with the group's ZREM (retryLater), never left at the head of the next run (Claude 1 E's and Claude 4
+    // AC's LEVEs on #5103).
+    const unread: string[] = [];
     if (!store || store.callsId !== callsId) {
       await redisPipeline([["ZREM", REMINDER_QUEUE, ...members.map((m) => m.member)]]);
       counts.dropped += members.length;
@@ -263,10 +316,11 @@ export async function sendCallReminders(
       paid = await paidCalls(store);
     } catch (error) {
       // Stripe did not answer: tried again next run, and given up on only
-      // once it is hours late and no use to anybody.
+      // once it is no use to anybody (givenUp).
       console.error("reading paid calls for reminders failed", error);
-      const stale = members.filter((m) => now - m.score > GIVE_UP_MS).map((m) => m.member);
-      if (stale.length) await redisPipeline([["ZREM", REMINDER_QUEUE, ...stale]]);
+      const stale = members.filter((m) => givenUp(m.member, m.score, now)).map((m) => m.member);
+      const kept = retryLater(members.map((m) => m.member).filter((m) => !stale.includes(m)), now);
+      if (stale.length || kept.length) await redisPipeline([...(stale.length ? [["ZREM", REMINDER_QUEUE, ...stale]] : []), ...kept]);
       counts.dropped += stale.length;
       continue;
     }
@@ -285,12 +339,15 @@ export async function sendCallReminders(
         call = bySession.get(item.session) ?? await paidCall(store, item.session);
       } catch (error) {
         // Unknown, not unpaid: kept for the next run while it can still be of
-        // use, and given up on once it is hours late, as when the whole list
+        // use, and given up on once it is not (givenUp), as when the whole list
         // does not answer, so a session Stripe answers 404 for on every run (one
         // of the account the store used before) cannot hold the queue.
         console.error("reading one paid call for reminders failed", error);
-        if (now - score > GIVE_UP_MS) counts.dropped += 1;
-        else done.pop();
+        if (givenUp(member, score, now)) counts.dropped += 1;
+        else {
+          done.pop();
+          unread.push(member);
+        }
         continue;
       }
       const product = call ? await find(call.product) : null;
@@ -362,14 +419,19 @@ export async function sendCallReminders(
             again = true;
           } else if (creator === "uncertain") console.error("a call reminder to the creator may have gone; its mark is kept", store.handle, call.session, item.mark);
         }
-        if (again) done.pop();
+        if (again) {
+          done.pop();
+          unread.push(member);
+        }
       } catch (error) {
         console.error("sending a call reminder failed", error);
-        // Kept in the queue for the next run; stillUseful lets it go once it is too late.
+        // Kept in the queue, put off RETRY_MS; stillUseful lets it go once it is too late.
         done.pop();
+        unread.push(member);
       }
     }
-    if (done.length) await redisPipeline([["ZREM", REMINDER_QUEUE, ...done]]);
+    const later = retryLater(unread, now);
+    if (done.length || later.length) await redisPipeline([...(done.length ? [["ZREM", REMINDER_QUEUE, ...done]] : []), ...later]);
   }
   return counts;
 }

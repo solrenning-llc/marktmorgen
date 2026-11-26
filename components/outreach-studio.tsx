@@ -38,6 +38,7 @@ const MESSAGES: Record<string, string> = {
   ...PITCH_PROBLEMS,
   address: "That does not look like a website address. Type it like brand.com.",
   unreadable: "Their website could not be read just now, or it asks not to be read. Try again, or try the address of their contact page.",
+  timeout: "Their website did not answer in time, so nothing was read. Try again in a minute, or try the address of their contact page.",
   unpublished: "That address is not printed on that page of their own website any more, so it is not written to.",
   notes: "Say in a sentence or two what you would offer them.",
   used: "This month's writing help is used up. It starts again on the first of the month.",

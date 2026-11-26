@@ -30,6 +30,7 @@ import { sendReviewRequests } from "@/lib/review-requests";
 import { syncDue } from "@/lib/email-sync";
 import { syncMeetings } from "@/lib/call-meetings";
 import { withCutoff } from "@/lib/fetch-timeout";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 export const maxDuration = 60;
 
@@ -90,6 +91,11 @@ export const maxDuration = 60;
  * events still get their phone notification, in the same place.
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   // Every request below is given up by 57 s (lib/fetch-timeout.ts). A run
   // that reaches it leaves its lock to run out by itself (90 s), long
   // before the next run.
@@ -115,6 +121,10 @@ async function run(request: NextRequest, started: number): Promise<Response> {
   if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   const webhooksBy = started + 50_000;
   const meetingsCutoff = started + 55_000;
+  // Every pass that threw is named here, and the run answers ok only when none did (issue #4090, Codex U): a pass that
+  // failed was only logged, and the run answered ok with HTTP 200, so a run that left a queue undone looked healthy.
+  // The passes stay apart, so one failing never skips the others; a count that was not read is null, never zero.
+  const failedPasses: string[] = [];
   try {
     // Saved shipment messages have their own exact payload and lifetime
     // barrier. They remain eligible after the checkout sweep's 24h window.
@@ -125,9 +135,11 @@ async function run(request: NextRequest, started: number): Promise<Response> {
       runShipmentMail(started + 5_000, sendQueuedShipmentMail),
       runOrderConfirmationMail(started + 5_000, sendQueuedShipmentMail),
     ]);
-    for (const result of saved) {
-      if (result.status === "rejected") console.error("saved order mail could not be checked", result.reason);
-    }
+    saved.forEach((result, i) => {
+      if (result.status !== "rejected") return;
+      failedPasses.push(i === 0 ? "runShipmentMail" : "runOrderConfirmationMail");
+      console.error("saved order mail could not be checked", result.reason);
+    });
     // First, and with a budget of its own: a buyer waiting for what they paid
     // for matters more than a newsletter going out a few minutes sooner, and
     // the budget keeps the newsletter from waiting on it for long. Without
@@ -136,6 +148,7 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     try {
       checkouts = await sweepCheckouts(started + 12_000);
     } catch (error) {
+      failedPasses.push("sweepCheckouts");
       console.error("the checkout pass failed", error);
     }
     // The reminders buyers asked for themselves on the way back from a
@@ -143,6 +156,7 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     try {
       await sendAsked(storeForHandle, started + 20_000);
     } catch (error) {
+      failedPasses.push("sendAsked");
       console.error("sending asked-for checkout reminders failed", error);
     }
     // The Store assistant's reminders, asked for with its box at checkout
@@ -150,12 +164,14 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     try {
       await sendAssistReminders(storeForHandle, started + 22_000);
     } catch (error) {
+      failedPasses.push("sendAssistReminders");
       console.error("sending the Store assistant's checkout reminders failed", error);
     }
     let offers = null;
     try {
       offers = await settlePendingOffers(storeForHandle, Math.max(Date.now(), started + 12_000) + 4_000);
     } catch (error) {
+      failedPasses.push("settlePendingOffers");
       console.error("settling waiting offers failed", error);
     }
     if (!isSenderConfigured()) {
@@ -163,59 +179,76 @@ async function run(request: NextRequest, started: number): Promise<Response> {
       try {
         events = await runEventQueue(storeForHandle, started + 43_000, { mail: false });
       } catch (error) {
+        failedPasses.push("runEventQueue");
         console.error("live event notifications failed", error);
       }
-      return Response.json({ ok: true, mail: "unavailable", checkouts, offers, events, webhooks: await runWebhooks(webhooksBy, meetingsCutoff) }, { headers: { "Cache-Control": "no-store" } });
+      const webhooks = await runWebhooks(webhooksBy, meetingsCutoff, failedPasses);
+      const ok = failedPasses.length === 0;
+      return Response.json({ ok, mail: "unavailable", checkouts, offers, events, webhooks, failedPasses }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
     }
     const deadline = started + 30_000;
     // Each kept apart: one failing never skips the others for this run.
-    let broadcasts = 0;
+    let broadcasts: number | null = 0;
     // Broadcasts, sequence steps and product updates read their store exactly: one read out of shape leaves the send
     // in line for a later run instead of ending it as if the store were gone (lib/store-exact.ts).
     try {
       broadcasts = await advanceAll(storeForScheduledWork, deadline);
     } catch (error) {
+      failedPasses.push("advanceAll");
+      broadcasts = null;
       console.error("sending broadcasts failed", error);
     }
-    let steps = { sent: 0, dropped: 0, later: 0 };
+    let steps: { sent: number | null; dropped: number | null; later: number | null } = { sent: 0, dropped: 0, later: 0 };
     try {
       steps = await sendDueSteps(storeForScheduledWork, deadline);
     } catch (error) {
+      failedPasses.push("sendDueSteps");
+      steps = { sent: null, dropped: null, later: null };
       console.error("sending sequence steps failed", error);
     }
-    let announcements = 0;
+    let announcements: number | null = 0;
     try {
       announcements = await advanceAnnouncements(storeForHandle, deadline);
     } catch (error) {
+      failedPasses.push("advanceAnnouncements");
+      announcements = null;
       console.error("sending community announcements failed", error);
     }
     // A product's buyers told it was updated (lib/product-updates.ts).
-    let updates = 0;
+    let updates: number | null = 0;
     try {
       updates = await advanceUpdates(storeForScheduledWork, deadline);
     } catch (error) {
+      failedPasses.push("advanceUpdates");
+      updates = null;
       console.error("sending product updates failed", error);
     }
     // The one email to a waitlist when its product goes on sale
     // (lib/waitlist.ts), in the same slot as the creators' other emails.
-    let launches = 0;
+    let launches: number | null = 0;
     try {
       launches = await runLaunches(storeForHandle, readListing, deadline);
     } catch (error) {
+      failedPasses.push("runLaunches");
+      launches = null;
       console.error("sending waitlist launches failed", error);
     }
     // Pre-orders of products put on sale, handed over and emailed (lib/preorders.ts).
-    let preorders = 0;
+    let preorders: number | null = 0;
     try {
       preorders = await runPreorderReleases(storeForHandle, readListing, preorderDeps, deadline);
     } catch (error) {
+      failedPasses.push("runPreorderReleases");
+      preorders = null;
       console.error("handing over pre-orders failed", error);
     }
     // The one email to a back-in-stock list when its product is back (lib/stock-alert-send.ts, 623 [SZ7]).
-    let restocks = 0;
+    let restocks: number | null = 0;
     try {
       restocks = await runRestocks(deadline);
     } catch (error) {
+      failedPasses.push("runRestocks");
+      restocks = null;
       console.error("sending back-in-stock emails failed", error);
     }
     // The creators' low-stock numbers (623 [SZ7]): checked here, one run at a time, never in the checkout.
@@ -223,6 +256,7 @@ async function run(request: NextRequest, started: number): Promise<Response> {
       // The units left as read where something is decided: never a guess (lowStockJobDeps).
       await runLowStockChecks(deadline, lowStockJobDeps);
     } catch (error) {
+      failedPasses.push("runLowStockChecks");
       console.error("checking low-stock numbers failed", error);
     }
     // Reminders are kept apart from the creators' own emails: one failing
@@ -234,6 +268,7 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     try {
       calls = await sendCallReminders(storeForReminders, Math.min(started + 40_000, Math.max(deadline, Date.now() + 10_000)), SITE_URL);
     } catch (error) {
+      failedPasses.push("sendCallReminders");
       console.error("sending call reminders failed", error);
     }
     // Live events next: a reminder an hour before has to arrive before the
@@ -242,6 +277,7 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     try {
       events = await runEventQueue(storeForHandle, Math.min(started + 43_000, Math.max(started + 33_000, Date.now() + 3_000)), { mail: true });
     } catch (error) {
+      failedPasses.push("runEventQueue");
       console.error("live event reminders failed", error);
     }
     // Review requests are the least urgent email here: a day late is no harm.
@@ -249,12 +285,17 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     try {
       reviews = await sendReviewRequests(storeForHandle, started + 44_000);
     } catch (error) {
+      failedPasses.push("sendReviewRequests");
       console.error("sending review requests failed", error);
     }
     // Nothing started after fifty: a webhook try can take eight more, and the
     // whole run has sixty.
-    const webhooks = await runWebhooks(webhooksBy, meetingsCutoff);
-    return Response.json({ ok: true, checkouts, offers, broadcasts, announcements, updates, launches, preorders, restocks, ...steps, calls, events, reviews, webhooks }, { headers: { "Cache-Control": "no-store" } });
+    const webhooks = await runWebhooks(webhooksBy, meetingsCutoff, failedPasses);
+    const ok = failedPasses.length === 0;
+    return Response.json(
+      { ok, checkouts, offers, broadcasts, announcements, updates, launches, preorders, restocks, ...steps, calls, events, reviews, webhooks, failedPasses },
+      { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     console.error("the email job failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
@@ -266,9 +307,9 @@ async function run(request: NextRequest, started: number): Promise<Response> {
 /**
  * The webhook pass: new Stripe events first, then the retries due, then the
  * Google Meet and Zoom meetings, then the email platforms' sends and
- * retries. One failing never stops the others.
+ * retries. One failing never stops the others; each one that threw is named in `failedPasses` (issue #4090).
  */
-async function runWebhooks(deadline: number, cutoff: number) {
+async function runWebhooks(deadline: number, cutoff: number, failedPasses: string[]) {
   let stripe = null;
   let deliveries = null;
   let emailPlatforms = null;
@@ -276,13 +317,18 @@ async function runWebhooks(deadline: number, cutoff: number) {
   try {
     stripe = await watchStripe(deadline - 3_000);
   } catch (error) {
+    failedPasses.push("watchStripe");
     console.error("reading Stripe for webhooks failed", error);
   }
   // Events noticed once that could not be queued then (lib/webhook-outbox.ts): queued now, before the deliveries.
-  await replayKept(deadline - 3_000).catch((error) => console.error("trying kept webhook events again failed", error));
+  await replayKept(deadline - 3_000).catch((error) => {
+    failedPasses.push("replayKept");
+    console.error("trying kept webhook events again failed", error);
+  });
   try {
     deliveries = await deliverDue(deadline);
   } catch (error) {
+    failedPasses.push("deliverDue");
     console.error("retrying webhooks failed", error);
   }
   // Google Meet and Zoom meetings for calls and live events: tries again what
@@ -293,11 +339,13 @@ async function runWebhooks(deadline: number, cutoff: number) {
   try {
     meetings = await withCutoff(cutoff, () => syncMeetings(storeForHandle, Math.min(deadline, Date.now() + 6_000), SITE_URL));
   } catch (error) {
+    failedPasses.push("syncMeetings");
     console.error("keeping meetings in step failed", error);
   }
   try {
     emailPlatforms = await syncDue(deadline);
   } catch (error) {
+    failedPasses.push("syncDue");
     console.error("sending to email platforms failed", error);
   }
   return { stripe, deliveries, emailPlatforms, meetings };

@@ -230,7 +230,10 @@ export async function run(argv, { env = {}, fetchImpl = globalThis.fetch, write 
     }
     const answered = await call(fetchImpl, url, key, "tools/call", { name: command, arguments: parsed.arguments });
     if (answered.error) {
-      warn(`${answered.error}\n`);
+      // An option the tool does not take is named by the server; the user is shown where each tool's options are
+      // listed (Claude 5 ibuF's LOW on #5228: --days used to be ignored by tools without a window).
+      const hint = / is not an argument of /.test(answered.error) ? "Run: marktmorgen tools (it lists the options each tool takes).\n" : "";
+      warn(`${answered.error}\n${hint}`);
       return 2;
     }
     const content = Array.isArray(answered.result?.content) ? answered.result.content : [];

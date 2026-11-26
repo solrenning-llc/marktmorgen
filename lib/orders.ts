@@ -30,7 +30,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { type Admission, countHeldOrders, heldOrdersKey, orderConfirmationAdmission, orderConfirmationHoldKeys } from "@/lib/order-admission";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 
 const seenKey = (reference: string) => `nl:orders:seen:${createHash("sha256").update(reference).digest("hex").slice(0, 32)}`;
 const countKey = (folder: string, month: string) => `nl:orders:n:${folder}:${month}`;
@@ -479,6 +479,8 @@ export async function storeOrdersThisMonth(store: Store, now = Date.now()): Prom
 /** The stores that had any order counted in a month. */
 export async function orderedFolders(month = calendarWindow().id): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["SMEMBERS", foldersKey(month)]]);
-  return Array.isArray(raw) ? raw.filter((f): f is string => typeof f === "string" && FOLDER_PATTERN.test(f)).sort() : [];
+  // Read exactly (rule 24; issue #4145): a reply in another shape is unknown, never "no store had an order".
+  const list = stringList(repliesFor(await redisPipeline([["SMEMBERS", foldersKey(month)]]), 1)?.[0]);
+  if (!list) throw new UnknownReplyError("the stores with orders in a month");
+  return list.filter((f) => FOLDER_PATTERN.test(f)).sort();
 }

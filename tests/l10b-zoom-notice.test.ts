@@ -38,8 +38,8 @@ function notice() {
 }
 /** The Zoom user's stores, read once each time a notice is acted on (lib/meet-connect.ts forgetUser). */
 const forgotten = () => count("SMEMBERS", "nl:meet:user:zoom:");
-/** forgetUser's read of the user's stores: its pipeline opens with the deletion's mark (lib/meet-connect.ts goneKey). */
-const forgetRead = (c: (string | number)[]) => c[0] === "SET" && String(c[1] ?? "").startsWith("nl:meet:gone:zoom:");
+/** forgetUser's read of the user's stores: its pipeline opens with the deletion's mark (lib/meet-connect.ts goneKey, MARK_GONE). */
+const forgetRead = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1] ?? "").startsWith("-- marktmorgen:meet-gone:v1\n") && String(c[3] ?? "").startsWith("nl:meet:gone:zoom:");
 
 async function main(): Promise<void> {
   redis.clear();

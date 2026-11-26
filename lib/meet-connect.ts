@@ -443,6 +443,23 @@ redis.call("SADD", KEYS[3], ARGV[4])
 redis.call("SET", KEYS[2], ARGV[2])
 return 1`;
 
+/**
+ * forgetUser's mark of an account's deletion, kept GONE_SECONDS, that never goes down: 1 when it now holds the time
+ * given, 2 when the mark already there is at or after it (or does not read as a time, which KEEP_UNLESS_GONE reads as
+ * gone for every flow) and is kept, its expiry renewed; -1, before touching anything, for a call of any other shape.
+ * A late retry of an older notice never lowers a newer removal's mark, so a flow begun between the two removals is
+ * still refused (Claude 3's LEVE on #5368). EVAL, GET and SET.
+ */
+const MARK_GONE = `-- marktmorgen:meet-gone:v1
+if #KEYS ~= 1 or #ARGV ~= 2 or #ARGV[1] > 16 or not string.match(ARGV[1], "^[1-9]%d*$") or #ARGV[2] > 16 or not string.match(ARGV[2], "^[1-9]%d*$") then return -1 end
+local gone = redis.call("GET", KEYS[1])
+if gone and (#gone > 16 or not string.match(gone, "^%d+$") or tonumber(gone) >= tonumber(ARGV[1])) then
+  redis.call("SET", KEYS[1], gone, "EX", ARGV[2])
+  return 2
+end
+redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
+return 1`;
+
 /** A malformed prior read stops this attempt before the grant's write. */
 class PriorConnectionUnreadError extends UnknownReplyError {}
 
@@ -671,24 +688,31 @@ export async function forgetUser(
   removedAt?: number,
 ): Promise<{ statsId: string; owner: { email: string; handle: string }; account: string }[]> {
   if (!isRedisConfigured() || !accountId) return [];
+  const known = typeof removedAt === "number" && Number.isFinite(removedAt) && removedAt > 0;
   // The mark first, in the same pipeline as the read of the stores: a consent flow that kept its connection before
   // the mark is in the stores read here and forgotten with them; one that would keep it after is refused
   // (KEEP_UNLESS_GONE). A mark not confirmed written, or the stores in any shape but a list of text, is unknown.
+  // The mark is when the person removed the app, when the notice says it, never later than now: a notice sent again
+  // marks the same removal, so a grant begun since (connected again in between) is not refused by the resend's own
+  // arrival time (Codex X6 on #3333, LOW); the line is the one the walk below draws for the stores it keeps. The mark
+  // never goes down (MARK_GONE): a late retry of an older notice leaves a newer removal's mark where it is (Claude 3's
+  // LEVE on #5368).
+  const now = Date.now();
+  const markedAt = known ? Math.min(Math.floor(removedAt as number), now) : now;
   const read = repliesFor(
     await redisPipeline([
-      ["SET", goneKey(provider, accountId), String(Date.now()), "EX", GONE_SECONDS],
+      ["EVAL", MARK_GONE, 1, goneKey(provider, accountId), String(markedAt), GONE_SECONDS],
       ["SMEMBERS", userKey(provider, accountId)],
     ]),
     2,
   );
-  if (!read || read[0] !== "OK") throw new UnknownReplyError("the mark of a meeting account's deletion");
+  if (!read || (read[0] !== 1 && read[0] !== 2)) throw new UnknownReplyError("the mark of a meeting account's deletion");
   const stores = stringList(read[1]);
   if (!stores) throw new UnknownReplyError("the stores a meeting account connected");
   const forgot: { statsId: string; owner: { email: string; handle: string }; account: string }[] = [];
   const pass = stores.slice(0, FORGET_PASS);
   // Stores connected again after the removal (a notice sent again by the provider after a first try failed, while
   // the creator connected anew in between; webhooks/cron audit, Claude 1, 12/11/2026): their new connection stays.
-  const known = typeof removedAt === "number" && Number.isFinite(removedAt) && removedAt > 0;
   try {
     for (const statsId of pass) {
       // Each store leaves the index under its renewal lock, with its connection: a store connected again since (a flow

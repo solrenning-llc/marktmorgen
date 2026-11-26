@@ -8,6 +8,7 @@ import { settleAllPayPal } from "@/lib/paypal-payouts";
 import { idleSweep } from "@/lib/affiliates";
 import { readIdleDays } from "@/lib/affiliate-idle-rules";
 import { storesAfter } from "@/lib/store";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 /** Long enough to walk every store, short enough to end before the platform does. */
 const RUN_MS = 50_000;
@@ -30,6 +31,11 @@ export const maxDuration = 60;
  * one run at a time.
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   if (!(await cronAllowed(request))) {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }
@@ -47,7 +53,11 @@ export async function GET(request: NextRequest) {
     const settled = await settleAllPayPal(started + RUN_MS / 3);
     const counts = await sendPaydayEmails(started + RUN_MS);
     // Only with what the payday left: a payment day is never cut short for this, which can wait for tomorrow.
-    const idle = counts.complete ? await idleAll(started + RUN_MS) : { warned: 0, removed: 0, complete: false };
+    const idle = counts.complete ? await idleAll(started + RUN_MS) : { warned: 0, removed: 0, complete: false, failed: 0 };
+    // A store whose sweep failed is a failed run, said as the weekly and monthly jobs say it (#4092): its counts kept.
+    if (idle.failed > 0) {
+      return Response.json({ ok: false, error: "failed", settled, ...counts, idle }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    }
     return Response.json({ ok: true, settled, ...counts, idle }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("sending affiliate payday emails failed", error);
@@ -57,9 +67,13 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/** Every store that asked for idle affiliates to be removed, until the deadline; the rest wait for tomorrow. */
-async function idleAll(deadline: number): Promise<{ warned: number; removed: number; complete: boolean }> {
-  const out = { warned: 0, removed: 0, complete: false };
+/**
+ * Every store that asked for idle affiliates to be removed, until the deadline; the rest wait for tomorrow. A store
+ * whose sweep throws is counted in `failed` and the others are still swept; the walk is complete only when every
+ * store was swept (#4092), never when one was only logged.
+ */
+async function idleAll(deadline: number): Promise<{ warned: number; removed: number; complete: boolean; failed: number }> {
+  const out = { warned: 0, removed: 0, complete: false, failed: 0 };
   let cursor = "0";
   for (let step = 0; step < 10_000; step += 1) {
     if (Date.now() >= deadline) return out;
@@ -72,12 +86,13 @@ async function idleAll(deadline: number): Promise<{ warned: number; removed: num
         out.warned += done.warned;
         out.removed += done.removed;
       } catch (error) {
+        out.failed += 1;
         console.error("sweeping idle affiliates failed", error);
       }
     }
     cursor = next;
     if (cursor === "0") break;
   }
-  out.complete = true;
+  out.complete = out.failed === 0;
   return out;
 }

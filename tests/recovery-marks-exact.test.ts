@@ -210,6 +210,33 @@ test("an unknown stop link write leaves no stop link behind, with the address in
   }
 });
 
+test("a stop link write that lands and then fails leaves no stop link behind (#5285 row #2929, LEVE 1)", async () => {
+  // The write reached Redis but the connection broke before the reply: the call rejects instead of answering.
+  // The link, with the address in it, must not stay 400 days, unsent and unknown to erasure.
+  // Claude 5's two cases (6702209293): the whole write lands and the reply times out; or only the SET runs and a
+  // later command in the same call answers with an error, which lib/redis.ts throws.
+  const isLink = (commands: Commands) => commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:recover:link:");
+  const cases: [string, (commands: Commands, real: Pipe) => Promise<unknown[]>][] = [
+    ["timeout", async (commands, real) => { await real(commands); throw new Error("Redis request timed out"); }],
+    ["command error", async (commands, real) => { await real([commands[0]]); throw new Error("Redis error: OOM command not allowed"); }],
+  ];
+  for (const [label, answer] of cases) {
+    const store = await shop();
+    const { id, email } = fresh();
+    let key = "";
+    await assert.rejects(
+      intercept(isLink, async (commands, real) => {
+        key = String(commands[0][1]);
+        return answer(commands, real);
+      }, () => remindAbandoned(store, left(id, email))),
+      /^Error: Redis (request timed out|error: OOM)/,
+      `${label}: the error goes on unchanged`,
+    );
+    assert.ok(key, `${label}: the stop link was written`);
+    assert.equal((await redis.pipeline([["GET", key]]))[0], null, `${label}: the stop link that was never sent is still there`);
+  }
+});
+
 test("control: a stop link written whole stays for the reminder it is sent in", async () => {
   const store = await shop();
   const { id, email } = fresh();

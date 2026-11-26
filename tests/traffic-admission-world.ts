@@ -17,3 +17,7 @@ export const monthKey = (date = new Date()) => date.toISOString().slice(0,7);
 export const alertSpike = async () => false;
 // #3697 asks spikeMark first, so an ordinary request schedules nothing; here no mark is ever reached, as no alarm is sent.
 export const spikeMark = (..._args: unknown[]): number | null => null;
+// The store's fence (lib/store-live-cache.ts) that lib/traffic.ts builds for the month's mark: this world's
+// rememberFolderOwner writes nothing, so the fence is never asked; aliased here (tests/aliases) because the real one
+// imports names of lib/store this world does not stand in for.
+export const storeLiveFence = async (_store: unknown) => ({ live: '', erasing: '', field: '', statsId: null, ref: 'synthetic-owner' });

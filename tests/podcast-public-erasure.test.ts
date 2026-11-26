@@ -21,6 +21,7 @@ import { GET as feed } from "@/app/api/store/podcast/public/[handle]/[product]/r
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
@@ -124,12 +125,14 @@ async function main(): Promise<void> {
         reached = true;
         // The store is closed and walked while the write waits. Not awaited here: a write that holds what the closing
         // needs makes it wait, and then the walk deletes what the write left.
-        erased = (async () => {
+        // The plan's end and the closing walk are scheduled jobs (cron/plans, cron/closing, cron/closed-data): they wait
+        // the job's whole wait for the store's lock, never a person's (lib/store-lock-wait.ts, #5010 row 182).
+        erased = runStoreJob(async () => {
           const T = Date.now();
           await closeForErasure(owner);
           await markDue(storeRef((await storeForEmail(owner))!), T - 1000);
           await walk(T);
-        })();
+        });
         await Promise.race([erased, new Promise((resolve) => setTimeout(resolve, 1_500))]);
       },
     };

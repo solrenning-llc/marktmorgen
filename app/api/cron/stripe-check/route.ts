@@ -8,7 +8,9 @@ import { isDemoCheckoutConfigured } from "@/lib/demo-store";
 import { type Check, verifyCartShipping, verifyPackages, verifyTaxDocuments, verifyTiers } from "@/lib/verify-stripe";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { SITE_URL } from "@/lib/site-url";
+import { failedNames } from "@/lib/health-check-status";
 import { STATUS_CHECKS, statusRunCommands } from "@/lib/status-page";
+import { runStoreJob } from "@/lib/store-lock-wait";
 
 // A run takes about half a minute, most of it Stripe charging and updating
 // test subscriptions; room is left so a slow day at Stripe is not cut off.
@@ -20,10 +22,16 @@ const LAST = "nl:stripe-check:last";
  * Run every day by Vercel: session packages, membership tiers, the tax
  * documents a checkout carries and a cart that ships, against Stripe's test mode
  * (lib/verify-stripe.ts). The last answer is kept; the site's own inbox hears
- * when a check fails, and again when all pass after a failure. Nobody else
+ * when a check fails, and again when all pass after a failure. A run with a failed check answers HTTP 500 with
+ * error "failed" and the names of the failed checks (failed); a passing run answers 200. Nobody else
  * can start it: only Vercel's scheduled call carries the secret.
  */
 export async function GET(request: NextRequest) {
+  // A scheduled job: every store write inside it waits the job's wait, not a person's (lib/store-lock-wait.ts, #5010 row 182).
+  return runStoreJob(() => runJob(request));
+}
+
+async function runJob(request: NextRequest) {
   if (!(await cronAllowed(request))) {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }
@@ -75,7 +83,12 @@ export async function GET(request: NextRequest) {
     // Kept for the public status page (lib/status-page.ts), after the save and the notice and apart from them, so
     // its failure stops neither: its time and result only. Every check here is an answer from Stripe's test mode.
     await redisPipeline(statusRunCommands(STATUS_CHECKS[1].key, at, ok)).catch((error) => console.error("keeping the Stripe check's run for the status page failed", error));
-    return Response.json({ ok, checks }, { headers: { "Cache-Control": "no-store" } });
+    // A failed check is the cron routes' failed-run answer (issue #4147): HTTP 500 with error "failed", as
+    // affiliates, shares and monthly answer (Claude 5 ichw on #5472), after every side effect above, so a monitor
+    // reading the status never takes it for a good run; the body still names each check, and which failed.
+    return ok
+      ? Response.json({ ok, checks }, { headers: { "Cache-Control": "no-store" } })
+      : Response.json({ ok, error: "failed", checks, failed: failedNames(checks) }, { status: 500, headers: { "Cache-Control": "no-store" } });
   } finally {
     await releaseMark("nl:stripe-check:lock", lock);
   }

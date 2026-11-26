@@ -14,6 +14,7 @@
 /** Families counted in a store's data room. */
 export const COUNTED_FAMILIES: readonly string[] = [
   "nl:ab:", "nl:adsrv:ctx:", "nl:adsrv:sent:", "nl:aff:", "nl:agent:book:",
+  "nl:paths:",
   "nl:agree:p:", "nl:agree:r:", "nl:agree:s:", "nl:agree:v:", "nl:amem:", "nl:blog:body:", "nl:blog:meta:", "nl:blog:pub:",
   "nl:call:busy:", "nl:call:confirmed:", "nl:call:series:", "nl:callteam:", "nl:callteam:rr:", "nl:catalog:", "nl:cert:",
   "nl:cm:", "nl:cm:unsub:", "nl:copy:", "nl:course:", "nl:crm:co:", "nl:crm:deals:", "nl:crm:pacc:", "nl:crm:pipes:", "nl:crm:tasks:", "nl:crm:v:", "nl:data:", "nl:dc:addr:",
@@ -38,6 +39,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:", "nl:*", "nl:2fa:", "nl:2fa:hold:", "nl:2fa:locked:", "nl:2fa:lock:", "nl:2fa:lockedset:", "nl:2fa:keptstar:", "nl:2fa:once:", "nl:2fa:rescue:",
   "nl:2fa:setup:", "nl:ab:paid:", "nl:account:stores:", "nl:adsrv:", "nl:adsrv:last:", "nl:adsrv:sub:",
   "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:pend:", "nl:aff:pend:due", "nl:aff:pend:pp:", "nl:aff:seen:", "nl:aff:session:", "nl:aff:unc:month:", "nl:affhub:", "nl:agent:book:lock:",
+  "nl:paths:lock:",
   "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:ai:file:", "nl:ai:pdfno:", "nl:ai:stop:", "nl:alert:",
   "nl:alert:seen:", "nl:allow:", "nl:amem:lock:", "nl:api:hold:", "nl:api:k:", "nl:api:keys:", "nl:api:used:", "nl:ask:", "nl:ask:a:", "nl:ask:missed:",
   "nl:assist:c:", "nl:assist:missed:", "nl:assist:next:", "nl:assist:nextlock:", "nl:assist:pool:", "nl:assist:remind:", "nl:assist:remindq", "nl:assist:remindwho:",
@@ -45,7 +47,8 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:auth:second:",
   "nl:auth:code:", "nl:auth:linkcode:", "nl:auth:lastcode:", "nl:rl:code-addr:", "nl:rl:code-day:", "nl:rl:code-ip:",
   "nl:auth:rec:bound:", "nl:auth:rec:link:", "nl:auth:rec:set:", "nl:auth:rec:until:", "nl:auth:session:", "nl:auth:sessions:",
-  "nl:backup:del:", "nl:backup:delcount:", "nl:backup:files:day:", "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:period-read:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
+  "nl:backup:del:", "nl:backup:delcount:", "nl:backup:files:day:", "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:progress", "nl:backup:ran:",
+  "nl:bench:ranges", "nl:bench:s:", "nl:billing:period-read:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
   "nl:cal:builds:", "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:chg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:pace:", "nl:cal:refused:", "nl:cal:tok:",
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
   "nl:certrefunds:n:", "nl:certrefunds:next:", "nl:certrefunds:seen:", "nl:certrefunds:since:",
@@ -54,6 +57,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:", "nl:confirm-room:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:coursegone:", "nl:courses:drip", "nl:courses:lock", "nl:crefund:told:",
   "nl:creators:responses", "nl:crm:co:lock:", "nl:crm:erased:", "nl:crm:fields:", "nl:crm:gen:", "nl:crm:pacc:lock:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:", "nl:dsched:tell",
+  "nl:crm:co:gone:",
   "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dripstart:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:files:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:fly:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
@@ -66,7 +70,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:hostcal:good:", "nl:hostcal:lock:", "nl:house:seed", "nl:house:seed:lock", "nl:import:",
   "nl:imports:active", "nl:imports:busy:", "nl:imports:cf:", "nl:imports:cf:lock:", "nl:imports:list:",
   "nl:inbound:support:bytes:", "nl:inbound:support:counted:", "nl:inbound:support:held:",
-  "nl:imports:lock", "nl:imports:moved:", "nl:imports:rows:", "nl:inbound:counted:", "nl:inbound:seen:", "nl:indexnow:sent", "nl:join:t:",
+  "nl:imports:lock", "nl:imports:moved:", "nl:imports:rows:", "nl:inbound:counted:", "nl:inbound:seen:", "nl:indexnow:lock", "nl:indexnow:sent", "nl:join:t:",
   "nl:keysfill:done", "nl:keysfill:round",
   "nl:learn:link:", "nl:learn:paid:", "nl:learn:pass:", "nl:learn:passes:", "nl:learn:rate:addr:",
   "nl:learn:rate:ip:", "nl:leave:", "nl:letters:link:", "nl:letters:ok:", "nl:letters:rl:addr:", "nl:letters:rl:ip:", "nl:lib:joined:", "nl:lib:link:", "nl:list:try:", "nl:listed:", "nl:lock:plan-stop:", "nl:lostdispute:cursor:", "nl:mail-check:last",
@@ -207,6 +211,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // ---------------------------------------------------------------- a-b
   "nl:ab:": E, "nl:ab:paid:": X(40),
   "nl:adsrv:": E, "nl:adsrv:ctx:": X(4), "nl:adsrv:last:": E, "nl:adsrv:sent:": X(3), "nl:adsrv:sub:": X(400),
+  "nl:paths:": E, "nl:paths:lock:": X(1),
   "nl:aff:": E, "nl:agent:book:": E, "nl:agent:book:lock:": X(1), "nl:aff:leads:lock:": X(1), "nl:aff:link:": X(1), "nl:aff:payday:": E, "nl:aff:payday:lock": C, "nl:aff:pend:": X(2), "nl:aff:pend:due": Cr(2), "nl:aff:pend:pp:": X(2), "nl:aff:seen:": X(2), "nl:aff:session:": X(30), "nl:aff:unc:month:": Cr(400),
   "nl:affhub:": L, "nl:affhub:link:": Cr(1), "nl:affkit:": E,
   // Proposals and agreements (lib/agreement-store.ts): the store's lists go, and each agreement and its versions through them.
@@ -220,7 +225,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:assist:c:": X(1), "nl:assist:missed:": E, "nl:assist:next:": X(3), "nl:assist:nextlock:": X(1), "nl:assist:pool:": E, "nl:assist:remind:": X(3), "nl:assist:remindq": I, "nl:assist:remindwho:": X(3),
   "nl:backup:del:": C, "nl:backup:delcount:": C, // the backup's deletion records and their per-store month count (lib/backup-deletions.ts), the company's bookkeeping
   "nl:backup:files:day:": C, // the backup files route's day count (lib/backup-files-source.ts), no store's
-  "nl:backup:last-fail": C, "nl:backup:last-ok": C, "nl:backup:lock": C, "nl:backup:ran:": C, // the company's daily backup run (lib/backup-run.ts), no store's
+  "nl:backup:last-fail": C, "nl:backup:last-ok": C, "nl:backup:lock": C, "nl:backup:progress": C, "nl:backup:ran:": C, // the company's daily backup run (lib/backup-run.ts), no store's
   "nl:bench:ranges": C, "nl:bench:s:": Cr(21),
   "nl:billing:period-read:": C, "nl:billing:sync:after": C, "nl:billing:sync:cursor": C,
   "nl:blog:body:": E, "nl:blog:meta:": E, "nl:blog:pub:": E,
@@ -269,6 +274,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:creators:responses": C,
   "nl:crefund:told:": X(2),
   "nl:crm:co:": E, "nl:crm:co:lock:": X(1), "nl:crm:deals:": E, "nl:crm:erased:": X(31), "nl:crm:fields:": E, "nl:crm:gen:": X(31), "nl:crm:pacc:": E, "nl:crm:pacc:lock:": X(1), "nl:crm:pipes:": E, "nl:crm:stages:": E, "nl:crm:tasklock:": X(1), "nl:crm:taskrecount:": X(1), "nl:crm:tasks:": E, "nl:crm:v:": E,
+  // A person deleted from the store, kept off the store's companies (#4026), on its own line so main's edits above do not conflict.
+  "nl:crm:co:gone:": E,
   // ---------------------------------------------------------------- d-f
   "nl:data:": E,
   "nl:dc:addr:": E, "nl:dc:due": I, "nl:dc:lock": C, "nl:dc:mem:": E, "nl:dc:ok:": E, "nl:dc:prod:": E, "nl:dc:srv:": E, "nl:dc:state:": X(1),
@@ -311,6 +318,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:inbound:support:bytes:": C, "nl:inbound:support:counted:": C, "nl:inbound:support:held:": C,
   "nl:inbox:": E, "nl:inbox:tok:": T("nl:inbox:"),
   "nl:intro:c:": E,
+  "nl:indexnow:lock": C,
   "nl:indexnow:sent": C,
   // The studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts): the company's day and its sessions, no store's; each session ends 21 hours after it opened.
   "nl:sdemo:": C, "nl:sdemo:{<session>}:<family>[:<part>]": C,
@@ -492,7 +500,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // company's list of stores with one due is a list naming stores, taken out by the walk.
   "nl:sub:slots:": E, "nl:sub:slotdue": I,
   "nl:store:before-catalog:": T("prepare"), "nl:store:delivery:": E, "nl:store:delivery:over:": I, "nl:store:folder-owner:": E,
-  "nl:store:handle:": Cr(30), "nl:store:id:": E, "nl:store:leads:": E, "nl:store:lock:": E, "nl:store:owner:*": C,
+  "nl:store:handle:": Cr(90), "nl:store:id:": E, "nl:store:leads:": E, "nl:store:lock:": E, "nl:store:owner:*": C,
   "nl:store:owner:": T("prepare"), "nl:store:photo:": E,
   "nl:stream:auto:": E, "nl:stream:autokept:month:": Cr(400), "nl:stream:autokeptcase:": Cr(400), "nl:stream:autoowed:": E, "nl:stream:autoq": I, "nl:stream:cap:": E, "nl:stream:col:": E, "nl:stream:due": I, "nl:stream:gone": C,
   "nl:stream:lock": C, "nl:stream:peek:": E, "nl:stream:v:": E,

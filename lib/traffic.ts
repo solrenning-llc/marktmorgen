@@ -38,15 +38,17 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { headers } from "next/headers";
 import { after } from "next/server";
 import { rememberFolderOwner } from "@/lib/delivery";
+import type { StoreLiveFence } from "@/lib/live-fence";
 import { type AllowanceWindow, WINDOW_ID, allowanceWindow, calendarWindow, keepSecondsFor } from "@/lib/allowance-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { poolPlace } from "@/lib/free-pool";
 import { alertSpike, spikeMark } from "@/lib/traffic-spike";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { noteReadStore } from "@/lib/page-read";
 import { deriveKey } from "@/lib/secret-box";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
+import { storeLiveFence } from "@/lib/store-live-cache";
 import { PARTS_PER_VISIT, SHARE_BATCH, clientDayShare, publicVisitLimit, requestLimitFor, shareAddress, visitLimitFor, visitorAddress } from "@/lib/traffic-rules";
 
 const dayKey = (folder: string, day: string) => `nl:traffic:day:${folder}:${day}`;
@@ -83,7 +85,7 @@ function fingerprint(of: string): string {
  * before a bill could be made from the count: no plan covers fewer than a
  * hundred visits.
  */
-async function markMonth(folder: string, window: string, owner: string | null, now: number): Promise<void> {
+async function markMonth(folder: string, window: string, owner: string | null, now: number, fence: StoreLiveFence): Promise<void> {
   // The counts by the store's window; the line of stores by the calendar
   // month, which is how the daily jobs find them (app/api/cron/usage).
   const month = calendarWindow(now).id;
@@ -94,12 +96,13 @@ async function markMonth(folder: string, window: string, owner: string | null, n
     ["EXPIRE", foldersKey(month), KEEP_SECONDS],
   ]);
   // Whose folder this is, for the daily job that bills and writes
-  // (lib/usage-billing.ts, storeOf).
-  if (owner) await rememberFolderOwner(folder, owner);
+  // (lib/usage-billing.ts, storeOf): through the store's fence, so a visit
+  // counted after the erasure began writes no address back.
+  if (owner) await rememberFolderOwner(folder, owner, fence);
 }
 
 /** One person, on one day, for one store: adds a visit to the month if they are new to today. */
-async function countOnce(folder: string, owner: string | null, who: string, now: number, window: AllowanceWindow): Promise<boolean> {
+async function countOnce(folder: string, owner: string | null, who: string, now: number, window: AllowanceWindow, fence: StoreLiveFence): Promise<boolean> {
   const day = new Date(now).toISOString().slice(0, 10);
   const [fresh] = await redisPipeline([["SADD", dayKey(folder, day), fingerprint(`${day}|${folder}|${who}`)]]);
   if (Number(fresh) !== 1) return false;
@@ -108,7 +111,7 @@ async function countOnce(folder: string, owner: string | null, who: string, now:
     ["EXPIRE", dayKey(folder, day), DAY_KEEP_SECONDS],
   ]);
   const n = Number(count);
-  if (n === 1 || n % 100 === 0) await markMonth(folder, window.id, owner, now);
+  if (n === 1 || n % 100 === 0) await markMonth(folder, window.id, owner, now, fence);
   return true;
 }
 
@@ -123,7 +126,7 @@ export async function recordVisit(store: Store, ip: string, now = Date.now()): P
   const window = allowanceWindow(store, now);
   if (!isRedisConfigured() || !window) return false;
   try {
-    return await countOnce(await storeFolder(storeRef(store)), storeRef(store), visitorAddress(ip), now, window);
+    return await countOnce(await storeFolder(storeRef(store)), storeRef(store), visitorAddress(ip), now, window, await storeLiveFence(store));
   } catch (error) {
     console.error("could not count a visit to a store", error);
     return false;
@@ -140,7 +143,7 @@ export async function recordListener(store: Store, feed: string, now = Date.now(
   const window = allowanceWindow(store, now);
   if (!isRedisConfigured() || !feed || !window) return false;
   try {
-    return await countOnce(await storeFolder(storeRef(store)), storeRef(store), `feed:${feed}`, now, window);
+    return await countOnce(await storeFolder(storeRef(store)), storeRef(store), `feed:${feed}`, now, window, await storeLiveFence(store));
   } catch (error) {
     console.error("could not count a podcast subscriber's day", error);
     return false;
@@ -164,7 +167,7 @@ export async function recordParts(store: Store, parts: number, now = Date.now())
     // The same mending as a visit's: with the first, and each time a
     // hundred visits' worth has been added.
     const step = 100 * PARTS_PER_VISIT;
-    if (held === parts || Math.floor(held / step) !== Math.floor((held - parts) / step)) await markMonth(folder, window.id, owner, now);
+    if (held === parts || Math.floor(held / step) !== Math.floor((held - parts) / step)) await markMonth(folder, window.id, owner, now, await storeLiveFence(store));
     return held;
   } catch (error) {
     console.error("could not count the live room toward a store's visits", error);
@@ -316,7 +319,9 @@ function afterAnswer(task: () => Promise<unknown>): void {
  * One more request answered for this store's public side, counted in its
  * window: true when it fits, where public pages rest at 95% of the window's
  * requests and what buyers have at all of them (lib/traffic-rules.ts,
- * requestLimitFor). A count that cannot be made is a request refused.
+ * requestLimitFor). A count that cannot be made is a request refused; a
+ * reply that came back in another shape is not known, so it throws
+ * UnknownReplyError (rule 24): never "the window is spent" and never room.
  */
 async function countRequest(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<boolean> {
   return (await countRequests(folder, store, window, who, now, units, client, giveBack ? units : 0)).counted === "all";
@@ -384,16 +389,17 @@ async function countRequestsAt(folder: string, store: Store, window: AllowanceWi
   // One connection's share of the day first (lib/traffic-rules.ts, clientDayShare):
   // past it this connection alone is refused, and nothing is counted against the store.
   if (client) {
-    const share = await overShare(folder, window, whole, client, units, now);
-    if (share !== "within") return why(share === "over" ? "connection" : "unknown");
+    // A share that cannot be read throws (overShare): takePublicWhy reads it as "unknown".
+    if ((await overShare(folder, window, whole, client, units, now)) === "over") return why("connection");
   }
   const key = requestsKey(folder, window.id);
-  const reply = await redisPipeline([["INCRBY", key, units]]);
+  const replies = repliesFor(await redisPipeline([["INCRBY", key, units]]), 1);
   // Only Redis's own answer to this one command counts (Codex G2 on #2583):
   // one reply, an integer at least `units`. Anything else, a `true`, a text
-  // or a second item, is a count that cannot be made: the request is refused.
-  const n = Array.isArray(reply) && reply.length === 1 && typeof reply[0] === "number" ? reply[0] : NaN;
-  if (!Number.isSafeInteger(n) || n < units) return why("unknown");
+  // or a second item, is a count that is not known (rule 24; follow-up of
+  // #3067): it is never said as a spent window, and nothing is answered for it.
+  const n = replies ? countOf(replies[0]) : null;
+  if (n === null || n < units) throw new UnknownReplyError("the store's public requests count");
   if (n === units) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
   // A window used up much faster than it passes tells the operator, once a mark; it changes nothing (lib/traffic-spike.ts).
   // Only on a count that stays, and after the answer is sent: the page never waits on the claim or the email (Claude 1's
@@ -422,9 +428,33 @@ async function countRequestsAt(folder: string, store: Store, window: AllowanceWi
  * happens to ask (an affiliate program's book refreshed for all its
  * affiliates, lib/affiliate-page-admission.ts): it counts against the
  * store's window alone, not the connection's share of the day.
+ *
+ * Three answers (rule 24; follow-up of #3067): true for room, false for a
+ * window confirmed spent (or a store with no window, no place or no funded
+ * period, or a Redis that cannot be asked at all, which refuses as it always
+ * has: this count bounds what the store's month costs), and UnknownReplyError
+ * thrown for a count or a share that came back in a shape that cannot be
+ * read, so the caller says it could not check just now, never "too many" or
+ * "resting". A caller that answers it in its own words reads it with
+ * `.catch(unknownLimit)` (lib/request-guard.ts).
+ */
+export async function takePublicRequestExact(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1, from: { shared?: boolean } = {}): Promise<boolean> {
+  return takePublic(store, who, now, units, from.shared === true, false);
+}
+
+/** An unknown count read as a no, for the callers that answer only yes or no (Claude 7 on #3068). */
+const unknownIsNo = (error: unknown): false => {
+  if (error instanceof UnknownReplyError) return false;
+  throw error;
+};
+
+/**
+ * takePublicRequestExact as a plain yes or no: a count that came back in a shape that cannot be read is a no, as it
+ * always was, so the many callers that read a boolean (an optional shelf, a sitemap, an image) are never broken by it
+ * (Claude 7's MEDIUM on #3068). A caller that tells the person "could not check just now" uses the exact one.
  */
 export async function takePublicRequest(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1, from: { shared?: boolean } = {}): Promise<boolean> {
-  return takePublic(store, who, now, units, from.shared === true, false);
+  return takePublicRequestExact(store, who, now, units, from).catch(unknownIsNo);
 }
 
 /**
@@ -447,7 +477,8 @@ export async function takePublicRequestRefusal(store: Store, who: "public" | "bu
  * already bound it, and its hold can be larger than one connection's whole share (Claude 1 cloud's triage on #3899).
  */
 export async function holdPublicRequests(store: Store, units: number, now: number, who: "public" | "buyer" = "public", from: { shared?: boolean } = {}): Promise<boolean> {
-  if (from.shared !== true) return takePublic(store, who, now, units, false, true);
+  // A yes or no for its caller: an unknown count is a no, as before (Claude 7 on #3068).
+  if (from.shared !== true) return takePublic(store, who, now, units, false, true).catch(unknownIsNo);
   // Held from the store's window alone, never from the connection's share of the day for pages (a big copy would shut
   // the buyer out of the store, the triage's MEDIUM on #3899), but counted on the asking connection's own share of
   // copies made on the fly (Claude 2 nuvem I's focal on #3899): a connection whose copies today already used that share
@@ -456,7 +487,7 @@ export async function holdPublicRequests(store: Store, units: number, now: numbe
   // the window is still made once, and the buyer's pages are never refused for it.
   const share = await connectionShare(store, now);
   if (share === "unknown" || (share !== null && share.spent)) return false;
-  if (!(await takePublic(store, who, now, units, true, true))) return false;
+  if (!(await takePublic(store, who, now, units, true, true).catch(unknownIsNo))) return false;
   // The copy goes ahead only once its share holds it too, read in its exact shape (Codex X8's MEDIUM on #3899): an add
   // refused, or answered otherwise and not found in place by its token, gives the window's hold back and refuses, so
   // no give-back later subtracts from a share that never held it, no credit below zero is left for the next copies,
@@ -571,10 +602,29 @@ async function moveShare(share: ConnectionShare, by: number): Promise<boolean> {
   return count !== null && (by < 0 || count >= by) && whole(replies[1]) === 1;
 }
 
+/**
+ * The yes or no of takePublicRequestExact (rule 24; follow-up of #3067): a count or a share that came back in a shape
+ * that cannot be read throws UnknownReplyError; anything else that keeps the count from being made (no Redis, no
+ * window, no funded period, Redis not reached) refuses, as it always has.
+ */
 async function takePublic(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<boolean> {
-  return (await takePublicWhy(store, who, now, units, shared, giveBack)) === "ok";
+  if (!isRedisConfigured()) return false;
+  try {
+    const window = allowanceWindow(store, now);
+    if (!window) return false;
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
+    return (await countRequestWhy(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack)) === "ok";
+  } catch (error) {
+    if (error instanceof UnknownReplyError) throw error;
+    return false;
+  }
 }
 
+/**
+ * The same take said with its reason (PublicRequestRefusal; RequestTake through takePublicRequestWhy, outage drill of
+ * 13 November 2026), for a page that tells "too many" apart from "not checked just now": an unreadable count or share
+ * (UnknownReplyError, rule 24, #3068) and a count that could not be made at all are both "unknown".
+ */
 async function takePublicWhy(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<"ok" | PublicRequestRefusal> {
   if (!isRedisConfigured()) return "unknown";
   try {
@@ -651,9 +701,9 @@ const MAX_HELD = 20_000;
  * Whether this request takes its connection past its share of the day
  * (lib/traffic-rules.ts, clientDayShare). Added to the share SHARE_BATCH
  * requests at a time, with the share's expiry in the same write; a share that
- * cannot be read refuses the request, as a count that cannot be made does.
+ * came back in another shape throws UnknownReplyError, as the window's count does.
  */
-async function overShare(folder: string, window: AllowanceWindow, whole: number, client: string, units: number, now: number): Promise<"within" | "over" | "unknown"> {
+async function overShare(folder: string, window: AllowanceWindow, whole: number, client: string, units: number, now: number): Promise<"within" | "over"> {
   const day = new Date(now).toISOString().slice(0, 10);
   const field = `${day}:${fingerprint(`${day}|${folder}|share|${client}`)}`;
   const local = `${folder}|${window.id}|${field}`;
@@ -665,12 +715,14 @@ async function overShare(folder: string, window: AllowanceWindow, whole: number,
     return "within";
   }
   heldShare.delete(local);
-  const [taken] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["HINCRBY", shareKey(folder, window.id), field, held],
     ["EXPIRE", shareKey(folder, window.id), keepSecondsFor(window, now)],
-  ]);
-  const total = Number(taken);
-  if (!Number.isSafeInteger(total) || total < held) return "unknown";
+  ]), 2);
+  // A share that came back in another shape is not known (rule 24, #3068): never "over its share", never room. It is
+  // thrown, as the window's count is, so takePublicRequestExact can tell it apart; takePublicWhy reads it as "unknown".
+  const total = replies ? countOf(replies[0]) : null;
+  if (total === null || total < held) throw new UnknownReplyError("a connection's share of the day");
   if (total <= clientDayShare(whole)) return "within";
   if (refusedShare.size >= MAX_HELD) refusedShare.clear();
   refusedShare.add(local);

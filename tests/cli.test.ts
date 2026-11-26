@@ -44,6 +44,13 @@ async function main(): Promise<void> {
       return { code, out, err };
     };
 
+    part("An option the tool does not take is named, with where to see each tool's options (Claude 5 ibuF's LOW on #5228)");
+    const extra = await cli(["list_products", "--days", "7"]);
+    is("refused with a usage exit", extra.code, 2);
+    is("the server's words name the option", extra.err.includes("days is not an argument of list_products"), true);
+    is("and the user is shown where each tool's options are listed", extra.err.includes("Run: marktmorgen tools (it lists the options each tool takes)."), true);
+    sent.length = 0;
+
     part("Help");
     is("help prints the commands", (await cli(["help"])).out, HELP);
     is("no command: help, and a usage exit", (await cli([])).code, 2);

@@ -247,7 +247,9 @@ export default function DevelopersPage() {
       <LegalSection title="Members">
         <Endpoint path="/api/v1/members">
           Everybody who has come into your community, as your own member list shows them. 404 with{" "}
-          <code className="font-mono">no_community</code> when the store has none.
+          <code className="font-mono">no_community</code> when the store has none. If a page holds a member that could
+          not be read, it leaves that member out and says how many in <code className="font-mono">unreadable</code>; a
+          page without that field left nobody out.
         </Endpoint>
         <Code>{`{
   "data": [

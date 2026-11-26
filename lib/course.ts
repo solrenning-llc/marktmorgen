@@ -733,8 +733,7 @@ export async function readCourse(id: string): Promise<Course | null> {
  * and an incomplete or unreadable storage reply. Destructive callers use this
  * before removing the only identity that lets a later request try again.
  */
-export async function readCourseExact(id: string): Promise<Course | null> {
-  const what = "the course being removed";
+export async function readCourseExact(id: string, what = "the course being removed"): Promise<Course | null> {
   if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(id)) throw new UnknownReply(what);
   const [raw] = exactReplies(await redisPipeline([["GET", courseKey(id)]]), 1, what);
   if (raw === null) return null;

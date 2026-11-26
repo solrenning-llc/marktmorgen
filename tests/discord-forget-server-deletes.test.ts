@@ -39,19 +39,23 @@ const ROLE = "323456789012345678";
 
 type Command = (string | number)[];
 /**
- * Answers the first of forgetServer's deletes (the people's, FORGET_PEOPLE; with nobody kept, the server's DEL) with
- * `reply`, without applying it.
+ * Answers the first of forgetServer's deletes (the people's, FORGET_PEOPLE; with nobody kept, the server's,
+ * DROP_SERVER_IF_EMPTY) with `reply`, without applying it; with `apply`, the delete runs and only its answer is replaced.
+ * Since the server is deleted only in the same step that sees nobody left (Board #5285, row #3017), the two "known
+ * counts" controls apply the people's deletes, as the counts they answer say, so the server's step sees nobody.
  */
-let reply: { value: unknown } | null = null;
+let reply: { value: unknown; apply?: true } | null = null;
 const original = redis.pipeline.bind(redis);
 const isDelete = (command: Command | undefined) =>
   Boolean(command) &&
-  ((command![0] === "EVAL" && String(command![1]).startsWith("-- marktmorgen:discord-forget-people:v1\n")) || (command![0] === "DEL" && String(command![1]).startsWith("nl:dc:srv:")));
+  command![0] === "EVAL" &&
+  (String(command![1]).startsWith("-- marktmorgen:discord-forget-people:v1\n") || String(command![1]).startsWith("-- marktmorgen:discord-drop-server-if-empty:v1\n"));
 redis.pipeline = (async (commands: Command[]) => {
   if (reply && commands.length && isDelete(commands[0])) {
-    const answer = reply.value;
+    const { value, apply } = reply;
     reply = null;
-    return answer;
+    if (apply) await original(commands);
+    return value;
   }
   return original(commands);
 }) as typeof redis.pipeline;
@@ -124,10 +128,10 @@ async function main(): Promise<void> {
   await seed(false);
   is("nobody given roles: the server alone is forgotten, 0 people", [await forgetServer(room, sid), await kept()], [0, NOTHING_KEPT]);
   await seed();
-  reply = { value: [[2, 2, 0]] };
+  reply = { value: [[2, 2, 0]], apply: true };
   is("exact counts (both people, both address links, nobody left) are known", [await outcome(() => forgetServer(room, sid))], [2]);
   await seed();
-  reply = { value: [[0, 0, 0]] };
+  reply = { value: [[0, 0, 0]], apply: true };
   is("zero counts (already gone) are known, never unknown", [await outcome(() => forgetServer(room, sid))], [2]);
 
   part("Unread deletes cannot say the people were forgotten");

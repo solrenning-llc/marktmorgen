@@ -123,6 +123,27 @@ async function main(): Promise<void> {
   await person(listId, "hal", "cus_HalOld000001");
   customerEmail.set("cus_HalNew000001", "hal@example.com");
   subsBody.set("cus_HalNew000001", live("sub_HalLive00001"));
+  // Ina came back too, but her new membership is still taking its first payment ("incomplete"), as it is while a bank
+  // asks the buyer to confirm (Claude 2's LOW on #3371, board #5285): the come-back link would only be refused as a
+  // member's (runningFor), so no offer is sent now. It is not yet "back" either (Claude 5 ichw's LEVE 1 on #5294): the
+  // attempt may expire, so it is unknown, the mark is let go, and a later run in the window decides.
+  await person(listId, "ina", "cus_InaOld000001");
+  customerEmail.set("cus_InaNew000001", "ina@example.com");
+  subsBody.set("cus_InaNew000001", list([{ id: "sub_InaFirst00001", status: "incomplete", metadata: { store: HANDLE, product } }]));
+  await person(listId, "pat", "cus_PatOld000001");
+  customerEmail.set("cus_PatNew000001", "pat@example.com");
+  subsBody.set("cus_PatNew000001", list([{ id: "sub_PatPaused0001", status: "paused", metadata: { store: HANDLE, product } }]));
+  // Uma is back with an unpaid membership: not ended either, so back (ichw's LEVE 3: unpaid was claimed, never tested).
+  await person(listId, "uma", "cus_UmaOld000001");
+  customerEmail.set("cus_UmaNew000001", "uma@example.com");
+  subsBody.set("cus_UmaNew000001", list([{ id: "sub_UmaUnpaid0001", status: "unpaid", metadata: { store: HANDLE, product } }]));
+  // Vic is back under the very customer whose membership ended: a second membership of the product there, paused
+  // (ichw's LEVE 2: the ended customer's own read had no test).
+  await person(listId, "vic", "cus_VicOld000001");
+  subsBody.set("cus_VicOld000001", list([
+    { id: "sub_vicEnded0001", status: "canceled", metadata: { store: HANDLE, product } },
+    { id: "sub_VicPaused0001", status: "paused", metadata: { store: HANDLE, product } },
+  ]));
   // Joy has a second customer too, with no live membership: still not back. Control.
   await person(listId, "joy", "cus_JoyOld000001");
   customerEmail.set("cus_JoyNew000001", "joy@example.com");
@@ -181,6 +202,10 @@ async function main(): Promise<void> {
   is("control: Pia, with a whole and empty list of other customers, gets the offer", first.includes("pia@example.com"), true);
   is("control: Wren, whose other customer in other letters has nothing live, gets the offer", first.includes("wren@example.com"), true);
   is("Hal, back as a newer customer of the same address, gets no come-back email", first.includes("hal@example.com"), false);
+  is("Ina, back with a membership still taking its first payment, gets no come-back email", first.includes("ina@example.com"), false);
+  is("Pat, back with a paused membership, gets no come-back email", first.includes("pat@example.com"), false);
+  is("Uma, back with an unpaid membership, gets no come-back email", first.includes("uma@example.com"), false);
+  is("Vic, back under the customer whose membership ended, gets no come-back email", first.includes("vic@example.com"), false);
   is("Quinn, back under the same address in small letters, gets no come-back email", first.includes("quinn@example.com"), false);
   is("Sam, back under the same address in mixed letters, gets no come-back email", first.includes("sam@example.com"), false);
   is("Tess, back under the same address in other mixed letters, gets no come-back email", first.includes("tess@example.com"), false);
@@ -194,9 +219,12 @@ async function main(): Promise<void> {
   for (const name of ["kim", "lee", "mia", "ned"]) listBody.delete(`${name}@example.com`);
   for (const name of ["xan", "yul", "zed", "abe"]) searchBody.delete(`${name}@example.com`);
   subsBody.set("cus_OlaNew000001", gone("sub_OlaOther0001"));
+  // Ina's first payment was never confirmed: the attempt expired (incomplete_expired). She did not come back after all.
+  subsBody.set("cus_InaNew000001", list([{ id: "sub_InaFirst00001", status: "incomplete_expired", metadata: { store: HANDLE, product } }]));
   const second = await run();
-  is("the nine read in full now get the offer, and nobody gets a second one", second, [
+  is("the ten read in full now get the offer (Ina too, once her attempt expired), and nobody gets a second one", second, [
     "abe@example.com",
+    "ina@example.com",
     "kim@example.com",
     "lee@example.com",
     "mia@example.com",
@@ -206,7 +234,7 @@ async function main(): Promise<void> {
     "yul@example.com",
     "zed@example.com",
   ]);
-  is("Sam and Tess, still back, get no come-back email on a later run either", second.some((to) => to === "sam@example.com" || to === "tess@example.com"), false);
+  is("Sam, Tess, Pat, Uma and Vic, still back, get no come-back email on a later run either", second.some((to) => ["sam@example.com", "tess@example.com", "pat@example.com", "uma@example.com", "vic@example.com"].includes(to)), false);
   const third = await run();
   is("a third run sends nothing more", third, []);
   done();

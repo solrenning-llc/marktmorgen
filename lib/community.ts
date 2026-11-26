@@ -46,7 +46,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, countWithin, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataOwner, ORDER_WRITE, fieldReleaseBytes, orderScriptWith, orderWrite, releaseOrderData } from "@/lib/order-data";
 import { HASH_DEL_IF } from "@/lib/redis-take";
 import { UnknownReply, exactReplies, replyCount } from "@/lib/redis-exact";
@@ -275,6 +275,22 @@ const POST_SLOT = (post: string) => `cm:p:${post}`;
 const MEMBERS_SLOT = "cm:m";
 /** A like, a vote or a member key in a set: its member and Redis's own. */
 export const SET_ENTRY_BYTES = 96;
+
+/**
+ * What deleting a post or a comment may spend, beyond what their items' own actions paid for. Deleting is uncounted
+ * (app/api/store/community/route.ts UNCOUNTED; lib/buyer-actions.ts): every post, comment, like, vote and report
+ * was a buyer action, priced at a hundred commands and 60 KB including "its deletion later" (tests/plan-cost-registry.ts,
+ * buyer-actions). So a deletion spends a fixed part of plain commands (DELETE_POST_COMMANDS for a post: the reads of
+ * its comments, likers and voters, the four deletes, the read and the delete of its index; DELETE_THREAD_COMMANDS for
+ * a comment and its replies: the read of the comments, the four deletes and the three reads that reindex the post)
+ * and the room's own scripts, two reads a comment (DELETE_COMMENT_COMMANDS: who liked it, who reported it), one SREM
+ * a member with every entry of theirs at once, never one an entry, and one ZREM a word the index drops, which its
+ * writing added once; at the most DELETE_ITEM_COMMANDS an item, far under the hundred (tests/community-delete-cost.test.ts).
+ */
+export const DELETE_POST_COMMANDS = 9;
+export const DELETE_THREAD_COMMANDS = 8;
+export const DELETE_COMMENT_COMMANDS = 2;
+export const DELETE_ITEM_COMMANDS = 3;
 /** What a post counts for: its record, its two places in the feeds, and its words. */
 function postBytes(post: Post): number {
   // A post's picture keeps a mark for as long as the post keeps it (lib/community-files.ts, PICTURE_MARK_BYTES):
@@ -917,7 +933,7 @@ export async function directorySize(id: string): Promise<number> {
  * Everyone who has come in, for the creator's list: a page at a time, in the
  * order Redis keeps them. `cursor` is Redis's own, "0" to begin.
  */
-export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number; bytes: number }> {
+export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number; bytes: number; unreadable: number }> {
   const both = repliesFor(
     await redisPipeline([
       ["HSCAN", membersKey(id), cursor, "COUNT", count],
@@ -934,13 +950,16 @@ export async function memberPage(id: string, cursor: string, count = 200): Promi
   const total = countOf(both?.[1]);
   if (next === null || !flat || flat.length % 2 !== 0 || total === null) throw new UnknownReplyError("a page of a community's members");
   const members: Member[] = [];
+  // A member whose record does not read is left out and counted (#4069, rule 24), never left out without a word.
+  let unreadable = 0;
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const member = parseMember(flat[i + 1]);
     if (member) members.push(member);
+    else unreadable += 1;
   }
   // The bytes the scan answered with, for a reading that pays for them (lib/api-read.ts, members).
   const bytes = flat.reduce((n, v) => n + Buffer.byteLength(v), 0);
-  return { members, next, total, bytes };
+  return { members, next, total, bytes, unreadable };
 }
 
 /** Every member who asked for announcement emails and is still here. */
@@ -1150,19 +1169,74 @@ export async function editPost(id: string, post: Post, input: { title: string; t
   return next;
 }
 
-/** Takes a post away for good, with its comments, likes and reports, and gives back its room. */
+/** A set's or a hash's keys as Redis lists them: member keys, or null when the answer is in another shape. */
+function memberList(raw: unknown): string[] | null {
+  if (raw === null || raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.some((one) => typeof one !== "string")) return null;
+  return raw as string[];
+}
+
+/**
+ * A post's comments as HGETALL lists them, flat or as an object: every id, and each comment that reads. A comment
+ * that does not read is still deleted with its post (moderation never waits on it); only its author's trace entry
+ * stays. Null when the answer as a whole is in another shape.
+ */
+function commentRows(raw: unknown): { ids: string[]; comments: Comment[] } | null {
+  if (raw === null || raw === undefined) return { ids: [], comments: [] };
+  let pairs: [unknown, unknown][];
+  if (Array.isArray(raw)) {
+    if (raw.length % 2 !== 0) return null;
+    pairs = [];
+    for (let n = 0; n < raw.length; n += 2) pairs.push([raw[n], raw[n + 1]]);
+  } else if (typeof raw === "object") pairs = Object.entries(raw as Record<string, unknown>);
+  else return null;
+  if (pairs.some(([field]) => typeof field !== "string" || !ITEM_ID.test(field))) return null;
+  const comments = pairs.flatMap(([field, value]) => {
+    const comment = parseComment(value);
+    return comment && comment.id === field ? [comment] : [];
+  });
+  return { ids: pairs.map(([field]) => field as string), comments };
+}
+
+/** Takes a post away for good, with its comments, likes, votes and reports, every member's trace of them, and gives back its room. */
 export async function deletePost(id: string, post: Post, room: DataStore): Promise<void> {
-  const [raw] = await redisPipeline([["HKEYS", commentsKey(id, post.id)]]);
-  const commentIds = Array.isArray(raw) ? (raw as string[]) : [];
-  const gone = await redisPipeline([
-    ["DEL", postKey(id, post.id), commentsKey(id, post.id), likesKey(id, post.id), reportersKey(id, `p:${post.id}`), ...pollKeys(id, post.id), ...commentIds.map((c) => commentLikesKey(id, post.id, c))],
+  // Everything done under the post is in its member's trace (lib/community-trace.ts), each entry with its
+  // TRACE_ENTRY of the store's data room: read who did what first, so each entry goes, and its room comes back,
+  // with the post. A read in an unknown shape deletes nothing (rule 24): the entries would stay, their room taken.
+  const [rawComments, rawLikers, rawVoters] = repliesFor(
+    await redisPipeline([["HGETALL", commentsKey(id, post.id)], ["SMEMBERS", likesKey(id, post.id)], ["HKEYS", pollKeys(id, post.id)[0]]]),
+    3,
+  ) ?? [];
+  const rows = commentRows(rawComments);
+  const likers = memberList(rawLikers);
+  const voters = memberList(rawVoters);
+  if (!rows || !likers || !voters) throw new UnknownReplyError("a deleted post's comments, likes or votes");
+  const { ids: commentIds, comments } = rows;
+  const targets = [`p:${post.id}`, ...commentIds.map((c) => `c:${post.id}:${c}`)];
+  const sets = repliesFor(
+    await redisPipeline([...commentIds.map((c) => ["SMEMBERS", commentLikesKey(id, post.id, c)]), ...targets.map((t) => ["SMEMBERS", reportersKey(id, t)])]),
+    commentIds.length + targets.length,
+  )?.map(memberList);
+  if (!sets || sets.some((one) => one === null)) throw new UnknownReplyError("a deleted post's comment likes or reporters");
+  const commentLikers = sets.slice(0, commentIds.length) as string[][];
+  const reporters = sets.slice(commentIds.length) as string[][];
+  const entries: [string, string][] = [
+    ...(post.a !== CREATOR ? [[post.a, `p:${post.id}`] as [string, string]] : []),
+    ...comments.filter((c) => c.a !== CREATOR).map((c): [string, string] => [c.a, `c:${post.id}:${c.id}`]),
+    ...likers.map((who): [string, string] => [who, `l:${post.id}`]),
+    ...voters.map((who): [string, string] => [who, `v:${post.id}`]),
+    ...commentIds.flatMap((c, i) => commentLikers[i].map((who): [string, string] => [who, `lc:${post.id}:${c}`])),
+    ...targets.flatMap((t, i) => reporters[i].map((who): [string, string] => [who, `r:${t}`])),
+  ];
+  await redisPipeline([
+    ["DEL", postKey(id, post.id), commentsKey(id, post.id), likesKey(id, post.id), ...pollKeys(id, post.id), ...commentIds.map((c) => commentLikesKey(id, post.id, c)), ...targets.map((t) => reportersKey(id, t))],
     ["ZREM", feedKey(id), post.id],
     ["ZREM", spaceKey(id, post.sp), post.id],
-    ["ZREM", reportsKey(id), `p:${post.id}`, ...commentIds.map((c) => `c:${post.id}:${c}`)],
-    ...(post.a !== CREATOR ? [["SREM", traceKey(id, post.a), `p:${post.id}`]] : []),
+    ["ZREM", reportsKey(id), ...targets],
   ]);
-  // Its entry in the author's trace comes back only when this took it out: a deletion of the author takes the whole trace.
-  if (post.a !== CREATOR && Number(gone[4]) === 1) await giveData(room, [TRACE_ENTRY]);
+  // Only what really left a trace gives its room back: one SREM a member, with every entry of theirs (DELETE_ITEM_COMMANDS).
+  const left = await dropTraces(id, entries);
+  if (left) await giveData(room, [{ ...TRACE_ENTRY, bytes: left * TRACE_ENTRY.bytes }]);
   await unindexPost(id, post.id).catch((error) => {
     console.error("taking a deleted post out of the search index failed", error);
   });
@@ -1557,17 +1631,30 @@ export async function deleteComment(id: string, post: string, comment: Comment, 
   const all = comment.parent ? [] : (await readComments(id, post)).filter((c) => c.parent === comment.id);
   const gone = [comment.id, ...all.map((c) => c.id)];
   const freed = [comment, ...all].reduce((sum, c) => sum + commentBytes(c), 0);
-  const authored = [comment, ...all].filter((c) => c.a !== CREATOR);
-  const replies = await redisPipeline([
+  // Who liked and who reported each of them, for their trace entries and their room (as deletePost); an unknown
+  // read deletes nothing (rule 24).
+  const sets = repliesFor(
+    await redisPipeline(gone.flatMap((c) => [["SMEMBERS", commentLikesKey(id, post, c)], ["SMEMBERS", reportersKey(id, `c:${post}:${c}`)]])),
+    gone.length * 2,
+  )?.map(memberList);
+  if (!sets || sets.some((one) => one === null)) throw new UnknownReplyError("a deleted comment's likes or reporters");
+  const likers = gone.map((_, i) => sets[i * 2] as string[]);
+  const reporters = gone.map((_, i) => sets[i * 2 + 1] as string[]);
+  const entries: [string, string][] = [
+    ...[comment, ...all].filter((c) => c.a !== CREATOR).map((c): [string, string] => [c.a, `c:${post}:${c.id}`]),
+    ...gone.flatMap((c, i) => likers[i].map((who): [string, string] => [who, `lc:${post}:${c}`])),
+    ...gone.flatMap((c, i) => reporters[i].map((who): [string, string] => [who, `r:c:${post}:${c}`])),
+  ];
+  const likes = likers.reduce((sum, list) => sum + list.length, 0);
+  await redisPipeline([
     ["HDEL", commentsKey(id, post), ...gone],
     ["DEL", ...gone.map((c) => commentLikesKey(id, post, c))],
     ["ZREM", reportsKey(id), ...gone.map((c) => `c:${post}:${c}`)],
-    ...gone.map((c) => ["DEL", reportersKey(id, `c:${post}:${c}`)]),
-    ...authored.map((c) => ["SREM", traceKey(id, c.a), `c:${post}:${c.id}`]),
+    ["DEL", ...gone.map((c) => reportersKey(id, `c:${post}:${c}`))],
   ]);
-  // Each entry in an author's trace comes back only when this took it out.
-  const traced = replies.slice(replies.length - authored.length).filter((n) => Number(n) === 1).length;
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: freed }, ...(traced ? [{ ...TRACE_ENTRY, bytes: traced * TRACE_ENTRY.bytes }] : [])]);
+  const left = await dropTraces(id, entries);
+  // Each like took SET_ENTRY_BYTES of the post's slot (toggleIn): it comes back with the comment.
+  await giveData(room, [{ slot: POST_SLOT(post), bytes: freed + likes * SET_ENTRY_BYTES }, ...(left ? [{ ...TRACE_ENTRY, bytes: left * TRACE_ENTRY.bytes }] : [])]);
   await reindexComments(id, post);
 }
 
@@ -1752,6 +1839,29 @@ export async function forgetMemberRecord(id: string, who: string, raw: string | 
 
 /** Commands sent at once while reading a whole community for one member's copy. */
 const TRACE_BATCH = 500;
+
+/**
+ * Takes the entries out of their members' traces, one SREM a member with every entry of theirs (so a deletion spends
+ * one command a member, never one an entry), in batches a request carries; how many entries really left, so only
+ * their room is given back. An unreadable count is no entry left (rule 24): the room stays taken, never given twice.
+ */
+async function dropTraces(id: string, entries: [string, string][]): Promise<number> {
+  const byMember = new Map<string, string[]>();
+  for (const [who, ref] of entries) byMember.set(who, [...(byMember.get(who) ?? []), ref]);
+  const members = [...byMember];
+  let left = 0;
+  for (let i = 0; i < members.length; i += TRACE_BATCH) {
+    const commands = members.slice(i, i + TRACE_BATCH).map(([who, refs]): (string | number)[] => ["SREM", traceKey(id, who), ...refs]);
+    const gone = await redisPipeline(commands);
+    // Only a count the SREM sent could give (at most its distinct refs) proves what left; any other reply gives no room
+    // back, so room is never returned for more than the entries took (Claude 1 on #5096; rule 24, countWithin).
+    gone.forEach((one, j) => {
+      const count = countWithin(one, commands[j]);
+      if (count) left += count;
+    });
+  }
+  return left;
+}
 
 export type MemberTraces = {
   posts: { post: string; space: string; title: string; text: string; at: number; edited: number; hidden: boolean }[];

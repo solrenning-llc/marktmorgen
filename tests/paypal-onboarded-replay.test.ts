@@ -145,7 +145,7 @@ async function main() {
   part("A disconnect whose end of the connect is not confirmed still wins over the way back already on its way (Codex X5)");
   await setPayPalSeller(email, null);
   // Marked as the connect route marks it (that route is limited to ten an hour, spent by the parts above).
-  await markOnboarding((await storeForEmail(email))!.statsId!);
+  await markOnboarding((await storeForEmail(email))!);
   integrationAsks = 0;
   const pipeline = redis.pipeline.bind(redis);
   duringLookup = async () => {
@@ -171,7 +171,7 @@ async function main() {
   const statsId = (await storeForEmail(email))!.statsId!;
   // A connect begun in the same millisecond as a disconnect counts as before it (refused): one millisecond apart here.
   await new Promise((resolve) => setTimeout(resolve, 2));
-  await markOnboarding(statsId);
+  await markOnboarding((await storeForEmail(email))!);
   let newer = "";
   const plain = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -179,7 +179,7 @@ async function main() {
     const ending = commands.length === 1 && String(commands[0][commands[0][0] === "EVAL" ? 3 : 1]).startsWith("nl:ppsell:start:") && (commands[0][0] === "DEL" || commands[0][0] === "EVAL");
     if (ending && newer === "") {
       redis.pipeline = plain;
-      newer = await markOnboarding(statsId);
+      newer = (await markOnboarding((await storeForEmail(email))!))!;
     }
     return plain(commands);
   }) as typeof redis.pipeline;

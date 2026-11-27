@@ -473,6 +473,30 @@ export class MemoryRedis {
           call(["SET", target, value]);
           return 1;
         }
+        // lib/community-dm.ts DM_SEND_UNLESS_ERASED: a private message's five writes, made only while neither member's print
+        // is that recent on Redis's clock (this stand-in's); {-1} too recent, {-2} a print not in whole seconds, nothing written.
+        if (key.startsWith("-- marktmorgen:dm-send-unless-erased:v1\n") && args[0] === "5" && args.length >= 13) {
+          const [, chat, fromInbox, toList, read, prints, seconds, message, keep, at, pair, mode, from, ...marks] = args;
+          let now: number | null = null;
+          for (const mark of marks) {
+            const erased = this.run(["HGET", prints, mark]);
+            this.scriptCalls += 1;
+            if (erased === null || erased === undefined) continue;
+            if (!/^\d+$/.test(String(erased))) return [-2];
+            if (now === null) {
+              now = Math.floor(this.now() / 1000);
+              this.scriptCalls += 1;
+            }
+            if (Number(erased) >= now - Number(seconds)) return [-1];
+          }
+          this.scriptCalls += 5;
+          this.run(["RPUSH", chat, message]);
+          this.run(["LTRIM", chat, -Number(keep), -1]);
+          this.run(["ZADD", fromInbox, at, pair]);
+          this.run(mode === "ask" ? ["ZADD", toList, "NX", at, pair] : ["ZADD", toList, at, pair]);
+          this.run(["HSET", read, from, at]);
+          return [1];
+        }
         // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
         // only while no live store holds it, read in the same step.
         if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {

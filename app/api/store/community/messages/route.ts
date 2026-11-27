@@ -17,6 +17,7 @@ import {
 } from "@/lib/community-dm";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
 import { DataRoomError } from "@/lib/store-data";
+import { dmSendFence } from "@/lib/dm-send-fence";
 import { communityWords } from "@/lib/buyer-words/community";
 
 /** How far a request got before something failed: the store's language once read, and whether a write had begun. */
@@ -56,6 +57,8 @@ export async function POST(request: NextRequest) {
 }
 
 async function act(request: NextRequest, progress: Progress): Promise<Response> {
+  // When this request began: a private message is not written for someone deleted since (lib/community-dm.ts, #4672).
+  const startedAt = Date.now();
   const origin = originFrom(request);
   // Read only as far as 32 KB (a message's 2,000 characters, written out as a form), whether or not a length was declared (MM-SA-10).
   const form = await limited(request, 32_000).then((r) => r.formData()).catch(() => null);
@@ -116,8 +119,9 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
     // who is a member. With requests on, that is a request sent, or "slow"
     // past the day's openings (counted as for a member); with requests off, or
     // from the creator, the message sent into the conversation.
+    let them: Awaited<ReturnType<typeof readMember>> = null;
     if (to !== CREATOR) {
-      const them = await readMember(id, to);
+      them = await readMember(id, to);
       if (!them || them.removed) {
         const asking = config.dm.ask && key !== CREATOR;
         if (!asking) return back(`${box}/${pairOf(key, to)}`, "dmsent");
@@ -125,17 +129,23 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
         return back(box, ok ? "dmasked" : "slow");
       }
     }
+    // Written only while neither member in it was just deleted from the store (DM_SEND_UNLESS_ERASED); the creator has no
+    // print. Asked before anything is written: a store with no list to ask throws here, answered "nothing changed"
+    // (lib/dm-send-fence.ts; Codex L on #5495).
+    const fence = await dmSendFence(store, [owner ? "" : viewer.email, them?.e ?? ""], startedAt);
     let sent: Awaited<ReturnType<typeof send>>;
     progress.writing = true;
     try {
       // Past the day's openings, a new request is refused before it is written
       // (never written and then answered "slow", which invites a second copy).
-      sent = await send(id, config.dm, key, to, text, store, { mayAsk: started });
+      sent = await send(id, config.dm, key, to, text, store, { mayAsk: started, fence });
     } catch (error) {
       // No room in the store's data room: nothing was sent (lib/store-data.ts).
       if (error instanceof DataRoomError) return back(`${box}/${pairOf(key, to)}`, "noroom");
       throw error;
     }
+    // Deleted while this request ran: what anyone not in the community is told, and nothing was written.
+    if (!sent.ok && sent.reason === "erased") return back(home, "out");
     if (!sent.ok) {
       const why =
         sent.reason === "declined"

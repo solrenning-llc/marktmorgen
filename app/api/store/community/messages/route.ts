@@ -17,6 +17,7 @@ import {
 } from "@/lib/community-dm";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
 import { DataRoomError } from "@/lib/store-data";
+import { dmSendFence } from "@/lib/dm-send-fence";
 import { communityWords } from "@/lib/buyer-words/community";
 
 /** How far a request got before something failed: the store's language once read, and whether a write had begun. */
@@ -128,15 +129,15 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
         return back(box, ok ? "dmasked" : "slow");
       }
     }
+    // Written only while neither member in it was just deleted from the store (DM_SEND_UNLESS_ERASED); the creator has no
+    // print. Asked before anything is written: a store with no list to ask throws here, answered "nothing changed"
+    // (lib/dm-send-fence.ts; Codex L on #5495).
+    const fence = await dmSendFence(store, [owner ? "" : viewer.email, them?.e ?? ""], startedAt);
     let sent: Awaited<ReturnType<typeof send>>;
     progress.writing = true;
     try {
       // Past the day's openings, a new request is refused before it is written
       // (never written and then answered "slow", which invites a second copy).
-      // Written only while neither member in it was just deleted from the store (DM_SEND_UNLESS_ERASED); the creator has no
-      // print, and a store with no list has deleted nobody (an erasure always gives the store a list first, lib/suppression.ts).
-      const emails = [owner ? "" : viewer.email, them?.e ?? ""].filter((email) => email !== "");
-      const fence = store.listId && emails.length ? { listId: store.listId, emails, ranSeconds: (Date.now() - startedAt) / 1000 } : null;
       sent = await send(id, config.dm, key, to, text, store, { mayAsk: started, fence });
     } catch (error) {
       // No room in the store's data room: nothing was sent (lib/store-data.ts).

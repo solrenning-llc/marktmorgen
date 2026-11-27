@@ -247,7 +247,7 @@ export async function send(
   // Given as a function, it is asked only for a new request, so the day's
   // openings are counted for openings and never for any other message.
   // The store's list and the members' addresses: the message is written only while neither was just deleted
-  // (DM_SEND_UNLESS_ERASED). None for a store with no list, which has deleted nobody (lib/suppression.ts).
+  // (DM_SEND_UNLESS_ERASED). The route always gives one when the message names a member (lib/dm-send-fence.ts).
   options: { mayAsk?: boolean | (() => Promise<boolean>); fence?: SendFence | null } = {},
 ): Promise<SendResult> {
   const blocked = mayMessage(setting, from, to);

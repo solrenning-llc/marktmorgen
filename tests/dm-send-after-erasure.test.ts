@@ -6,6 +6,8 @@ import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
 import { conversationsOf, send } from "@/lib/community-dm";
 import { suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { dmSendFence } from "@/lib/dm-send-fence";
+import { utcDay } from "@/lib/today-rules";
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
@@ -101,6 +103,37 @@ async function main(): Promise<void> {
   }
   is("the send throws (the route answers 503)", thrown, true);
   is("the recipient's conversations are unchanged", await conversationsOf(id, calKey), before);
+
+  part("DM: a request whose copy of the store has no list still asks the list an erasure gave it meanwhile (Codex L on #5495)");
+  // The request read the store before an erasure gave it its list and wrote the person's print in it (lib/person-erasure.ts asks
+  // ensureListId first): the copy says no list, the store has one.
+  const fay = normaliseEmail("fay@example.com");
+  const gus = normaliseEmail("gus@example.com");
+  await seedPerson(world, gus, null);
+  await seedPerson(world, fay, gus);
+  const fayKey = emailKey(fay);
+  const gusKey = emailKey(gus);
+  const stale: typeof store = { ...store, listId: null };
+  const startedAt = Date.now();
+  is("erasure completes", (await erasePerson(store, fay, { kind: "person" })).ok, true);
+  const fence = await dmSendFence(stale, [fay, gus], startedAt);
+  is("the fence asks the store's own list, not the copy's none", fence?.listId, listId);
+  is("the send from the stale copy is refused as erased", await send(id, dm, fayKey, gusKey, "words from before", stale, { fence }), { ok: false, reason: "erased" });
+  is("and nothing of the erased sender comes back", await conversationsOf(id, fayKey), []);
+  is("nor in the recipient's copy", (await conversationsOf(id, gusKey)).filter((c) => JSON.stringify(c).includes(fayKey)), []);
+
+  part("DM: a copy with no list and no try left today writes nothing");
+  const day = utcDay(Date.now());
+  // The day's one try already taken (lib/store-readings.ts, listTryKey), by a reading or a send whose try failed.
+  await redis.pipeline([["SET", `nl:list:try:${store.statsId}:${day}`, "1"]]);
+  let refused = false;
+  try {
+    await dmSendFence({ ...stale, statsId: store.statsId }, [gus], Date.now());
+  } catch {
+    refused = true;
+  }
+  is("no list to ask: it throws before anything is written (the route answers 503)", refused, true);
+  is("a message naming nobody needs no list", await dmSendFence(stale, [""], Date.now()), null);
   done();
 }
 main().catch((e) => { console.error(e); process.exit(1); });

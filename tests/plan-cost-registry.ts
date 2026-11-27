@@ -3240,7 +3240,8 @@ export const COST_LINES: CostLine[] = [
       + (STORE_ALLOWANCES[tier].studio / STUDIO_PAGE_UNITS) * readShapeCost(KEPT_READINGS_SHAPE)
       + READING_KINDS.length * READING_COPY_MAX_BYTES * DB_BYTE_MONTH * (READING_KEEP_SECONDS / (30 * 86_400))
       // A store from before lists: its one try a UTC day to be given one (lib/store-readings.ts, listForNaming), shared
-      // by its sales readings and its calendar feed (one mark), at its worst every day (review of 2c1af02e0).
+      // by its sales readings, its calendar feed and its private messages (one mark), at its worst every day (review of
+      // 2c1af02e0; lib/dm-send-fence.ts, Codex L on #5495).
       + DAY_WINDOWS * readShapeCost(LIST_MADE_SHAPE),
     sources: [
       { file: "lib/store-reading-rules.ts", names: ["STORE_READINGS_PER_DAY", "HEAVY_READINGS_PER_DAY", "READING_FRESH_SECONDS"] },
@@ -3248,6 +3249,9 @@ export const COST_LINES: CostLine[] = [
       // 426 [BX2]: the twelve months of earnings are one of the day's heavy readings, within SALES_READ_SHAPE, kept as the fourth kind (tests/bx2-u2-year-read.test.ts).
       { file: "lib/earnings-read.ts", names: ["readEarningsYear", 'keptReading(store, "earnings"', "EARNINGS_STRIPE_PAGES", "EARNINGS_PAYPAL_SALES", "EARNINGS_PAYPAL_REFUNDS"] },
       { file: "app/api/store/calendar/[token]/route.ts", names: ["listForNaming(store)"] },
+      // A private message names its members only against the store's list (DM_SEND_UNLESS_ERASED): a copy with none asks the same
+      // day's try (its SET NX is inside the message's buyer action, line buyer-actions), never a try of its own.
+      { file: "lib/dm-send-fence.ts", names: ["listForNaming(store, now)"] },
       { file: "lib/read-ceilings.ts", names: ["LIST_MADE_SHAPE", "STORE_LOCK_TRIES"] },
       { file: "app/studio/page.tsx", names: ["keptStats(current, undefined, freshNumbers)", "keptSales(current, undefined, freshNumbers)", "readingsLeft(current)"] },
       { file: "app/studio/totals/page.tsx", names: ["keptNumbers(store)", "keptMembers(store)"] },
